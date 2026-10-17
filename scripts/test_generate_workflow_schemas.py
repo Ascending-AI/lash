@@ -41,7 +41,8 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=[str(Path("generator").resolve())],
             returncode=0,
-            stdout='[{"shape":"workflow","version":7,"version_constant":"V","schema":{"type":"object"}}]',
+            stdout='[{"shape":"workflow","version":7,"version_constant":"V","schema":{"type":"object"}},'
+            '{"shape":"postgres-host-config","version":1,"schema":{"type":"object"}}]',
             stderr="",
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -55,6 +56,23 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                 self.assertEqual(MODULE.generate(False, [Path("generator")]), 0)
                 generated = output / "workflow/v7.schema.json"
                 self.assertTrue(generated.is_file())
+                for relative in [
+                    "crates/lash/host-schemas/workflow/v7.schema.json",
+                    "crates/lash/host-schemas/postgres-host-config/v1.schema.json",
+                    "crates/lash-postgres-store/postgres-host-config-v1.schema.json",
+                ]:
+                    crate_copy = MODULE.ROOT / relative
+                    expected = crate_copy.read_text(encoding="utf-8")
+                    for contents in ["drift\n", None]:
+                        with self.subTest(path=relative, contents=contents):
+                            if contents is None:
+                                crate_copy.unlink()
+                            else:
+                                crate_copy.write_text(contents, encoding="utf-8")
+                            with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
+                                self.assertEqual(MODULE.generate(True, [Path("generator")]), 1)
+                            self.assertIn(str(crate_copy), errors.getvalue())
+                            crate_copy.write_text(expected, encoding="utf-8")
                 generated.write_text("drift\n", encoding="utf-8")
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()):
                     self.assertEqual(MODULE.generate(True, [Path("generator")]), 1)
@@ -126,11 +144,30 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                                 (root / "crates/lash/host-schemas" / relative).read_text(),
                                 contents,
                             )
-                    self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
-                    (output / declaration).write_text("export type WorkflowView = unknown;\n")
-                    with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
-                        self.assertEqual(MODULE.generate(True, generated=generated, output=output), 1)
-                    self.assertIn("v1.d.ts differs", errors.getvalue())
+                        self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
+                        crate_copies = [root / "crates/lash/host-schemas" / relative
+                                        for relative in expected]
+                        if shape == "kernel-workflow-view":
+                            crate_copies.extend([
+                                root / "crates/lash-kernel-view/kernel-workflow-view-v1.schema.json",
+                                root / "crates/lash-kernel-view/kernel-workflow-view-v1.d.ts",
+                            ])
+                        for crate_copy in crate_copies:
+                            original = crate_copy.read_text()
+                            for contents in ["drift\n", None]:
+                                with self.subTest(path=crate_copy, contents=contents):
+                                    if contents is None:
+                                        crate_copy.unlink()
+                                    else:
+                                        crate_copy.write_text(contents)
+                                    with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
+                                        self.assertEqual(MODULE.generate(True, generated=generated, output=output), 1)
+                                    self.assertIn(str(crate_copy), errors.getvalue())
+                                    crate_copy.write_text(original)
+                        (output / declaration).write_text("export type WorkflowView = unknown;\n")
+                        with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
+                            self.assertEqual(MODULE.generate(True, generated=generated, output=output), 1)
+                        self.assertIn("v1.d.ts differs", errors.getvalue())
 
     def test_generator_failure_does_not_write_a_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -94,6 +94,20 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+export_file(
+    name = "kernel-workflow-view-v1.d.ts",
+    src = "kernel-workflow-view-v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "kernel-workflow-view-v1.schema.json",
+    src = "kernel-workflow-view-v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(

@@ -177,32 +177,21 @@ def generate(
 
     stale: list[str] = []
     for relative, expected in documents.items():
-        path = output / relative
-        if check:
-            try:
-                actual = path.read_text(encoding="utf-8")
-            except OSError as error:
-                stale.append(f"{path} cannot be read: {error}")
-            else:
-                if actual != expected:
-                    stale.append(f"{path} differs")
-            if relative == Path("postgres-host-config/v1.schema.json"):
-                crate_path = ROOT / CRATE_DECLARATIONS[relative]
+        paths = [output / relative, ROOT / "crates/lash/host-schemas" / relative]
+        if relative in CRATE_DECLARATIONS:
+            paths.append(ROOT / CRATE_DECLARATIONS[relative])
+        for path in paths:
+            if check:
                 try:
-                    if crate_path.read_text(encoding="utf-8") != expected:
-                        stale.append(f"{crate_path} differs")
+                    actual = path.read_text(encoding="utf-8")
                 except OSError as error:
-                    stale.append(f"{crate_path} cannot be read: {error}")
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(expected, encoding="utf-8")
-            for crate_relative in (
-                CRATE_DECLARATIONS.get(relative), Path("crates/lash/host-schemas") / relative
-            ):
-                if crate_relative is not None:
-                    crate_path = ROOT / crate_relative
-                    crate_path.parent.mkdir(parents=True, exist_ok=True)
-                    crate_path.write_text(expected, encoding="utf-8")
+                    stale.append(f"{path} cannot be read: {error}")
+                else:
+                    if actual != expected:
+                        stale.append(f"{path} differs")
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(expected, encoding="utf-8")
 
     expected_paths = {output / relative for relative in documents}
     if output.exists():

@@ -484,6 +484,10 @@ export type StartConvention = ("direct" | {
     "await_fn": FunctionId;
     "same_fn": FunctionId;
   };
+} | {
+  "py_direct": {
+    "cleanup": FunctionId;
+  };
 });
 
 export type Stmt = (("break" | "continue") | {
@@ -517,6 +521,11 @@ export type Stmt = (("break" | "continue") | {
     "body": Array<Stmt>;
     "else_block"?: Array<Stmt>;
     "iterable": Expr;
+    /**
+     * Declared units at every continuation test, even in library code.
+     * Zero leaves the loop covered by the call's completion formula.
+     */
+    "metered"?: number;
     "via"?: (Protocol | null);
   };
 } | {
@@ -524,6 +533,10 @@ export type Stmt = (("break" | "continue") | {
     "body": Array<Stmt>;
     "condition": Expr;
     "else_block"?: Array<Stmt>;
+    /**
+     * As the declared loop charge of [`Stmt::For`].
+     */
+    "metered"?: number;
   };
 } | {
   "return": {

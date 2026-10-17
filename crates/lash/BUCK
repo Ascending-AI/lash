@@ -1632,6 +1632,195 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+export_file(
+    name = "host-schemas/kernel-authoring-operation/v1.d.ts",
+    src = "host-schemas/kernel-authoring-operation/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-authoring-operation/v1.schema.json",
+    src = "host-schemas/kernel-authoring-operation/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-correspondence/v1.schema.json",
+    src = "host-schemas/kernel-correspondence/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-document/v1.schema.json",
+    src = "host-schemas/kernel-document/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-edit-refusal/v1.schema.json",
+    src = "host-schemas/kernel-edit-refusal/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-edit-transaction/v1.schema.json",
+    src = "host-schemas/kernel-edit-transaction/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-entry-extraction/v1.schema.json",
+    src = "host-schemas/kernel-entry-extraction/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-function/v1.schema.json",
+    src = "host-schemas/kernel-function/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-function-declarations/v1.schema.json",
+    src = "host-schemas/kernel-function-declarations/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-migration-refusal/v1.d.ts",
+    src = "host-schemas/kernel-migration-refusal/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-migration-refusal/v1.schema.json",
+    src = "host-schemas/kernel-migration-refusal/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-parked-refusal/v1.d.ts",
+    src = "host-schemas/kernel-parked-refusal/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-parked-refusal/v1.schema.json",
+    src = "host-schemas/kernel-parked-refusal/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-source-map/v1.schema.json",
+    src = "host-schemas/kernel-source-map/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-workflow-view/v1.d.ts",
+    src = "host-schemas/kernel-workflow-view/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-workflow-view/v1.schema.json",
+    src = "host-schemas/kernel-workflow-view/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/postgres-host-config/v1.schema.json",
+    src = "host-schemas/postgres-host-config/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/process-effect-omissions/v1.schema.json",
+    src = "host-schemas/process-effect-omissions/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/process-effect-outcome/v1.schema.json",
+    src = "host-schemas/process-effect-outcome/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/process-ran/v1.schema.json",
+    src = "host-schemas/process-ran/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/process-workflow-overlay/v1.schema.json",
+    src = "host-schemas/process-workflow-overlay/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/trace-record/v37.schema.json",
+    src = "host-schemas/trace-record/v37.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/worker-page-reply/v1.schema.json",
+    src = "host-schemas/worker-page-reply/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/worker-page-request/v1.schema.json",
+    src = "host-schemas/worker-page-request/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/worker-seal-batch/v1.schema.json",
+    src = "host-schemas/worker-seal-batch/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/worker-start/v1.schema.json",
+    src = "host-schemas/worker-start/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/workflow-execution-overlay/v37.schema.json",
+    src = "host-schemas/workflow-execution-overlay/v37.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
