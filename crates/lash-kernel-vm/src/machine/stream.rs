@@ -555,20 +555,34 @@ impl KernelMachine {
 
     /// A closure of `code` over the cells of the variables it shares.
     fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<EntityId> {
-        let access = self.heap.pages().clone();
         let frame = self.frame(task)?;
-        let mut captures = Vec::new();
+        let mut cells = Vec::new();
         for capture in &exe.code(code).captures {
             match frame.slot(capture.outer_at) {
-                SlotState::Cell(cell) => captures.push((
-                    lash_kernel_state::paged::NameRef::new(
-                        &exe.code(code).slots[capture.inner as usize].name,
-                        &access,
-                    )?,
-                    *cell,
-                )),
+                SlotState::Cell(cell) => cells.push(*cell),
                 _ => return Err(fault("a captured variable has no cell").into()),
             }
+        }
+        self.make_closure(exe, code, &cells)
+    }
+
+    /// Both body and plan create the same closure at its semantic site,
+    /// sharing the cells allocated when its captured variables were bound.
+    pub(super) fn make_closure(
+        &mut self,
+        exe: &Executable,
+        code: CodeId,
+        cells: &[EntityId],
+    ) -> Eval<EntityId> {
+        let mut captures = Vec::new();
+        for (capture, cell) in exe.code(code).captures.iter().zip(cells) {
+            captures.push((
+                lash_kernel_state::paged::NameRef::new(
+                    &exe.code(code).slots[capture.inner as usize].name,
+                    self.heap.pages(),
+                )?,
+                *cell,
+            ));
         }
         let code = exe.code(code);
         let mut site = code.site.clone();

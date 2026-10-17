@@ -30,5 +30,51 @@ fn main() -> ExitCode {
         }
         println!("{}: {} plans", dialect.name(), generated.planned);
     }
-    ExitCode::SUCCESS
+    // The same compiler records the synthetic bodies of the kernel laws;
+    // no hand-written plan is used to test control flow or captures.
+    match control_fixture().and_then(|rust| {
+        std::fs::write(
+            root.join("crates/lash-kernel-conformance/src/helper_plan_control_generated.rs"),
+            rust,
+        )
+        .map_err(|error| error.to_string())
+    }) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("control laws: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn control_fixture() -> Result<String, String> {
+    let mut library = lash_ext_helper_compiler::library::Library::of(Dialect::Python)?;
+    let mut names = lash_kernel_dialect::NamedLibrary::from_registry(&library.registry)
+        .map_err(|error| error.to_string())?;
+    let definitions = lash_kernel_dialect::define_functions(
+        include_str!("../../tests/control.kernel"),
+        &mut names,
+    )
+    .map_err(|error| error.to_string())?;
+    library.helpers.clear();
+    for definition in definitions {
+        library.helpers.push(
+            library
+                .registry
+                .register(definition, None)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    Ok(lash_ext_helper_compiler::generate_library(&library, Dialect::Python)?.rust)
+}
+
+/// The kernel control laws execute plans emitted by the current compiler,
+/// including finally bodies that the dialect corpus need not contain.
+#[test]
+fn control_plans_are_what_the_compiler_gives_for_the_current_bodies() {
+    assert_eq!(
+        control_fixture().expect("the control law bodies compile"),
+        include_str!("../../../lash-kernel-conformance/src/helper_plan_control_generated.rs"),
+        "run kiln run //crates/lash-ext-helper-compiler:regenerate__bin"
+    );
 }

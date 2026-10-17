@@ -6,10 +6,16 @@
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan as p;
 
+#[allow(dead_code)]
+enum Departure { Next, Return(Value), Break, Continue }
+
 /// Every plan, in the order the helpers are registered.
 pub static PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_TRIM_VALUE,
     &TS_NUMBER_DIGIT,
+    &TS_NUMBER_PARSE_INT,
+    &TS_NUMBER_PARSE_DECIMAL,
+    &TS_NUMBER_PARSE,
     &TS_NUMBER_PARTS,
     &TS_NUMBER_LAYOUT,
     &TS_NUMBER_TO_STRING,
@@ -36,6 +42,7 @@ pub static PLANS: &[&p::HelperPlan] = &[
     &TS_NOT,
     &TS_TYPEOF,
     &TS_PRIMITIVE_TO_STRING,
+    &TS_PRIMITIVE_TO_NUMBER,
     &TS_WRAP_INT32,
     &TS_BITWISE32,
     &TS_STRICT_EQUALS,
@@ -181,23 +188,32 @@ pub static PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_IS,
     &TS_ARRAY_IS_ARRAY,
     &TS_ARRAY_CALLBACK,
+    &TS_ARRAY_REUSABLE_CALLBACK,
     &TS_ARRAY_OF,
     &TS_ARRAY_VALUEOF,
     &TS_ARRAY_PRIMITIVE,
     &TS_ARRAY_SEARCHABLE,
     &TS_ARRAY_TOLOCALESTRING,
+    &TS_ARRAY_KEYS,
+    &TS_ARRAY_VALUES,
+    &TS_ARRAY_ENTRIES,
     &TS_FOR_OF_ITEM,
     &TS_PROMISE_IS,
     &TS_PROMISE_PENDING,
     &TS_PROMISE_CALLABLE,
     &TS_PROMISE_DECIDED,
     &TS_STRING_CLAMP,
+    &TS_STRING_SLICE_UNITS,
     &TS_STRING_TOSTRING,
     &TS_STRING_VALUEOF,
     &TS_STRING_LOCALE_UNSUPPORTED,
     &TS_REGEXP_IS,
     &TS_REGEXP_REQUIRE,
     &TS_REGEXP_MATCH_RECORD,
+    &TS_REGEXP_NATIVE_EXEC,
+    &TS_REGEXP_NATIVE_MATCH_ALL,
+    &TS_REGEXP_NATIVE_REPLACE,
+    &TS_REGEXP_NATIVE_SPLIT,
     &TS_REGEXP_GLOBAL,
     &TS_REGEXP_IGNORECASE,
     &TS_REGEXP_MULTILINE,
@@ -206,9 +222,12 @@ pub static PLANS: &[&p::HelperPlan] = &[
     &TS_REGEXP_STICKY,
     &TS_REGEXP_FLAGS,
     &TS_REGEXP_SOURCE,
+    &TS_STRING_SUBSTITUTE,
     &TS_URI_HEX,
     &TS_URI_ESCAPE,
     &TS_URI_ENCODE,
+    &TS_URI_FLUSH,
+    &TS_URI_DECODE,
 ];
 
 static TS_STRING_TRIM_VALUE: p::HelperPlan = p::HelperPlan {
@@ -223,17 +242,26 @@ static TS_STRING_TRIM_VALUE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "text", path: &[] },
+        p::PlanLocal { name: "leading", path: &[] },
+        p::PlanLocal { name: "trailing", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_string_trim_value,
 };
 
 /// `ts.string.trim_value`.
 fn ts_string_trim_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
-    ctx.param(1, 2)?;
-    ctx.param(2, 3)?;
+    ctx.local(1, 2)?;
+    ctx.local(2, 3)?;
     ctx.call(0, 0, 4)?;
     Ok(ctx.take(0))
 }
@@ -265,14 +293,23 @@ static TS_NUMBER_DIGIT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "character", path: &[] },
+        p::PlanLocal { name: "radix", path: &[] },
+        p::PlanLocal { name: "unit", path: &[1] },
+        p::PlanLocal { name: "value", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_number_digit,
 };
 
 /// `ts.number.digit`.
 fn ts_number_digit(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -283,75 +320,1084 @@ fn ts_number_digit(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.literal(1, 0)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
     ctx.literal(3, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(2, 1)?;
     ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(4, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(2, 0)?;
             ctx.literal(3, 1)?;
             ctx.call(4, 0, 2)?;
-            ctx.assign(1, 0)?;
+            ctx.assign(3, 0)?;
         }
     }
     ctx.begin()?;
     ctx.literal(5, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(2, 1)?;
     ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(6, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(2, 0)?;
             ctx.literal(7, 1)?;
             ctx.call(4, 0, 2)?;
-            ctx.assign(1, 0)?;
+            ctx.assign(3, 0)?;
         }
     }
     ctx.begin()?;
     ctx.literal(8, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(2, 1)?;
     ctx.call(3, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(9, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(2, 0)?;
             ctx.literal(10, 1)?;
             ctx.call(4, 0, 2)?;
-            ctx.assign(1, 0)?;
+            ctx.assign(3, 0)?;
         }
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.param(1, 1)?;
+    ctx.local(3, 0)?;
+    ctx.local(1, 1)?;
     ctx.call(5, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.literal(1, 0)?;
+    Ok(ctx.take(0))
+}
+
+static TS_NUMBER_PARSE_INT: p::HelperPlan = p::HelperPlan {
+    name: "ts.number.parse_int",
+    function: p::function("9934402af51e4d44c2de42d6e1e8d13d411ea73be2f291946c74b28f4f28e44e"),
+    callees: &[
+        p::function("1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c"),
+        p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
+        p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("aedd9f190f9e219c66029bffa1788d46d06ada839133bed50283d05cd101998b"),
+        p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"),
+        p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"),
+    ],
+    literals: &[
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Float(0x3ff0000000000000),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("-"),
+        p::PlanLiteral::Float(0xbff0000000000000),
+        p::PlanLiteral::Text("+"),
+        p::PlanLiteral::Int("10"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Float(0x7ff8000000000000),
+        p::PlanLiteral::Int("36"),
+        p::PlanLiteral::Text("0x"),
+        p::PlanLiteral::Int("16"),
+        p::PlanLiteral::Text("0X"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Float(0x7fe1ccf385ebc8a0),
+        p::PlanLiteral::Float(0x7ff0000000000000),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "source", path: &[] },
+        p::PlanLocal { name: "radix", path: &[] },
+        p::PlanLocal { name: "whole", path: &[] },
+        p::PlanLocal { name: "source", path: &[0] },
+        p::PlanLocal { name: "length", path: &[1] },
+        p::PlanLocal { name: "i", path: &[2] },
+        p::PlanLocal { name: "sign", path: &[3] },
+        p::PlanLocal { name: "first", path: &[4] },
+        p::PlanLocal { name: "base", path: &[7] },
+        p::PlanLocal { name: "prefix", path: &[11, 1, 0] },
+        p::PlanLocal { name: "prefix", path: &[12, 1, 0] },
+        p::PlanLocal { name: "start", path: &[13] },
+        p::PlanLocal { name: "value", path: &[14] },
+        p::PlanLocal { name: "large", path: &[15] },
+        p::PlanLocal { name: "infinite", path: &[16] },
+        p::PlanLocal { name: "character", path: &[17, 1, 0] },
+        p::PlanLocal { name: "digit", path: &[17, 1, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "overflow", path: &[21, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_number_parse_int,
+};
+
+/// `ts.number.parse_int`.
+fn ts_number_parse_int(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(0, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.literal(3, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.local(7, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        ctx.assign(6, 0)?;
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.assign(5, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(7, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.assign(5, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.bind(8, 0)?;
+    ctx.begin()?;
+    ctx.local(8, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(7, 0)?;
+        ctx.assign(8, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(8, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(5, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(10, 0)?;
+    ctx.local(8, 1)?;
+    ctx.call(5, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(5, 2)?;
+        ctx.literal(8, 3)?;
+        ctx.call(6, 2, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(9, 0)?;
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(12, 0)?;
+            ctx.assign(8, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.literal(13, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(12, 0)?;
+            ctx.assign(8, 0)?;
+        }
+        ctx.unbind(9);
+    }
+    ctx.begin()?;
+    ctx.local(8, 0)?;
+    ctx.literal(12, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(5, 2)?;
+        ctx.literal(8, 3)?;
+        ctx.call(6, 2, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(10, 0)?;
+        ctx.begin()?;
+        ctx.local(10, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.literal(8, 1)?;
+            ctx.call(6, 0, 2)?;
+            ctx.assign(5, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(10, 0)?;
+        ctx.literal(13, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.literal(8, 1)?;
+            ctx.call(6, 0, 2)?;
+            ctx.assign(5, 0)?;
+        }
+        ctx.unbind(10);
+    }
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.bind(11, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(12, 0)?;
+    ctx.begin()?;
+    ctx.literal(14, 0)?;
+    ctx.bind(13, 0)?;
+    ctx.begin()?;
+    ctx.literal(14, 0)?;
+    ctx.bind(14, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(5, 0)?;
+        ctx.local(4, 1)?;
+        ctx.call(5, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(5, 2)?;
+        ctx.literal(3, 3)?;
+        ctx.call(6, 2, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(15, 0)?;
+        ctx.begin()?;
+        ctx.local(15, 0)?;
+        ctx.local(8, 1)?;
+        ctx.call(7, 0, 2)?;
+        ctx.bind(16, 0)?;
+        ctx.begin()?;
+        ctx.local(16, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.unbind(16);
+            ctx.unbind(15);
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(13, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(0, 0)?;
+            ctx.assign(14, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            ctx.local(8, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.local(16, 1)?;
+            ctx.call(6, 0, 2)?;
+            ctx.assign(12, 0)?;
+            ctx.begin()?;
+            ctx.literal(15, 0)?;
+            ctx.local(12, 1)?;
+            ctx.call(5, 0, 2)?;
+            ctx.assign(13, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(6, 0, 2)?;
+        ctx.assign(5, 0)?;
+        ctx.unbind(16);
+        ctx.unbind(15);
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(11, 0)?;
+    ctx.local(5, 1)?;
+    ctx.call(4, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.local(4, 1)?;
+        ctx.call(4, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(9, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(14, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(8, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.local(12, 1)?;
+            ctx.call(9, 1, 1)?;
+            ctx.call(8, 0, 2)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 17)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 17)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 18)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(6, 0)?;
+                    ctx.literal(16, 1)?;
+                    ctx.call(8, 0, 2)?;
+                    return Ok(Departure::Return(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 17)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 17)?)),
+                    other => other,
+                };
+                ctx.unbind(18);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(17);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_NUMBER_PARSE_DECIMAL: p::HelperPlan = p::HelperPlan {
+    name: "ts.number.parse_decimal",
+    function: p::function("014ac38bc58b512103455fde371b71f4fd791c462816f788a77b1cc4925198b9"),
+    callees: &[
+        p::function("1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c"),
+        p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
+        p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
+        p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("aedd9f190f9e219c66029bffa1788d46d06ada839133bed50283d05cd101998b"),
+        p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"),
+    ],
+    literals: &[
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Float(0x3ff0000000000000),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("-"),
+        p::PlanLiteral::Float(0xbff0000000000000),
+        p::PlanLiteral::Text("+"),
+        p::PlanLiteral::Int("8"),
+        p::PlanLiteral::Text("Infinity"),
+        p::PlanLiteral::Float(0x7ff8000000000000),
+        p::PlanLiteral::Float(0x7ff0000000000000),
+        p::PlanLiteral::Int("10"),
+        p::PlanLiteral::Text("."),
+        p::PlanLiteral::Text("e"),
+        p::PlanLiteral::Text("E"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "source", path: &[] },
+        p::PlanLocal { name: "whole", path: &[] },
+        p::PlanLocal { name: "source", path: &[0] },
+        p::PlanLocal { name: "length", path: &[1] },
+        p::PlanLocal { name: "i", path: &[2] },
+        p::PlanLocal { name: "sign", path: &[3] },
+        p::PlanLocal { name: "first", path: &[4] },
+        p::PlanLocal { name: "digits", path: &[8] },
+        p::PlanLocal { name: "builtin_arg_0", path: &[9, 1, 0] },
+        p::PlanLocal { name: "d", path: &[9, 1, 1] },
+        p::PlanLocal { name: "builtin_arg_1", path: &[10, 1, 1, 1, 0] },
+        p::PlanLocal { name: "d", path: &[10, 1, 1, 1, 1] },
+        p::PlanLocal { name: "mantissa_end", path: &[12] },
+        p::PlanLocal { name: "marker", path: &[13] },
+        p::PlanLocal { name: "exponential", path: &[14] },
+        p::PlanLocal { name: "next", path: &[16, 1, 1] },
+        p::PlanLocal { name: "start", path: &[16, 1, 4] },
+        p::PlanLocal { name: "builtin_arg_2", path: &[16, 1, 5, 1, 0] },
+        p::PlanLocal { name: "d", path: &[16, 1, 5, 1, 1] },
+        p::PlanLocal { name: "prefix", path: &[18] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "overflow", path: &[19, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_number_parse_decimal,
+};
+
+/// `ts.number.parse_decimal`.
+fn ts_number_parse_decimal(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(0, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.literal(3, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        ctx.assign(5, 0)?;
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.assign(4, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(6, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.assign(4, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.local(4, 1)?;
+    ctx.local(4, 2)?;
+    ctx.literal(7, 3)?;
+    ctx.call(4, 2, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.literal(8, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(7, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.local(3, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.literal(9, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(10, 1)?;
+        ctx.call(6, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(4, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(7, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(4, 1)?;
+        ctx.local(4, 2)?;
+        ctx.literal(3, 3)?;
+        ctx.call(4, 2, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(8, 0)?;
+        ctx.begin()?;
+        ctx.local(8, 0)?;
+        ctx.literal(11, 1)?;
+        ctx.call(8, 0, 2)?;
+        ctx.bind(9, 0)?;
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(7, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.unbind(9);
+            ctx.unbind(8);
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(7, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(4, 0)?;
+        ctx.unbind(9);
+        ctx.unbind(8);
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.local(4, 1)?;
+    ctx.local(4, 2)?;
+    ctx.literal(3, 3)?;
+    ctx.call(4, 2, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.literal(12, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(4, 0)?;
+        ctx.begin()?;
+        'l0: loop {
+            ctx.local(4, 0)?;
+            ctx.local(3, 1)?;
+            ctx.call(7, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.literal(3, 3)?;
+            ctx.call(4, 2, 2)?;
+            ctx.call(2, 0, 3)?;
+            ctx.bind(10, 0)?;
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.bind(11, 0)?;
+            ctx.begin()?;
+            ctx.local(11, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(7, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.unbind(11);
+                ctx.unbind(10);
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(7, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(4, 0)?;
+            ctx.unbind(11);
+            ctx.unbind(10);
+            ctx.begin()?;
+        }
+    }
+    ctx.begin()?;
+    ctx.local(7, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(5, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.bind(12, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.local(4, 1)?;
+    ctx.local(4, 2)?;
+    ctx.literal(3, 3)?;
+    ctx.call(4, 2, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(13, 0)?;
+    ctx.begin()?;
+    ctx.local(13, 0)?;
+    ctx.literal(13, 1)?;
+    ctx.call(3, 0, 2)?;
+    ctx.bind(14, 0)?;
+    ctx.begin()?;
+    ctx.local(14, 0)?;
+    if ctx.test(0, p::Test::If)? {
+    } else {
+        ctx.begin()?;
+        ctx.local(13, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(3, 0, 2)?;
+        ctx.assign(14, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(14, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(4, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.local(4, 1)?;
+        ctx.local(4, 2)?;
+        ctx.literal(3, 3)?;
+        ctx.call(4, 2, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(15, 0)?;
+        ctx.begin()?;
+        ctx.local(15, 0)?;
+        ctx.literal(6, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(4, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(15, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(4, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.bind(16, 0)?;
+        ctx.begin()?;
+        'l0: loop {
+            ctx.local(4, 0)?;
+            ctx.local(3, 1)?;
+            ctx.call(7, 0, 2)?;
+            if !ctx.test(0, p::Test::While)? {
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(2, 0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.literal(3, 3)?;
+            ctx.call(4, 2, 2)?;
+            ctx.call(2, 0, 3)?;
+            ctx.bind(17, 0)?;
+            ctx.begin()?;
+            ctx.local(17, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.bind(18, 0)?;
+            ctx.begin()?;
+            ctx.local(18, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.call(7, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.unbind(18);
+                ctx.unbind(17);
+                break 'l0;
+            }
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(3, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(4, 0)?;
+            ctx.unbind(18);
+            ctx.unbind(17);
+            ctx.begin()?;
+        }
+        ctx.begin()?;
+        ctx.local(16, 0)?;
+        ctx.local(4, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            ctx.assign(4, 0)?;
+        }
+        ctx.unbind(16);
+        ctx.unbind(15);
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.local(3, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.literal(9, 0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.local(4, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(19, 0)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(19, 0)?;
+            ctx.call(9, 0, 1)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 20)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 20)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 21)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(5, 0)?;
+                    ctx.literal(10, 1)?;
+                    ctx.call(6, 0, 2)?;
+                    return Ok(Departure::Return(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 20)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 20)?)),
+                    other => other,
+                };
+                ctx.unbind(21);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(20);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_NUMBER_PARSE: p::HelperPlan = p::HelperPlan {
+    name: "ts.number.parse",
+    function: p::function("d029f2e329c1a2e7fe6ff173343d97243e648bcd09d17e3e7c99706cfc22bf8a"),
+    callees: &[
+        p::function("1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
+        p::function("9934402af51e4d44c2de42d6e1e8d13d411ea73be2f291946c74b28f4f28e44e"),
+        p::function("014ac38bc58b512103455fde371b71f4fd791c462816f788a77b1cc4925198b9"),
+    ],
+    literals: &[
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Text("0x"),
+        p::PlanLiteral::Int("16"),
+        p::PlanLiteral::Text("0X"),
+        p::PlanLiteral::Text("0b"),
+        p::PlanLiteral::Text("0B"),
+        p::PlanLiteral::Text("0o"),
+        p::PlanLiteral::Int("8"),
+        p::PlanLiteral::Text("0O"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("+"),
+        p::PlanLiteral::Float(0x7ff8000000000000),
+        p::PlanLiteral::Text("-"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "source", path: &[] },
+        p::PlanLocal { name: "source", path: &[0] },
+        p::PlanLocal { name: "prefix", path: &[2] },
+        p::PlanLocal { name: "base", path: &[3] },
+        p::PlanLocal { name: "number_body", path: &[10, 1, 0] },
+        p::PlanLocal { name: "first", path: &[10, 1, 1] },
+        p::PlanLocal { name: "parsed", path: &[10, 1, 4] },
+        p::PlanLocal { name: "parsed", path: &[11] },
+    ],
+    closures: &[
+    ],
+    run: ts_number_parse,
+};
+
+/// `ts.number.parse`.
+fn ts_number_parse(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(0, 2)?;
+    ctx.call(0, 0, 3)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.literal(4, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(7, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(6, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(9, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(11, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(12, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(11, 0)?;
+        ctx.assign(3, 0)?;
+    }
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.local(3, 1)?;
+    ctx.call(3, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.local(1, 2)?;
+        ctx.call(4, 2, 1)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(4, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.literal(13, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(14, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(15, 0)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.literal(16, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(15, 0)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.local(3, 1)?;
+        ctx.literal(0, 2)?;
+        ctx.call(5, 0, 3)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.local(7, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -384,42 +1430,51 @@ static TS_NUMBER_PARTS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "digits", path: &[0, 1, 0] },
+        p::PlanLocal { name: "last", path: &[0, 1, 1] },
+        p::PlanLocal { name: "exponent", path: &[0, 1, 2] },
+        p::PlanLocal { name: "parts", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_number_parts,
 };
 
 /// `ts.number.parts`.
 fn ts_number_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(3, 0, 1)?;
         ctx.literal(1, 1)?;
         ctx.call(2, 0, 2)?;
-        ctx.bind(0, 0)?;
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(4, 0, 1)?;
         ctx.bind(1, 0)?;
         ctx.begin()?;
-        ctx.literal(2, 0)?;
+        ctx.local(1, 0)?;
+        ctx.call(4, 0, 1)?;
         ctx.bind(2, 0)?;
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.bind(3, 0)?;
         ctx.begin()?;
         'l0: loop {
             ctx.literal(3, 0)?;
-            ctx.local(1, 1)?;
+            ctx.local(2, 1)?;
             ctx.call(5, 0, 2)?;
             if !ctx.test(0, p::Test::While)? {
                 break 'l0;
             }
             ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
+            ctx.local(1, 0)?;
+            ctx.local(2, 1)?;
             ctx.literal(3, 2)?;
             ctx.call(8, 1, 2)?;
             ctx.call(7, 0, 2)?;
@@ -427,15 +1482,15 @@ fn ts_number_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             ctx.call(6, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(1, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(8, 0, 2)?;
-                ctx.assign(1, 0)?;
-                ctx.begin()?;
                 ctx.local(2, 0)?;
                 ctx.literal(3, 1)?;
-                ctx.call(9, 0, 2)?;
+                ctx.call(8, 0, 2)?;
                 ctx.assign(2, 0)?;
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(9, 0, 2)?;
+                ctx.assign(3, 0)?;
             } else {
                 ctx.begin()?;
                 break 'l0;
@@ -443,23 +1498,23 @@ fn ts_number_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             ctx.begin()?;
         }
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(2, 1)?;
-        ctx.local(1, 2)?;
+        ctx.local(2, 2)?;
         ctx.call(10, 0, 3)?;
-        ctx.local(2, 1)?;
+        ctx.local(3, 1)?;
         ctx.tuple(0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(11, 0, 1)?;
-    ctx.bind(3, 0)?;
+    ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(4, 0)?;
     ctx.literal(5, 1)?;
     ctx.index(0)?;
-    ctx.local(3, 1)?;
+    ctx.local(4, 1)?;
     ctx.literal(6, 2)?;
     ctx.index(1)?;
     ctx.tuple(0, 2)?;
@@ -494,61 +1549,74 @@ static TS_NUMBER_LAYOUT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 5,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "digits", path: &[] },
+        p::PlanLocal { name: "point", path: &[] },
+        p::PlanLocal { name: "scientific", path: &[] },
+        p::PlanLocal { name: "exponent", path: &[0, 1, 0] },
+        p::PlanLocal { name: "mantissa", path: &[0, 1, 1] },
+        p::PlanLocal { name: "sign", path: &[0, 1, 3] },
+        p::PlanLocal { name: "zeros", path: &[1, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_number_layout,
 };
 
 /// `ts.number.layout`.
 fn ts_number_layout(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
     ctx.begin()?;
-    ctx.param(2, 0)?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(0, 0, 2)?;
-        ctx.bind(0, 0)?;
+        ctx.bind(3, 0)?;
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(1, 1)?;
         ctx.literal(0, 2)?;
         ctx.call(1, 0, 3)?;
-        ctx.bind(1, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
         ctx.literal(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.call(3, 1, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(4, 0)?;
             ctx.literal(2, 1)?;
-            ctx.param(0, 2)?;
+            ctx.local(0, 2)?;
             ctx.literal(0, 3)?;
-            ctx.param(0, 4)?;
+            ctx.local(0, 4)?;
             ctx.call(3, 4, 1)?;
             ctx.call(1, 2, 3)?;
             ctx.call(4, 1, 2)?;
             ctx.call(4, 0, 2)?;
-            ctx.assign(1, 0)?;
+            ctx.assign(4, 0)?;
         }
         ctx.begin()?;
         ctx.literal(3, 0)?;
-        ctx.bind(2, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
         ctx.literal(1, 0)?;
-        ctx.local(0, 1)?;
+        ctx.local(3, 1)?;
         ctx.call(5, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(4, 0)?;
-            ctx.assign(2, 0)?;
+            ctx.assign(5, 0)?;
         }
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(5, 1)?;
-        ctx.local(2, 2)?;
-        ctx.local(0, 3)?;
+        ctx.local(5, 2)?;
+        ctx.local(3, 3)?;
         ctx.literal(6, 4)?;
         ctx.call(6, 3, 2)?;
         ctx.call(4, 2, 2)?;
@@ -557,35 +1625,35 @@ fn ts_number_layout(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> 
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(5, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(7, 0)?;
-        ctx.param(1, 1)?;
+        ctx.local(1, 1)?;
         ctx.call(8, 1, 1)?;
         ctx.call(7, 0, 2)?;
-        ctx.bind(3, 0)?;
+        ctx.bind(6, 0)?;
         ctx.begin()?;
         ctx.literal(8, 0)?;
-        ctx.local(3, 1)?;
-        ctx.param(0, 2)?;
+        ctx.local(6, 1)?;
+        ctx.local(0, 2)?;
         ctx.call(4, 1, 2)?;
         ctx.call(4, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(3, 0, 1)?;
-    ctx.param(1, 1)?;
+    ctx.local(1, 1)?;
     ctx.call(5, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(7, 1)?;
-        ctx.param(1, 2)?;
-        ctx.param(0, 3)?;
+        ctx.local(1, 2)?;
+        ctx.local(0, 3)?;
         ctx.call(3, 3, 1)?;
         ctx.call(0, 2, 2)?;
         ctx.call(7, 1, 2)?;
@@ -593,14 +1661,14 @@ fn ts_number_layout(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> 
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(1, 1)?;
-    ctx.param(1, 2)?;
+    ctx.local(1, 2)?;
     ctx.call(1, 0, 3)?;
     ctx.literal(2, 1)?;
-    ctx.param(0, 2)?;
-    ctx.param(1, 3)?;
-    ctx.param(0, 4)?;
+    ctx.local(0, 2)?;
+    ctx.local(1, 3)?;
+    ctx.local(0, 4)?;
     ctx.call(3, 4, 1)?;
     ctx.call(1, 2, 3)?;
     ctx.call(4, 1, 2)?;
@@ -643,26 +1711,36 @@ static TS_NUMBER_TO_STRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "parts", path: &[4] },
+        p::PlanLocal { name: "digits", path: &[5] },
+        p::PlanLocal { name: "point", path: &[6] },
+        p::PlanLocal { name: "scientific", path: &[7] },
+        p::PlanLocal { name: "output", path: &[9] },
+    ],
+    closures: &[
+    ],
     run: ts_number_to_string,
 };
 
 /// `ts.number.to_string`.
 fn ts_number_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(3, 0, 1)?;
         ctx.literal(0, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.call(5, 0, 1)?;
             ctx.literal(1, 1)?;
             ctx.call(4, 0, 2)?;
@@ -670,7 +1748,7 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         }
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(6, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -678,7 +1756,7 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -687,7 +1765,7 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -696,55 +1774,55 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(7, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.literal(7, 1)?;
-    ctx.index(0)?;
+    ctx.call(7, 0, 1)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(9, 0, 1)?;
-    ctx.local(0, 1)?;
-    ctx.literal(8, 2)?;
-    ctx.index(1)?;
-    ctx.call(8, 0, 2)?;
+    ctx.literal(7, 1)?;
+    ctx.index(0)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(9, 1)?;
-    ctx.call(2, 0, 2)?;
+    ctx.call(9, 0, 1)?;
+    ctx.local(1, 1)?;
+    ctx.literal(8, 2)?;
+    ctx.index(1)?;
+    ctx.call(8, 0, 2)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.literal(9, 1)?;
+    ctx.call(2, 0, 2)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
     ctx.literal(10, 0)?;
-    ctx.local(2, 1)?;
+    ctx.local(3, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(11, 0)?;
-        ctx.assign(3, 0)?;
+        ctx.assign(4, 0)?;
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(2, 1)?;
-    ctx.local(3, 2)?;
+    ctx.local(2, 0)?;
+    ctx.local(3, 1)?;
+    ctx.local(4, 2)?;
     ctx.call(10, 0, 3)?;
-    ctx.bind(4, 0)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(12, 0)?;
-        ctx.local(4, 1)?;
+        ctx.local(5, 1)?;
         ctx.call(11, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(4, 0)?;
+    ctx.local(5, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -767,23 +1845,30 @@ static TS_NUMBER_RATIO: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "numerator", path: &[0] },
+        p::PlanLocal { name: "denominator", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_number_ratio,
 };
 
 /// `ts.number.ratio`.
 fn ts_number_ratio(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
     'l0: loop {
-        ctx.local(0, 0)?;
-        ctx.local(0, 1)?;
+        ctx.local(1, 0)?;
+        ctx.local(1, 1)?;
         ctx.call(3, 1, 1)?;
         ctx.call(2, 0, 2)?;
         ctx.call(1, 0, 1)?;
@@ -791,21 +1876,21 @@ fn ts_number_ratio(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(4, 0, 2)?;
-        ctx.assign(0, 0)?;
-        ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.literal(2, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(4, 0, 2)?;
         ctx.assign(1, 0)?;
         ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(2, 0)?;
+        ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.call(5, 0, 1)?;
-    ctx.local(1, 1)?;
+    ctx.local(2, 1)?;
     ctx.tuple(0, 2)?;
     Ok(ctx.take(0))
 }
@@ -833,73 +1918,85 @@ static TS_NUMBER_ROUND_DECIMAL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "shift", path: &[] },
+        p::PlanLocal { name: "ratio", path: &[0] },
+        p::PlanLocal { name: "numerator", path: &[1] },
+        p::PlanLocal { name: "denominator", path: &[2] },
+        p::PlanLocal { name: "rounded", path: &[4] },
+        p::PlanLocal { name: "remainder", path: &[5] },
+    ],
+    closures: &[
+    ],
     run: ts_number_round_decimal,
 };
 
 /// `ts.number.round_decimal`.
 fn ts_number_round_decimal(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(1, 1)?;
+    ctx.local(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         ctx.literal(2, 1)?;
-        ctx.param(1, 2)?;
+        ctx.local(1, 2)?;
         ctx.call(3, 1, 2)?;
         ctx.call(2, 0, 2)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     } else {
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(2, 1)?;
-        ctx.param(1, 2)?;
+        ctx.local(1, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.call(3, 1, 2)?;
         ctx.call(2, 0, 2)?;
-        ctx.assign(2, 0)?;
+        ctx.assign(4, 0)?;
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(5, 0, 2)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(6, 0, 2)?;
-    ctx.bind(4, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
+    ctx.local(3, 0)?;
     ctx.local(4, 1)?;
+    ctx.call(5, 0, 2)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.local(4, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.local(6, 1)?;
     ctx.literal(3, 2)?;
     ctx.call(2, 1, 2)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(7, 0, 2)?;
-        ctx.assign(3, 0)?;
+        ctx.assign(5, 0)?;
     }
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(5, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(8, 0, 2)?;
     Ok(ctx.take(0))
@@ -946,14 +2043,26 @@ static TS_REGEXP_ESCAPED_SOURCE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 7,
+    slots: &[
+        p::PlanLocal { name: "pattern", path: &[] },
+        p::PlanLocal { name: "pieces", path: &[1] },
+        p::PlanLocal { name: "position", path: &[2] },
+        p::PlanLocal { name: "escaped", path: &[3] },
+        p::PlanLocal { name: "inClass", path: &[4] },
+        p::PlanLocal { name: "unit", path: &[5, 1, 0] },
+        p::PlanLocal { name: "end", path: &[5, 1, 1] },
+        p::PlanLocal { name: "character", path: &[5, 1, 3] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_escaped_source,
 };
 
 /// `ts.regexp.escaped_source`.
 fn ts_regexp_escaped_source(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -963,161 +2072,161 @@ fn ts_regexp_escaped_source(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Pl
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(2, 0)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.literal(3, 0)?;
+    ctx.literal(2, 0)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.literal(3, 0)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
     'l0: loop {
-        ctx.local(1, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(2, 0)?;
+        ctx.local(0, 1)?;
         ctx.call(2, 1, 1)?;
         ctx.call(1, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(2, 1)?;
         ctx.call(3, 0, 2)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(4, 1)?;
-        ctx.call(4, 0, 2)?;
         ctx.bind(5, 0)?;
         ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
         ctx.literal(5, 0)?;
-        ctx.local(4, 1)?;
+        ctx.local(5, 1)?;
         ctx.call(5, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(5, 0)?;
             ctx.literal(6, 1)?;
             ctx.call(5, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(5, 0)?;
+                ctx.local(6, 0)?;
                 ctx.literal(4, 1)?;
                 ctx.call(4, 0, 2)?;
-                ctx.assign(5, 0)?;
+                ctx.assign(6, 0)?;
             }
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(1, 1)?;
-        ctx.local(5, 2)?;
+        ctx.local(0, 0)?;
+        ctx.local(2, 1)?;
+        ctx.local(6, 2)?;
         ctx.call(6, 0, 3)?;
-        ctx.bind(6, 0)?;
+        ctx.bind(7, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(7, 1)?;
         ctx.call(7, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(8, 0)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(7, 0)?;
         }
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(9, 1)?;
         ctx.call(7, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(10, 0)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(7, 0)?;
         }
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(11, 1)?;
         ctx.call(7, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(12, 0)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(7, 0)?;
         }
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(13, 1)?;
         ctx.call(7, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(14, 0)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(7, 0)?;
         }
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(3, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(3, 0)?;
-            ctx.assign(2, 0)?;
+            ctx.assign(3, 0)?;
         } else {
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(5, 0)?;
             ctx.literal(15, 1)?;
             ctx.call(7, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.literal(16, 0)?;
-                ctx.assign(2, 0)?;
+                ctx.assign(3, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.literal(17, 1)?;
                 ctx.call(7, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(16, 0)?;
-                    ctx.assign(3, 0)?;
+                    ctx.assign(4, 0)?;
                 }
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.literal(18, 1)?;
                 ctx.call(7, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(3, 0)?;
-                    ctx.assign(3, 0)?;
+                    ctx.assign(4, 0)?;
                 }
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.literal(19, 1)?;
                 ctx.call(7, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.local(3, 0)?;
+                    ctx.local(4, 0)?;
                     if ctx.test(0, p::Test::If)? {
                     } else {
                         ctx.begin()?;
                         ctx.literal(20, 0)?;
-                        ctx.assign(6, 0)?;
+                        ctx.assign(7, 0)?;
                     }
                 }
             }
         }
         ctx.begin()?;
-        ctx.local(6, 0)?;
+        ctx.local(7, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(1, 1)?;
+        ctx.local(1, 2)?;
         ctx.call(8, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.local(6, 0)?;
+        ctx.assign(2, 0)?;
+        ctx.unbind(7);
         ctx.unbind(6);
         ctx.unbind(5);
-        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(9, 0, 2)?;
     Ok(ctx.take(0))
@@ -1136,21 +2245,29 @@ static TS_REGEXP_SPELL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "pattern", path: &[] },
+        p::PlanLocal { name: "flags", path: &[] },
+        p::PlanLocal { name: "source", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_spell,
 };
 
 /// `ts.regexp.spell`.
 fn ts_regexp_spell(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(2, 1)?;
     ctx.literal(0, 2)?;
-    ctx.param(1, 3)?;
+    ctx.local(1, 3)?;
     ctx.call(1, 2, 2)?;
     ctx.call(1, 1, 2)?;
     ctx.call(1, 0, 2)?;
@@ -1179,49 +2296,56 @@ static TS_EXOTIC_ERROR_NAME: p::HelperPlan = p::HelperPlan {
     fields: &["data", "properties", "name", "kind", ],
     records: &[],
     registers: 2,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "properties", path: &[0, 1, 0] },
+        p::PlanLocal { name: "name", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_exotic_error_name,
 };
 
 /// `ts.exotic.error_name`.
 fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.field(0, 1)?;
-        ctx.bind(0, 0)?;
+        ctx.bind(1, 0)?;
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         ctx.call(1, 0, 1)?;
         ctx.literal(0, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(1, 0)?;
             ctx.literal(1, 1)?;
             ctx.call(2, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(0, 0)?;
+                ctx.local(1, 0)?;
                 ctx.field(0, 2)?;
                 return Ok(ctx.take(0));
             }
         }
-        ctx.unbind(0);
+        ctx.unbind(1);
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 3)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1230,7 +2354,7 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1239,7 +2363,7 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(6, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1248,7 +2372,7 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1257,7 +2381,7 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -1290,46 +2414,57 @@ static TS_EXOTIC_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", "pattern", "flags", "state", "href", ],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "hint", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "pattern", path: &[2, 1, 0, 1, 0] },
+        p::PlanLocal { name: "flags", path: &[2, 1, 0, 1, 1] },
+        p::PlanLocal { name: "spelled", path: &[2, 1, 0, 1, 2] },
+    ],
+    closures: &[
+    ],
     run: ts_exotic_to_primitive,
 };
 
 /// `ts.exotic.to_primitive`.
 fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.call(2, 0, 1)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(2, 1)?;
         ctx.call(3, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1338,26 +2473,26 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 2)?;
-            ctx.bind(1, 0)?;
-            ctx.begin()?;
-            ctx.param(0, 0)?;
-            ctx.field(0, 3)?;
-            ctx.bind(2, 0)?;
-            ctx.begin()?;
-            ctx.local(1, 0)?;
-            ctx.local(2, 1)?;
-            ctx.call(4, 0, 2)?;
             ctx.bind(3, 0)?;
             ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.field(0, 3)?;
+            ctx.bind(4, 0)?;
+            ctx.begin()?;
             ctx.local(3, 0)?;
+            ctx.local(4, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1366,7 +2501,7 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(1, 0)?;
+            ctx.local(1, 0)?;
             ctx.literal(1, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
@@ -1379,9 +2514,9 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1390,14 +2525,14 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 4)?;
             ctx.field(0, 5)?;
             return Ok(ctx.take(0));
         }
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(9, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1406,7 +2541,7 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(11, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -1444,65 +2579,75 @@ static TS_EXOTIC_GET: p::HelperPlan = p::HelperPlan {
     fields: &["data", "properties", "message", "__ts_brand", "__ts_type", "searchParams", "state", "pairs", ],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "key", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "name", path: &[1, 1, 0, 1, 0] },
+        p::PlanLocal { name: "properties", path: &[1, 1, 1, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_exotic_get,
 };
 
 /// `ts.exotic.get`.
 fn ts_exotic_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.call(2, 0, 1)?;
-            ctx.bind(1, 0)?;
+            ctx.bind(3, 0)?;
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(3, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.call(0, 0, 1)?;
         ctx.literal(2, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 0)?;
             ctx.field(0, 1)?;
-            ctx.bind(2, 0)?;
+            ctx.bind(4, 0)?;
             ctx.begin()?;
-            ctx.local(2, 0)?;
+            ctx.local(4, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(2, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(2, 0)?;
-                ctx.param(1, 1)?;
+                ctx.local(4, 0)?;
+                ctx.local(1, 1)?;
                 ctx.call(3, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.local(2, 0)?;
-                    ctx.param(1, 1)?;
+                    ctx.local(4, 0)?;
+                    ctx.local(1, 1)?;
                     ctx.index(0)?;
                     return Ok(ctx.take(0));
                 }
                 ctx.begin()?;
-                ctx.param(1, 0)?;
+                ctx.local(1, 0)?;
                 ctx.literal(3, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
@@ -1511,15 +2656,15 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                     return Ok(ctx.take(0));
                 }
             }
-            ctx.unbind(2);
+            ctx.unbind(4);
         }
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 2)?;
             return Ok(ctx.take(0));
         }
@@ -1528,14 +2673,14 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 3)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 4)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1544,26 +2689,26 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(1, 0)?;
+            ctx.local(1, 0)?;
             ctx.literal(7, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 ctx.field(0, 5)?;
                 return Ok(ctx.take(0));
             }
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 6)?;
-            ctx.param(1, 1)?;
+            ctx.local(1, 1)?;
             ctx.index(0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 3)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 4)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1572,12 +2717,12 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(1, 0)?;
+            ctx.local(1, 0)?;
             ctx.literal(9, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 ctx.field(0, 7)?;
                 ctx.call(4, 0, 1)?;
                 return Ok(ctx.take(0));
@@ -1613,23 +2758,38 @@ static TS_EXOTIC_SET: p::HelperPlan = p::HelperPlan {
     fields: &["data", "properties", "__ts_brand", "__ts_type", "state", "href", "searchParams", "pairs", ],
     records: &[],
     registers: 3,
-    slots: 6,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "key", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "properties", path: &[1, 1, 1] },
+        p::PlanLocal { name: "href", path: &[2, 1, 0, 1, 1] },
+        p::PlanLocal { name: "parsed", path: &[2, 1, 0, 1, 2] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "name", path: &[2, 1, 0, 1, 3, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_exotic_set,
 };
 
 /// `ts.exotic.set`.
 fn ts_exotic_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.call(0, 0, 1)?;
         ctx.literal(1, 1)?;
@@ -1644,12 +2804,12 @@ fn ts_exotic_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Err(p::PlanExit::Raise(ctx.take(0)));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.field(0, 1)?;
-        ctx.bind(1, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(4, 0)?;
         ctx.call(0, 0, 1)?;
         ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
@@ -1663,24 +2823,24 @@ fn ts_exotic_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Err(p::PlanExit::Raise(ctx.take(0)));
         }
         ctx.begin()?;
-        ctx.param(2, 0)?;
+        ctx.local(2, 0)?;
         ctx.pin(0)?;
-        ctx.local(1, 1)?;
-        ctx.param(1, 2)?;
+        ctx.local(4, 1)?;
+        ctx.local(1, 2)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.param(2, 0)?;
+        ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(3, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 2)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 3)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1689,7 +2849,7 @@ fn ts_exotic_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(2, 0)?;
+            ctx.local(2, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(6, 1)?;
             ctx.call(1, 0, 2)?;
@@ -1703,50 +2863,50 @@ fn ts_exotic_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                 return Err(p::PlanExit::Raise(ctx.take(0)));
             }
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 4)?;
             ctx.field(0, 5)?;
-            ctx.bind(2, 0)?;
+            ctx.bind(5, 0)?;
             ctx.begin()?;
-            ctx.local(2, 0)?;
-            ctx.param(1, 1)?;
-            ctx.param(2, 2)?;
+            ctx.local(5, 0)?;
+            ctx.local(1, 1)?;
+            ctx.local(2, 2)?;
             ctx.call(3, 0, 3)?;
-            ctx.bind(3, 0)?;
+            ctx.bind(6, 0)?;
             ctx.begin()?;
-            ctx.local(3, 0)?;
+            ctx.local(6, 0)?;
             ctx.field(0, 4)?;
             ctx.call(4, 0, 1)?;
-            let c0 = ctx.open(0, 4)?;
+            let c0 = ctx.open(0, 7)?;
             'l0: loop {
                 if !ctx.next(c0, 0)? {
                     break 'l0;
                 }
-                ctx.bind(5, 0)?;
+                ctx.bind(8, 0)?;
                 ctx.begin()?;
-                ctx.local(3, 0)?;
+                ctx.local(6, 0)?;
                 ctx.field(0, 4)?;
-                ctx.local(5, 1)?;
+                ctx.local(8, 1)?;
                 ctx.index(0)?;
                 ctx.pin(0)?;
-                ctx.param(0, 1)?;
+                ctx.local(0, 1)?;
                 ctx.field(1, 4)?;
-                ctx.local(5, 2)?;
+                ctx.local(8, 2)?;
                 ctx.set_index(1, 0)?;
-                ctx.unbind(5);
+                ctx.unbind(8);
                 ctx.begin()?;
             }
             ctx.close(c0);
             ctx.begin()?;
-            ctx.local(3, 0)?;
+            ctx.local(6, 0)?;
             ctx.field(0, 6)?;
             ctx.field(0, 7)?;
             ctx.pin(0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.field(1, 6)?;
             ctx.set_field(1, 7, 0)?;
             ctx.begin()?;
-            ctx.param(2, 0)?;
+            ctx.local(2, 0)?;
             return Ok(ctx.take(0));
         }
     }
@@ -1789,75 +2949,87 @@ static TS_EXOTIC_ITERATE: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", "pairs", ],
     records: &[],
     registers: 4,
-    slots: 7,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "items", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "map_key", path: &[2, 1, 0, 1] },
+        p::PlanLocal { name: "key", path: &[2, 1, 0, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[3, 1, 0, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_exotic_iterate,
 };
 
 /// `ts.exotic.iterate`.
 fn ts_exotic_iterate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        let c0 = ctx.open(0, 2)?;
+        ctx.local(0, 0)?;
+        let c0 = ctx.open(0, 3)?;
         'l0: loop {
             if !ctx.next(c0, 0)? {
                 break 'l0;
             }
-            ctx.bind(3, 0)?;
-            ctx.begin()?;
-            ctx.local(3, 0)?;
             ctx.bind(4, 0)?;
             ctx.begin()?;
             ctx.local(4, 0)?;
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(1, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.call(2, 0, 1)?;
-                ctx.assign(4, 0)?;
+                ctx.assign(5, 0)?;
             }
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(5, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(2, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.literal(3, 1)?;
                 ctx.index(0)?;
                 ctx.literal(4, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.local(4, 0)?;
+                    ctx.local(5, 0)?;
                     ctx.literal(5, 1)?;
                     ctx.index(0)?;
-                    ctx.local(4, 1)?;
+                    ctx.local(5, 1)?;
                     ctx.literal(6, 2)?;
                     ctx.index(1)?;
-                    ctx.local(4, 2)?;
+                    ctx.local(5, 2)?;
                     ctx.literal(7, 3)?;
                     ctx.index(2)?;
                     ctx.call(2, 2, 1)?;
                     ctx.call(3, 0, 3)?;
-                    ctx.assign(4, 0)?;
+                    ctx.assign(5, 0)?;
                 } else {
                     ctx.begin()?;
-                    ctx.local(4, 0)?;
+                    ctx.local(5, 0)?;
                     ctx.literal(3, 1)?;
                     ctx.index(0)?;
                     ctx.literal(8, 1)?;
@@ -1865,83 +3037,83 @@ fn ts_exotic_iterate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.literal(9, 0)?;
-                        ctx.assign(4, 0)?;
+                        ctx.assign(5, 0)?;
                     }
                 }
             }
             ctx.begin()?;
-            ctx.local(4, 0)?;
-            ctx.param(0, 1)?;
-            ctx.local(3, 2)?;
+            ctx.local(5, 0)?;
+            ctx.local(0, 1)?;
+            ctx.local(4, 2)?;
             ctx.index(1)?;
             ctx.list(0, 2)?;
             ctx.pin(0)?;
-            ctx.local(1, 1)?;
-            ctx.local(1, 2)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
             ctx.call(4, 2, 1)?;
             ctx.set_index(1, 0)?;
+            ctx.unbind(5);
             ctx.unbind(4);
-            ctx.unbind(3);
             ctx.begin()?;
         }
         ctx.close(c0);
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(10, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        let c0 = ctx.open(0, 5)?;
+        ctx.local(0, 0)?;
+        let c0 = ctx.open(0, 6)?;
         'l0: loop {
             if !ctx.next(c0, 0)? {
                 break 'l0;
             }
-            ctx.bind(6, 0)?;
+            ctx.bind(7, 0)?;
             ctx.begin()?;
-            ctx.local(6, 0)?;
+            ctx.local(7, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(1, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(6, 0)?;
+                ctx.local(7, 0)?;
                 ctx.call(2, 0, 1)?;
-                ctx.assign(6, 0)?;
+                ctx.assign(7, 0)?;
             }
             ctx.begin()?;
-            ctx.local(6, 0)?;
+            ctx.local(7, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(2, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(6, 0)?;
+                ctx.local(7, 0)?;
                 ctx.literal(3, 1)?;
                 ctx.index(0)?;
                 ctx.literal(4, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.local(6, 0)?;
+                    ctx.local(7, 0)?;
                     ctx.literal(5, 1)?;
                     ctx.index(0)?;
-                    ctx.local(6, 1)?;
+                    ctx.local(7, 1)?;
                     ctx.literal(6, 2)?;
                     ctx.index(1)?;
-                    ctx.local(6, 2)?;
+                    ctx.local(7, 2)?;
                     ctx.literal(7, 3)?;
                     ctx.index(2)?;
                     ctx.call(2, 2, 1)?;
                     ctx.call(3, 0, 3)?;
-                    ctx.assign(6, 0)?;
+                    ctx.assign(7, 0)?;
                 } else {
                     ctx.begin()?;
-                    ctx.local(6, 0)?;
+                    ctx.local(7, 0)?;
                     ctx.literal(3, 1)?;
                     ctx.index(0)?;
                     ctx.literal(8, 1)?;
@@ -1949,34 +3121,34 @@ fn ts_exotic_iterate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.literal(9, 0)?;
-                        ctx.assign(6, 0)?;
+                        ctx.assign(7, 0)?;
                     }
                 }
             }
             ctx.begin()?;
-            ctx.local(6, 0)?;
+            ctx.local(7, 0)?;
             ctx.pin(0)?;
-            ctx.local(1, 1)?;
-            ctx.local(1, 2)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
             ctx.call(4, 2, 1)?;
             ctx.set_index(1, 0)?;
-            ctx.unbind(6);
+            ctx.unbind(7);
             ctx.begin()?;
         }
         ctx.close(c0);
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(11, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -1985,7 +3157,7 @@ fn ts_exotic_iterate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 2)?;
             return Ok(ctx.take(0));
         }
@@ -2023,56 +3195,62 @@ static TS_RECEIVER: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_receiver,
 };
 
 /// `ts.receiver`.
 fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.field(0, 1)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2081,7 +3259,7 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2090,7 +3268,7 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(6, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2099,18 +3277,18 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(8, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
         } else {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(9, 1)?;
             ctx.index(0)?;
             ctx.literal(10, 1)?;
@@ -2121,7 +3299,7 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                 return Ok(ctx.take(0));
             }
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(9, 1)?;
             ctx.index(0)?;
             ctx.literal(11, 1)?;
@@ -2134,7 +3312,7 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         }
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2154,47 +3332,52 @@ static TS_CALLABLE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_callable,
 };
 
 /// `ts.callable`.
 fn ts_callable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.tuple(1, 0)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(1, 1)?;
     ctx.index(0)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.index(0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2216,62 +3399,67 @@ static TS_IDENTITY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_identity,
 };
 
 /// `ts.identity`.
 fn ts_identity(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.tuple(1, 0)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(1, 1)?;
     ctx.index(0)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.index(0)?;
         ctx.literal(4, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(5, 1)?;
             ctx.index(0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.literal(2, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.literal(3, 2)?;
         ctx.index(1)?;
         ctx.tuple(0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2291,16 +3479,21 @@ static TS_REQUIRES_NEW: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "name", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_requires_new,
 };
 
 /// `ts.requires_new`.
 fn ts_requires_new(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
-    ctx.param(0, 2)?;
+    ctx.local(0, 2)?;
     ctx.literal(2, 3)?;
     ctx.call(1, 2, 2)?;
     ctx.call(1, 1, 2)?;
@@ -2323,12 +3516,19 @@ static TS_FUNCTION_FROM_TEXT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_function_from_text,
 };
 
 /// `ts.function_from_text`.
 fn ts_function_from_text(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -2347,12 +3547,19 @@ static TS_NOTHING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_nothing,
 };
 
 /// `ts.nothing`.
 fn ts_nothing(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
@@ -2377,18 +3584,24 @@ static TS_IS_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_is_primitive,
 };
 
 /// `ts.is_primitive`.
 fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2397,7 +3610,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2406,7 +3619,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2415,7 +3628,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2424,7 +3637,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2433,7 +3646,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(6, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -2453,14 +3666,19 @@ static TS_IS_NULLISH: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_is_nullish,
 };
 
 /// `ts.is_nullish`.
 fn ts_is_nullish(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2469,7 +3687,7 @@ fn ts_is_nullish(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
@@ -2492,21 +3710,28 @@ static TS_TDZ: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "name", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_tdz,
 };
 
 /// `ts.tdz`.
 fn ts_tdz(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.tuple(1, 0)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(0, 0)?;
         ctx.literal(1, 1)?;
-        ctx.param(1, 2)?;
+        ctx.local(1, 2)?;
         ctx.literal(2, 3)?;
         ctx.call(2, 2, 2)?;
         ctx.call(2, 1, 2)?;
@@ -2515,7 +3740,7 @@ fn ts_tdz(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2534,18 +3759,24 @@ static TS_REQUIRE_OBJECT_COERCIBLE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "nullish", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_require_object_coercible,
 };
 
 /// `ts.require_object_coercible`.
 fn ts_require_object_coercible(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(0, 0)?;
@@ -2555,7 +3786,7 @@ fn ts_require_object_coercible(ctx: &mut dyn p::PlanContext) -> Result<Value, p:
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2584,32 +3815,38 @@ static TS_TO_BOOLEAN: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_to_boolean,
 };
 
 /// `ts.to_boolean`.
 fn ts_to_boolean(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -2617,14 +3854,14 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(4, 0, 2)?;
         ctx.call(3, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2633,19 +3870,19 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(6, 1)?;
         ctx.call(1, 0, 2)?;
         ctx.call(3, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2654,12 +3891,12 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(8, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(4, 0, 2)?;
         ctx.call(3, 0, 1)?;
@@ -2681,18 +3918,24 @@ static TS_NOT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "truthy", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_not,
 };
 
 /// `ts.not`.
 fn ts_not(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -2719,18 +3962,24 @@ static TS_TYPEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_typeof,
 };
 
 /// `ts.typeof`.
 fn ts_typeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2739,7 +3988,7 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2748,7 +3997,7 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2757,7 +4006,7 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2766,7 +4015,7 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2805,45 +4054,40 @@ static TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "spelled", path: &[2, 1, 0] },
+        p::PlanLocal { name: "spelled", path: &[3, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_primitive_to_string,
 };
 
 /// `ts.primitive_to_string`.
 fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(1, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
         ctx.bind(2, 0)?;
         ctx.begin()?;
@@ -2851,7 +4095,20 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2860,7 +4117,7 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -2869,12 +4126,12 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(6, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(7, 0)?;
@@ -2889,6 +4146,124 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
     ctx.literal(10, 1)?;
     ctx.literal(11, 2)?;
     ctx.call(3, 0, 3)?;
+    Err(p::PlanExit::Raise(ctx.take(0)))
+}
+
+static TS_PRIMITIVE_TO_NUMBER: p::HelperPlan = p::HelperPlan {
+    name: "ts.primitive_to_number",
+    function: p::function("2bb8d44c8c8202cd2bd9e04a66981602abf93823862177808308ca5294860f5f"),
+    callees: &[
+        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"),
+        p::function("d029f2e329c1a2e7fe6ff173343d97243e648bcd09d17e3e7c99706cfc22bf8a"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("float"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("absent"),
+        p::PlanLiteral::Float(0x7ff8000000000000),
+        p::PlanLiteral::Text("null"),
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Text("bool"),
+        p::PlanLiteral::Float(0x3ff0000000000000),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("type_error"),
+        p::PlanLiteral::Text("Cannot convert object to primitive value"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "parsed", path: &[6, 1, 0] },
+    ],
+    closures: &[
+    ],
+    run: ts_primitive_to_number,
+};
+
+/// `ts.primitive_to_number`.
+fn ts_primitive_to_number(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(4, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(7, 0)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.literal(5, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.bind(2, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(9, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.literal(11, 2)?;
+    ctx.call(4, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
@@ -2907,30 +4282,36 @@ static TS_WRAP_INT32: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "wrapped", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_wrap_int32,
 };
 
 /// `ts.wrap_int32`.
 fn ts_wrap_int32(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(1, 0)?;
     ctx.begin()?;
     ctx.literal(1, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(2, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -2962,56 +4343,76 @@ static TS_BITWISE32: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 11,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "operation", path: &[] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
+        p::PlanLocal { name: "conjunction", path: &[2] },
+        p::PlanLocal { name: "disjunction", path: &[3] },
+        p::PlanLocal { name: "weight", path: &[4] },
+        p::PlanLocal { name: "result_value", path: &[5] },
+        p::PlanLocal { name: "x", path: &[6, 1, 1] },
+        p::PlanLocal { name: "y", path: &[6, 1, 2] },
+        p::PlanLocal { name: "bit", path: &[6, 1, 3] },
+        p::PlanLocal { name: "combined", path: &[7] },
+        p::PlanLocal { name: "signed", path: &[8] },
+    ],
+    closures: &[
+    ],
     run: ts_bitwise32,
 };
 
 /// `ts.bitwise32`.
 fn ts_bitwise32(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.param(2, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.call(2, 0, 2)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.param(2, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(2, 0, 2)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.literal(3, 0)?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.call(0, 0, 1)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.literal(4, 0)?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(2, 0, 2)?;
     ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(2, 0, 2)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.bind(7, 0)?;
+    ctx.begin()?;
+    ctx.literal(4, 0)?;
+    ctx.bind(8, 0)?;
     ctx.begin()?;
     'l0: loop {
         ctx.literal(4, 0)?;
-        ctx.local(0, 1)?;
-        ctx.local(1, 2)?;
+        ctx.local(3, 1)?;
+        ctx.local(4, 2)?;
         ctx.call(4, 1, 2)?;
         ctx.call(3, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(5, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.local(1, 1)?;
+            ctx.local(3, 0)?;
+            ctx.local(4, 1)?;
             ctx.call(6, 0, 2)?;
             ctx.literal(4, 1)?;
             ctx.call(5, 0, 2)?;
@@ -3021,82 +4422,82 @@ fn ts_bitwise32(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             }
         }
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(3, 0)?;
         ctx.literal(5, 1)?;
         ctx.call(7, 0, 2)?;
-        ctx.bind(6, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(7, 0, 2)?;
-        ctx.bind(7, 0)?;
-        ctx.begin()?;
-        ctx.local(6, 0)?;
-        ctx.local(7, 1)?;
-        ctx.call(4, 0, 2)?;
-        ctx.bind(8, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(6, 0)?;
-            ctx.local(7, 1)?;
-            ctx.call(8, 0, 2)?;
-            ctx.assign(8, 0)?;
-        } else {
-            ctx.begin()?;
-            ctx.local(3, 0)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(6, 0, 2)?;
-                ctx.assign(8, 0)?;
-            } else {
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.literal(5, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(8, 0)?;
-            }
-        }
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.local(4, 1)?;
-        ctx.local(8, 2)?;
-        ctx.call(8, 1, 2)?;
-        ctx.call(4, 0, 2)?;
-        ctx.assign(5, 0)?;
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(9, 0, 2)?;
-        ctx.assign(0, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(5, 1)?;
-        ctx.call(9, 0, 2)?;
-        ctx.assign(1, 0)?;
+        ctx.bind(9, 0)?;
         ctx.begin()?;
         ctx.local(4, 0)?;
         ctx.literal(5, 1)?;
-        ctx.call(8, 0, 2)?;
+        ctx.call(7, 0, 2)?;
+        ctx.bind(10, 0)?;
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.local(10, 1)?;
+        ctx.call(4, 0, 2)?;
+        ctx.bind(11, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.local(10, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.assign(11, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(6, 0, 2)?;
+                ctx.assign(11, 0)?;
+            } else {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.literal(5, 1)?;
+                ctx.call(7, 0, 2)?;
+                ctx.assign(11, 0)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.local(8, 0)?;
+        ctx.local(7, 1)?;
+        ctx.local(11, 2)?;
+        ctx.call(8, 1, 2)?;
+        ctx.call(4, 0, 2)?;
+        ctx.assign(8, 0)?;
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(9, 0, 2)?;
+        ctx.assign(3, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(9, 0, 2)?;
         ctx.assign(4, 0)?;
-        ctx.unbind(8);
-        ctx.unbind(7);
-        ctx.unbind(6);
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(8, 0, 2)?;
+        ctx.assign(7, 0)?;
+        ctx.unbind(11);
+        ctx.unbind(10);
+        ctx.unbind(9);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(5, 0)?;
+    ctx.local(8, 0)?;
     ctx.call(10, 0, 1)?;
-    ctx.bind(9, 0)?;
+    ctx.bind(12, 0)?;
     ctx.begin()?;
-    ctx.local(9, 0)?;
+    ctx.local(12, 0)?;
     ctx.call(11, 0, 1)?;
-    ctx.bind(10, 0)?;
+    ctx.bind(13, 0)?;
     ctx.begin()?;
-    ctx.local(10, 0)?;
+    ctx.local(13, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3116,23 +4517,34 @@ static TS_STRICT_EQUALS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "a", path: &[0] },
+        p::PlanLocal { name: "b", path: &[1] },
+        p::PlanLocal { name: "x", path: &[4] },
+        p::PlanLocal { name: "y", path: &[5] },
+    ],
+    closures: &[
+    ],
     run: ts_strict_equals,
 };
 
 /// `ts.strict_equals`.
 fn ts_strict_equals(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.local(1, 1)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.local(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
     } else {
@@ -3141,27 +4553,27 @@ fn ts_strict_equals(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> 
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.param(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
         ctx.call(2, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(2, 0)?;
+    ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(3, 0)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.local(3, 1)?;
+    ctx.local(4, 0)?;
+    ctx.local(5, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
@@ -3177,19 +4589,27 @@ static TS_STRICT_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "equal", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_strict_not_equals,
 };
 
 /// `ts.strict_not_equals`.
 fn ts_strict_not_equals(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.param(1, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -3208,49 +4628,59 @@ static TS_PAD: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "items", path: &[] },
+        p::PlanLocal { name: "count", path: &[] },
+        p::PlanLocal { name: "padded", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "item", path: &[2, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_pad,
 };
 
 /// `ts.pad`.
 fn ts_pad(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(1, 0)?;
+    ctx.local(0, 1)?;
     ctx.call(1, 1, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(1, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(2);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
     'l0: loop {
-        ctx.local(0, 0)?;
+        ctx.local(2, 0)?;
         ctx.call(1, 0, 1)?;
-        ctx.param(1, 1)?;
+        ctx.local(1, 1)?;
         ctx.call(2, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
@@ -3258,14 +4688,14 @@ fn ts_pad(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         ctx.begin()?;
         ctx.literal(0, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(1, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3281,14 +4711,19 @@ static TS_HOLE_VALUE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_hole_value,
 };
 
 /// `ts.hole_value`.
 fn ts_hole_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.tuple(1, 0)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -3297,7 +4732,7 @@ fn ts_hole_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3316,54 +4751,65 @@ static TS_REST: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "items", path: &[] },
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "rest", path: &[0] },
+        p::PlanLocal { name: "position", path: &[1] },
+        p::PlanLocal { name: "item", path: &[2, 1, 0] },
+        p::PlanLocal { name: "value", path: &[2, 1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_rest,
 };
 
 /// `ts.rest`.
 fn ts_rest(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.bind(1, 0)?;
+    ctx.local(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
     'l0: loop {
-        ctx.local(1, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(3, 0)?;
+        ctx.local(0, 1)?;
         ctx.call(1, 1, 1)?;
         ctx.call(0, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(3, 1)?;
         ctx.index(0)?;
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.call(2, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(5, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(1, 2, 1)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(3, 0, 2)?;
-        ctx.assign(1, 0)?;
-        ctx.unbind(3);
-        ctx.unbind(2);
+        ctx.assign(3, 0)?;
+        ctx.unbind(5);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3377,48 +4823,58 @@ static TS_SPREAD: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "parts", path: &[] },
+        p::PlanLocal { name: "flat", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "part", path: &[1, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "item", path: &[1, 1, 0, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_spread,
 };
 
 /// `ts.spread`.
 fn ts_spread(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 2)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(3, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        let c1 = ctx.open(0, 3)?;
+        ctx.local(3, 0)?;
+        let c1 = ctx.open(0, 4)?;
         'l1: loop {
             if !ctx.next(c1, 0)? {
                 break 'l1;
             }
-            ctx.bind(4, 0)?;
+            ctx.bind(5, 0)?;
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(5, 0)?;
             ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(0, 2)?;
+            ctx.local(1, 1)?;
+            ctx.local(1, 2)?;
             ctx.call(0, 2, 1)?;
             ctx.set_index(1, 0)?;
-            ctx.unbind(4);
+            ctx.unbind(5);
             ctx.begin()?;
         }
         ctx.close(c1);
-        ctx.unbind(2);
+        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3463,64 +4919,80 @@ static TS_BOUNDARY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 11,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "copied", path: &[6] },
+        p::PlanLocal { name: "pending", path: &[8] },
+        p::PlanLocal { name: "last", path: &[9, 1, 0] },
+        p::PlanLocal { name: "item", path: &[9, 1, 1] },
+        p::PlanLocal { name: "children", path: &[9, 1, 3] },
+        p::PlanLocal { name: "index", path: &[9, 1, 4, 1, 0] },
+        p::PlanLocal { name: "child", path: &[9, 1, 4, 1, 1, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "child", path: &[9, 1, 5, 1] },
+        p::PlanLocal { name: "ck", path: &[9, 1, 5, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_boundary,
 };
 
 /// `ts.boundary`.
 fn ts_boundary(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.index(0)?;
         ctx.literal(4, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(5, 1)?;
             ctx.index(0)?;
             ctx.literal(6, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 return Ok(ctx.take(0));
             }
             ctx.begin()?;
@@ -3531,7 +5003,7 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Err(p::PlanExit::Raise(ctx.take(0)));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.index(0)?;
         ctx.literal(10, 1)?;
@@ -3545,219 +5017,219 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Err(p::PlanExit::Raise(ctx.take(0)));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(11, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(3, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(12, 1)?;
     ctx.literal(2, 2)?;
     ctx.set(1, 2)?;
     ctx.call(4, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(13, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(5, 0, 1)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(2, 0)?;
     } else {
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(1, 0)?;
         ctx.literal(14, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.call(6, 0, 1)?;
-            ctx.assign(1, 0)?;
+            ctx.assign(2, 0)?;
         } else {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(1, 0)?;
             ctx.literal(15, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 ctx.call(7, 0, 1)?;
-                ctx.assign(1, 0)?;
+                ctx.assign(2, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 return Ok(ctx.take(0));
             }
         }
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.list(0, 1)?;
-    ctx.bind(2, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
     'l0: loop {
         ctx.meter(2)?;
         ctx.literal(3, 0)?;
-        ctx.local(2, 1)?;
+        ctx.local(3, 1)?;
         ctx.call(9, 1, 1)?;
         ctx.call(8, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(3, 0)?;
         ctx.call(9, 0, 1)?;
         ctx.literal(5, 1)?;
         ctx.call(10, 0, 2)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(3, 1)?;
-        ctx.index(0)?;
         ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.local(3, 1)?;
-        ctx.remove_index(0)?;
-        ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(3, 0)?;
+        ctx.local(4, 1)?;
+        ctx.index(0)?;
         ctx.bind(5, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(3, 0)?;
+        ctx.local(4, 1)?;
+        ctx.remove_index(0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
         ctx.call(0, 0, 1)?;
         ctx.literal(13, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(3, 0)?;
-            ctx.bind(6, 0)?;
+            ctx.bind(7, 0)?;
             ctx.begin()?;
             'l1: loop {
-                ctx.local(6, 0)?;
-                ctx.local(4, 1)?;
+                ctx.local(7, 0)?;
+                ctx.local(5, 1)?;
                 ctx.call(9, 1, 1)?;
                 ctx.call(8, 0, 2)?;
                 if !ctx.test(0, p::Test::While)? {
                     break 'l1;
                 }
                 ctx.begin()?;
-                ctx.local(4, 0)?;
-                ctx.local(6, 1)?;
+                ctx.local(5, 0)?;
+                ctx.local(7, 1)?;
                 ctx.index(0)?;
-                ctx.bind(7, 0)?;
+                ctx.bind(8, 0)?;
                 ctx.begin()?;
-                ctx.local(7, 0)?;
+                ctx.local(8, 0)?;
                 ctx.tuple(1, 0)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(9, 0)?;
                     ctx.pin(0)?;
-                    ctx.local(4, 1)?;
-                    ctx.local(6, 2)?;
+                    ctx.local(5, 1)?;
+                    ctx.local(7, 2)?;
                     ctx.set_index(1, 0)?;
                 }
                 ctx.begin()?;
-                ctx.local(7, 0)?;
+                ctx.local(8, 0)?;
                 ctx.literal(16, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(9, 0)?;
                     ctx.pin(0)?;
-                    ctx.local(4, 1)?;
-                    ctx.local(6, 2)?;
+                    ctx.local(5, 1)?;
+                    ctx.local(7, 2)?;
                     ctx.set_index(1, 0)?;
                 }
                 ctx.begin()?;
-                ctx.local(6, 0)?;
+                ctx.local(7, 0)?;
                 ctx.literal(5, 1)?;
                 ctx.call(11, 0, 2)?;
-                ctx.assign(6, 0)?;
-                ctx.unbind(7);
+                ctx.assign(7, 0)?;
+                ctx.unbind(8);
                 ctx.begin()?;
             }
-            ctx.unbind(6);
+            ctx.unbind(7);
         } else {
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(5, 0)?;
             ctx.call(0, 0, 1)?;
             ctx.literal(14, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.call(12, 0, 1)?;
-                ctx.assign(5, 0)?;
+                ctx.assign(6, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(5, 0)?;
                 ctx.call(13, 0, 1)?;
-                ctx.assign(5, 0)?;
+                ctx.assign(6, 0)?;
             }
         }
         ctx.begin()?;
-        ctx.local(5, 0)?;
-        let c1 = ctx.open(0, 8)?;
+        ctx.local(6, 0)?;
+        let c1 = ctx.open(0, 9)?;
         'l1: loop {
             if !ctx.next(c1, 0)? {
                 break 'l1;
             }
-            ctx.bind(9, 0)?;
-            ctx.begin()?;
-            ctx.local(9, 0)?;
-            ctx.call(0, 0, 1)?;
             ctx.bind(10, 0)?;
             ctx.begin()?;
             ctx.local(10, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.bind(11, 0)?;
+            ctx.begin()?;
+            ctx.local(11, 0)?;
             ctx.literal(1, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
             } else {
                 ctx.begin()?;
-                ctx.local(10, 0)?;
+                ctx.local(11, 0)?;
                 ctx.literal(0, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                 } else {
                     ctx.begin()?;
-                    ctx.local(10, 0)?;
+                    ctx.local(11, 0)?;
                     ctx.literal(2, 1)?;
                     ctx.call(1, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
-                        ctx.local(9, 0)?;
+                        ctx.local(10, 0)?;
                         ctx.tuple(1, 0)?;
                         ctx.call(1, 0, 2)?;
                         if ctx.test(0, p::Test::If)? {
                         } else {
                             ctx.begin()?;
-                            ctx.local(9, 0)?;
+                            ctx.local(10, 0)?;
                             ctx.literal(3, 1)?;
                             ctx.index(0)?;
                             ctx.literal(4, 1)?;
                             ctx.call(1, 0, 2)?;
                             if ctx.test(0, p::Test::If)? {
                                 ctx.begin()?;
-                                ctx.local(9, 0)?;
+                                ctx.local(10, 0)?;
                                 ctx.literal(5, 1)?;
                                 ctx.index(0)?;
                                 ctx.literal(6, 1)?;
@@ -3773,7 +5245,7 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                                 }
                             }
                             ctx.begin()?;
-                            ctx.local(9, 0)?;
+                            ctx.local(10, 0)?;
                             ctx.literal(3, 1)?;
                             ctx.index(0)?;
                             ctx.literal(10, 1)?;
@@ -3789,59 +5261,59 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                         }
                     } else {
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
+                        ctx.local(11, 0)?;
                         ctx.literal(13, 1)?;
                         ctx.call(1, 0, 2)?;
                         if ctx.test(0, p::Test::If)? {
                             ctx.begin()?;
-                            ctx.local(9, 0)?;
+                            ctx.local(10, 0)?;
                             ctx.pin(0)?;
-                            ctx.local(2, 1)?;
-                            ctx.local(2, 2)?;
+                            ctx.local(3, 1)?;
+                            ctx.local(3, 2)?;
                             ctx.call(9, 2, 1)?;
                             ctx.set_index(1, 0)?;
                         }
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
+                        ctx.local(11, 0)?;
                         ctx.literal(14, 1)?;
                         ctx.call(1, 0, 2)?;
                         if ctx.test(0, p::Test::If)? {
                             ctx.begin()?;
-                            ctx.local(9, 0)?;
+                            ctx.local(10, 0)?;
                             ctx.pin(0)?;
-                            ctx.local(2, 1)?;
-                            ctx.local(2, 2)?;
+                            ctx.local(3, 1)?;
+                            ctx.local(3, 2)?;
                             ctx.call(9, 2, 1)?;
                             ctx.set_index(1, 0)?;
                         }
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
+                        ctx.local(11, 0)?;
                         ctx.literal(15, 1)?;
                         ctx.call(1, 0, 2)?;
                         if ctx.test(0, p::Test::If)? {
                             ctx.begin()?;
-                            ctx.local(9, 0)?;
+                            ctx.local(10, 0)?;
                             ctx.pin(0)?;
-                            ctx.local(2, 1)?;
-                            ctx.local(2, 2)?;
+                            ctx.local(3, 1)?;
+                            ctx.local(3, 2)?;
                             ctx.call(9, 2, 1)?;
                             ctx.set_index(1, 0)?;
                         }
                     }
                 }
             }
+            ctx.unbind(11);
             ctx.unbind(10);
-            ctx.unbind(9);
             ctx.begin()?;
         }
         ctx.close(c1);
+        ctx.unbind(6);
         ctx.unbind(5);
         ctx.unbind(4);
-        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -3863,53 +5335,63 @@ static TS_ARGUMENTS: p::HelperPlan = p::HelperPlan {
     fields: &["length", "__ts_brand", "__ts_type", "properties", "hidden", ],
     records: &[&[0], &[1, 2, 3, 4], ],
     registers: 4,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "items", path: &[] },
+        p::PlanLocal { name: "properties", path: &[0] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[2, 1] },
+        p::PlanLocal { name: "key", path: &[2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_arguments,
 };
 
 /// `ts.arguments`.
 fn ts_arguments(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.call(0, 0, 1)?;
     ctx.record(0, 0)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 2)?;
+    ctx.literal(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.call(2, 0, 1)?;
         ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(2, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(4, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(4, 2)?;
+        ctx.local(1, 1)?;
+        ctx.local(5, 2)?;
         ctx.set_index(1, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(3, 0, 2)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(2, 0)?;
+        ctx.unbind(5);
         ctx.unbind(4);
-        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
     ctx.tuple(0, 0)?;
     ctx.literal(2, 1)?;
-    ctx.local(0, 2)?;
+    ctx.local(1, 2)?;
     ctx.literal(3, 3)?;
     ctx.set(3, 1)?;
     ctx.record(1, 0)?;
@@ -3943,18 +5425,26 @@ static TS_FUNCTION_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "target", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_function_tostring,
 };
 
 /// `ts.function.toString`.
 fn ts_function_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.call(2, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
@@ -3968,13 +5458,13 @@ fn ts_function_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(2, 0, 1)?;
     ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(5, 1)?;
         ctx.index(0)?;
         ctx.literal(6, 1)?;
@@ -3983,7 +5473,7 @@ fn ts_function_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanEx
         } else {
             ctx.begin()?;
             ctx.literal(7, 0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.literal(8, 2)?;
             ctx.index(1)?;
             ctx.literal(9, 2)?;
@@ -4014,12 +5504,19 @@ static TS_FUNCTION_EVAL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_function_eval,
 };
 
 /// `ts.function.eval`.
 fn ts_function_eval(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -4042,12 +5539,19 @@ static TS_MAP_CALL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_map_call,
 };
 
 /// `ts.map.call`.
 fn ts_map_call(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -4070,14 +5574,19 @@ static TS_MAP_KEY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_map_key,
 };
 
 /// `ts.map.key`.
 fn ts_map_key(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.literal(1, 2)?;
     ctx.tuple(1, 2)?;
@@ -4113,44 +5622,50 @@ static TS_MAP_VALUE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 7,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "key", path: &[] },
+        p::PlanLocal { name: "callable", path: &[1, 1, 2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_map_value,
 };
 
 /// `ts.map.value`.
 fn ts_map_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(1, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(2, 1)?;
         ctx.index(0)?;
         ctx.literal(3, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(4, 1)?;
             ctx.index(0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.literal(5, 2)?;
             ctx.index(1)?;
-            ctx.param(0, 2)?;
+            ctx.local(0, 2)?;
             ctx.literal(6, 3)?;
             ctx.index(2)?;
             ctx.call(2, 2, 1)?;
@@ -4158,7 +5673,7 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(2, 1)?;
         ctx.index(0)?;
         ctx.literal(7, 1)?;
@@ -4169,30 +5684,30 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(2, 1)?;
         ctx.index(0)?;
         ctx.literal(9, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(10, 1)?;
             ctx.index(0)?;
-            ctx.bind(0, 0)?;
+            ctx.bind(1, 0)?;
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(1, 0)?;
             ctx.call(1, 0, 1)?;
             ctx.literal(0, 1)?;
             ctx.call(0, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(0, 0)?;
+                ctx.local(1, 0)?;
                 ctx.call(2, 0, 1)?;
-                ctx.assign(0, 0)?;
+                ctx.assign(1, 0)?;
             }
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(6, 1)?;
             ctx.index(0)?;
             ctx.literal(11, 1)?;
@@ -4201,14 +5716,14 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
                 ctx.begin()?;
                 ctx.literal(9, 0)?;
                 ctx.literal(11, 1)?;
-                ctx.param(0, 2)?;
+                ctx.local(0, 2)?;
                 ctx.literal(4, 3)?;
                 ctx.index(2)?;
-                ctx.param(0, 3)?;
+                ctx.local(0, 3)?;
                 ctx.literal(5, 4)?;
                 ctx.index(3)?;
-                ctx.local(0, 4)?;
-                ctx.param(0, 5)?;
+                ctx.local(1, 4)?;
+                ctx.local(0, 5)?;
                 ctx.literal(12, 6)?;
                 ctx.index(5)?;
                 ctx.call(2, 5, 1)?;
@@ -4217,25 +5732,25 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             }
             ctx.begin()?;
             ctx.literal(9, 0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.literal(6, 2)?;
             ctx.index(1)?;
-            ctx.param(0, 2)?;
+            ctx.local(0, 2)?;
             ctx.literal(4, 3)?;
             ctx.index(2)?;
-            ctx.param(0, 3)?;
+            ctx.local(0, 3)?;
             ctx.literal(5, 4)?;
             ctx.index(3)?;
-            ctx.local(0, 4)?;
+            ctx.local(1, 4)?;
             ctx.tuple(0, 5)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4252,14 +5767,19 @@ static TS_MAP_IS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_map_is,
 };
 
 /// `ts.map.is`.
 fn ts_map_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4285,14 +5805,19 @@ static TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_map_size,
 };
 
 /// `ts.map.size`.
 fn ts_map_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4306,7 +5831,7 @@ fn ts_map_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(4, 0, 1)?;
     ctx.call(3, 0, 1)?;
     Ok(ctx.take(0))
@@ -4336,14 +5861,22 @@ static TS_MAP_SET: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "key", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_set,
 };
 
 /// `ts.map.set`.
 fn ts_map_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4357,7 +5890,7 @@ fn ts_map_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.literal(5, 1)?;
@@ -4365,17 +5898,17 @@ fn ts_map_set(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.tuple(1, 2)?;
     ctx.literal(7, 2)?;
     ctx.call(3, 0, 3)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(8, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.pin(0)?;
-    ctx.param(0, 1)?;
-    ctx.local(0, 2)?;
+    ctx.local(0, 1)?;
+    ctx.local(2, 2)?;
     ctx.set_index(1, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4404,14 +5937,22 @@ static TS_MAP_GET: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "key", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_get,
 };
 
 /// `ts.map.get`.
 fn ts_map_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4425,7 +5966,7 @@ fn ts_map_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.literal(5, 1)?;
@@ -4433,15 +5974,15 @@ fn ts_map_get(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.tuple(1, 2)?;
     ctx.literal(7, 2)?;
     ctx.call(3, 0, 3)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(2, 1)?;
     ctx.call(5, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(0, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(2, 1)?;
         ctx.index(0)?;
         return Ok(ctx.take(0));
     }
@@ -4474,14 +6015,22 @@ static TS_MAP_HAS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "key", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_has,
 };
 
 /// `ts.map.has`.
 fn ts_map_has(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4495,7 +6044,7 @@ fn ts_map_has(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.literal(5, 1)?;
@@ -4503,10 +6052,10 @@ fn ts_map_has(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.tuple(1, 2)?;
     ctx.literal(7, 2)?;
     ctx.call(3, 0, 3)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(2, 1)?;
     ctx.call(5, 0, 2)?;
     Ok(ctx.take(0))
 }
@@ -4535,14 +6084,23 @@ static TS_MAP_DELETE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "key", path: &[1] },
+        p::PlanLocal { name: "had", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_map_delete,
 };
 
 /// `ts.map.delete`.
 fn ts_map_delete(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4556,7 +6114,7 @@ fn ts_map_delete(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.literal(5, 1)?;
@@ -4564,18 +6122,18 @@ fn ts_map_delete(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.tuple(1, 2)?;
     ctx.literal(7, 2)?;
     ctx.call(3, 0, 3)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(2, 1)?;
     ctx.call(5, 0, 2)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(2, 1)?;
     ctx.remove_index(0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4598,14 +6156,23 @@ static TS_MAP_CLEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_clear,
 };
 
 /// `ts.map.clear`.
 fn ts_map_clear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4619,20 +6186,20 @@ fn ts_map_clear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(3, 0, 1)?;
-    let c0 = ctx.open(0, 0)?;
+    let c0 = ctx.open(0, 2)?;
     'l0: loop {
         ctx.meter(2)?;
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(1, 0)?;
+        ctx.bind(3, 0)?;
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(3, 1)?;
         ctx.remove_index(0)?;
-        ctx.unbind(1);
+        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.close(c0);
@@ -4660,14 +6227,26 @@ static TS_MAP_KEYS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "map_key", path: &[2, 1] },
+        p::PlanLocal { name: "builtin_arg_4", path: &[2, 1, 0] },
+        p::PlanLocal { name: "key", path: &[2, 1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_keys,
 };
 
 /// `ts.map.keys`.
 fn ts_map_keys(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4682,37 +6261,37 @@ fn ts_map_keys(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(3, 0, 1)?;
         ctx.bind(4, 0)?;
         ctx.begin()?;
         ctx.local(4, 0)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.set_index(1, 0)?;
+        ctx.unbind(6);
+        ctx.unbind(5);
         ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.unbind(2);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4735,14 +6314,26 @@ static TS_MAP_VALUES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "map_key", path: &[2, 1] },
+        p::PlanLocal { name: "builtin_arg_5", path: &[2, 1, 0] },
+        p::PlanLocal { name: "key", path: &[2, 1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_values,
 };
 
 /// `ts.map.values`.
 fn ts_map_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4757,39 +6348,39 @@ fn ts_map_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(3, 0, 1)?;
         ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(2, 1)?;
+        ctx.local(4, 0)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(4, 1)?;
         ctx.index(0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.set_index(1, 0)?;
+        ctx.unbind(6);
+        ctx.unbind(5);
         ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.unbind(2);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4812,14 +6403,26 @@ static TS_MAP_ENTRIES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "map_key", path: &[2, 1] },
+        p::PlanLocal { name: "builtin_arg_6", path: &[2, 1, 0] },
+        p::PlanLocal { name: "key", path: &[2, 1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_map_entries,
 };
 
 /// `ts.map.entries`.
 fn ts_map_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4834,41 +6437,41 @@ fn ts_map_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.call(3, 0, 1)?;
         ctx.bind(4, 0)?;
         ctx.begin()?;
         ctx.local(4, 0)?;
-        ctx.param(0, 1)?;
-        ctx.local(2, 2)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.call(3, 0, 1)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.local(0, 1)?;
+        ctx.local(4, 2)?;
         ctx.index(1)?;
         ctx.list(0, 2)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.set_index(1, 0)?;
+        ctx.unbind(6);
+        ctx.unbind(5);
         ctx.unbind(4);
-        ctx.unbind(3);
-        ctx.unbind(2);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -4886,12 +6489,19 @@ static TS_SET_CALL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_set_call,
 };
 
 /// `ts.set.call`.
 fn ts_set_call(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -4913,14 +6523,19 @@ static TS_SET_IS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_set_is,
 };
 
 /// `ts.set.is`.
 fn ts_set_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4946,14 +6561,19 @@ static TS_SET_SIZE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_set_size,
 };
 
 /// `ts.set.size`.
 fn ts_set_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -4967,7 +6587,7 @@ fn ts_set_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(4, 0, 1)?;
     ctx.call(3, 0, 1)?;
     Ok(ctx.take(0))
@@ -4995,14 +6615,24 @@ static TS_SET_ADD: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[1] },
+        p::PlanLocal { name: "builtin_arg_0", path: &[2] },
+        p::PlanLocal { name: "key", path: &[3] },
+    ],
+    closures: &[
+    ],
     run: ts_set_add,
 };
 
 /// `ts.set.add`.
 fn ts_set_add(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5016,27 +6646,27 @@ fn ts_set_add(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(3, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(5, 1)?;
     ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     ctx.call(4, 0, 1)?;
-    ctx.bind(2, 0)?;
+    ctx.bind(4, 0)?;
     ctx.begin()?;
     ctx.literal(6, 0)?;
     ctx.pin(0)?;
-    ctx.param(0, 1)?;
-    ctx.local(2, 2)?;
+    ctx.local(0, 1)?;
+    ctx.local(4, 2)?;
     ctx.set_index(1, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5062,14 +6692,24 @@ static TS_SET_HAS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[1] },
+        p::PlanLocal { name: "builtin_arg_1", path: &[2] },
+        p::PlanLocal { name: "key", path: &[3] },
+    ],
+    closures: &[
+    ],
     run: ts_set_has,
 };
 
 /// `ts.set.has`.
 fn ts_set_has(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5083,22 +6723,22 @@ fn ts_set_has(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(3, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(2, 1)?;
+    ctx.local(2, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(4, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(4, 1)?;
     ctx.call(5, 0, 2)?;
     Ok(ctx.take(0))
 }
@@ -5126,14 +6766,25 @@ static TS_SET_DELETE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[1] },
+        p::PlanLocal { name: "builtin_arg_2", path: &[2] },
+        p::PlanLocal { name: "key", path: &[3] },
+        p::PlanLocal { name: "had", path: &[4] },
+    ],
+    closures: &[
+    ],
     run: ts_set_delete,
 };
 
 /// `ts.set.delete`.
 fn ts_set_delete(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5147,32 +6798,32 @@ fn ts_set_delete(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(3, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(5, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(4, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(2, 1)?;
-    ctx.call(5, 0, 2)?;
+    ctx.local(2, 0)?;
+    ctx.literal(5, 1)?;
+    ctx.index(0)?;
     ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(4, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(4, 1)?;
+    ctx.call(5, 0, 2)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
     ctx.literal(6, 0)?;
     ctx.pin(0)?;
-    ctx.param(0, 1)?;
-    ctx.local(2, 2)?;
+    ctx.local(0, 1)?;
+    ctx.local(4, 2)?;
     ctx.set_index(1, 0)?;
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(5, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5196,14 +6847,23 @@ static TS_SET_CLEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_set_clear,
 };
 
 /// `ts.set.clear`.
 fn ts_set_clear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5217,22 +6877,22 @@ fn ts_set_clear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(3, 0, 1)?;
-    let c0 = ctx.open(0, 0)?;
+    let c0 = ctx.open(0, 2)?;
     'l0: loop {
         ctx.meter(2)?;
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(1, 0)?;
+        ctx.bind(3, 0)?;
         ctx.begin()?;
         ctx.literal(4, 0)?;
         ctx.pin(0)?;
-        ctx.param(0, 1)?;
-        ctx.local(1, 2)?;
+        ctx.local(0, 1)?;
+        ctx.local(3, 2)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(1);
+        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.close(c0);
@@ -5260,14 +6920,25 @@ static TS_SET_VALUES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[2, 1] },
+        p::PlanLocal { name: "value", path: &[2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_set_values,
 };
 
 /// `ts.set.values`.
 fn ts_set_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5282,33 +6953,33 @@ fn ts_set_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.call(3, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(5, 0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(3);
-        ctx.unbind(2);
+        ctx.unbind(5);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5331,14 +7002,25 @@ static TS_SET_ENTRIES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[2, 1] },
+        p::PlanLocal { name: "value", path: &[2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_set_entries,
 };
 
 /// `ts.set.entries`.
 fn ts_set_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -5353,35 +7035,35 @@ fn ts_set_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.call(3, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
-        ctx.local(3, 0)?;
-        ctx.local(3, 1)?;
+        ctx.local(5, 0)?;
+        ctx.local(5, 1)?;
         ctx.list(0, 2)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(4, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(3);
-        ctx.unbind(2);
+        ctx.unbind(5);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5400,27 +7082,34 @@ static TS_SET_CONTAINS_OTHER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "other", path: &[] },
+        p::PlanLocal { name: "key", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_set_contains_other,
 };
 
 /// `ts.set.contains_other`.
 fn ts_set_contains_other(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.param(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
         ctx.call(2, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.param(1, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
     ctx.call(3, 0, 2)?;
     Ok(ctx.take(0))
 }
@@ -5441,26 +7130,31 @@ static TS_SET_OTHER_SIZE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "other", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_set_other_size,
 };
 
 /// `ts.set.other_size`.
 fn ts_set_other_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(3, 0, 1)?;
         ctx.call(2, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(4, 0, 1)?;
     ctx.call(2, 0, 1)?;
     Ok(ctx.take(0))
@@ -5480,28 +7174,38 @@ static TS_BOOLEAN_CONVERT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "builtin_arg_0", path: &[1] },
+        p::PlanLocal { name: "output", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_boolean_convert,
 };
 
 /// `ts.boolean.convert`.
 fn ts_boolean_convert(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5522,20 +7226,27 @@ static TS_BOOLEAN_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_boolean_valueof,
 };
 
 /// `ts.boolean.valueOf`.
 fn ts_boolean_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -5557,14 +7268,21 @@ static TS_BOOLEAN_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_boolean_tostring,
 };
 
 /// `ts.boolean.toString`.
 fn ts_boolean_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(0, 0)?;
@@ -5594,39 +7312,50 @@ static TS_OBJECT_CONVERT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[&[], ],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "nullish", path: &[2] },
+        p::PlanLocal { name: "primitive", path: &[4] },
+    ],
+    closures: &[
+    ],
     run: ts_object_convert,
 };
 
 /// `ts.object.convert`.
 fn ts_object_convert(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.record(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
     ctx.local(3, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(2, 0)?;
@@ -5636,7 +7365,7 @@ fn ts_object_convert(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5662,70 +7391,83 @@ static TS_OBJECT_IS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 6,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "a", path: &[1] },
+        p::PlanLocal { name: "b", path: &[2] },
+        p::PlanLocal { name: "ka", path: &[3] },
+        p::PlanLocal { name: "kb", path: &[4] },
+        p::PlanLocal { name: "output", path: &[6] },
+    ],
+    closures: &[
+    ],
     run: ts_object_is,
 };
 
 /// `ts.object.is`.
 fn ts_object_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.index(0)?;
-    ctx.bind(2, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(2, 1)?;
+    ctx.index(0)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(6, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(2, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(3, 0)?;
             ctx.call(3, 0, 1)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(2, 0)?;
+                ctx.local(4, 0)?;
                 ctx.call(3, 0, 1)?;
                 return Ok(ctx.take(0));
             }
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(3, 0)?;
             ctx.literal(1, 1)?;
             ctx.call(4, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(2, 0)?;
+                ctx.local(4, 0)?;
                 ctx.literal(1, 1)?;
                 ctx.call(4, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(4, 0)?;
-                    ctx.local(1, 1)?;
+                    ctx.local(3, 1)?;
                     ctx.call(5, 0, 2)?;
                     ctx.literal(4, 1)?;
-                    ctx.local(2, 2)?;
+                    ctx.local(4, 2)?;
                     ctx.call(5, 1, 2)?;
                     ctx.call(4, 0, 2)?;
                     return Ok(ctx.take(0));
@@ -5734,12 +7476,12 @@ fn ts_object_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         }
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.local(2, 1)?;
+    ctx.local(3, 0)?;
+    ctx.local(4, 1)?;
     ctx.call(6, 0, 2)?;
-    ctx.bind(5, 0)?;
+    ctx.bind(7, 0)?;
     ctx.begin()?;
-    ctx.local(5, 0)?;
+    ctx.local(7, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -5757,12 +7499,19 @@ static TS_OBJECT_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_defineproperty,
 };
 
 /// `ts.object.defineProperty`.
 fn ts_object_defineproperty(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5785,12 +7534,19 @@ static TS_OBJECT_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_defineproperties,
 };
 
 /// `ts.object.defineProperties`.
 fn ts_object_defineproperties(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5813,12 +7569,19 @@ static TS_OBJECT_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_getownpropertydescriptor,
 };
 
 /// `ts.object.getOwnPropertyDescriptor`.
 fn ts_object_getownpropertydescriptor(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5841,12 +7604,19 @@ static TS_OBJECT_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_getownpropertydescriptors,
 };
 
 /// `ts.object.getOwnPropertyDescriptors`.
 fn ts_object_getownpropertydescriptors(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5869,12 +7639,19 @@ static TS_OBJECT_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_getownpropertynames,
 };
 
 /// `ts.object.getOwnPropertyNames`.
 fn ts_object_getownpropertynames(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5897,12 +7674,19 @@ static TS_OBJECT_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_getownpropertysymbols,
 };
 
 /// `ts.object.getOwnPropertySymbols`.
 fn ts_object_getownpropertysymbols(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5925,12 +7709,19 @@ static TS_OBJECT_CREATE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_create,
 };
 
 /// `ts.object.create`.
 fn ts_object_create(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5953,12 +7744,19 @@ static TS_OBJECT_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_getprototypeof,
 };
 
 /// `ts.object.getPrototypeOf`.
 fn ts_object_getprototypeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -5981,12 +7779,19 @@ static TS_OBJECT_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_setprototypeof,
 };
 
 /// `ts.object.setPrototypeOf`.
 fn ts_object_setprototypeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6009,12 +7814,19 @@ static TS_OBJECT_FREEZE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_freeze,
 };
 
 /// `ts.object.freeze`.
 fn ts_object_freeze(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6037,12 +7849,19 @@ static TS_OBJECT_SEAL: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_seal,
 };
 
 /// `ts.object.seal`.
 fn ts_object_seal(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6065,12 +7884,19 @@ static TS_OBJECT_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_preventextensions,
 };
 
 /// `ts.object.preventExtensions`.
 fn ts_object_preventextensions(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6093,12 +7919,19 @@ static TS_OBJECT_ISFROZEN: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_isfrozen,
 };
 
 /// `ts.object.isFrozen`.
 fn ts_object_isfrozen(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6121,12 +7954,19 @@ static TS_OBJECT_ISSEALED: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_issealed,
 };
 
 /// `ts.object.isSealed`.
 fn ts_object_issealed(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6149,12 +7989,19 @@ static TS_OBJECT_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_object_isextensible,
 };
 
 /// `ts.object.isExtensible`.
 fn ts_object_isextensible(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -6208,159 +8055,168 @@ static TS_OBJECT_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "tag", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_object_tostring,
 };
 
 /// `ts.object.toString`.
 fn ts_object_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(2, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(4, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(6, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(8, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(9, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(10, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(11, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(12, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(13, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(14, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(15, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(16, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(17, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(18, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(19, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(20, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(21, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(22, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(23, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(24, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(25, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(26, 1)?;
         ctx.index(0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(27, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(28, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(29, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(18, 0)?;
-        ctx.assign(1, 0)?;
+        ctx.assign(3, 0)?;
     }
     ctx.begin()?;
     ctx.literal(30, 0)?;
-    ctx.local(1, 1)?;
+    ctx.local(3, 1)?;
     ctx.literal(31, 2)?;
     ctx.call(2, 1, 2)?;
     ctx.call(2, 0, 2)?;
@@ -6399,51 +8255,65 @@ static TS_OBJECT_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 10,
-    slots: 7,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "primitive", path: &[2] },
+        p::PlanLocal { name: "primitive", path: &[5] },
+        p::PlanLocal { name: "receiver", path: &[7] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "instance", path: &[8, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_object_isprototypeof,
 };
 
 /// `ts.object.isPrototypeOf`.
 fn ts_object_isprototypeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
     ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(4, 0)?;
+    ctx.bind(6, 0)?;
     ctx.begin()?;
     ctx.literal(3, 0)?;
     ctx.literal(4, 1)?;
@@ -6456,22 +8326,22 @@ fn ts_object_isprototypeof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Pla
     ctx.literal(11, 8)?;
     ctx.literal(12, 9)?;
     ctx.list(0, 10)?;
-    let c0 = ctx.open(0, 5)?;
+    let c0 = ctx.open(0, 7)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(6, 0)?;
+        ctx.bind(8, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.local(6, 1)?;
+        ctx.local(6, 0)?;
+        ctx.local(8, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(2, 0)?;
             return Ok(ctx.take(0));
         }
-        ctx.unbind(6);
+        ctx.unbind(8);
         ctx.begin()?;
     }
     ctx.close(c0);
@@ -6499,21 +8369,29 @@ static TS_OBJECT_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "primitive", path: &[1] },
+    ],
+    closures: &[
+    ],
     run: ts_object_valueof,
 };
 
 /// `ts.object.valueOf`.
 fn ts_object_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(1, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(0, 0)?;
@@ -6523,7 +8401,7 @@ fn ts_object_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
         return Err(p::PlanExit::Raise(ctx.take(0)));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -6545,34 +8423,41 @@ static TS_OBJECT_IS_INSTANCE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "primitive", path: &[0] },
+        p::PlanLocal { name: "receiver", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_object_is_instance,
 };
 
 /// `ts.object.is_instance`.
 fn ts_object_is_instance(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(2, 1)?;
         ctx.index(0)?;
         ctx.literal(3, 1)?;
@@ -6598,7 +8483,10 @@ static TS_MATH_E: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_e,
 };
 
@@ -6619,7 +8507,10 @@ static TS_MATH_LN10: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_ln10,
 };
 
@@ -6640,7 +8531,10 @@ static TS_MATH_LN2: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_ln2,
 };
 
@@ -6661,7 +8555,10 @@ static TS_MATH_LOG10E: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_log10e,
 };
 
@@ -6682,7 +8579,10 @@ static TS_MATH_LOG2E: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_log2e,
 };
 
@@ -6703,7 +8603,10 @@ static TS_MATH_PI: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_pi,
 };
 
@@ -6724,7 +8627,10 @@ static TS_MATH_SQRT1_2: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_sqrt1_2,
 };
 
@@ -6745,7 +8651,10 @@ static TS_MATH_SQRT2: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_math_sqrt2,
 };
 
@@ -6774,28 +8683,38 @@ static TS_NUMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "k", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_number_isfinite,
 };
 
 /// `ts.number.isFinite`.
 fn ts_number_isfinite(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -6805,7 +8724,7 @@ fn ts_number_isfinite(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     ctx.call(3, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -6828,28 +8747,38 @@ static TS_NUMBER_ISNAN: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "k", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_number_isnan,
 };
 
 /// `ts.number.isNaN`.
 fn ts_number_isnan(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -6859,7 +8788,7 @@ fn ts_number_isnan(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     ctx.call(3, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -6882,28 +8811,38 @@ static TS_NUMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "k", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_number_isinteger,
 };
 
 /// `ts.number.isInteger`.
 fn ts_number_isinteger(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -6913,7 +8852,7 @@ fn ts_number_isinteger(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     ctx.call(3, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -6939,28 +8878,38 @@ static TS_NUMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "args", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+        p::PlanLocal { name: "k", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_number_issafeinteger,
 };
 
 /// `ts.number.isSafeInteger`.
 fn ts_number_issafeinteger(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.index(0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.index(0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(4, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -6970,11 +8919,11 @@ fn ts_number_issafeinteger(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Pla
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     ctx.call(3, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         ctx.call(5, 0, 1)?;
         ctx.literal(4, 1)?;
         ctx.call(4, 0, 2)?;
@@ -7002,23 +8951,29 @@ static TS_NUMBER_RECEIVER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "receiver", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_number_receiver,
 };
 
 /// `ts.number.receiver`.
 fn ts_number_receiver(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -7039,18 +8994,26 @@ static TS_NUMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "this", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_number_valueof,
 };
 
 /// `ts.number.valueOf`.
 fn ts_number_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -7064,7 +9027,10 @@ static TS_NUMBER_EPSILON: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_epsilon,
 };
 
@@ -7085,7 +9051,10 @@ static TS_NUMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_max_safe_integer,
 };
 
@@ -7106,7 +9075,10 @@ static TS_NUMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_min_safe_integer,
 };
 
@@ -7127,7 +9099,10 @@ static TS_NUMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_max_value,
 };
 
@@ -7148,7 +9123,10 @@ static TS_NUMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_min_value,
 };
 
@@ -7169,7 +9147,10 @@ static TS_NUMBER_NAN: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_nan,
 };
 
@@ -7190,7 +9171,10 @@ static TS_NUMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_positive_infinity,
 };
 
@@ -7211,7 +9195,10 @@ static TS_NUMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_number_negative_infinity,
 };
 
@@ -7245,33 +9232,38 @@ static TS_DATE_DAY_FROM_YEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "year", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_day_from_year,
 };
 
 /// `ts.date.day_from_year`.
 fn ts_date_day_from_year(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.literal(1, 2)?;
     ctx.call(1, 1, 2)?;
     ctx.call(2, 0, 2)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.literal(2, 2)?;
     ctx.call(1, 1, 2)?;
     ctx.literal(3, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(3, 1, 1)?;
     ctx.call(0, 0, 2)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.literal(4, 2)?;
     ctx.call(1, 1, 2)?;
     ctx.literal(5, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(3, 1, 1)?;
     ctx.call(1, 0, 2)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.literal(6, 2)?;
     ctx.call(1, 1, 2)?;
     ctx.literal(7, 2)?;
@@ -7298,14 +9290,19 @@ static TS_DATE_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_is,
 };
 
 /// `ts.date.is`.
 fn ts_date_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -7315,15 +9312,15 @@ fn ts_date_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -7352,21 +9349,27 @@ static TS_DATE_REQUIRE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_require,
 };
 
 /// `ts.date.require`.
 fn ts_date_require(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -7420,21 +9423,38 @@ static TS_DATE_PARTS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 9,
-    slots: 12,
+    slots: &[
+        p::PlanLocal { name: "date", path: &[] },
+        p::PlanLocal { name: "time", path: &[1] },
+        p::PlanLocal { name: "days", path: &[3] },
+        p::PlanLocal { name: "shifted", path: &[4] },
+        p::PlanLocal { name: "era", path: &[5] },
+        p::PlanLocal { name: "day_of_era", path: &[6] },
+        p::PlanLocal { name: "year_of_era", path: &[7] },
+        p::PlanLocal { name: "year", path: &[8] },
+        p::PlanLocal { name: "day_of_year", path: &[9] },
+        p::PlanLocal { name: "month_prime", path: &[10] },
+        p::PlanLocal { name: "date", path: &[11] },
+        p::PlanLocal { name: "month", path: &[12] },
+        p::PlanLocal { name: "within", path: &[15] },
+    ],
+    closures: &[
+    ],
     run: ts_date_parts,
 };
 
 /// `ts.date.parts`.
 fn ts_date_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(1, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.call(2, 0, 1)?;
     if ctx.test(0, p::Test::If)? {
     } else {
@@ -7451,42 +9471,42 @@ fn ts_date_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(5, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.local(2, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(5, 0, 2)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(3, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(3, 0)?;
+    ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.local(3, 1)?;
+    ctx.local(3, 0)?;
+    ctx.local(4, 1)?;
     ctx.literal(3, 2)?;
     ctx.call(7, 1, 2)?;
     ctx.call(6, 0, 2)?;
-    ctx.bind(4, 0)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.local(4, 1)?;
+    ctx.local(5, 0)?;
+    ctx.local(5, 1)?;
     ctx.literal(4, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(3, 1, 1)?;
     ctx.call(6, 0, 2)?;
-    ctx.local(4, 1)?;
+    ctx.local(5, 1)?;
     ctx.literal(5, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(3, 1, 1)?;
     ctx.call(5, 0, 2)?;
-    ctx.local(4, 1)?;
+    ctx.local(5, 1)?;
     ctx.literal(6, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(3, 1, 1)?;
@@ -7494,45 +9514,45 @@ fn ts_date_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.literal(7, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(5, 0)?;
+    ctx.bind(6, 0)?;
     ctx.begin()?;
-    ctx.local(5, 0)?;
-    ctx.local(3, 1)?;
+    ctx.local(6, 0)?;
+    ctx.local(4, 1)?;
     ctx.literal(8, 2)?;
     ctx.call(7, 1, 2)?;
     ctx.call(5, 0, 2)?;
-    ctx.bind(6, 0)?;
+    ctx.bind(7, 0)?;
     ctx.begin()?;
-    ctx.local(4, 0)?;
-    ctx.local(5, 1)?;
+    ctx.local(5, 0)?;
+    ctx.local(6, 1)?;
     ctx.literal(7, 2)?;
     ctx.call(7, 1, 2)?;
-    ctx.local(5, 2)?;
+    ctx.local(6, 2)?;
     ctx.literal(9, 3)?;
     ctx.call(4, 2, 2)?;
     ctx.call(3, 2, 1)?;
     ctx.call(5, 1, 2)?;
-    ctx.local(5, 2)?;
+    ctx.local(6, 2)?;
     ctx.literal(10, 3)?;
     ctx.call(4, 2, 2)?;
     ctx.call(3, 2, 1)?;
     ctx.call(6, 1, 2)?;
     ctx.call(6, 0, 2)?;
-    ctx.bind(7, 0)?;
+    ctx.bind(8, 0)?;
     ctx.begin()?;
     ctx.literal(11, 0)?;
-    ctx.local(7, 1)?;
+    ctx.local(8, 1)?;
     ctx.call(7, 0, 2)?;
     ctx.literal(12, 1)?;
     ctx.call(5, 0, 2)?;
     ctx.literal(13, 1)?;
     ctx.call(4, 0, 2)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(8, 0)?;
+    ctx.bind(9, 0)?;
     ctx.begin()?;
-    ctx.local(7, 0)?;
+    ctx.local(8, 0)?;
     ctx.literal(13, 1)?;
-    ctx.local(8, 2)?;
+    ctx.local(9, 2)?;
     ctx.call(7, 1, 2)?;
     ctx.literal(12, 2)?;
     ctx.call(5, 1, 2)?;
@@ -7542,67 +9562,67 @@ fn ts_date_parts(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.call(6, 0, 2)?;
     ctx.literal(14, 1)?;
     ctx.call(5, 0, 2)?;
-    ctx.bind(9, 0)?;
-    ctx.begin()?;
-    ctx.local(8, 0)?;
-    ctx.literal(15, 1)?;
-    ctx.call(6, 0, 2)?;
     ctx.bind(10, 0)?;
     ctx.begin()?;
-    ctx.local(8, 0)?;
+    ctx.local(9, 0)?;
+    ctx.literal(15, 1)?;
+    ctx.call(6, 0, 2)?;
+    ctx.bind(11, 0)?;
+    ctx.begin()?;
+    ctx.local(9, 0)?;
     ctx.literal(16, 1)?;
     ctx.call(8, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(8, 0)?;
+        ctx.local(9, 0)?;
         ctx.literal(17, 1)?;
         ctx.call(5, 0, 2)?;
-        ctx.assign(10, 0)?;
+        ctx.assign(11, 0)?;
     }
     ctx.begin()?;
-    ctx.local(10, 0)?;
+    ctx.local(11, 0)?;
     ctx.literal(12, 1)?;
     ctx.call(9, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(6, 0)?;
+        ctx.local(7, 0)?;
         ctx.literal(14, 1)?;
         ctx.call(5, 0, 2)?;
-        ctx.assign(6, 0)?;
+        ctx.assign(7, 0)?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(1, 1)?;
     ctx.call(10, 0, 2)?;
-    ctx.bind(11, 0)?;
+    ctx.bind(12, 0)?;
     ctx.begin()?;
-    ctx.local(6, 0)?;
-    ctx.local(10, 1)?;
+    ctx.local(7, 0)?;
+    ctx.local(11, 1)?;
     ctx.literal(14, 2)?;
     ctx.call(6, 1, 2)?;
-    ctx.local(9, 2)?;
-    ctx.local(1, 3)?;
+    ctx.local(10, 2)?;
+    ctx.local(2, 3)?;
     ctx.literal(9, 4)?;
     ctx.call(5, 3, 2)?;
     ctx.literal(18, 4)?;
     ctx.call(10, 3, 2)?;
-    ctx.local(11, 4)?;
+    ctx.local(12, 4)?;
     ctx.literal(19, 5)?;
     ctx.call(4, 4, 2)?;
     ctx.call(3, 4, 1)?;
-    ctx.local(11, 5)?;
+    ctx.local(12, 5)?;
     ctx.literal(19, 6)?;
     ctx.call(10, 5, 2)?;
     ctx.literal(20, 6)?;
     ctx.call(4, 5, 2)?;
     ctx.call(3, 5, 1)?;
-    ctx.local(11, 6)?;
+    ctx.local(12, 6)?;
     ctx.literal(20, 7)?;
     ctx.call(10, 6, 2)?;
     ctx.literal(21, 7)?;
     ctx.call(4, 6, 2)?;
     ctx.call(3, 6, 1)?;
-    ctx.local(11, 7)?;
+    ctx.local(12, 7)?;
     ctx.literal(21, 8)?;
     ctx.call(10, 7, 2)?;
     ctx.tuple(0, 8)?;
@@ -7620,17 +9640,24 @@ static TS_DATE_GETTIME: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_gettime,
 };
 
 /// `ts.date.getTime`.
 fn ts_date_gettime(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -7646,17 +9673,24 @@ static TS_DATE_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_valueof,
 };
 
 /// `ts.date.valueOf`.
 fn ts_date_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -7673,18 +9707,26 @@ static TS_DATE_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcfullyear,
 };
 
 /// `ts.date.getUTCFullYear`.
 fn ts_date_getutcfullyear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7702,18 +9744,26 @@ static TS_DATE_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcmonth,
 };
 
 /// `ts.date.getUTCMonth`.
 fn ts_date_getutcmonth(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7731,18 +9781,26 @@ static TS_DATE_GETUTCDATE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcdate,
 };
 
 /// `ts.date.getUTCDate`.
 fn ts_date_getutcdate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7760,18 +9818,26 @@ static TS_DATE_GETUTCDAY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcday,
 };
 
 /// `ts.date.getUTCDay`.
 fn ts_date_getutcday(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7789,18 +9855,26 @@ static TS_DATE_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutchours,
 };
 
 /// `ts.date.getUTCHours`.
 fn ts_date_getutchours(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7818,18 +9892,26 @@ static TS_DATE_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcminutes,
 };
 
 /// `ts.date.getUTCMinutes`.
 fn ts_date_getutcminutes(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7847,18 +9929,26 @@ static TS_DATE_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcseconds,
 };
 
 /// `ts.date.getUTCSeconds`.
 fn ts_date_getutcseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7876,18 +9966,26 @@ static TS_DATE_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "parts", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getutcmilliseconds,
 };
 
 /// `ts.date.getUTCMilliseconds`.
 fn ts_date_getutcmilliseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
@@ -7906,17 +10004,24 @@ static TS_DATE_TOISOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_toisostring,
 };
 
 /// `ts.date.toISOString`.
 fn ts_date_toisostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -7935,17 +10040,24 @@ static TS_DATE_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_toutcstring,
 };
 
 /// `ts.date.toUTCString`.
 fn ts_date_toutcstring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -7964,17 +10076,24 @@ static TS_DATE_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_tostring,
 };
 
 /// `ts.date.toString`.
 fn ts_date_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -7997,18 +10116,26 @@ static TS_DATE_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getfullyear,
 };
 
 /// `ts.date.getFullYear`.
 fn ts_date_getfullyear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8043,18 +10170,26 @@ static TS_DATE_GETMONTH: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getmonth,
 };
 
 /// `ts.date.getMonth`.
 fn ts_date_getmonth(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8089,18 +10224,26 @@ static TS_DATE_GETDATE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getdate,
 };
 
 /// `ts.date.getDate`.
 fn ts_date_getdate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8135,18 +10278,26 @@ static TS_DATE_GETDAY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getday,
 };
 
 /// `ts.date.getDay`.
 fn ts_date_getday(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8181,18 +10332,26 @@ static TS_DATE_GETHOURS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_gethours,
 };
 
 /// `ts.date.getHours`.
 fn ts_date_gethours(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8227,18 +10386,26 @@ static TS_DATE_GETMINUTES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getminutes,
 };
 
 /// `ts.date.getMinutes`.
 fn ts_date_getminutes(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8273,18 +10440,26 @@ static TS_DATE_GETSECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getseconds,
 };
 
 /// `ts.date.getSeconds`.
 fn ts_date_getseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8319,18 +10494,26 @@ static TS_DATE_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_getmilliseconds,
 };
 
 /// `ts.date.getMilliseconds`.
 fn ts_date_getmilliseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8365,18 +10548,26 @@ static TS_DATE_SETTIME: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_settime,
 };
 
 /// `ts.date.setTime`.
 fn ts_date_settime(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8411,18 +10602,26 @@ static TS_DATE_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setfullyear,
 };
 
 /// `ts.date.setFullYear`.
 fn ts_date_setfullyear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8457,18 +10656,26 @@ static TS_DATE_SETMONTH: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setmonth,
 };
 
 /// `ts.date.setMonth`.
 fn ts_date_setmonth(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8503,18 +10710,26 @@ static TS_DATE_SETDATE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setdate,
 };
 
 /// `ts.date.setDate`.
 fn ts_date_setdate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8549,18 +10764,26 @@ static TS_DATE_SETHOURS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_sethours,
 };
 
 /// `ts.date.setHours`.
 fn ts_date_sethours(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8595,18 +10818,26 @@ static TS_DATE_SETMINUTES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setminutes,
 };
 
 /// `ts.date.setMinutes`.
 fn ts_date_setminutes(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8641,18 +10872,26 @@ static TS_DATE_SETSECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setseconds,
 };
 
 /// `ts.date.setSeconds`.
 fn ts_date_setseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8687,18 +10926,26 @@ static TS_DATE_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setmilliseconds,
 };
 
 /// `ts.date.setMilliseconds`.
 fn ts_date_setmilliseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8730,12 +10977,19 @@ static TS_DATE_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcfullyear,
 };
 
 /// `ts.date.setUTCFullYear`.
 fn ts_date_setutcfullyear(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8758,12 +11012,19 @@ static TS_DATE_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcmonth,
 };
 
 /// `ts.date.setUTCMonth`.
 fn ts_date_setutcmonth(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8786,12 +11047,19 @@ static TS_DATE_SETUTCDATE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcdate,
 };
 
 /// `ts.date.setUTCDate`.
 fn ts_date_setutcdate(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8814,12 +11082,19 @@ static TS_DATE_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutchours,
 };
 
 /// `ts.date.setUTCHours`.
 fn ts_date_setutchours(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8842,12 +11117,19 @@ static TS_DATE_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcminutes,
 };
 
 /// `ts.date.setUTCMinutes`.
 fn ts_date_setutcminutes(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8870,12 +11152,19 @@ static TS_DATE_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcseconds,
 };
 
 /// `ts.date.setUTCSeconds`.
 fn ts_date_setutcseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8898,12 +11187,19 @@ static TS_DATE_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_date_setutcmilliseconds,
 };
 
 /// `ts.date.setUTCMilliseconds`.
 fn ts_date_setutcmilliseconds(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
@@ -8929,18 +11225,26 @@ static TS_DATE_LOCAL_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "date", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_date_local_unsupported,
 };
 
 /// `ts.date.local_unsupported`.
 fn ts_date_local_unsupported(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -8973,14 +11277,19 @@ static TS_ERROR_IS_ERROR: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_error_is_error,
 };
 
 /// `ts.error.is_Error`.
 fn ts_error_is_error(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -9010,22 +11319,27 @@ static TS_URL_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_is,
 };
 
 /// `ts.url.is`.
 fn ts_url_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -9047,14 +11361,21 @@ static TS_URL_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &["state", "href", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_tostring,
 };
 
 /// `ts.url.toString`.
 fn ts_url_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.field(0, 1)?;
     Ok(ctx.take(0))
@@ -9068,14 +11389,21 @@ static TS_URL_TOJSON: p::HelperPlan = p::HelperPlan {
     fields: &["state", "href", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_tojson,
 };
 
 /// `ts.url.toJSON`.
 fn ts_url_tojson(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.field(0, 1)?;
     Ok(ctx.take(0))
@@ -9089,14 +11417,21 @@ static TS_URL_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_valueof,
 };
 
 /// `ts.url.valueOf`.
 fn ts_url_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9118,58 +11453,67 @@ static TS_URL_SEARCH_PARAMS_REFRESH: p::HelperPlan = p::HelperPlan {
     fields: &["owner", "pairs", "href", "state", ],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "params", path: &[] },
+        p::PlanLocal { name: "serialized", path: &[0, 1, 0] },
+        p::PlanLocal { name: "parsed", path: &[0, 1, 1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[0, 1, 2, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_refresh,
 };
 
 /// `ts.url_search_params.refresh`.
 fn ts_url_search_params_refresh(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 1)?;
         ctx.call(2, 0, 1)?;
-        ctx.bind(0, 0)?;
+        ctx.bind(1, 0)?;
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
         ctx.field(0, 2)?;
         ctx.literal(1, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(1, 2)?;
         ctx.call(3, 0, 3)?;
-        ctx.bind(1, 0)?;
+        ctx.bind(2, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(2, 0)?;
         ctx.field(0, 3)?;
         ctx.call(4, 0, 1)?;
-        let c0 = ctx.open(0, 2)?;
+        let c0 = ctx.open(0, 3)?;
         'l0: loop {
             if !ctx.next(c0, 0)? {
                 break 'l0;
             }
-            ctx.bind(3, 0)?;
+            ctx.bind(4, 0)?;
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(2, 0)?;
             ctx.field(0, 3)?;
-            ctx.local(3, 1)?;
+            ctx.local(4, 1)?;
             ctx.index(0)?;
             ctx.pin(0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.field(1, 0)?;
-            ctx.local(3, 2)?;
+            ctx.local(4, 2)?;
             ctx.set_index(1, 0)?;
-            ctx.unbind(3);
+            ctx.unbind(4);
             ctx.begin()?;
         }
         ctx.close(c0);
+        ctx.unbind(2);
         ctx.unbind(1);
-        ctx.unbind(0);
     }
     ctx.begin()?;
     ctx.literal(2, 0)?;
@@ -9191,22 +11535,27 @@ static TS_URL_SEARCH_PARAMS_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_is,
 };
 
 /// `ts.url_search_params.is`.
 fn ts_url_search_params_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -9231,14 +11580,19 @@ static TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_size,
 };
 
 /// `ts.url_search_params.size`.
 fn ts_url_search_params_size(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.call(0, 0, 1)?;
@@ -9255,14 +11609,21 @@ static TS_URL_SEARCH_PARAMS_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_tostring,
 };
 
 /// `ts.url_search_params.toString`.
 fn ts_url_search_params_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.call(0, 0, 1)?;
     Ok(ctx.take(0))
@@ -9276,14 +11637,21 @@ static TS_URL_SEARCH_PARAMS_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_valueof,
 };
 
 /// `ts.url_search_params.valueOf`.
 fn ts_url_search_params_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9306,19 +11674,30 @@ static TS_URL_SEARCH_PARAMS_SORT: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 3,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "i", path: &[0] },
+        p::PlanLocal { name: "item", path: &[1, 1, 0] },
+        p::PlanLocal { name: "j", path: &[1, 1, 1] },
+        p::PlanLocal { name: "previous", path: &[1, 1, 2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_sort,
 };
 
 /// `ts.url_search_params.sort`.
 fn ts_url_search_params_sort(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
     'l0: loop {
-        ctx.local(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(2, 0)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 0)?;
         ctx.call(1, 1, 1)?;
         ctx.call(0, 0, 2)?;
@@ -9326,34 +11705,34 @@ fn ts_url_search_params_sort(ctx: &mut dyn p::PlanContext) -> Result<Value, p::P
             break 'l0;
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.field(0, 0)?;
-        ctx.local(0, 1)?;
-        ctx.index(0)?;
-        ctx.bind(1, 0)?;
-        ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.bind(2, 0)?;
+        ctx.field(0, 0)?;
+        ctx.local(2, 1)?;
+        ctx.index(0)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
         'l1: loop {
             ctx.literal(1, 0)?;
-            ctx.local(2, 1)?;
+            ctx.local(4, 1)?;
             ctx.call(0, 0, 2)?;
             if !ctx.test(0, p::Test::While)? {
                 break 'l1;
             }
             ctx.begin()?;
-            ctx.local(2, 0)?;
+            ctx.local(4, 0)?;
             ctx.literal(0, 1)?;
             ctx.call(2, 0, 2)?;
-            ctx.bind(3, 0)?;
+            ctx.bind(5, 0)?;
             ctx.begin()?;
-            ctx.local(1, 0)?;
+            ctx.local(3, 0)?;
             ctx.literal(1, 1)?;
             ctx.index(0)?;
-            ctx.param(0, 1)?;
+            ctx.local(0, 1)?;
             ctx.field(1, 0)?;
-            ctx.local(3, 2)?;
+            ctx.local(5, 2)?;
             ctx.index(1)?;
             ctx.literal(1, 2)?;
             ctx.index(1)?;
@@ -9362,44 +11741,44 @@ fn ts_url_search_params_sort(ctx: &mut dyn p::PlanContext) -> Result<Value, p::P
             ctx.call(0, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 ctx.field(0, 0)?;
-                ctx.local(3, 1)?;
+                ctx.local(5, 1)?;
                 ctx.index(0)?;
                 ctx.pin(0)?;
-                ctx.param(0, 1)?;
+                ctx.local(0, 1)?;
                 ctx.field(1, 0)?;
-                ctx.local(2, 2)?;
-                ctx.set_index(1, 0)?;
-                ctx.begin()?;
-                ctx.local(1, 0)?;
-                ctx.pin(0)?;
-                ctx.param(0, 1)?;
-                ctx.field(1, 0)?;
-                ctx.local(3, 2)?;
+                ctx.local(4, 2)?;
                 ctx.set_index(1, 0)?;
                 ctx.begin()?;
                 ctx.local(3, 0)?;
-                ctx.assign(2, 0)?;
+                ctx.pin(0)?;
+                ctx.local(0, 1)?;
+                ctx.field(1, 0)?;
+                ctx.local(5, 2)?;
+                ctx.set_index(1, 0)?;
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.assign(4, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.unbind(3);
+                ctx.unbind(5);
                 break 'l1;
             }
-            ctx.unbind(3);
+            ctx.unbind(5);
             ctx.begin()?;
         }
         ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(2, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(4, 0, 2)?;
-        ctx.assign(0, 0)?;
-        ctx.unbind(2);
-        ctx.unbind(1);
+        ctx.assign(2, 0)?;
+        ctx.unbind(4);
+        ctx.unbind(3);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(5, 0, 1)?;
     ctx.begin()?;
     ctx.literal(2, 0)?;
@@ -9418,39 +11797,49 @@ static TS_URL_SEARCH_PARAMS_KEYS: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "pair", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_keys,
 };
 
 /// `ts.url_search_params.keys`.
 fn ts_url_search_params_keys(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(0, 1)?;
         ctx.index(0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(0, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(2);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9466,39 +11855,49 @@ static TS_URL_SEARCH_PARAMS_VALUES: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "pair", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_values,
 };
 
 /// `ts.url_search_params.values`.
 fn ts_url_search_params_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(0, 1)?;
         ctx.index(0)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(0, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(2);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9515,43 +11914,53 @@ static TS_URL_SEARCH_PARAMS_ENTRIES: p::HelperPlan = p::HelperPlan {
     fields: &["pairs", ],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "output", path: &[0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "pair", path: &[1, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_url_search_params_entries,
 };
 
 /// `ts.url_search_params.entries`.
 fn ts_url_search_params_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(0, 1)?;
         ctx.index(0)?;
-        ctx.local(2, 1)?;
+        ctx.local(4, 1)?;
         ctx.literal(1, 2)?;
         ctx.index(1)?;
         ctx.list(0, 2)?;
         ctx.pin(0)?;
-        ctx.local(0, 1)?;
-        ctx.local(0, 2)?;
+        ctx.local(2, 1)?;
+        ctx.local(2, 2)?;
         ctx.call(0, 2, 1)?;
         ctx.set_index(1, 0)?;
-        ctx.unbind(2);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9573,20 +11982,26 @@ static TS_CONSOLE_JSON: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 7,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "verbatim", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_console_json,
 };
 
 /// `ts.console.json`.
 fn ts_console_json(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
     ctx.set(0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.local(0, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
     ctx.literal(2, 2)?;
     ctx.literal(3, 3)?;
     ctx.literal(4, 4)?;
@@ -9617,14 +12032,20 @@ static TS_JSON_PLAIN: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 5,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "classified", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_json_plain,
 };
 
 /// `ts.json.plain`.
 fn ts_json_plain(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.literal(1, 2)?;
     ctx.literal(2, 3)?;
@@ -9632,9 +12053,9 @@ fn ts_json_plain(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.literal(3, 3)?;
     ctx.literal(4, 4)?;
     ctx.call(0, 0, 5)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(2, 0, 2)?;
     ctx.literal(6, 1)?;
@@ -9653,14 +12074,19 @@ static TS_ARRAY_MATCH_LENGTH: p::HelperPlan = p::HelperPlan {
     fields: &["items", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_match_length,
 };
 
 /// `ts.array.match_length`.
 fn ts_array_match_length(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.call(0, 0, 1)?;
@@ -9680,21 +12106,28 @@ static TS_ARRAY_ARGUMENT: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "index", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_argument,
 };
 
 /// `ts.array.argument`.
 fn ts_array_argument(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(1, 0)?;
+    ctx.local(0, 1)?;
     ctx.call(1, 1, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.param(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
         ctx.index(0)?;
         return Ok(ctx.take(0));
     }
@@ -9714,14 +12147,19 @@ static TS_ARRAY_LENGTH_PROPERTY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_length_property,
 };
 
 /// `ts.array.length_property`.
 fn ts_array_length_property(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.call(0, 0, 1)?;
     Ok(ctx.take(0))
@@ -9744,14 +12182,19 @@ static TS_ARRAY_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_is,
 };
 
 /// `ts.array.is`.
 fn ts_array_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -9761,15 +12204,15 @@ fn ts_array_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -9801,19 +12244,28 @@ static TS_ARRAY_IS_ARRAY: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "value", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_array_is_array,
 };
 
 /// `ts.array.is_array`.
 fn ts_array_is_array(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(1, 1)?;
     ctx.literal(2, 2)?;
     ctx.literal(3, 3)?;
@@ -9825,11 +12277,11 @@ fn ts_array_is_array(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.call(2, 0, 1)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9856,33 +12308,40 @@ static TS_ARRAY_CALLBACK: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "receiver", path: &[1] },
+        p::PlanLocal { name: "made", path: &[2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_array_callback,
 };
 
 /// `ts.array.callback`.
 fn ts_array_callback(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
         } else {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(1, 1)?;
             ctx.index(0)?;
             ctx.literal(2, 1)?;
             ctx.call(0, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
+                ctx.local(0, 0)?;
                 ctx.literal(3, 1)?;
                 ctx.index(0)?;
                 return Ok(ctx.take(0));
@@ -9890,20 +12349,20 @@ fn ts_array_callback(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
         }
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(2, 0, 1)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(3, 0, 1)?;
-        ctx.bind(1, 0)?;
+        ctx.bind(2, 0)?;
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(2, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -9912,6 +12371,86 @@ fn ts_array_callback(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit>
     ctx.literal(7, 2)?;
     ctx.call(4, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
+}
+
+static TS_ARRAY_REUSABLE_CALLBACK: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.reusable_callback",
+    function: p::function("89d78c4ba567ffe435f6f33142c22639dd04afbd21b95ff4a6613aabc39f2b88"),
+    callees: &[
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
+        p::function("0d0b0633eb6be2f98e3f3e245f9cdfe3d2d508f73eef2ddc64f665e3f45df84b"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("ts.function"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Int("4"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "callback", path: &[1] },
+        p::PlanLocal { name: "owned", path: &[2] },
+    ],
+    closures: &[
+        &[2, 0],
+    ],
+    run: ts_array_reusable_callback,
+};
+
+/// `ts.array.reusable_callback`.
+fn ts_array_reusable_callback(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.tuple(1, 0)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+        } else {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(1, 1)?;
+            ctx.index(0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.index(0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.literal(5, 1)?;
+                    ctx.index(0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+        }
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(2, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    Ok(ctx.take(0))
 }
 
 static TS_ARRAY_OF: p::HelperPlan = p::HelperPlan {
@@ -9924,14 +12463,21 @@ static TS_ARRAY_OF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_of,
 };
 
 /// `ts.array.of`.
 fn ts_array_of(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.call(0, 0, 1)?;
     Ok(ctx.take(0))
 }
@@ -9946,17 +12492,24 @@ static TS_ARRAY_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_valueof,
 };
 
 /// `ts.array.valueOf`.
 fn ts_array_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -9978,18 +12531,24 @@ static TS_ARRAY_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "tag", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_array_primitive,
 };
 
 /// `ts.array.primitive`.
 fn ts_array_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -9998,7 +12557,7 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -10007,7 +12566,7 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -10016,7 +12575,7 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -10025,7 +12584,7 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -10055,14 +12614,27 @@ static TS_ARRAY_SEARCHABLE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 6,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "search", path: &[1] },
+        p::PlanLocal { name: "primitive", path: &[2] },
+        p::PlanLocal { name: "input", path: &[4] },
+        p::PlanLocal { name: "index", path: &[6] },
+        p::PlanLocal { name: "value", path: &[7, 1, 0] },
+        p::PlanLocal { name: "primitive", path: &[7, 1, 1, 2, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_array_searchable,
 };
 
 /// `ts.array.searchable`.
 fn ts_array_searchable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
@@ -10073,16 +12645,16 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(2, 0, 2)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.call(3, 0, 1)?;
-    ctx.bind(1, 0)?;
+    ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.local(1, 0)?;
+    ctx.local(3, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -10090,18 +12662,18 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(2, 0, 2)?;
-    ctx.bind(2, 0)?;
+    ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.local(2, 0)?;
+    ctx.local(4, 0)?;
     ctx.literal(4, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.call(1, 0, 1)?;
         ctx.literal(5, 1)?;
         ctx.call(0, 0, 2)?;
@@ -10114,47 +12686,47 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExi
     }
     ctx.begin()?;
     ctx.literal(2, 0)?;
-    ctx.bind(3, 0)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
     'l0: loop {
-        ctx.local(3, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(5, 0)?;
+        ctx.local(0, 1)?;
         ctx.call(5, 1, 1)?;
         ctx.call(4, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(3, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(5, 1)?;
         ctx.index(0)?;
-        ctx.bind(4, 0)?;
+        ctx.bind(6, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(6, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
         } else {
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(6, 0)?;
             ctx.call(3, 0, 1)?;
-            ctx.bind(5, 0)?;
+            ctx.bind(7, 0)?;
             ctx.begin()?;
-            ctx.local(5, 0)?;
+            ctx.local(7, 0)?;
             if ctx.test(0, p::Test::If)? {
             } else {
                 ctx.begin()?;
                 ctx.literal(1, 0)?;
                 return Ok(ctx.take(0));
             }
-            ctx.unbind(5);
+            ctx.unbind(7);
         }
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(5, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(6, 0, 2)?;
-        ctx.assign(3, 0)?;
-        ctx.unbind(4);
+        ctx.assign(5, 0)?;
+        ctx.unbind(6);
         ctx.begin()?;
     }
     ctx.begin()?;
@@ -10176,18 +12748,205 @@ static TS_ARRAY_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_array_tolocalestring,
 };
 
 /// `ts.array.toLocaleString`.
 fn ts_array_tolocalestring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.literal(1, 1)?;
     ctx.literal(2, 2)?;
     ctx.call(0, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
+}
+
+static TS_ARRAY_KEYS: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.keys",
+    function: p::function("5cc9a61b49c15f09f6550e23d721a18dda1cc2c54bc553a3b98bfb707934d48e"),
+    callees: &[
+        p::function("115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("brand:ts.iterator"),
+        p::PlanLiteral::Text("ts.function"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("next"),
+    ],
+    fields: &["__ts_brand", "__ts_type", "next", ],
+    records: &[&[], &[0, 1, 2], ],
+    registers: 8,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "exhausted", path: &[2] },
+        p::PlanLocal { name: "next", path: &[3] },
+    ],
+    closures: &[
+        &[3, 0],
+    ],
+    run: ts_array_keys,
+};
+
+/// `ts.array.keys`.
+fn ts_array_keys(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.tuple(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.literal(3, 2)?;
+    ctx.literal(4, 3)?;
+    ctx.literal(5, 4)?;
+    ctx.literal(0, 5)?;
+    ctx.local(4, 6)?;
+    ctx.record(0, 7)?;
+    ctx.tuple(2, 6)?;
+    ctx.record(1, 0)?;
+    Ok(ctx.take(0))
+}
+
+static TS_ARRAY_VALUES: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.values",
+    function: p::function("d8417bcd2960fc3c002a3b8b8f7021f05aa92b24848e807b01af0389336e8b21"),
+    callees: &[
+        p::function("115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("brand:ts.iterator"),
+        p::PlanLiteral::Text("ts.function"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("next"),
+    ],
+    fields: &["__ts_brand", "__ts_type", "next", ],
+    records: &[&[], &[0, 1, 2], ],
+    registers: 8,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "exhausted", path: &[2] },
+        p::PlanLocal { name: "next", path: &[3] },
+    ],
+    closures: &[
+        &[3, 0],
+    ],
+    run: ts_array_values,
+};
+
+/// `ts.array.values`.
+fn ts_array_values(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.tuple(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.literal(3, 2)?;
+    ctx.literal(4, 3)?;
+    ctx.literal(5, 4)?;
+    ctx.literal(0, 5)?;
+    ctx.local(4, 6)?;
+    ctx.record(0, 7)?;
+    ctx.tuple(2, 6)?;
+    ctx.record(1, 0)?;
+    Ok(ctx.take(0))
+}
+
+static TS_ARRAY_ENTRIES: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.entries",
+    function: p::function("b603a305fe28fdb3f4a79c7fdcdfae2d80cbe57d8d83f748802b57bcb378a0f5"),
+    callees: &[
+        p::function("115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("brand:ts.iterator"),
+        p::PlanLiteral::Text("ts.function"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("next"),
+    ],
+    fields: &["__ts_brand", "__ts_type", "next", ],
+    records: &[&[], &[0, 1, 2], ],
+    registers: 8,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "exhausted", path: &[2] },
+        p::PlanLocal { name: "next", path: &[3] },
+    ],
+    closures: &[
+        &[3, 0],
+    ],
+    run: ts_array_entries,
+};
+
+/// `ts.array.entries`.
+fn ts_array_entries(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(1, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.tuple(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.literal(3, 2)?;
+    ctx.literal(4, 3)?;
+    ctx.literal(5, 4)?;
+    ctx.literal(0, 5)?;
+    ctx.local(4, 6)?;
+    ctx.record(0, 7)?;
+    ctx.tuple(2, 6)?;
+    ctx.record(1, 0)?;
+    Ok(ctx.take(0))
 }
 
 static TS_FOR_OF_ITEM: p::HelperPlan = p::HelperPlan {
@@ -10207,23 +12966,33 @@ static TS_FOR_OF_ITEM: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 3,
+    slots: &[
+        p::PlanLocal { name: "source", path: &[] },
+        p::PlanLocal { name: "raw", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "key", path: &[2, 1, 0] },
+        p::PlanLocal { name: "member", path: &[3, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_for_of_item,
 };
 
 /// `ts.for_of.item`.
 fn ts_for_of_item(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.tuple(1, 0)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
@@ -10232,41 +13001,41 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(1, 0)?;
-        ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.param(0, 1)?;
-        ctx.param(1, 2)?;
+        ctx.call(2, 0, 1)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(0, 1)?;
+        ctx.local(1, 2)?;
         ctx.index(1)?;
         ctx.list(0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(1, 0)?;
+        ctx.local(1, 0)?;
         ctx.call(2, 0, 1)?;
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
 
@@ -10285,22 +13054,27 @@ static TS_PROMISE_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_promise_is,
 };
 
 /// `ts.promise.is`.
 fn ts_promise_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -10326,7 +13100,10 @@ static TS_PROMISE_PENDING: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", "state", "task", ],
     records: &[&[0, 1, 2, 3], ],
     registers: 4,
-    slots: 0,
+    slots: &[
+    ],
+    closures: &[
+    ],
     run: ts_promise_pending,
 };
 
@@ -10354,18 +13131,24 @@ static TS_PROMISE_CALLABLE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_promise_callable,
 };
 
 /// `ts.promise.callable`.
 fn ts_promise_callable(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
@@ -10393,62 +13176,74 @@ static TS_PROMISE_DECIDED: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 5,
+    slots: &[
+        p::PlanLocal { name: "states", path: &[] },
+        p::PlanLocal { name: "mode", path: &[] },
+        p::PlanLocal { name: "pending", path: &[0] },
+        p::PlanLocal { name: "fulfilled", path: &[1] },
+        p::PlanLocal { name: "rejected", path: &[2] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "state", path: &[3, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_promise_decided,
 };
 
 /// `ts.promise.decided`.
 fn ts_promise_decided(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(1, 0)?;
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    let c0 = ctx.open(0, 3)?;
+    ctx.literal(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    let c0 = ctx.open(0, 5)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(4, 0)?;
+        ctx.bind(6, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(6, 0)?;
         ctx.literal(1, 1)?;
-        ctx.call(0, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.assign(0, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.call(0, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.assign(1, 0)?;
-        }
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        ctx.literal(4, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(2, 0)?;
             ctx.assign(2, 0)?;
         }
-        ctx.unbind(4);
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.assign(3, 0)?;
+        }
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(2, 0)?;
+            ctx.assign(4, 0)?;
+        }
+        ctx.unbind(6);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(2, 0, 1)?;
     ctx.literal(5, 1)?;
     ctx.call(1, 0, 2)?;
@@ -10458,7 +13253,7 @@ fn ts_promise_decided(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     if ctx.test(0, p::Test::If)? {
     } else {
         ctx.begin()?;
@@ -10466,37 +13261,37 @@ fn ts_promise_decided(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(6, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(7, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(2, 0)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     ctx.literal(8, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.local(1, 0)?;
+        ctx.local(3, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -10518,14 +13313,21 @@ static TS_STRING_CLAMP: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 2,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "length", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_string_clamp,
 };
 
 /// `ts.string.clamp`.
 fn ts_string_clamp(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -10534,19 +13336,119 @@ fn ts_string_clamp(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.param(1, 1)?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.call(2, 0, 1)?;
         ctx.call(1, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
-    ctx.param(1, 0)?;
+    ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+
+static TS_STRING_SLICE_UNITS: p::HelperPlan = p::HelperPlan {
+    name: "ts.string.slice_units",
+    function: p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"),
+    callees: &[
+        p::function("e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("text_boundary"),
+        p::PlanLiteral::Text("TS_LONE_SURROGATE_UNSUPPORTED"),
+        p::PlanLiteral::Text("String output_value contains a lone surrogate"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &["kind", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "text", path: &[] },
+        p::PlanLocal { name: "start", path: &[] },
+        p::PlanLocal { name: "end", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "boundary", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_string_slice_units,
+};
+
+/// `ts.string.slice_units`.
+fn ts_string_slice_units(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(0, 0, 3)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 4)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    ctx.field(0, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.literal(3, 2)?;
+                        ctx.call(2, 0, 3)?;
+                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                    }
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+                    other => other,
+                };
+                ctx.unbind(4);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(3);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
 }
 
 static TS_STRING_TOSTRING: p::HelperPlan = p::HelperPlan {
@@ -10566,20 +13468,27 @@ static TS_STRING_TOSTRING: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_string_tostring,
 };
 
 /// `ts.string.toString`.
 fn ts_string_tostring(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -10607,20 +13516,27 @@ static TS_STRING_VALUEOF: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_string_valueof,
 };
 
 /// `ts.string.valueOf`.
 fn ts_string_valueof(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -10646,14 +13562,21 @@ static TS_STRING_LOCALE_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_string_locale_unsupported,
 };
 
 /// `ts.string.locale_unsupported`.
 fn ts_string_locale_unsupported(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
@@ -10678,22 +13601,27 @@ static TS_REGEXP_IS: p::HelperPlan = p::HelperPlan {
     fields: &["__ts_brand", "__ts_type", ],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_is,
 };
 
 /// `ts.regexp.is`.
 fn ts_regexp_is(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(1, 0, 1)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.field(0, 0)?;
-        ctx.param(0, 1)?;
+        ctx.local(0, 1)?;
         ctx.field(1, 1)?;
         ctx.tuple(0, 2)?;
         ctx.tuple(1, 0)?;
@@ -10722,21 +13650,27 @@ static TS_REGEXP_REQUIRE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 1,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "branded", path: &[0] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_require,
 };
 
 /// `ts.regexp.require`.
 fn ts_regexp_require(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
@@ -10764,14 +13698,27 @@ static TS_REGEXP_MATCH_RECORD: p::HelperPlan = p::HelperPlan {
     fields: &["groups", "named", "index", "__ts_brand", "__ts_type", "items", "input", ],
     records: &[&[3, 4, 5, 2, 6, 0], ],
     registers: 6,
-    slots: 6,
+    slots: &[
+        p::PlanLocal { name: "match", path: &[] },
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "items", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "group", path: &[2, 1] },
+        p::PlanLocal { name: "named", path: &[3] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[4, 2, 0, 1] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_match_record,
 };
 
 /// `ts.regexp.match_record`.
 fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
@@ -10781,66 +13728,66 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
     }
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
-    let c0 = ctx.open(0, 1)?;
+    let c0 = ctx.open(0, 3)?;
     'l0: loop {
         if !ctx.next(c0, 0)? {
             break 'l0;
         }
-        ctx.bind(2, 0)?;
+        ctx.bind(4, 0)?;
         ctx.begin()?;
-        ctx.local(2, 0)?;
+        ctx.local(4, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.literal(1, 0)?;
             ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(0, 2)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
             ctx.call(1, 2, 1)?;
             ctx.set_index(1, 0)?;
         } else {
             ctx.begin()?;
-            ctx.local(2, 0)?;
+            ctx.local(4, 0)?;
             ctx.pin(0)?;
-            ctx.local(0, 1)?;
-            ctx.local(0, 2)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
             ctx.call(1, 2, 1)?;
             ctx.set_index(1, 0)?;
         }
-        ctx.unbind(2);
+        ctx.unbind(4);
         ctx.begin()?;
     }
     ctx.close(c0);
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 1)?;
-    ctx.bind(3, 0)?;
+    ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.local(3, 0)?;
+    ctx.local(5, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.literal(1, 0)?;
-        ctx.assign(3, 0)?;
+        ctx.assign(5, 0)?;
     } else {
         ctx.begin()?;
-        ctx.local(3, 0)?;
+        ctx.local(5, 0)?;
         ctx.call(2, 0, 1)?;
-        let c0 = ctx.open(0, 4)?;
+        let c0 = ctx.open(0, 6)?;
         'l0: loop {
             if !ctx.next(c0, 0)? {
                 break 'l0;
             }
-            ctx.bind(5, 0)?;
+            ctx.bind(7, 0)?;
             ctx.begin()?;
-            ctx.local(3, 0)?;
-            ctx.local(5, 1)?;
+            ctx.local(5, 0)?;
+            ctx.local(7, 1)?;
             ctx.index(0)?;
             ctx.literal(0, 1)?;
             ctx.call(0, 0, 2)?;
@@ -10848,11 +13795,11 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
                 ctx.begin()?;
                 ctx.literal(1, 0)?;
                 ctx.pin(0)?;
-                ctx.local(3, 1)?;
-                ctx.local(5, 2)?;
+                ctx.local(5, 1)?;
+                ctx.local(7, 2)?;
                 ctx.set_index(1, 0)?;
             }
-            ctx.unbind(5);
+            ctx.unbind(7);
             ctx.begin()?;
         }
         ctx.close(c0);
@@ -10860,14 +13807,404 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext) -> Result<Value, p::Plan
     ctx.begin()?;
     ctx.tuple(0, 0)?;
     ctx.literal(2, 1)?;
-    ctx.local(0, 2)?;
-    ctx.param(0, 3)?;
+    ctx.local(2, 2)?;
+    ctx.local(0, 3)?;
     ctx.field(3, 2)?;
     ctx.call(3, 3, 1)?;
-    ctx.param(1, 4)?;
-    ctx.local(3, 5)?;
+    ctx.local(1, 4)?;
+    ctx.local(5, 5)?;
     ctx.record(0, 0)?;
     Ok(ctx.take(0))
+}
+
+static TS_REGEXP_NATIVE_EXEC: p::HelperPlan = p::HelperPlan {
+    name: "ts.regexp.native_exec",
+    function: p::function("1003446f1fce48d98db977e5af970cfd5f58c75113e29b2f77d5c0aa7423e97d"),
+    callees: &[
+        p::function("9fe8497f6f5100a0f9c2a841104faa3da8917e465b971ea05c9d96a9e37ffbb1"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("regex.lone_surrogate"),
+        p::PlanLiteral::Text("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"),
+    ],
+    fields: &["kind", "message", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "regex", path: &[] },
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "cause", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_regexp_native_exec,
+};
+
+/// `ts.regexp.native_exec`.
+fn ts_regexp_native_exec(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(0, 0, 2)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 2)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 2)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 3)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    ctx.field(0, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        ctx.local(3, 1)?;
+                        ctx.field(1, 1)?;
+                        ctx.local(3, 2)?;
+                        ctx.call(2, 0, 3)?;
+                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                    }
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 2)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 2)?)),
+                    other => other,
+                };
+                ctx.unbind(3);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(2);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_REGEXP_NATIVE_MATCH_ALL: p::HelperPlan = p::HelperPlan {
+    name: "ts.regexp.native_match_all",
+    function: p::function("9a2f8a72b5af206d72de3645c4407ea260db29a3d0dc27fb12280a110e0cba19"),
+    callees: &[
+        p::function("9284c5cf6e2fee71d4386601d76de71a37c78718c069e1ac39d4bc1cd28584f9"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("regex.lone_surrogate"),
+        p::PlanLiteral::Text("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"),
+    ],
+    fields: &["kind", "message", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "regex", path: &[] },
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "cause", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_regexp_native_match_all,
+};
+
+/// `ts.regexp.native_match_all`.
+fn ts_regexp_native_match_all(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.call(0, 0, 2)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 2)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 2)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 3)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    ctx.field(0, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        ctx.local(3, 1)?;
+                        ctx.field(1, 1)?;
+                        ctx.local(3, 2)?;
+                        ctx.call(2, 0, 3)?;
+                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                    }
+                    ctx.begin()?;
+                    ctx.local(3, 0)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 2)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 2)?)),
+                    other => other,
+                };
+                ctx.unbind(3);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(2);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_REGEXP_NATIVE_REPLACE: p::HelperPlan = p::HelperPlan {
+    name: "ts.regexp.native_replace",
+    function: p::function("0a6c30e645b786e55255e285a1167670a6c467719658e0f3efd439e08df91d73"),
+    callees: &[
+        p::function("b1eca466edb34097fd41735ef9d4ca3d0ed8691fccf5eff403aa892496f82fce"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("regex.lone_surrogate"),
+        p::PlanLiteral::Text("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"),
+    ],
+    fields: &["kind", "message", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "regex", path: &[] },
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "replacement", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "cause", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_regexp_native_replace,
+};
+
+/// `ts.regexp.native_replace`.
+fn ts_regexp_native_replace(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(0, 0, 3)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 4)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    ctx.field(0, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        ctx.local(4, 1)?;
+                        ctx.field(1, 1)?;
+                        ctx.local(4, 2)?;
+                        ctx.call(2, 0, 3)?;
+                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                    }
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+                    other => other,
+                };
+                ctx.unbind(4);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(3);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_REGEXP_NATIVE_SPLIT: p::HelperPlan = p::HelperPlan {
+    name: "ts.regexp.native_split",
+    function: p::function("5f5633e30f1aae0bc6d967df38c0e07b5c794144973748417d7a65ea9b008d75"),
+    callees: &[
+        p::function("a1072303ec402f80a4d3f0ea608b7a5cb0428613539cc92f1d77937b40a64502"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("regex.lone_surrogate"),
+        p::PlanLiteral::Text("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"),
+    ],
+    fields: &["kind", "message", ],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "regex", path: &[] },
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "limit", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "cause", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_regexp_native_split,
+};
+
+/// `ts.regexp.native_split`.
+fn ts_regexp_native_split(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(0, 0, 3)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 4)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    ctx.field(0, 0)?;
+                    ctx.literal(0, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(1, 0)?;
+                        ctx.local(4, 1)?;
+                        ctx.field(1, 1)?;
+                        ctx.local(4, 2)?;
+                        ctx.call(2, 0, 3)?;
+                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                    }
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 3)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 3)?)),
+                    other => other,
+                };
+                ctx.unbind(4);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(3);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
 }
 
 static TS_REGEXP_GLOBAL: p::HelperPlan = p::HelperPlan {
@@ -10885,18 +14222,23 @@ static TS_REGEXP_GLOBAL: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_global,
 };
 
 /// `ts.regexp.global`.
 fn ts_regexp_global(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -10920,18 +14262,23 @@ static TS_REGEXP_IGNORECASE: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_ignorecase,
 };
 
 /// `ts.regexp.ignoreCase`.
 fn ts_regexp_ignorecase(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -10955,18 +14302,23 @@ static TS_REGEXP_MULTILINE: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_multiline,
 };
 
 /// `ts.regexp.multiline`.
 fn ts_regexp_multiline(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -10990,18 +14342,23 @@ static TS_REGEXP_DOTALL: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_dotall,
 };
 
 /// `ts.regexp.dotAll`.
 fn ts_regexp_dotall(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -11025,18 +14382,23 @@ static TS_REGEXP_UNICODE: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_unicode,
 };
 
 /// `ts.regexp.unicode`.
 fn ts_regexp_unicode(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -11060,18 +14422,23 @@ static TS_REGEXP_STICKY: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 4,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_sticky,
 };
 
 /// `ts.regexp.sticky`.
 fn ts_regexp_sticky(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.field(1, 0)?;
     ctx.literal(1, 2)?;
     ctx.literal(0, 3)?;
@@ -11090,17 +14457,22 @@ static TS_REGEXP_FLAGS: p::HelperPlan = p::HelperPlan {
     fields: &["flags", ],
     records: &[],
     registers: 1,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_flags,
 };
 
 /// `ts.regexp.flags`.
 fn ts_regexp_flags(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.call(0, 0, 1)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.field(0, 0)?;
     Ok(ctx.take(0))
 }
@@ -11116,25 +14488,265 @@ static TS_REGEXP_SOURCE: p::HelperPlan = p::HelperPlan {
     fields: &["pattern", ],
     records: &[],
     registers: 1,
-    slots: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "pattern", path: &[1] },
+        p::PlanLocal { name: "source", path: &[2] },
+    ],
+    closures: &[
+    ],
     run: ts_regexp_source,
 };
 
 /// `ts.regexp.source`.
 fn ts_regexp_source(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.field(0, 0)?;
-    ctx.bind(0, 0)?;
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(1, 0, 1)?;
+    ctx.call(0, 0, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.field(0, 0)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
     ctx.local(1, 0)?;
+    ctx.call(1, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    Ok(ctx.take(0))
+}
+
+static TS_STRING_SUBSTITUTE: p::HelperPlan = p::HelperPlan {
+    name: "ts.string.substitute",
+    function: p::function("ecb61970f9cda0eca312eb247358de9c5a76cb470cfd0bbd81dedae432bfb890"),
+    callees: &[
+        p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("3b3bc1d5b628bc3fb3e0558144151d085120a0d173e1932ffa98423cbbb0db76"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("682fa4fa6329e4f79afcd5bd4bbeb448c772ca482988723a6c48977c973e444d"),
+        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
+        p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409"),
+        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
+        p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("$"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Int("36"),
+        p::PlanLiteral::Int("38"),
+        p::PlanLiteral::Int("96"),
+        p::PlanLiteral::Int("39"),
+        p::PlanLiteral::Text(""),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "replacement", path: &[] },
+        p::PlanLocal { name: "text", path: &[] },
+        p::PlanLocal { name: "needle", path: &[] },
+        p::PlanLocal { name: "position", path: &[] },
+        p::PlanLocal { name: "pieces", path: &[0] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "length", path: &[2] },
+        p::PlanLocal { name: "dollar", path: &[3, 1, 0] },
+        p::PlanLocal { name: "end", path: &[3, 1, 2] },
+        p::PlanLocal { name: "piece", path: &[3, 1, 3] },
+        p::PlanLocal { name: "token", path: &[3, 1, 4, 1, 0] },
+        p::PlanLocal { name: "after", path: &[3, 1, 4, 1, 4, 1, 0] },
+        p::PlanLocal { name: "size", path: &[3, 1, 4, 1, 4, 1, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_string_substitute,
+};
+
+/// `ts.string.substitute`.
+fn ts_string_substitute(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.adopt(3, 3)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(6, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(5, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(1, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.local(5, 2)?;
+        ctx.call(2, 0, 3)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(0, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.unbind(7);
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.call(3, 0, 2)?;
+        ctx.bind(8, 0)?;
+        ctx.begin()?;
+        ctx.literal(3, 0)?;
+        ctx.bind(9, 0)?;
+        ctx.begin()?;
+        ctx.local(8, 0)?;
+        ctx.local(6, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(8, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.bind(10, 0)?;
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(1, 0)?;
+                ctx.assign(9, 0)?;
+            }
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.literal(5, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(2, 0)?;
+                ctx.assign(9, 0)?;
+            }
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.literal(0, 1)?;
+                ctx.local(3, 2)?;
+                ctx.call(6, 0, 3)?;
+                ctx.assign(9, 0)?;
+            }
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.literal(7, 1)?;
+            ctx.call(5, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.local(2, 1)?;
+                ctx.call(0, 1, 1)?;
+                ctx.call(3, 0, 2)?;
+                ctx.bind(11, 0)?;
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.call(0, 0, 1)?;
+                ctx.bind(12, 0)?;
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.local(11, 1)?;
+                ctx.local(12, 2)?;
+                ctx.call(6, 0, 3)?;
+                ctx.assign(9, 0)?;
+                ctx.unbind(12);
+                ctx.unbind(11);
+            }
+            ctx.unbind(10);
+        }
+        ctx.begin()?;
+        ctx.local(9, 0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(7, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(5, 1)?;
+            ctx.local(8, 2)?;
+            ctx.call(8, 0, 3)?;
+            ctx.pin(0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.call(9, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            ctx.assign(5, 0)?;
+        } else {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(5, 1)?;
+            ctx.local(7, 2)?;
+            ctx.call(8, 0, 3)?;
+            ctx.pin(0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.call(9, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.pin(0)?;
+            ctx.local(4, 1)?;
+            ctx.local(4, 2)?;
+            ctx.call(9, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
+            ctx.assign(5, 0)?;
+        }
+        ctx.unbind(9);
+        ctx.unbind(8);
+        ctx.unbind(7);
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(5, 0)?;
+    ctx.local(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(6, 2)?;
+        ctx.call(8, 0, 3)?;
+        ctx.pin(0)?;
+        ctx.local(4, 1)?;
+        ctx.local(4, 2)?;
+        ctx.call(9, 2, 1)?;
+        ctx.set_index(1, 0)?;
+    }
+    ctx.begin()?;
+    ctx.local(4, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(10, 0, 2)?;
     Ok(ctx.take(0))
 }
 
@@ -11162,24 +14774,29 @@ static TS_URI_HEX: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 3,
-    slots: 0,
+    slots: &[
+        p::PlanLocal { name: "unit", path: &[] },
+    ],
+    closures: &[
+    ],
     run: ts_uri_hex,
 };
 
 /// `ts.uri.hex`.
 fn ts_uri_hex(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
     ctx.literal(0, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(1, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(0, 1)?;
             ctx.call(1, 0, 2)?;
             return Ok(ctx.take(0));
@@ -11187,16 +14804,16 @@ fn ts_uri_hex(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.literal(2, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(3, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(4, 1)?;
             ctx.call(1, 0, 2)?;
             return Ok(ctx.take(0));
@@ -11204,16 +14821,16 @@ fn ts_uri_hex(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     }
     ctx.begin()?;
     ctx.literal(5, 0)?;
-    ctx.param(0, 1)?;
+    ctx.local(0, 1)?;
     ctx.call(0, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
-        ctx.param(0, 0)?;
+        ctx.local(0, 0)?;
         ctx.literal(6, 1)?;
         ctx.call(0, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.param(0, 0)?;
+            ctx.local(0, 0)?;
             ctx.literal(7, 1)?;
             ctx.call(1, 0, 2)?;
             return Ok(ctx.take(0));
@@ -11246,29 +14863,30 @@ static TS_URI_ESCAPE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 4,
-    slots: 4,
+    slots: &[
+        p::PlanLocal { name: "octet", path: &[] },
+        p::PlanLocal { name: "high", path: &[0] },
+        p::PlanLocal { name: "low", path: &[1] },
+        p::PlanLocal { name: "a", path: &[2] },
+        p::PlanLocal { name: "b", path: &[3] },
+    ],
+    closures: &[
+    ],
     run: ts_uri_escape,
 };
 
 /// `ts.uri.escape`.
 fn ts_uri_escape(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.param(0, 0)?;
+    ctx.local(0, 0)?;
     ctx.literal(0, 1)?;
     ctx.call(0, 0, 2)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
     ctx.bind(1, 0)?;
     ctx.begin()?;
-    ctx.literal(1, 0)?;
-    ctx.local(0, 1)?;
-    ctx.local(0, 2)?;
-    ctx.literal(2, 3)?;
-    ctx.call(3, 2, 2)?;
-    ctx.call(2, 0, 3)?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
     ctx.literal(1, 0)?;
@@ -11279,9 +14897,17 @@ fn ts_uri_escape(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
     ctx.call(2, 0, 3)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.literal(3, 0)?;
+    ctx.literal(1, 0)?;
     ctx.local(2, 1)?;
-    ctx.local(3, 2)?;
+    ctx.local(2, 2)?;
+    ctx.literal(2, 3)?;
+    ctx.call(3, 2, 2)?;
+    ctx.call(2, 0, 3)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    ctx.local(3, 1)?;
+    ctx.local(4, 2)?;
     ctx.call(4, 1, 2)?;
     ctx.call(4, 0, 2)?;
     Ok(ctx.take(0))
@@ -11331,255 +14957,653 @@ static TS_URI_ENCODE: p::HelperPlan = p::HelperPlan {
     fields: &[],
     records: &[],
     registers: 6,
-    slots: 12,
+    slots: &[
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "preserve", path: &[] },
+        p::PlanLocal { name: "pieces", path: &[0] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "length", path: &[2] },
+        p::PlanLocal { name: "unit", path: &[3, 1, 0] },
+        p::PlanLocal { name: "scalar", path: &[3, 1, 2] },
+        p::PlanLocal { name: "low", path: &[3, 1, 3, 1, 0, 1, 0] },
+        p::PlanLocal { name: "unescaped", path: &[3, 1, 4] },
+        p::PlanLocal { name: "character", path: &[3, 1, 5, 1, 0] },
+        p::PlanLocal { name: "octets", path: &[3, 1, 6, 2, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "octet", path: &[3, 1, 6, 2, 2, 1] },
+        p::PlanLocal { name: "escaped", path: &[3, 1, 6, 2, 2, 1, 0] },
+    ],
+    closures: &[
+    ],
     run: ts_uri_encode,
 };
 
 /// `ts.uri.encode`.
 fn ts_uri_encode(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
-    ctx.bind(0, 0)?;
-    ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.param(0, 0)?;
-    ctx.call(0, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
     'l0: loop {
-        ctx.local(1, 0)?;
-        ctx.local(2, 1)?;
+        ctx.local(3, 0)?;
+        ctx.local(4, 1)?;
         ctx.call(1, 0, 2)?;
         if !ctx.test(0, p::Test::While)? {
             break 'l0;
         }
         ctx.begin()?;
-        ctx.param(0, 0)?;
-        ctx.local(1, 1)?;
+        ctx.local(0, 0)?;
+        ctx.local(3, 1)?;
         ctx.call(2, 0, 2)?;
-        ctx.bind(3, 0)?;
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        ctx.literal(1, 1)?;
-        ctx.call(3, 0, 2)?;
-        ctx.assign(1, 0)?;
+        ctx.bind(5, 0)?;
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.bind(4, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(3, 0, 2)?;
+        ctx.assign(3, 0)?;
+        ctx.begin()?;
+        ctx.local(5, 0)?;
+        ctx.bind(6, 0)?;
         ctx.begin()?;
         ctx.literal(2, 0)?;
-        ctx.local(3, 1)?;
+        ctx.local(5, 1)?;
         ctx.call(4, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(3, 0)?;
+            ctx.local(5, 0)?;
             ctx.literal(3, 1)?;
             ctx.call(4, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.param(0, 0)?;
-                ctx.local(1, 1)?;
+                ctx.local(0, 0)?;
+                ctx.local(3, 1)?;
                 ctx.call(2, 0, 2)?;
-                ctx.bind(5, 0)?;
+                ctx.bind(7, 0)?;
                 ctx.begin()?;
                 ctx.literal(4, 0)?;
-                ctx.local(3, 1)?;
+                ctx.local(5, 1)?;
                 ctx.literal(2, 2)?;
                 ctx.call(6, 1, 2)?;
                 ctx.literal(5, 2)?;
                 ctx.call(5, 1, 2)?;
-                ctx.local(5, 2)?;
+                ctx.local(7, 2)?;
                 ctx.literal(6, 3)?;
                 ctx.call(6, 2, 2)?;
                 ctx.call(3, 1, 2)?;
                 ctx.call(3, 0, 2)?;
-                ctx.assign(4, 0)?;
+                ctx.assign(6, 0)?;
                 ctx.begin()?;
-                ctx.local(1, 0)?;
+                ctx.local(3, 0)?;
                 ctx.literal(1, 1)?;
                 ctx.call(3, 0, 2)?;
-                ctx.assign(1, 0)?;
-                ctx.unbind(5);
+                ctx.assign(3, 0)?;
+                ctx.unbind(7);
             }
         }
         ctx.begin()?;
         ctx.literal(7, 0)?;
-        ctx.bind(6, 0)?;
+        ctx.bind(8, 0)?;
         ctx.begin()?;
-        ctx.local(4, 0)?;
+        ctx.local(6, 0)?;
         ctx.literal(8, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(6, 0)?;
             ctx.list(0, 1)?;
             ctx.call(7, 0, 1)?;
-            ctx.bind(7, 0)?;
+            ctx.bind(9, 0)?;
             ctx.begin()?;
             ctx.literal(0, 0)?;
             ctx.literal(9, 1)?;
-            ctx.local(7, 2)?;
+            ctx.local(9, 2)?;
             ctx.literal(0, 3)?;
             ctx.call(8, 1, 3)?;
             ctx.call(4, 0, 2)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(8, 0)?;
             ctx.begin()?;
-            ctx.param(1, 0)?;
+            ctx.local(1, 0)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.literal(0, 0)?;
                 ctx.literal(10, 1)?;
-                ctx.local(7, 2)?;
+                ctx.local(9, 2)?;
                 ctx.literal(0, 3)?;
                 ctx.call(8, 1, 3)?;
                 ctx.call(4, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(11, 0)?;
-                    ctx.assign(6, 0)?;
+                    ctx.assign(8, 0)?;
                 }
             }
             ctx.begin()?;
-            ctx.local(6, 0)?;
+            ctx.local(8, 0)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
+                ctx.local(9, 0)?;
                 ctx.pin(0)?;
-                ctx.local(0, 1)?;
-                ctx.local(0, 2)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
                 ctx.call(9, 2, 1)?;
                 ctx.set_index(1, 0)?;
             }
-            ctx.unbind(7);
+            ctx.unbind(9);
         }
         ctx.begin()?;
-        ctx.local(6, 0)?;
+        ctx.local(8, 0)?;
         if ctx.test(0, p::Test::If)? {
         } else {
             ctx.begin()?;
             ctx.list(0, 0)?;
-            ctx.bind(8, 0)?;
+            ctx.bind(10, 0)?;
             ctx.begin()?;
-            ctx.local(4, 0)?;
+            ctx.local(6, 0)?;
             ctx.literal(8, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(6, 0)?;
                 ctx.list(0, 1)?;
-                ctx.assign(8, 0)?;
+                ctx.assign(10, 0)?;
             } else {
                 ctx.begin()?;
-                ctx.local(4, 0)?;
+                ctx.local(6, 0)?;
                 ctx.literal(12, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.literal(13, 0)?;
-                    ctx.local(4, 1)?;
+                    ctx.local(6, 1)?;
                     ctx.literal(14, 2)?;
                     ctx.call(10, 1, 2)?;
                     ctx.call(3, 0, 2)?;
                     ctx.literal(8, 1)?;
-                    ctx.local(4, 2)?;
+                    ctx.local(6, 2)?;
                     ctx.literal(14, 3)?;
                     ctx.call(11, 2, 2)?;
                     ctx.call(3, 1, 2)?;
                     ctx.list(0, 2)?;
-                    ctx.assign(8, 0)?;
+                    ctx.assign(10, 0)?;
                 } else {
                     ctx.begin()?;
-                    ctx.local(4, 0)?;
+                    ctx.local(6, 0)?;
                     ctx.literal(4, 1)?;
                     ctx.call(1, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.literal(15, 0)?;
-                        ctx.local(4, 1)?;
+                        ctx.local(6, 1)?;
                         ctx.literal(16, 2)?;
                         ctx.call(10, 1, 2)?;
                         ctx.call(3, 0, 2)?;
                         ctx.literal(8, 1)?;
-                        ctx.local(4, 2)?;
+                        ctx.local(6, 2)?;
                         ctx.literal(14, 3)?;
                         ctx.call(10, 2, 2)?;
                         ctx.literal(14, 3)?;
                         ctx.call(11, 2, 2)?;
                         ctx.call(3, 1, 2)?;
                         ctx.literal(8, 2)?;
-                        ctx.local(4, 3)?;
+                        ctx.local(6, 3)?;
                         ctx.literal(14, 4)?;
                         ctx.call(11, 3, 2)?;
                         ctx.call(3, 2, 2)?;
                         ctx.list(0, 3)?;
-                        ctx.assign(8, 0)?;
+                        ctx.assign(10, 0)?;
                     } else {
                         ctx.begin()?;
                         ctx.literal(17, 0)?;
-                        ctx.local(4, 1)?;
+                        ctx.local(6, 1)?;
                         ctx.literal(18, 2)?;
                         ctx.call(10, 1, 2)?;
                         ctx.call(3, 0, 2)?;
                         ctx.literal(8, 1)?;
-                        ctx.local(4, 2)?;
+                        ctx.local(6, 2)?;
                         ctx.literal(16, 3)?;
                         ctx.call(10, 2, 2)?;
                         ctx.literal(14, 3)?;
                         ctx.call(11, 2, 2)?;
                         ctx.call(3, 1, 2)?;
                         ctx.literal(8, 2)?;
-                        ctx.local(4, 3)?;
+                        ctx.local(6, 3)?;
                         ctx.literal(14, 4)?;
                         ctx.call(10, 3, 2)?;
                         ctx.literal(14, 4)?;
                         ctx.call(11, 3, 2)?;
                         ctx.call(3, 2, 2)?;
                         ctx.literal(8, 3)?;
-                        ctx.local(4, 4)?;
+                        ctx.local(6, 4)?;
                         ctx.literal(14, 5)?;
                         ctx.call(11, 4, 2)?;
                         ctx.call(3, 3, 2)?;
                         ctx.list(0, 4)?;
-                        ctx.assign(8, 0)?;
+                        ctx.assign(10, 0)?;
                     }
                 }
             }
             ctx.begin()?;
-            ctx.local(8, 0)?;
-            let c1 = ctx.open(0, 9)?;
+            ctx.local(10, 0)?;
+            let c1 = ctx.open(0, 11)?;
             'l1: loop {
                 if !ctx.next(c1, 0)? {
                     break 'l1;
                 }
-                ctx.bind(10, 0)?;
+                ctx.bind(12, 0)?;
                 ctx.begin()?;
-                ctx.local(10, 0)?;
+                ctx.local(12, 0)?;
                 ctx.call(12, 0, 1)?;
-                ctx.bind(11, 0)?;
+                ctx.bind(13, 0)?;
                 ctx.begin()?;
-                ctx.local(11, 0)?;
+                ctx.local(13, 0)?;
                 ctx.pin(0)?;
-                ctx.local(0, 1)?;
-                ctx.local(0, 2)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
                 ctx.call(9, 2, 1)?;
                 ctx.set_index(1, 0)?;
-                ctx.unbind(11);
-                ctx.unbind(10);
+                ctx.unbind(13);
+                ctx.unbind(12);
                 ctx.begin()?;
             }
             ctx.close(c1);
-            ctx.unbind(8);
+            ctx.unbind(10);
         }
+        ctx.unbind(8);
         ctx.unbind(6);
-        ctx.unbind(4);
-        ctx.unbind(3);
+        ctx.unbind(5);
         ctx.begin()?;
     }
     ctx.begin()?;
-    ctx.local(0, 0)?;
+    ctx.local(2, 0)?;
     ctx.literal(19, 1)?;
     ctx.call(13, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+static TS_URI_FLUSH: p::HelperPlan = p::HelperPlan {
+    name: "ts.uri.flush",
+    function: p::function("ddcd7d034d26de52f6715f990244346abb3d61888e5d84a24522125d3a870754"),
+    callees: &[
+        p::function("d64d4b3e95df0f66c316f179d617d2bc181e73c129f55757c83d8edcdcd597ca"),
+        p::function("7a80e37aa7ed48e0618fe2cec6b37d406d3481c681652c58cdc91977dff017a3"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("URIError"),
+        p::PlanLiteral::Text("URI malformed"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "octets", path: &[] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "malformed", path: &[0, 1] },
+    ],
+    closures: &[
+    ],
+    run: ts_uri_flush,
+};
+
+/// `ts.uri.flush`.
+fn ts_uri_flush(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    {
+        let cursor_scope = ctx.scope();
+        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.call(0, 0, 1)?;
+            return Ok(Departure::Return(ctx.take(0)));
+        })(ctx);
+        outcome = match outcome {
+            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 1)?)),
+            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 1)?)),
+            other => other,
+        };
+        ctx.unwind(cursor_scope);
+        if let Err(p::PlanExit::Raise(value)) = outcome {
+            ctx.retain(value, 2)?;
+            outcome = {
+                let cursor_scope = ctx.scope();
+                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                    ctx.begin()?;
+                    ctx.literal(0, 0)?;
+                    ctx.literal(1, 1)?;
+                    ctx.literal(2, 2)?;
+                    ctx.call(2, 0, 3)?;
+                    return Err(p::PlanExit::Raise(ctx.take(0)));
+                })(ctx);
+                outcome = match outcome {
+                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 1)?)),
+                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 1)?)),
+                    other => other,
+                };
+                ctx.unbind(2);
+                ctx.unwind(cursor_scope);
+                outcome
+            };
+        }
+        ctx.unbind(1);
+        match outcome {
+            Ok(Departure::Next) => {},
+            Err(exit) => return Err(exit),
+            Ok(Departure::Return(value)) => return Ok(value),
+            Ok(Departure::Break) => {
+                unreachable!("a loop departure needs a loop");
+            },
+            Ok(Departure::Continue) => {
+                unreachable!("a loop departure needs a loop");
+            },
+        }
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+static TS_URI_DECODE: p::HelperPlan = p::HelperPlan {
+    name: "ts.uri.decode",
+    function: p::function("1df9f06e9655aa79c033eede3fb75b45b39d782e7cdd73969101a7330d32b05e"),
+    callees: &[
+        p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("682fa4fa6329e4f79afcd5bd4bbeb448c772ca482988723a6c48977c973e444d"),
+        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+        p::function("a3ebfbc8573b7f6bab77492a5db9a890aac30578d4a2564feb1db220b91ea2b2"),
+        p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"),
+        p::function("501ce1af4c8c6d36b5addf29e27cad4e176edd2671761669760f27d58a94f6a5"),
+        p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"),
+        p::function("3b3bc1d5b628bc3fb3e0558144151d085120a0d173e1932ffa98423cbbb0db76"),
+        p::function("ddcd7d034d26de52f6715f990244346abb3d61888e5d84a24522125d3a870754"),
+        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
+        p::function("e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409"),
+        p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("37"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Text("URIError"),
+        p::PlanLiteral::Text("URI malformed"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Int("16"),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Int("128"),
+        p::PlanLiteral::Text(";/?:@&=+$,#"),
+        p::PlanLiteral::Int("3"),
+        p::PlanLiteral::Int("55296"),
+        p::PlanLiteral::Int("56319"),
+        p::PlanLiteral::Text(""),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "preserve", path: &[] },
+        p::PlanLocal { name: "pieces", path: &[0] },
+        p::PlanLocal { name: "octets", path: &[1] },
+        p::PlanLocal { name: "index", path: &[2] },
+        p::PlanLocal { name: "length", path: &[3] },
+        p::PlanLocal { name: "unit", path: &[4, 1, 0] },
+        p::PlanLocal { name: "highUnit", path: &[4, 1, 1, 1, 1] },
+        p::PlanLocal { name: "lowUnit", path: &[4, 1, 1, 1, 2] },
+        p::PlanLocal { name: "high", path: &[4, 1, 1, 1, 3] },
+        p::PlanLocal { name: "low", path: &[4, 1, 1, 1, 4] },
+        p::PlanLocal { name: "octet", path: &[4, 1, 1, 1, 5] },
+        p::PlanLocal { name: "reserved", path: &[4, 1, 1, 1, 6] },
+        p::PlanLocal { name: "character", path: &[4, 1, 1, 1, 7, 1, 0, 1, 0] },
+        p::PlanLocal { name: "flushed", path: &[4, 1, 1, 1, 8, 1, 0] },
+        p::PlanLocal { name: "flushed", path: &[4, 1, 1, 2, 0] },
+        p::PlanLocal { name: "end", path: &[4, 1, 1, 2, 3] },
+        p::PlanLocal { name: "flushed", path: &[5] },
+    ],
+    closures: &[
+    ],
+    run: ts_uri_decode,
+};
+
+/// `ts.uri.decode`.
+fn ts_uri_decode(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.list(0, 0)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(5, 0)?;
+    ctx.begin()?;
+    'l0: loop {
+        ctx.local(4, 0)?;
+        ctx.local(5, 1)?;
+        ctx.call(1, 0, 2)?;
+        if !ctx.test(0, p::Test::While)? {
+            break 'l0;
+        }
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(4, 1)?;
+        ctx.call(2, 0, 2)?;
+        ctx.bind(6, 0)?;
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(3, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.local(5, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.literal(5, 2)?;
+                ctx.call(5, 0, 3)?;
+                return Err(p::PlanExit::Raise(ctx.take(0)));
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(4, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.call(4, 1, 2)?;
+            ctx.call(2, 0, 2)?;
+            ctx.bind(7, 0)?;
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(4, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.call(4, 1, 2)?;
+            ctx.call(2, 0, 2)?;
+            ctx.bind(8, 0)?;
+            ctx.begin()?;
+            ctx.local(7, 0)?;
+            ctx.call(6, 0, 1)?;
+            ctx.bind(9, 0)?;
+            ctx.begin()?;
+            ctx.local(8, 0)?;
+            ctx.call(6, 0, 1)?;
+            ctx.bind(10, 0)?;
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.literal(7, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.local(10, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.bind(11, 0)?;
+            ctx.begin()?;
+            ctx.literal(8, 0)?;
+            ctx.bind(12, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.literal(9, 1)?;
+                ctx.call(1, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(11, 0)?;
+                    ctx.list(0, 1)?;
+                    ctx.call(8, 0, 1)?;
+                    ctx.bind(13, 0)?;
+                    ctx.begin()?;
+                    ctx.literal(0, 0)?;
+                    ctx.literal(10, 1)?;
+                    ctx.local(13, 2)?;
+                    ctx.literal(0, 3)?;
+                    ctx.call(10, 1, 3)?;
+                    ctx.call(9, 0, 2)?;
+                    ctx.assign(12, 0)?;
+                    ctx.unbind(13);
+                }
+            }
+            ctx.begin()?;
+            ctx.local(12, 0)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.call(11, 0, 1)?;
+                ctx.bind(14, 0)?;
+                ctx.begin()?;
+                ctx.local(14, 0)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
+                ctx.call(12, 2, 1)?;
+                ctx.set_index(1, 0)?;
+                ctx.begin()?;
+                ctx.list(0, 0)?;
+                ctx.assign(3, 0)?;
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(4, 1)?;
+                ctx.local(4, 2)?;
+                ctx.literal(11, 3)?;
+                ctx.call(4, 2, 2)?;
+                ctx.call(13, 0, 3)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
+                ctx.call(12, 2, 1)?;
+                ctx.set_index(1, 0)?;
+                ctx.unbind(14);
+            } else {
+                ctx.begin()?;
+                ctx.local(11, 0)?;
+                ctx.pin(0)?;
+                ctx.local(3, 1)?;
+                ctx.local(3, 2)?;
+                ctx.call(12, 2, 1)?;
+                ctx.set_index(1, 0)?;
+            }
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(11, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.assign(4, 0)?;
+            ctx.unbind(12);
+            ctx.unbind(11);
+            ctx.unbind(10);
+            ctx.unbind(9);
+            ctx.unbind(8);
+            ctx.unbind(7);
+        } else {
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.call(11, 0, 1)?;
+            ctx.bind(15, 0)?;
+            ctx.begin()?;
+            ctx.local(15, 0)?;
+            ctx.pin(0)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(12, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.list(0, 0)?;
+            ctx.assign(3, 0)?;
+            ctx.begin()?;
+            ctx.local(4, 0)?;
+            ctx.literal(6, 1)?;
+            ctx.call(4, 0, 2)?;
+            ctx.bind(16, 0)?;
+            ctx.begin()?;
+            ctx.literal(12, 0)?;
+            ctx.local(6, 1)?;
+            ctx.call(9, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(6, 0)?;
+                ctx.literal(13, 1)?;
+                ctx.call(9, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(16, 0)?;
+                    ctx.literal(6, 1)?;
+                    ctx.call(4, 0, 2)?;
+                    ctx.assign(16, 0)?;
+                }
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(4, 1)?;
+            ctx.local(16, 2)?;
+            ctx.call(13, 0, 3)?;
+            ctx.pin(0)?;
+            ctx.local(2, 1)?;
+            ctx.local(2, 2)?;
+            ctx.call(12, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.begin()?;
+            ctx.local(16, 0)?;
+            ctx.assign(4, 0)?;
+            ctx.unbind(16);
+            ctx.unbind(15);
+        }
+        ctx.unbind(6);
+        ctx.begin()?;
+    }
+    ctx.begin()?;
+    ctx.local(3, 0)?;
+    ctx.call(11, 0, 1)?;
+    ctx.bind(17, 0)?;
+    ctx.begin()?;
+    ctx.local(17, 0)?;
+    ctx.pin(0)?;
+    ctx.local(2, 1)?;
+    ctx.local(2, 2)?;
+    ctx.call(12, 2, 1)?;
+    ctx.set_index(1, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(14, 1)?;
+    ctx.call(14, 0, 2)?;
     Ok(ctx.take(0))
 }

@@ -51,7 +51,7 @@ fn run_rule(rule: &str, text: &str) {
     run_shard(&shard, registry);
 }
 
-fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
+pub(super) fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
     let mut registry = lash_kernel_doc::FunctionRegistry::new();
     lash_kernel_vm::register_machine_functions(&mut registry).expect("register kernel functions");
     lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");

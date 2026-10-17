@@ -7,12 +7,12 @@ py.exc.name	01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1	clo
 py.exc.args	0c324b55f60d7ca736dd443b52948cedeedf99941596e480fdb6628b6b027cf8	closed	-	false	0	false	6	generated
 py.float_text	6969aff90755003d65ee43d90645aa4fba5ed3c364c1e52555d4ed9641185229	closed	-	false	0	false	8	generated
 py.text_repr	1475159c83989aa624b02296b831c8181413d61443fcb85183d6fffd53d9be82	closed	-	true	0	false	sum(4, size(value), size(result))	generated
-py.repr	a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf	callback	apply go; apply go; apply go; apply go; apply go; apply go; apply go	true	1	false	sum(8, deep_size(value), size(result))	reaches callback
-py.str	05cc5cafbf50563ff5236cae76777ea49f28c3a3a6f7835d5e3e6180ce3ac599	callback	invoke py.repr	true	0	false	sum(8, deep_size(value), size(result))	reaches callback
+py.repr	a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf	callback	apply go	false	1	false	sum(8, deep_size(value), size(result))	reaches callback
+py.str	05cc5cafbf50563ff5236cae76777ea49f28c3a3a6f7835d5e3e6180ce3ac599	callback	invoke py.repr	false	0	false	sum(8, deep_size(value), size(result))	reaches callback
 py.type	a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b	closed	-	false	0	false	8	generated
 py.fail	3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef	closed	-	false	0	false	4	generated
 py.exc.check_cause	a054b750476f5e55fa51236f2b773f46c4d4e40f8d24955bbdba72fadd8ff9ae	closed	-	false	0	false	4	generated
-py.exc.new	38d40e4b2c888250e5d1c5464c9a5ee3bfa0f7585343850875f64caf80a80586	callback	invoke py.str; invoke py.repr	true	0	false	sum(8, deep_size(args))	reaches callback
+py.exc.new	38d40e4b2c888250e5d1c5464c9a5ee3bfa0f7585343850875f64caf80a80586	callback	invoke py.str; invoke py.repr	false	0	false	sum(8, deep_size(args))	reaches callback
 py.exc.cause	389dc5e831f2af227bbb93909df31bce956fef2583e0067e160f08bdc19196b6	closed	-	false	0	false	6	generated
 py.exc.with_cause	aa38ae905df68ff9171a98d0c78e170e1e8b43cef90640c98d3c9a7828053b15	closed	-	false	0	false	8	generated
 py.exc.matches	970eccd13df97c9a0c1e0ed679f9e252e831fd2026c3de1c597c8e85e7e56391	closed	-	false	0	false	sum(6, size(names))	generated
@@ -38,7 +38,7 @@ py.pos	0083a86870927d3bec4578864e38d0e9abb5909ae95354a3355b56dd020276e0	closed	-
 py.set_op	3f213860fea5919e82388afd49d9222db298e5a21269910593318fc7a9175e8d	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.contains	e842aa699eb6254bfc9633a3ec23f47078c191eaa0f9e515c13bf383de91c3e5	closed	-	false	0	false	sum(4, size(container), deep_size(item))	generated
 py.index	9685d56e4df2598398b295708f932de975b666fad5382eb6e29ac2c7ed5464c2	closed	-	false	0	false	6	generated
-py.getitem	81bbe1cbf45f89eed18711f1d5f4bb9f8bd9401d15620a6e056c595fa58a4f1f	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	reaches callback
+py.getitem	81bbe1cbf45f89eed18711f1d5f4bb9f8bd9401d15620a6e056c595fa58a4f1f	callback	invoke py.repr	false	0	false	sum(6, deep_size(index))	reaches callback
 py.setitem	edba14b7556da4f04334afd9562b8aff746ca76196458bc9963eee614fbd866f	closed	-	true	0	false	sum(6, deep_size(index))	generated
 py.delitem	9e45a8142fc655d1b6b6b2edb263eed25130ac98f0e08a403f20f250acf6311e	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	reaches callback
 py.slice	32a4ec519b21da247d9491590b0a8f96154648c4b5791e2afe72bdeb875ed612	closed	-	true	0	false	sum(8, size(target), size(result))	generated
@@ -48,7 +48,7 @@ py.for_in.check	c85c33d14ac1847f1c08b7354b0227e0fcdceb1b53426309b174b0251c05a7c3
 py.to_tuple	b827a2c3c5ed1d384081d813f79221488b02746c927fc6f3d0e18867806f696f	closed	-	false	0	false	sum(4, product(size(value), size(value)))	generated
 py.to_set	baab499d6282e9a1389bd28bda2a16d69e1f946f385d1e87760c18b79881ffde	closed	-	true	0	false	sum(4, size(value), size(result))	generated
 py.to_dict	227b675ca9c54caa20bf67cafa644392783d3d4beb077c7b6d2abbd015dcabf2	closed	-	true	0	false	sum(4, size(value), size(result))	generated
-py.reply	09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd	callback	apply go; apply go; apply go	true	1	false	sum(4, deep_size(value))	reaches callback
+py.reply	09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd	callback	apply go	false	1	false	sum(4, deep_size(value))	reaches callback
 py.unpack	bafb3552cd76e71cc1d796b6ba145efc45ff10a6c2fb0319d18cae3cdada7add	closed	-	false	0	false	sum(4, size(value))	generated
 py.show	33435cbf56c96e267b0d6ca1fb4709b7d46e59c1f1c0e9bdec869cbe0e5e5b67	callback	invoke py.str	true	0	false	sum(4, deep_size(args), size(result))	reaches callback
 py.number_text	f3bb7eff92d6abcdf0deb8f37e46017836cb753a92b8c19657a8f3751a757689	closed	-	true	0	false	sum(8, size(value), size(result))	generated
@@ -59,30 +59,35 @@ py.abs	431d7c66bf4f61735231ee2ed3042976e11af283e98acad6f74dc65b9a96da69	closed	-
 py.extreme	a6f4e04841dcf8f7c2d1f0eef75ad7064e9a26ac3da807c3e482e6e185a9d9a6	closed	-	false	0	false	sum(4, deep_size(args))	generated
 py.sum	82bb75745974ce3d788ba064bef208d2c7dc85ded5ce201c4e9f27673f5da443	closed	-	false	0	false	sum(4, deep_size(values))	generated
 py.sorted	567414aae860816c3ea975cb4a7b12aaaebca7ddb91fa467942e1d5a7e95e66e	callback	apply key; invoke list.sort	true	1	false	sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))	reaches callback
-py.range	bfa1a2450157b5454b0426dea95595bfb9d9f876c17cf425d3ffe2f33c49dc82	closed	-	true	0	false	sum(4, size(result))	calls collection.range, which no plan answers
+collection.range	415c2e292b3d92d430c2d45093ced467eb1753e255ee1fe0b668296f84153d4b	closed	-	true	0	false	sum(1, size(start), size(end), size(step), size(result))	generated
+py.range	bfa1a2450157b5454b0426dea95595bfb9d9f876c17cf425d3ffe2f33c49dc82	closed	-	true	0	false	sum(4, size(result))	generated
 py.enumerate	1de49ea81aff57fcf4bc8a03f43a943ac5a082d8c3d60edfde47f3d4c4cf4f18	closed	-	true	0	false	sum(4, size(values), size(result))	generated
 py.zip	21f07038f87df9c3268bb20ac1e1d187b20c5e009d7a0f94b86455408b2fcf01	closed	-	true	0	false	sum(4, deep_size(sequences), size(result))	generated
 py.reversed	e670bd817b6cefb3dd7470fe487e13577463e4c626478eed68938ae70b71b1f5	closed	-	true	0	false	sum(4, size(values), size(result))	generated
 py.any	2ac4f16f711695cbb7cc99847be0abf2ea0cb917658141662f2301523e50d41e	closed	-	false	0	false	sum(4, size(values))	generated
 py.all	cee33bf6e90e2dcefea6dfa8ec317617fdbeb5fc33a9c87475012c99dded6d3d	closed	-	false	0	false	sum(4, size(values))	generated
-py.round	6e855902bff349776940f5c1641f7bace0d126b8e11de52cff1a6781cbe3eb2b	closed	-	false	0	false	sum(6, size(value))	has a `try`
+py.round	6e855902bff349776940f5c1641f7bace0d126b8e11de52cff1a6781cbe3eb2b	closed	-	false	0	false	sum(6, size(value))	generated
 py.isinstance	83dd010611c22781bd37914cc6a65000a8d41b2a8ecc2f89e3e94739ae2c9f9a	closed	-	false	0	false	sum(8, size(names))	generated
 py.ord	abb2bfaebabf9882ef8963b68b62dce5ba3b0267d780880288c01288d7222b2e	closed	-	false	0	false	6	generated
-py.chr	599edda7a88d3bb03944491eba320102601d6def211ad99cc787c71d97f704f0	closed	-	false	0	false	6	has a `try`
+py.chr	599edda7a88d3bb03944491eba320102601d6def211ad99cc787c71d97f704f0	closed	-	false	0	false	6	generated
 py.divmod	b56aa7e0edfe60360ffb593445e8e05199779487d55d676ca692b678882825f0	closed	-	false	0	false	sum(6, size(left), size(right))	generated
 py.no_attribute	cc460bdde925d3a4a0a89b496f25b152d4d5b2b9c0c65e0cf7ea9a533080ab26	closed	-	false	0	false	8	generated
 py.text_of	623418b0e4b10f4d93319363df18dfaadbbc269e311291e7b245e90aead6a66a	closed	-	false	0	false	6	generated
 py.method.append	d8fa186a8c5784053d9e47d83b231e2bae49e435d560e60788186a51b79fda9c	closed	-	true	0	false	4	generated
 py.method.extend	191b4ab641cd018d2978ac62f65793ef1d6de32e39361f98170fa18f8f5d75d2	closed	-	true	0	false	sum(4, size(values))	generated
-py.method.insert	542592a2123339e2660adf9d6c1d38e656df34d5bd857c1c6690d4177118da84	closed	-	true	0	false	sum(4, size(self))	calls list.insert, which no plan answers
+list.insert	5a0d3fe6f74c55499875a896627ad3f436dfce898ba80f6a592ad6abd4224193	closed	-	true	0	false	sum(1, size(xs), size(index))	generated
+py.method.insert	542592a2123339e2660adf9d6c1d38e656df34d5bd857c1c6690d4177118da84	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.pop	8aaa99b70ecb88aed81e20bdd6ce35bf3dad1d5200bf4063603148660cdc71e2	callback	invoke py.repr	true	0	false	sum(6, size(self))	reaches callback
 py.method.remove	9e353af06cab8c661de706bd17a64c7710ae8b613d6b12f04a5db30605c7729e	callback	invoke py.repr	true	0	false	sum(6, size(self), deep_size(value))	reaches callback
-py.method.index	d9a2747829ce914a42d94450ff4ea60378549a5333028bd9c8ffad4f473d7bc2	callback	invoke py.repr	true	0	false	sum(6, size(self), deep_size(value))	reaches callback
+py.method.index	d9a2747829ce914a42d94450ff4ea60378549a5333028bd9c8ffad4f473d7bc2	callback	invoke py.repr	false	0	false	sum(6, size(self), deep_size(value))	reaches callback
 py.method.count	e495fc8d3619334722227bc170c6936f21eca799404e70c92464f112bdbbfe55	closed	-	false	0	false	sum(6, size(self), deep_size(value))	generated
 py.method.sort	7f348fc8b070b9485a03e841b52bfceefa75bcb30d23bed2e22fca1d4b56755d	callback	invoke py.sorted	true	0	true	sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))	reaches callback
 py.method.reverse	f69089761e00d70b3a3b2185a047f5655c5e5616d6064a7d56abbb4e80b7018f	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.copy	fe9c064f3103b290740c50f10befb3e09c5523f7df21c734fb7fd4296221a66c	closed	-	false	0	false	sum(4, size(self))	generated
-py.method.clear	2a3ccd5da97a7ff4e95ea0ead1c01ede9741f32eceb9a7a9a057e64ca64ffaa2	closed	-	true	0	false	sum(4, size(self))	calls list.clear, which no plan answers
+list.clear	60cfea808c1d6121cea1f0605e928b4418db7d358e8d47f0ea09427c4580c0ea	closed	-	true	0	true	sum(1, size(xs))	generated
+set.clear	6d4225498b59acfc8fe9b3bf66fd8317e7fda53c22e280ebe56e7588a51f2b2c	closed	-	true	0	true	sum(1, size(xs))	generated
+map.clear	b6b4a4935fb30716ed7d17317c7ac62b39f870b12b2bf48f0448d50cf6c05edb	closed	-	true	0	true	sum(1, size(xs))	generated
+py.method.clear	2a3ccd5da97a7ff4e95ea0ead1c01ede9741f32eceb9a7a9a057e64ca64ffaa2	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.get	13c0ba23ee431a4f0803a6735f8303d9886afd7e08a015db4d6ef08588e0f602	closed	-	false	0	false	sum(4, deep_size(key))	generated
 py.method.keys	787768a4dcc1a2d4ccbddfa7492910ad6f22e49ef1754a3c76a0de0da4ab1c6f	closed	-	false	0	false	sum(4, size(self))	generated
 py.method.values	7fd285df5db5323157d64877467cecb2f16ff48e4f69cbf7ca8884747d818311	closed	-	false	0	false	sum(4, size(self))	generated
@@ -113,7 +118,7 @@ py.method.find	0dc27a7f5aa712714e3d18089dcb5735e0b2a70a3bc01d6e9a1b2251076c99ff	
 py.method.cancel	39392446d80435d3dd505a0c0af4efb4ba7df4b3fb6a801933ca126a0e823232	task	cancel; invoke tasks.unfinished	false	0	false	4	reaches task
 py.format.group	9d79836c47f60eb7508bb6940eefe0ebe17440c0d0367d8bb31475ac3d2b7a4a	closed	-	false	0	true	sum(4, product(size(digits), size(digits)))	generated
 py.format.exponent	e0c384de6f3c69eb2b70927638cfa6680839116e46862634b83d71e5e3ebb384	closed	-	false	0	false	sum(4, size(digits))	generated
-py.format	544888b4d84caf800c323aff85494689b2f19390373d7cacfb5783b7b4b525ee	callback	invoke py.str; invoke py.repr	true	0	false	sum(16, deep_size(value), size(result), magnitude(width))	reaches callback
+py.format	544888b4d84caf800c323aff85494689b2f19390373d7cacfb5783b7b4b525ee	callback	invoke py.str; invoke py.repr	false	0	false	sum(16, deep_size(value), size(result), magnitude(width))	reaches callback
 py.task.run	f38fc4ff1301b8bba9c3622fe2e6672fad1adb700b7775a10af1d8af6bb9773f	callback	apply work; yield	false	0	false	6	reaches callback
 py.await	253110ca57c3a217a7d1592e0c59a03d28570acbd3ac3ea117d5d4825c2fae2d	task	cancel; join	false	0	false	6	reaches task
 py.await.result	7ed7b501c451d25962befebb947a2851a7331623e42af8d0c1c645e27bf3118a	host	invoke py.await	false	0	false	6	reaches host

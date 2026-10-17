@@ -191,7 +191,12 @@ fn own(definition: &FunctionDefinition) -> Own {
             },
             Node::Action(action) => action_facts(action, &mut own),
             Node::Expr(expr) => match expr {
-                Expr::Closure(_) => own.closures += 1,
+                Expr::Closure(_) => {
+                    // Making a closure executes none of its body. Its calls,
+                    // writes and host reads happen later as ordinary code.
+                    own.closures += 1;
+                    continue;
+                }
                 Expr::Clock => own.host.push("clock".into()),
                 Expr::Random => own.host.push("random".into()),
                 Expr::Read(_) => own.host.push("read".into()),

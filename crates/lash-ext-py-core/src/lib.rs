@@ -30,12 +30,13 @@ pub enum ImplementError {
 
 /// Installs each plan of [`PLANS`] beside the helper of `helpers` it was
 /// compiled from. A plan of a helper the registry does not hold is not
-/// installed.
+/// installed. Closed kernel callee plans are installed as dependencies;
+/// an already installed kernel plan is shared by both dialects.
 ///
 /// # Errors
 ///
-/// [`ImplementError::Registry`] when a helper has a native already, or a
-/// plan calls a body the registry answers with neither a plan nor a native.
+/// [`ImplementError::Registry`] when a helper already has a plan or a
+/// closed callee has neither a total native nor a body plan.
 pub fn implement(
     registry: &mut FunctionRegistry,
     helpers: impl IntoIterator<Item = FunctionId>,
@@ -44,7 +45,14 @@ pub fn implement(
     let plans: Vec<&'static lash_kernel_doc::plan::HelperPlan> = PLANS
         .iter()
         .copied()
-        .filter(|plan| helpers.contains(&plan.function))
+        .filter(|plan| {
+            helpers.contains(&plan.function)
+                || !plan.name.starts_with("py.")
+                    && !plan.name.starts_with("ts.")
+                    && registry
+                        .get(&plan.function)
+                        .is_some_and(|registered| registered.plan().is_none())
+        })
         .collect();
     registry.install_plans(&plans)?;
     Ok(())

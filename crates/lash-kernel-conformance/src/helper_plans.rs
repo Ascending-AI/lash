@@ -65,8 +65,17 @@ fn run<const L: u64>(
     program: &Program,
     projector: &mut Projector<'_>,
 ) -> Observed {
+    run_bounded::<L>(case, program, projector, 50_000_000)
+}
+
+fn run_bounded<const L: u64>(
+    case: &runner::Case,
+    program: &Program,
+    projector: &mut Projector<'_>,
+    charge: u64,
+) -> Observed {
     let bounds = Bounds {
-        charge: 50_000_000,
+        charge,
         memory: 64 << 20,
         call_depth: 200,
         live_tasks: 100,
@@ -168,7 +177,7 @@ fn depth_cases(dialect: &str) -> Vec<runner::Case> {
         .collect()
 }
 
-fn compare(dialect: &str, parity: Option<usize>) {
+fn compare(dialect: &str, shard: Option<usize>) {
     let mut cases: Vec<runner::Case> = serde_json::from_str(include_str!(
         "../../lash-dialect-typescript/tests/helper_differential/cases.json"
     ))
@@ -183,7 +192,7 @@ fn compare(dialect: &str, parity: Option<usize>) {
         .filter(|case| case.dialect == dialect)
         .enumerate()
     {
-        if parity.is_some_and(|parity| index % 2 != parity) {
+        if shard.is_some_and(|shard| index % 16 != shard) {
             continue;
         }
         println!("{dialect}: checking {}", case.id);
@@ -253,17 +262,100 @@ fn compare(dialect: &str, parity: Option<usize>) {
     println!("{dialect}: helper schedule plan comparisons={compared}");
 }
 
-/// K-CHG-003/007 and PLAN-INDEP: the TypeScript helper corpus preserves
-/// values, errors, effects, charge and canonical checkpoints across plans.
+/// K-CHG-003/007 and PLAN-INDEP: shard 0/16 of the unchanged TS corpus.
 #[test]
-fn typescript_even_helper_schedules_survive_native_fallback_and_cold_resume() {
+fn typescript_00_helper_schedules_survive_native_fallback_and_cold_resume() {
     compare("typescript", Some(0));
 }
 
-/// K-CHG-003/007 and PLAN-INDEP: the other half of the same corpus.
+/// K-CHG-003/007 and PLAN-INDEP: shard 1/16 of the unchanged TS corpus.
 #[test]
-fn typescript_odd_helper_schedules_survive_native_fallback_and_cold_resume() {
+fn typescript_01_helper_schedules_survive_native_fallback_and_cold_resume() {
     compare("typescript", Some(1));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 2/16 of the unchanged TS corpus.
+#[test]
+fn typescript_02_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(2));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 3/16 of the unchanged TS corpus.
+#[test]
+fn typescript_03_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(3));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 4/16 of the unchanged TS corpus.
+#[test]
+fn typescript_04_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(4));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 5/16 of the unchanged TS corpus.
+#[test]
+fn typescript_05_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(5));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 6/16 of the unchanged TS corpus.
+#[test]
+fn typescript_06_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(6));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 7/16 of the unchanged TS corpus.
+#[test]
+fn typescript_07_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(7));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 8/16 of the unchanged TS corpus.
+#[test]
+fn typescript_08_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(8));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 9/16 of the unchanged TS corpus.
+#[test]
+fn typescript_09_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(9));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 10/16 of the unchanged TS corpus.
+#[test]
+fn typescript_10_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(10));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 11/16 of the unchanged TS corpus.
+#[test]
+fn typescript_11_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(11));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 12/16 of the unchanged TS corpus.
+#[test]
+fn typescript_12_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(12));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 13/16 of the unchanged TS corpus.
+#[test]
+fn typescript_13_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(13));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 14/16 of the unchanged TS corpus.
+#[test]
+fn typescript_14_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(14));
+}
+
+/// K-CHG-003/007 and PLAN-INDEP: shard 15/16 of the unchanged TS corpus.
+#[test]
+fn typescript_15_helper_schedules_survive_native_fallback_and_cold_resume() {
+    compare("typescript", Some(15));
 }
 
 /// K-CHG-003/007 and PLAN-INDEP: the same schedule contract for Python.
@@ -289,4 +381,152 @@ fn empty_python_sequence_repetition_charges_its_declared_tests() {
         runner.run(&case).unwrap().charged
     };
     assert_eq!(charge(9) - charge(5), 2 * (9 - 5));
+}
+
+#[rustfmt::skip]
+#[path = "helper_plan_control_generated.rs"]
+mod control;
+
+fn control_program(source: &str) -> Program {
+    use lash_kernel_dialect::{NamedLibrary, define_functions};
+    use std::sync::Arc;
+    let mut registry = crate::tests::corpus_registry();
+    let mut names = NamedLibrary::from_registry(&registry).unwrap();
+    for definition in define_functions(
+        include_str!("../../lash-ext-helper-compiler/tests/control.kernel"),
+        &mut names,
+    )
+    .unwrap()
+    {
+        let native = (definition.name.as_str() == "law.declining").then(|| {
+            std::sync::Arc::new(Declining) as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>
+        });
+        registry.register(definition, native).unwrap();
+    }
+    assert_eq!(
+        registry.install_plans(control::PLANS).unwrap(),
+        control::PLANS.len(),
+        "the compiled control fixture matches its admitted bodies"
+    );
+    let mut source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
+    for (function, registered) in registry.iter() {
+        source.push_str(&format!(
+            "use {} = @{function}\n",
+            registered.definition().name
+        ));
+    }
+    Program {
+        release: crate::pages::RELEASE,
+        document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+    }
+}
+
+fn compare_control(source: &str, charge: u64) -> Observed {
+    let program = control_program(source);
+    let case = runner::Case {
+        id: "control".into(),
+        dialect: "kernel".into(),
+        source: source.into(),
+        bits: 0,
+        stride: 0,
+        nanoseconds: 0,
+    };
+    let expected = run_bounded::<3>(&case, &program, &mut Projector::default(), charge);
+    assert_eq!(
+        run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
+        expected
+    );
+    assert_eq!(
+        run_bounded::<1>(&case, &program, &mut Projector::default(), charge),
+        expected
+    );
+    expected
+}
+
+/// K-FORM-014..017: catch sees only guest raises, cleanup runs in order,
+/// and its departure replaces the return or raise it interrupted.
+#[test]
+fn generated_handlers_preserve_typed_raises_departures_and_cleanup_order() {
+    for (mode, answer, raised) in [
+        (0, 20, Some("guest")),
+        (1, 10, None),
+        (2, 20, Some("division_by_zero")),
+        (3, 40, None),
+    ] {
+        let observed = compare_control(
+            &format!(
+                "main {{ let log = [] let answer = invoke law.handlers({mode}, log) return (answer, log) }}"
+            ),
+            1_000_000,
+        );
+        let mut log = vec![Datum::Int(1.into()), Datum::Int(2.into())];
+        if let Some(kind) = raised {
+            log.push(Datum::Text(kind.into()));
+        }
+        log.extend([Datum::Int(99.into()), Datum::Int(100.into())]);
+        assert_eq!(
+            observed.end,
+            crate::ExpectedEnd::Finished(Datum::Tuple(vec![
+                Datum::Int(answer.into()),
+                Datum::List(log)
+            ]))
+        );
+    }
+    let halted = compare_control("main { let value = invoke law.halt() return value }", 31);
+    assert!(matches!(halted.end, crate::ExpectedEnd::Bound { .. }));
+}
+
+/// K-FORM-004/K-FN-005/K-CHG-007: closures share the original cells and
+/// execute later as charged ordinary code, with their logical depth unit.
+#[test]
+fn generated_closures_share_cells_and_keep_ordinary_charge_and_depth() {
+    let source = "main { let pair = invoke law.factory(5) let increment = pair.increment let peek = pair.peek let first = apply increment(2) let second = apply increment(3) let state = apply peek() return (first, second, state) }";
+    let observed = compare_control(source, 1_000_000);
+    assert_eq!(
+        observed.end,
+        crate::ExpectedEnd::Finished(Datum::Tuple(vec![
+            Datum::Int(7.into()),
+            Datum::Int(10.into()),
+            Datum::Tuple(vec![Datum::Int(6.into()), Datum::Int(10.into())])
+        ]))
+    );
+    // Each ordinary closure's charged trace and each refusal point survive
+    // the plan/body choice, including the formula completion boundary.
+    for charge in 0..=observed.charged {
+        compare_control(source, charge);
+    }
+    for depth in 190..=200 {
+        compare_control(
+            &format!(
+                "fn descend(n, f) {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = call descend(next, f) return value }} main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend({depth}, peek) return value }}"
+            ),
+            1_000_000,
+        );
+    }
+}
+
+struct Declining;
+impl lash_kernel_doc::NativeFunction for Declining {
+    fn call(
+        &self,
+        _: lash_kernel_doc::NativeCall<'_>,
+    ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+        Err(lash_kernel_doc::NativeError::Decline)
+    }
+}
+
+/// K-LIB-006: the native is offered once, then its body's mutations are
+/// performed once by the generated callee plan under the same admission.
+#[test]
+fn generated_callees_run_a_declined_body_once() {
+    let observed = compare_control(
+        "main { let log = [] let answer = invoke law.decline_caller(log) return answer }",
+        1_000_000,
+    );
+    let log = Datum::List(vec![Datum::Int(1.into())]);
+    assert_eq!(
+        observed.end,
+        crate::ExpectedEnd::Finished(Datum::Tuple(vec![log.clone(), log]))
+    );
 }

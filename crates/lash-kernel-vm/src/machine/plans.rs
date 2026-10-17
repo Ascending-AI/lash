@@ -13,9 +13,9 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
-use lash_kernel_doc::{TaskId, Value};
+use lash_kernel_doc::{EntityId, Identity, TaskId, Value};
 use lash_kernel_exec::{Reg as KirReg, RegRange};
-use lash_kernel_state::paged::SemanticHeap;
+use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
 
 use super::loops::Cursor;
 use super::ops::Reg;
@@ -44,6 +44,7 @@ struct PlanRun<'m> {
     /// The caller's argument registers: the plan's parameters, which a
     /// plan reads where the native path reads them.
     args: Reg,
+    entry: Option<&'m super::operation_entry::OperationEntry>,
     /// The first of the plan's operand registers.
     base: Reg,
     /// The first of its variables' registers.
@@ -55,6 +56,32 @@ struct PlanRun<'m> {
 }
 
 impl PlanRun<'_> {
+    fn shared(&self, slot: u32) -> bool {
+        self.prepared.locals[slot as usize].is_some_and(|local| local.shared)
+    }
+
+    fn cell(&self, slot: u32) -> Result<EntityId, Halt> {
+        match self.machine.regs[self.slots + slot as usize] {
+            Value::Ref(Identity::Object(cell)) => Ok(cell),
+            _ => Err(fault("a plan's captured variable has no cell")),
+        }
+    }
+
+    fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
+        let value = self.machine.canonical_binding(value);
+        let value = self.held(value)?;
+        let holding = if self.shared(slot) {
+            let allocated = self.machine.alloc(ObjectInit::Variable(value.clone()));
+            Value::Ref(Identity::Object(self.held(allocated)?))
+        } else {
+            let reserved = self.machine.reserve_held(value_bytes(&value));
+            self.held(reserved)?;
+            value.clone()
+        };
+        self.machine.put(self.slots + slot as usize, holding);
+        Ok(value)
+    }
+
     fn exit(&mut self, interrupt: Interrupt) -> PlanExit {
         match interrupt {
             Interrupt::Raise(value) => PlanExit::Raise(*value),
@@ -124,7 +151,26 @@ impl PlanContext for PlanRun<'_> {
         // The argument stays: the formula is charged on what was passed, as
         // the body's frame retains it.
         let value = self.machine.regs[self.args + index as usize].clone();
-        self.machine.put(self.slots + slot as usize, value);
+        if self.shared(slot) {
+            let admitted = self
+                .entry
+                .and_then(|entry| entry.shared.get(index as usize))
+                .copied()
+                .flatten();
+            let cell = match admitted {
+                Some(cell) => cell,
+                None => {
+                    let allocated = self.machine.alloc(ObjectInit::Variable(value));
+                    self.held(allocated)?
+                }
+            };
+            self.machine.put(
+                self.slots + slot as usize,
+                Value::Ref(Identity::Object(cell)),
+            );
+        } else {
+            self.machine.put(self.slots + slot as usize, value);
+        }
         Ok(())
     }
 
@@ -138,23 +184,35 @@ impl PlanContext for PlanRun<'_> {
     }
 
     fn local(&mut self, slot: u32, dst: u32) -> Result<(), PlanExit> {
-        let value = self.machine.regs[self.slots + slot as usize].clone();
+        let value = if self.shared(slot) {
+            let cell = self.cell(slot);
+            let cell = self.held(cell)?;
+            let value = self.machine.heap.variable_get(cell).map_err(Halt::from);
+            self.held(value)?
+        } else {
+            self.machine.regs[self.slots + slot as usize].clone()
+        };
         self.machine.put(self.base + dst as usize, value);
         Ok(())
     }
 
     fn bind(&mut self, slot: u32, src: u32) -> Result<(), PlanExit> {
         let value = self.machine.take(self.base + src as usize);
-        let value = self.machine.canonical_binding(value);
-        let value = self.held(value)?;
-        let reserved = self.machine.reserve_held(value_bytes(&value));
-        self.held(reserved)?;
-        self.machine.put(self.slots + slot as usize, value);
+        self.bind_value(slot, value)?;
         Ok(())
     }
 
     fn assign(&mut self, slot: u32, src: u32) -> Result<(), PlanExit> {
         let value = self.machine.take(self.base + src as usize);
+        if self.shared(slot) {
+            let cell = self.cell(slot);
+            let cell = self.held(cell)?;
+            let written = self.machine.heap_write(|heap| {
+                heap.variable_write(cell, value.clone())
+                    .map_err(Interrupt::from)
+            });
+            return self.check(written);
+        }
         let at = self.slots + slot as usize;
         let growth = value_bytes(&value).saturating_sub(value_bytes(&self.machine.regs[at]));
         if growth != 0 {
@@ -169,6 +227,49 @@ impl PlanContext for PlanRun<'_> {
     fn unbind(&mut self, slot: u32) {
         let at = self.slots + slot as usize;
         self.machine.regs.clear_range(at..at + 1);
+    }
+
+    fn closure(&mut self, closure: u32, dst: u32) -> Result<(), PlanExit> {
+        let code = self.prepared.closures[closure as usize];
+        let mut cells = Vec::new();
+        for capture in &self.exe.code(code).captures {
+            let slot = self
+                .prepared
+                .locals
+                .iter()
+                .position(|local| local.is_some_and(|local| local.slot == capture.outer));
+            let Some(slot) = slot else {
+                return self.held(Err(fault("a plan closure has no captured declaration")));
+            };
+            let cell = self.cell(slot as u32);
+            cells.push(self.held(cell)?);
+        }
+        let made = self.machine.make_closure(self.exe, code, &cells);
+        let value = Value::Closure(self.check(made)?);
+        self.machine.put(self.base + dst as usize, value);
+        Ok(())
+    }
+
+    fn retain(&mut self, value: Value, slot: u32) -> Result<Value, PlanExit> {
+        if !self.prepared.plan.slots[slot as usize].name.is_empty() {
+            return self.bind_value(slot, value);
+        }
+        // A pending departure is a borrowed payload, not a new binding.
+        // Its private register roots it across finally's statement marks.
+        let canonical = self
+            .machine
+            .heap_write(|heap| heap.canonical_value(value.clone()).map_err(Interrupt::from));
+        let value = self.check(canonical)?;
+        self.machine.put(self.slots + slot as usize, value.clone());
+        Ok(value)
+    }
+
+    fn scope(&self) -> u32 {
+        self.cursors.len() as u32
+    }
+
+    fn unwind(&mut self, scope: u32) {
+        self.close(PlanCursor(scope));
     }
 
     fn call(&mut self, callee: u32, args: u32, count: u32) -> Result<(), PlanExit> {
@@ -354,6 +455,7 @@ impl KernelMachine {
         lib: LibId,
         plan: &Arc<PreparedPlan>,
         args: Reg,
+        entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Result<Value, Value>> {
         // The call's depth unit (`K-BND-002`): an operation's admission
         // checked it; any other plan's is checked as its body's frame is at
@@ -365,7 +467,7 @@ impl KernelMachine {
         let base = self.regs.extent().max(args + arity);
         let registers = plan.plan.registers as usize;
         let slots = base + registers;
-        let end = slots + plan.plan.slots as usize;
+        let end = slots + plan.plan.slots.len();
         self.regs.window(end);
         let charging = std::mem::replace(&mut self.charging, false);
         self.plans += 1;
@@ -375,6 +477,7 @@ impl KernelMachine {
             exe,
             prepared: plan,
             args,
+            entry,
             base,
             slots,
             cursors: Vec::new(),

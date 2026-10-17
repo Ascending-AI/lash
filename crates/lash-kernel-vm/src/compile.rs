@@ -327,13 +327,18 @@ impl PreparedLibrary {
                     (None, Some(_), Some(body)) if layout.declines() => LibRun::Body(body),
                     (None, None, Some(body)) if !layout.declines() => match registered.plan() {
                         Some(plan) => LibRun::Plan {
-                            plan: Arc::new(PreparedPlan::new(plan, &lib_of, layout)),
+                            plan: Arc::new(PreparedPlan::new(plan, &lib_of, layout, body, &tables)),
                             body,
                         },
                         None => LibRun::Body(body),
                     },
                     (None, Some(native), body) => LibRun::Native {
                         native: Arc::clone(native),
+                        fallback: body.and_then(|body| {
+                            registered.plan().map(|plan| {
+                                Arc::new(PreparedPlan::new(plan, &lib_of, layout, body, &tables))
+                            })
+                        }),
                         body,
                     },
                     // A function with no native registered has a body, and
@@ -370,6 +375,7 @@ impl PreparedLibrary {
                         LibRun::Native {
                             native,
                             body: Some(_),
+                            ..
                         },
                         doc::Formula::Constant(units),
                     ) if limit.is_none() && layout.0.is_multiple_of(2) => {
@@ -765,6 +771,8 @@ pub(crate) enum LibRun {
     Native {
         native: Arc<dyn NativeFunction>,
         body: Option<CodeId>,
+        /// The same body's plan runs a decline without re-offering the native.
+        fallback: Option<Arc<PreparedPlan>>,
     },
     /// The body's generated plan, which answers every call; the body's
     /// code stays for a frame saved inside it (FIG-6678).
@@ -784,6 +792,8 @@ pub(crate) struct PreparedPlan {
     pub(crate) callees: Vec<LibId>,
     pub(crate) literals: Vec<Constant>,
     pub(crate) fields: Vec<Field>,
+    pub(crate) locals: Vec<Option<Local>>,
+    pub(crate) closures: Vec<CodeId>,
 }
 
 impl PreparedPlan {
@@ -791,6 +801,8 @@ impl PreparedPlan {
         plan: &'static doc::plan::HelperPlan,
         lib_of: &BTreeMap<FunctionId, LibId>,
         layout: Layout,
+        body: CodeId,
+        tables: &Tables,
     ) -> Self {
         use doc::plan::PlanLiteral;
         let callees = plan
@@ -824,11 +836,48 @@ impl PreparedPlan {
             .iter()
             .map(|name| Field::new(name, layout))
             .collect();
+        let code = &tables.codes[body.0 as usize];
+        let locals = plan
+            .slots
+            .iter()
+            .map(|local| {
+                code.slots
+                    .iter()
+                    .enumerate()
+                    .find(|(_, slot)| {
+                        slot.name.as_str() == local.name && slot.declared.path == local.path
+                    })
+                    .map(|(index, slot)| Local {
+                        slot: index as u32,
+                        at: code
+                            .slots_by_at
+                            .iter()
+                            .position(|slot| *slot == index as u32)
+                            .unwrap_or(index) as u32,
+                        shared: slot.shared,
+                    })
+            })
+            .collect();
+        let closures = plan
+            .closures
+            .iter()
+            .map(|path| {
+                let mut path = path.to_vec();
+                path.push(0);
+                tables
+                    .code_at
+                    .get(&Site::new(code.site.unit.clone(), path))
+                    .copied()
+                    .unwrap_or(CodeId(u32::MAX))
+            })
+            .collect();
         Self {
             plan,
             callees,
             literals,
             fields,
+            locals,
+            closures,
         }
     }
 }

@@ -23,6 +23,9 @@ lash_rust_library(
     crate_name = "lash_ext_helper_compiler",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "lash_ext_helper_compiler"),
+    compile_data_patterns = [
+        "tests/control.kernel",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-ext-helper-compiler",
     package_name = "lash-ext-helper-compiler",
@@ -57,6 +60,9 @@ lash_rust_binary(
     crate_name = "regenerate",
     crate_root = "src/bin/regenerate.rs",
     declared_features = [],
+    compile_data_patterns = [
+        "tests/control.kernel",
+    ],
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "regenerate"),
     extra_compile_data = [],
     include_dev_deps = False,
@@ -76,12 +82,25 @@ lash_rust_unit_test(
     crate_root = "src/bin/regenerate.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "regenerate", "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test"),
+    extra_compile_data = [
+        "//crates/lash-ext-helper-compiler:control_law_source",
+        "//crates/lash-kernel-conformance:control_law_plans",
+    ],
     library = ":lash-ext-helper-compiler",
     library_crate_name = "lash_ext_helper_compiler",
     manifest_dir = "crates/lash-ext-helper-compiler",
     package_name = "lash-ext-helper-compiler",
     tags = [],
     version = "0.0.0-dev",
+)
+
+filegroup(
+    name = "control_law_source",
+    srcs = [
+        "tests/control.kernel",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
 )
 
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")

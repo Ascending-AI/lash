@@ -266,8 +266,8 @@ pub enum RegistryError {
         function: FunctionId,
     },
     /// A plan was offered for a function whose definition has no kernel
-    /// body, or one with a native implementation, which answers instead.
-    #[error("`{name}` has no kernel body a plan could perform without a native")]
+    /// body.
+    #[error("`{name}` has no kernel body a plan could perform")]
     PlanWithoutBody { name: FunctionName },
     /// A plan was offered for a function that has one.
     #[error("`{name}` ({function}) already has a plan")]
@@ -454,12 +454,6 @@ impl FunctionRegistry {
                 name: registered.definition.name.clone(),
             });
         }
-        if registered.plan.is_some() {
-            return Err(RegistryError::AlreadyPlanned {
-                name: registered.definition.name.clone(),
-                function,
-            });
-        }
         if registered.native.is_some() {
             return Err(RegistryError::AlreadyImplemented {
                 name: registered.definition.name.clone(),
@@ -473,9 +467,10 @@ impl FunctionRegistry {
     /// Installs the plans a build generated, each beside the definition
     /// it was generated from, by identity. A plan whose function is not
     /// registered is skipped: the registry holds another dialect's or
-    /// another release's helpers. Every callee of an installed plan must
-    /// answer at once: a native, a function the machine implements, or
-    /// another installed plan.
+    /// another release's helpers. Every callee must answer at once: a native
+    /// without a body, a machine function, or an installed plan. When a
+    /// native beside a plan declines, that plan executes the callee's body
+    /// without offering the native the call again.
     ///
     /// # Errors
     ///
@@ -487,7 +482,7 @@ impl FunctionRegistry {
             let Some(registered) = self.functions.get(&plan.function) else {
                 continue;
             };
-            if registered.definition.body().is_none() || registered.native.is_some() {
+            if registered.definition.body().is_none() {
                 return Err(RegistryError::PlanWithoutBody {
                     name: registered.definition.name.clone(),
                 });
@@ -501,8 +496,8 @@ impl FunctionRegistry {
         }
         for plan in installing.values() {
             for callee in plan.callees {
-                // A native beside a body may decline, and the body would
-                // then need a frame.
+                // A native beside a body may decline: that body needs its
+                // own plan too, before it can answer a closed caller.
                 let answers = installing.contains_key(callee)
                     || self.functions.get(callee).is_some_and(|registered| {
                         registered.plan.is_some() || registered.definition.body().is_none()

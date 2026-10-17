@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 
 use lash_kernel_doc::{
     ActKind, Action, AssignOrder, Atom, Callee, Expr, FunctionDefinition, FunctionId, Literal,
-    Member, Name, Place, Rhs, Stmt,
+    Member, Name, Node, Place, Rhs, Stmt,
 };
 
 use crate::library::Library;
@@ -45,7 +45,12 @@ struct Emitter<'a> {
     literals: Vec<String>,
     fields: Vec<String>,
     records: Vec<Vec<u32>>,
-    slots: u32,
+    slots: Vec<(String, Vec<u32>)>,
+    closures: Vec<Vec<u32>>,
+    stmt_paths: BTreeMap<*const Stmt, Vec<u32>>,
+    expr_paths: BTreeMap<*const Expr, Vec<u32>>,
+    /// Loop depth at each Rust closure used for protected control flow.
+    protected: Vec<(usize, usize)>,
     adopted: BTreeMap<usize, u32>,
     /// Each open block's variables, innermost last; `None` for a name an
     /// expression `let` scoped away.
@@ -78,8 +83,15 @@ impl Emitter<'_> {
     }
 
     fn slot(&mut self) -> u32 {
-        self.slots += 1;
-        self.slots - 1
+        let slot = self.slots.len() as u32;
+        self.slots.push((String::new(), Vec::new()));
+        slot
+    }
+
+    fn named_slot(&mut self, name: &Name, path: Vec<u32>) -> u32 {
+        let slot = self.slot();
+        self.slots[slot as usize] = (name.to_string(), path);
+        slot
     }
 
     fn callee(&mut self, function: &FunctionId) -> Result<u32, Unsupported> {
@@ -279,14 +291,20 @@ impl Emitter<'_> {
             }
             Expr::Let { name, value, body } => {
                 self.expr(value, dst)?;
-                let slot = self.slot();
+                let slot =
+                    self.named_slot(name, self.expr_paths[&std::ptr::from_ref(expr)].clone());
                 self.line(&format!("ctx.bind({slot}, {dst})?;"));
                 self.scopes.push(vec![(name.clone(), Var::Slot(slot))]);
                 self.expr(body, dst)?;
                 self.scopes.pop();
                 self.line(&format!("ctx.unbind({slot});"));
             }
-            Expr::Closure(_) => return Err(Unsupported("makes a closure".into())),
+            Expr::Closure(_) => {
+                let at = self.closures.len();
+                self.closures
+                    .push(self.expr_paths[&std::ptr::from_ref(expr)].clone());
+                self.line(&format!("ctx.closure({at}, {dst})?;"));
+            }
             Expr::Clock | Expr::Random | Expr::Read(_) => {
                 return Err(Unsupported("reads the host".into()));
             }
@@ -375,7 +393,8 @@ impl Emitter<'_> {
             Stmt::Let { name, value } => {
                 // The right-hand side does not see the variable it binds.
                 self.rhs(value)?;
-                let slot = self.slot();
+                let slot =
+                    self.named_slot(name, self.stmt_paths[&std::ptr::from_ref(stmt)].clone());
                 self.line(&format!("ctx.bind({slot}, 0)?;"));
                 self.declare(name, Var::Slot(slot));
             }
@@ -429,7 +448,9 @@ impl Emitter<'_> {
             Stmt::Do { value } => self.expr(value, 0)?,
             Stmt::Return { value } => {
                 self.expr(value, 0)?;
-                if tail {
+                if !self.protected.is_empty() {
+                    self.line("return Ok(Departure::Return(ctx.take(0)));");
+                } else if tail {
                     self.line("Ok(ctx.take(0))");
                 } else {
                     self.line("return Ok(ctx.take(0));");
@@ -488,7 +509,9 @@ impl Emitter<'_> {
                 let walked = self.slot();
                 let level = self.loops.len();
                 self.line(&format!("let c{level} = ctx.open(0, {walked})?;"));
-                let bound = self.slot();
+                let mut path = self.stmt_paths[&std::ptr::from_ref(stmt)].clone();
+                path.push(1);
+                let bound = self.named_slot(binding, path);
                 return self.looped(*metered, Some((binding, bound)), body, else_block, |_| {
                     Ok(format!("ctx.next(c{level}, 0)?"))
                 });
@@ -500,9 +523,17 @@ impl Emitter<'_> {
                 let (scopes, level) = (innermost.scopes, innermost.level);
                 let continues = matches!(stmt, Stmt::Continue);
                 innermost.continues |= continues;
-                self.unbind_scopes(scopes);
+                let crossing = self
+                    .protected
+                    .last()
+                    .filter(|(depth, _)| level < *depth)
+                    .copied();
+                self.unbind_scopes(crossing.map_or(scopes, |(_, scopes)| scopes));
                 let label = label(level);
-                if continues {
+                if crossing.is_some() {
+                    let departure = if continues { "Continue" } else { "Break" };
+                    self.line(&format!("return Ok(Departure::{departure});"));
+                } else if continues {
                     self.line(&format!("continue {label};"));
                 } else {
                     self.line(&format!("break {label};"));
@@ -510,13 +541,150 @@ impl Emitter<'_> {
                 return Ok(true);
             }
             Stmt::For { .. } => return Err(Unsupported("iterates through a protocol".into())),
-            Stmt::Try(_) => return Err(Unsupported("has a `try`".into())),
+            Stmt::Try(scope) => {
+                let path = self.stmt_paths[&std::ptr::from_ref(stmt)].clone();
+                self.line("{");
+                self.indent += 1;
+                let held = self.slot();
+                self.protected_block(&scope.body, Vec::new(), held)?;
+                if let Some(catch) = &scope.catch {
+                    self.line("if let Err(p::PlanExit::Raise(value)) = outcome {");
+                    self.indent += 1;
+                    let mut declared = path.clone();
+                    declared.push(1);
+                    let slot = self.named_slot(&catch.binding, declared);
+                    self.line(&format!("ctx.retain(value, {slot})?;"));
+                    self.line("outcome = {");
+                    self.indent += 1;
+                    self.protected_block(
+                        &catch.body,
+                        vec![(catch.binding.clone(), Var::Slot(slot))],
+                        held,
+                    )?;
+                    self.line("outcome");
+                    self.indent -= 1;
+                    self.line("};");
+                    self.indent -= 1;
+                    self.line("}");
+                }
+                if let Some(finally) = &scope.finally {
+                    // Halts bypass handlers and cleanup. Only guest departures
+                    // run finally, whose own departure replaces the pending one.
+                    self.line("if matches!(outcome, Err(p::PlanExit::Halt)) { return Err(p::PlanExit::Halt); }");
+                    let cleanup_held = self.slot();
+                    self.line("let cleanup = {");
+                    self.indent += 1;
+                    self.protected_block(finally, Vec::new(), cleanup_held)?;
+                    self.line("outcome");
+                    self.indent -= 1;
+                    self.line("};");
+                    self.line("if !matches!(cleanup, Ok(Departure::Next)) { outcome = cleanup; }");
+                    self.line(&format!("ctx.unbind({cleanup_held});"));
+                }
+                self.line(&format!("ctx.unbind({held});"));
+                self.line("match outcome {");
+                self.indent += 1;
+                self.line("Ok(Departure::Next) => {},");
+                self.line("Err(exit) => return Err(exit),");
+                if self.protected.is_empty() {
+                    self.line("Ok(Departure::Return(value)) => return Ok(value),");
+                } else {
+                    self.line(
+                        "Ok(Departure::Return(value)) => return Ok(Departure::Return(value)),",
+                    );
+                }
+                for (variant, keyword) in [("Break", "break"), ("Continue", "continue")] {
+                    let action = match self.loops.last() {
+                        Some(loop_)
+                            if self
+                                .protected
+                                .last()
+                                .is_none_or(|(depth, _)| loop_.level >= *depth) =>
+                        {
+                            format!("{keyword} {}", label(loop_.level))
+                        }
+                        Some(_) => format!("return Ok(Departure::{variant})"),
+                        None => "unreachable!(\"a loop departure needs a loop\")".to_string(),
+                    };
+                    self.line(&format!("Ok(Departure::{variant}) => {{"));
+                    self.indent += 1;
+                    if let Some(loop_) = self.loops.last() {
+                        let from = self
+                            .protected
+                            .last()
+                            .filter(|(depth, _)| loop_.level < *depth)
+                            .map_or(loop_.scopes, |(_, scopes)| *scopes);
+                        self.unbind_scopes(from);
+                    }
+                    self.line(&format!("{action};"));
+                    self.indent -= 1;
+                    self.line("},");
+                }
+                self.indent -= 1;
+                self.line("}");
+                self.indent -= 1;
+                self.line("}");
+            }
             Stmt::ReturnVia { .. } => return Err(Unsupported("returns through a policy".into())),
             Stmt::Print { .. } | Stmt::Finish { .. } | Stmt::Fail { .. } => {
                 return Err(Unsupported("prints or ends the run".into()));
             }
         }
         Ok(false)
+    }
+
+    /// A handler body executes in a Rust closure so `?` only leaves that
+    /// body. Canonical payloads live in a machine slot across every finally
+    /// statement; the Rust `outcome` is control, never the only value root.
+    fn protected_block(
+        &mut self,
+        body: &[Stmt],
+        bound: Vec<(Name, Var)>,
+        held: u32,
+    ) -> Result<(), Unsupported> {
+        self.line("let cursor_scope = ctx.scope();");
+        self.line(
+            "let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {",
+        );
+        self.indent += 1;
+        let first = self.slots.len();
+        let bound_slots: Vec<u32> = bound
+            .iter()
+            .filter_map(|(_, var)| {
+                if let Var::Slot(slot) = var {
+                    Some(*slot)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.protected.push((self.loops.len(), self.scopes.len()));
+        let departs = self.block(body, bound, false)?;
+        self.protected.pop();
+        if !departs {
+            self.line("Ok(Departure::Next)");
+        }
+        self.indent -= 1;
+        self.line("})(ctx);");
+        self.line("outcome = match outcome {");
+        self.indent += 1;
+        self.line(&format!(
+            "Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, {held})?)),"
+        ));
+        self.line(&format!(
+            "Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, {held})?)),"
+        ));
+        self.line("other => other,");
+        self.indent -= 1;
+        self.line("};");
+        for slot in bound_slots
+            .into_iter()
+            .chain(first as u32..self.slots.len() as u32)
+        {
+            self.line(&format!("ctx.unbind({slot});"));
+        }
+        self.line("ctx.unwind(cursor_scope);");
+        Ok(())
     }
 
     /// A `while` or a `for` whose header the caller began: each test
@@ -598,48 +766,6 @@ impl Emitter<'_> {
     }
 }
 
-/// Assigned parameters: a body that writes a parameter holds it as a
-/// variable from its entry.
-fn assigned(block: &[Stmt], names: &mut BTreeSet<Name>) {
-    for stmt in block {
-        match stmt {
-            Stmt::Assign {
-                place: Place::Variable(name),
-                ..
-            } => {
-                names.insert(name.clone());
-            }
-            Stmt::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                assigned(then_block, names);
-                assigned(else_block, names);
-            }
-            Stmt::For {
-                body, else_block, ..
-            }
-            | Stmt::While {
-                body, else_block, ..
-            } => {
-                assigned(body, names);
-                assigned(else_block, names);
-            }
-            Stmt::Try(scope) => {
-                assigned(&scope.body, names);
-                if let Some(catch) = &scope.catch {
-                    assigned(&catch.body, names);
-                }
-                if let Some(finally) = &scope.finally {
-                    assigned(finally, names);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Compiles `definition`'s body, whose identity is `function`, to the
 /// plan named `ident`. Every body it calls must be in `planned`.
 ///
@@ -669,7 +795,11 @@ pub fn emit(
         literals: Vec::new(),
         fields: Vec::new(),
         records: Vec::new(),
-        slots: 0,
+        slots: Vec::new(),
+        closures: Vec::new(),
+        stmt_paths: BTreeMap::new(),
+        expr_paths: BTreeMap::new(),
+        protected: Vec::new(),
         adopted: BTreeMap::new(),
         scopes: Vec::new(),
         loops: Vec::new(),
@@ -677,15 +807,32 @@ pub fn emit(
         indent: 1,
         used: 0,
     };
-    let mut written = BTreeSet::new();
-    assigned(&body.block, &mut written);
+    let mut pending = vec![(Node::Block(&body.block), Vec::new())];
+    while let Some((node, path)) = pending.pop() {
+        match node {
+            Node::Stmt(stmt) => {
+                emitter
+                    .stmt_paths
+                    .insert(std::ptr::from_ref(stmt), path.clone());
+            }
+            Node::Expr(expr) => {
+                emitter
+                    .expr_paths
+                    .insert(std::ptr::from_ref(expr), path.clone());
+            }
+            _ => {}
+        }
+        for (index, child) in node.children().into_iter().enumerate() {
+            let mut child_path = path.clone();
+            child_path.push(index as u32);
+            pending.push((child, child_path));
+        }
+    }
     let mut bound = Vec::new();
     for (index, name) in params.iter().enumerate() {
-        if written.contains(name) {
-            let slot = emitter.slot();
-            emitter.adopted.insert(index, slot);
-            emitter.line(&format!("ctx.adopt({index}, {slot})?;"));
-        }
+        let slot = emitter.named_slot(name, Vec::new());
+        emitter.adopted.insert(index, slot);
+        emitter.line(&format!("ctx.adopt({index}, {slot})?;"));
         bound.push((name.clone(), Var::Param(index)));
     }
     emitter.block(&body.block, bound, true)?;
@@ -729,7 +876,18 @@ pub fn emit(
     }
     item.push_str("],\n");
     let _ = writeln!(item, "    registers: {registers},");
-    let _ = writeln!(item, "    slots: {},", emitter.slots);
+    item.push_str("    slots: &[\n");
+    for (name, path) in &emitter.slots {
+        let _ = writeln!(
+            item,
+            "        p::PlanLocal {{ name: {name:?}, path: &{path:?} }},"
+        );
+    }
+    item.push_str("    ],\n    closures: &[\n");
+    for path in &emitter.closures {
+        let _ = writeln!(item, "        &{path:?},");
+    }
+    item.push_str("    ],\n");
     let _ = writeln!(item, "    run: {ident},");
     item.push_str("};\n");
     let mut code = String::new();

@@ -89323,6 +89323,7 @@
           "clippy_label": "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
+          "shard_count": 16,
           "tags": []
         },
         {

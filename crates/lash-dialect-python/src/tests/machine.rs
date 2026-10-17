@@ -704,7 +704,7 @@ pub(super) fn execution_observation(
 }
 
 /// K-MACH-007/008, K-CHG-007: new arithmetic identities preserve each
-/// document's result, effects, aliases and exact body charge across slices.
+/// document's result, effects, aliases and exact formula charge across slices.
 /// Previous definitions held beside them still resolve their original pins.
 #[test]
 fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
@@ -772,9 +772,9 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         observations[0].1, observations[1].1,
         "numeric and fallback observations agree"
     );
-    assert!(
-        observations[0].3 < observations[1].3,
-        "the new bodies do less work"
+    assert_eq!(
+        observations[0].3, observations[1].3,
+        "held and current helpers declare the same charge formulas"
     );
 }
 

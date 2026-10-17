@@ -486,7 +486,7 @@ impl KernelMachine {
                     .map_err(|interrupt| interrupt.in_function(&function.definition.name))
             })
             .transpose()?;
-        let result = self.answer_admitted(task, exe, lib, args, out);
+        let result = self.answer_admitted(task, exe, lib, args, out, entry.as_ref());
         match result {
             Ok(Answer::Body(mut body)) => {
                 body.entry = entry;
@@ -503,6 +503,7 @@ impl KernelMachine {
         lib: LibId,
         args: Reg,
         out: Reg,
+        entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Answer> {
         let function = exe.lib(lib);
         let end = args + function.arity;
@@ -514,7 +515,7 @@ impl KernelMachine {
         }
         let result = match &function.run {
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
-            LibRun::Plan { plan, .. } => self.run_plan(task, exe, lib, plan, args)?,
+            LibRun::Plan { plan, .. } => self.run_plan(task, exe, lib, plan, args, entry)?,
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
@@ -533,7 +534,11 @@ impl KernelMachine {
                 })?;
                 Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
-            LibRun::Native { native, body } => {
+            LibRun::Native {
+                native,
+                body,
+                fallback,
+            } => {
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
@@ -630,8 +635,12 @@ impl KernelMachine {
                         let Some(body) = body else {
                             return Err(fault("a native with no kernel body declined").into());
                         };
-                        self.observe(Event::NativeExit);
-                        return Ok(Answer::Body((*body).into()));
+                        if let Some(plan) = fallback {
+                            self.run_plan(task, exe, lib, plan, args, entry)?
+                        } else {
+                            self.observe(Event::NativeExit);
+                            return Ok(Answer::Body((*body).into()));
+                        }
                     }
                 }
             }

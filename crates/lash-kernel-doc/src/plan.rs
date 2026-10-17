@@ -45,12 +45,24 @@ pub struct HelperPlan {
     pub records: &'static [&'static [u32]],
     /// How many operand registers the plan uses.
     pub registers: u32,
-    /// How many variables the plan holds: the body's named ones, and one
-    /// for what each loop walks.
-    pub slots: u32,
+    /// The variables the plan holds: the body's named ones by semantic
+    /// declaration, and private holdings such as what each loop walks.
+    pub slots: &'static [PlanLocal],
+    /// Canonical paths of the closure expressions this plan evaluates.
+    pub closures: &'static [&'static [u32]],
     /// The code: it reads its parameters through the context and returns
     /// the body's result.
     pub run: fn(&mut dyn PlanContext) -> Result<Value, PlanExit>,
+}
+
+/// A variable's semantic declaration, resolved to the body's own slot and
+/// sharing rule at preparation. An empty name marks a private loop holding.
+#[derive(Debug)]
+pub struct PlanLocal {
+    /// The name bound by the declaration, or empty for a private holding.
+    pub name: &'static str,
+    /// The declaring node's canonical path within the helper's library unit.
+    pub path: &'static [u32],
 }
 
 /// A literal a plan evaluates, as the body writes it.
@@ -127,8 +139,8 @@ pub trait PlanContext {
 
     /// Parameter `index`'s argument into `dst`.
     fn param(&mut self, index: u32, dst: u32) -> Result<(), PlanExit>;
-    /// Makes variable `slot` parameter `index`, which the body assigns: it
-    /// holds the argument from here on.
+    /// Binds variable `slot` to parameter `index`, using the body's shared
+    /// cell when captured. The original argument stays for the formula.
     fn adopt(&mut self, index: u32, slot: u32) -> Result<(), PlanExit>;
     /// Literal `literal` into `dst`.
     fn literal(&mut self, literal: u32, dst: u32) -> Result<(), PlanExit>;
@@ -140,6 +152,15 @@ pub trait PlanContext {
     fn assign(&mut self, slot: u32, src: u32) -> Result<(), PlanExit>;
     /// Ends the scope of variable `slot`.
     fn unbind(&mut self, slot: u32);
+
+    /// Creates the body's closure at `closure`, sharing its original cells.
+    fn closure(&mut self, closure: u32, dst: u32) -> Result<(), PlanExit>;
+    /// Holds a departing or caught value across cleanup statements in `slot`.
+    fn retain(&mut self, value: Value, slot: u32) -> Result<Value, PlanExit>;
+    /// The open-loop depth at a protected block's entry.
+    fn scope(&self) -> u32;
+    /// Leaves every loop opened inside a protected block.
+    fn unwind(&mut self, scope: u32);
 
     /// Calls `callee` with the `count` arguments from `args`, its value
     /// into `args`.

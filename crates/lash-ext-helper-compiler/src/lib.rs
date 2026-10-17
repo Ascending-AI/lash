@@ -68,12 +68,52 @@ fn ident(name: &str, taken: &mut BTreeSet<String>) -> String {
 /// A refusal of the helpers' registration, as text.
 pub fn generate(dialect: Dialect) -> Result<Generated, String> {
     let library = Library::of(dialect)?;
-    let analysis = Analysis::of(&library);
+    generate_library(&library, dialect)
+}
+
+/// Compiles an admitted library's selected helpers and their closed callees.
+/// This is also the recorder seam for the kernel's control-flow laws.
+///
+/// # Errors
+///
+/// A refusal to compile a definition, as text.
+pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated, String> {
+    let analysis = Analysis::of(library);
     let mut planned = BTreeSet::new();
     let mut plans = Vec::new();
     let mut outcomes = BTreeMap::new();
     let mut taken = BTreeSet::new();
+    // Include closed kernel bodies used by helpers: their natives may decline.
+    fn order(
+        function: lash_kernel_doc::FunctionId,
+        library: &Library,
+        analysis: &Analysis,
+        seen: &mut BTreeSet<lash_kernel_doc::FunctionId>,
+        functions: &mut Vec<lash_kernel_doc::FunctionId>,
+    ) {
+        if !seen.insert(function) {
+            return;
+        }
+        if let Some(facts) = analysis.facts(&function)
+            && facts.closed
+        {
+            for callee in facts.callees() {
+                if library
+                    .definition(callee)
+                    .is_some_and(|definition| definition.body().is_some())
+                {
+                    order(*callee, library, analysis, seen, functions);
+                }
+            }
+        }
+        functions.push(function);
+    }
+    let mut functions = Vec::new();
+    let mut seen = BTreeSet::new();
     for function in &library.helpers {
+        order(*function, library, &analysis, &mut seen, &mut functions);
+    }
+    for function in &functions {
         let Some(definition) = library.definition(function) else {
             continue;
         };
@@ -82,13 +122,9 @@ pub fn generate(dialect: Dialect) -> Result<Generated, String> {
         };
         let outcome = if !facts.closed {
             Err(format!("reaches {}", facts.kind()))
-        } else if facts.closures() > 0 {
-            Err("makes a closure".to_string())
-        } else if facts.handlers() {
-            Err("has a `try`".to_string())
         } else {
             let ident = ident(definition.name.as_str(), &mut taken);
-            emit::emit(&library, &planned, *function, definition, &ident)
+            emit::emit(library, &planned, *function, definition, &ident)
                 .map(|plan| (ident, plan))
                 .map_err(|unsupported| unsupported.0)
         };
@@ -115,6 +151,9 @@ pub fn generate(dialect: Dialect) -> Result<Generated, String> {
         "\n#![allow(clippy::needless_return, clippy::unnecessary_wraps, unused_labels)]\n\n",
     );
     rust.push_str("use lash_kernel_doc::Value;\nuse lash_kernel_doc::plan as p;\n\n");
+    rust.push_str(
+        "#[allow(dead_code)]\nenum Departure { Next, Return(Value), Break, Continue }\n\n",
+    );
     rust.push_str("/// Every plan, in the order the helpers are registered.\n");
     rust.push_str("pub static PLANS: &[&p::HelperPlan] = &[\n");
     for (ident, _) in &plans {
@@ -133,7 +172,7 @@ pub fn generate(dialect: Dialect) -> Result<Generated, String> {
     manifest.push_str(
         "name\tfunction\tkind\tcallback_sites\tmutates\tclosures\tmetered\tformula\tplan\n",
     );
-    for function in &library.helpers {
+    for function in &functions {
         let (Some(definition), Some(facts)) =
             (library.definition(function), analysis.facts(function))
         else {

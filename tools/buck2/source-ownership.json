@@ -1108,5 +1108,10 @@
       "src/lib.rs",
       "src/**/*.rs"
     ]
+  },
+  "crates/lash-ext-helper-compiler": {
+    "compile_data": [
+      "tests/control.kernel"
+    ]
   }
 }

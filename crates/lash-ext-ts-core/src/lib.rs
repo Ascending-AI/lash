@@ -64,7 +64,8 @@ pub const OPERATIONS: [&str; 8] = [
 /// Installs each plan of [`PLANS`] beside the helper of `helpers` it was
 /// compiled from, then adds its native to each of `helpers` that this
 /// crate implements ([`OPERATIONS`]), each looked up by the name its
-/// definition carries.
+/// definition carries. Closed kernel callee plans are installed as
+/// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
 /// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
 ///
@@ -81,7 +82,14 @@ pub fn implement(
     let plans: Vec<&'static lash_kernel_doc::plan::HelperPlan> = PLANS
         .iter()
         .copied()
-        .filter(|plan| helpers.contains(&plan.function))
+        .filter(|plan| {
+            helpers.contains(&plan.function)
+                || !plan.name.starts_with("py.")
+                    && !plan.name.starts_with("ts.")
+                    && registry
+                        .get(&plan.function)
+                        .is_some_and(|registered| registered.plan().is_none())
+        })
         .collect();
     registry.install_plans(&plans)?;
     let kernel = |name: &'static str| {

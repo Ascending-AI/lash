@@ -681,10 +681,13 @@ kinds = ["unit-test"]
 data = ["//:workspace_rust_sources"]
 
 # Kernel conformance reads independently owned rule shards and the specification.
+# The TS helper corpus is split into 16 laws, distributed over separate
+# actions so each comparison stays inside the pool's unchanged 300 s bound.
 [[rule]]
 packages = ["lash-kernel-conformance"]
 kinds = ["unit-test"]
-compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files", "//crates/lash-dialect-typescript:package_files"]
+shards = 16
+compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files", "//crates/lash-dialect-typescript:package_files", "//crates/lash-ext-helper-compiler:control_law_source"]
 
 [[rule]]
 packages = ["kernel-embedder"]
@@ -770,3 +773,16 @@ compile_data = ["//crates/lash-facade-tests:unit_fixture_sources"]
 
 [filegroups.lash-internal-facade-tests]
 unit_fixture_sources = { srcs = ["src/controls.rs", "src/durable.rs", "src/fixtures.rs", "src/harness.rs", "src/history.rs", "src/ingress.rs", "src/lib.rs", "src/observations.rs", "src/send.rs", "src/session_process.rs", "src/streaming.rs", "src/turn.rs"] }
+
+# Exact compile inputs of the control-plan recorder's drift law.
+[[rule]]
+packages = ["lash-ext-helper-compiler"]
+kinds = ["bin-unit-test"]
+targets = ["regenerate"]
+compile_data = ["//crates/lash-ext-helper-compiler:control_law_source", "//crates/lash-kernel-conformance:control_law_plans"]
+
+[filegroups.lash-ext-helper-compiler]
+control_law_source = { srcs = ["tests/control.kernel"] }
+
+[filegroups.lash-kernel-conformance]
+control_law_plans = { srcs = ["src/helper_plan_control_generated.rs"] }

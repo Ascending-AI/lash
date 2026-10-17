@@ -49,9 +49,11 @@ lash_rust_unit_test(
         "//crates/lash-kernel-conformance:package_files",
         "//crates/lash-kernel-lib:package_files",
         "//crates/lash-dialect-typescript:package_files",
+        "//crates/lash-ext-helper-compiler:control_law_source",
     ],
     manifest_dir = "crates/lash-kernel-conformance",
     package_name = "lash-kernel-conformance",
+    shard_count = 16,
     tags = [],
     version = "0.0.0-dev",
 )
@@ -92,6 +94,15 @@ lash_rust_binary(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
+)
+
+filegroup(
+    name = "control_law_plans",
+    srcs = [
+        "src/helper_plan_control_generated.rs",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
 )
 
 filegroup(

@@ -1,0 +1,76 @@
+# K-FORM-014..017: departures run cleanup in order; halts bypass handlers.
+use eq
+use num.add
+use num.div
+use list.len
+use error.new
+use law.declining
+
+function law.handlers(mode: Any, log: Any) -> Any
+kernel 1
+charge 10
+body {
+  try {
+    for n in [1, 2, 3] {
+      try {
+        if eq(n, 1) { continue }
+        if eq(n, 2) { break }
+      } finally { set log[list.len(log)] = n }
+    }
+    try {
+      if eq(mode, 0) { throw error.new("guest", "raised", null) }
+      if eq(mode, 1) { return 10 }
+      if eq(mode, 2) { return num.div(1, 0) }
+      return 30
+    } catch problem {
+      set log[list.len(log)] = problem.kind
+      return 20
+    } finally {
+      set log[list.len(log)] = 99
+      if eq(mode, 3) { return 40 }
+    }
+  } finally { set log[list.len(log)] = 100 }
+}
+
+function law.halt() -> Any
+kernel 1
+charge 10
+body {
+  try { while true metered 2 {} }
+  catch problem { return "caught" }
+  finally { throw error.new("cleanup", "must not run on halt", null) }
+}
+
+# K-FORM-004, K-FN-005 and K-CHG-007: escaped closures share the body's
+# parameter and local cells and retain their ordinary charge and depth.
+function law.factory(start: Any) -> Any
+kernel 1
+charge 7
+body {
+  let count = start
+  let increment = fn(delta) {
+    set count = num.add(count, delta)
+    return count
+  }
+  let peek = fn() { return (start, count) }
+  set start = num.add(start, 1)
+  return {increment: increment, peek: peek}
+}
+
+# K-LIB-006: a declining native enters its body's plan exactly once.
+function law.declining(log: Any) -> Any
+kernel 1
+charge 3
+native
+body {
+  set log[list.len(log)] = 1
+  return log
+}
+
+function law.decline_caller(log: Any) -> Any
+kernel 1
+charge 5
+body {
+  let answer = invoke law.declining(log)
+  return (answer, log)
+}
