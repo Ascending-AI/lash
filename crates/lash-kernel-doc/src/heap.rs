@@ -428,6 +428,9 @@ pub enum HeapFault {
     /// The embedder's transport failed.
     #[error("page transport failed: {0}")]
     Transport(String),
+    /// A saved frame's prepaid register file differs from its definition.
+    #[error("frame register count {stored} differs from admitted count {expected}")]
+    FrameRegisters { stored: u32, expected: u32 },
     /// The heap's own state or an admitted certificate is inconsistent.
     #[error("the heap is malformed: {0}")]
     Malformed(String),
@@ -557,6 +560,23 @@ pub trait NativeFunction: Send + Sync {
     /// A heap-independent prepared entry, as today. It reads no page: an
     /// operand that is paged makes it return `None`.
     fn prepare(&self) -> Option<PreparedNative> {
+        None
+    }
+
+    /// Returns an existing argument or a value reached through one, without
+    /// creating a result allocation, or returns a pre-held immediate. Its
+    /// answer must remain reachable through the arguments until the machine
+    /// transfers it to the result register; no second holding is allocated.
+    fn returns_borrowed(&self) -> bool {
+        self.record_read_marker().is_some()
+    }
+
+    /// Offers a guarded record-read specialization. This promises that the
+    /// native answers exactly an existing field for `[Record, Text]` when
+    /// `marker` is not the empty tuple, and declines every other input.
+    /// The machine reads both fields through its heap; a position hint must
+    /// verify the field name. The native still supplies the general call.
+    fn record_read_marker(&self) -> Option<&'static str> {
         None
     }
 }

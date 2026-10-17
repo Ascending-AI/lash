@@ -48,6 +48,7 @@ pub(super) const DATA: &str = r####"{
 "a65182bf3bf4fc0bafbd42ba9b9ff0c881a109812c137431b0fe3da7cd4b934d":[{"int":"-2500340017023150132"}],
 "a653794aa3aee85b81856061b28ff3b66791837d0af083108c6a8c7368233dc1":[{"float":"-2.279526591659513e266"},{"list":26}],
 "a653c3c24d353a376986efd8b357ee270615b23a14f764617ce1aa46e05aa435":[{"float":"-6.636727750587374e103"},{"float":"-5.348402761055164e-304"}],
+"a653fd1f90bd5256ee2ebbd4004ddd0c05951c359731c5f43864fb8c4d566cc7":[{"list":[{"float":"6.007575482970104e29"},{"int":"2609504151480479845"},{"float":"-1.7290628865744276e-99"},"null",{"bool":false}]}],
 "a654a6ce3577ae7957cd27ebc6b96ef72b6e832cc00142601c317871f95dfef5":{"charge":17,"outcome":"ok {\"list\":[\"null\",{\"int\":\"-6268314250440466107\"},{\"bool\":true},{\"int\":\"7072034015324656114\"},{\"float\":\"4.128533899129809e-242\"},{\"bool\":true},{\"list\":[{\"bool\":false},{\"bool\":false},{\"bool\":true},{\"int\":\"4215210358138022393\"},\"null\"]}]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a658649fbeafbaf16ba635d358d8c3b6830273243d8532e0f92e86984539fd59":{"charge":70,"outcome":"ok {\"float\":\"1.1805916207174113e21\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a65cb4f86561b5b9d9c6d6d5ba96471fc65f636ded8739992fec0c899a74391d":{"charge":68,"outcome":"ok {\"float\":\"2.6204271428941807e-278\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -143,5 +144,6 @@ pub(super) const DATA: &str = r####"{
 "a6f7cc17d963893635b68681573995654a1b73dbe4119dd42f8a14e0117e2625":{"charge":19,"outcome":"ok {\"int\":\"-3679736801852508012\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a6f8f17ee2c2b0f03f0dd59cc54ccf31c8bb4541b75fe4325c1502d89a54bd39":[{"text":"񦑕󩇝𥆾񱒝󆯴򇀣󵐃󕩫𭀟񆙿󻭳󲋅󱧀𔿳𡎬򢪋􈀞𨒞󑈗󾏳𥣴􇭅񳛳𞁞򸐞󣊖󱵳󠞉𑇆񎉥𻓡󌧈䡛񉠋󡷻󮔀򑻊񱙷𖞛򾖔󠽟"},{"int":"5316794345171760769"}],
 "a6f8f201ace14d0e0368f48ee40da306a619fe2c615be13ad9eec64bcc811052":{"charge":9,"outcome":"ok {\"text\":\"\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"a6f930c3fe1c34a3aa03d9367ca3e6f0eb48a5af69ed22b8f0edf5b6fc15569d":[{"list":["null",{"float":"-5.488085017307118e-243"},"null"]}],
 "a6ff228f8bb245739d1660e3be53ed943ffec0f50dbcc8d887d900fbf3cd0887":[{"int":"5179539076365930388"}]
 }"####;

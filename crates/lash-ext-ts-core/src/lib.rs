@@ -34,7 +34,8 @@ pub enum ImplementError {
 }
 
 /// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 9] = [
+pub const OPERATIONS: [&str; 10] = [
+    "ts.get",
     "ts.to_boolean",
     "ts.add",
     "ts.sub",
@@ -49,7 +50,7 @@ pub const OPERATIONS: [&str; 9] = [
 /// Adds its native to each of `helpers` that this crate implements
 /// ([`OPERATIONS`]), each looked up by the name its definition carries.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
+/// its `num.add`, `num.sub` and `text.concat`.
 ///
 /// # Errors
 ///
@@ -66,25 +67,19 @@ pub fn implement(
     };
     let add = Arc::new(Add {
         add: kernel("num.add")?,
-        to_float: kernel("num.to_float")?,
         concat: kernel("text.concat")?,
     });
     let subtract = Arc::new(Subtract {
         native: kernel("num.sub")?,
     });
-    let compare = kernel("text.utf16_compare")?;
     let mut natives: Vec<(FunctionId, Arc<dyn NativeFunction>)> = Vec::new();
     for function in helpers {
         let registered = registry
             .get(&function)
             .ok_or(RegistryError::NotRegistered { function })?;
-        let relation = |relation| -> Arc<dyn NativeFunction> {
-            Arc::new(Relate {
-                relation,
-                compare: Arc::clone(&compare),
-            })
-        };
+        let relation = |relation| -> Arc<dyn NativeFunction> { Arc::new(Relate { relation }) };
         let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
+            "ts.get" => Arc::new(Get),
             "ts.to_boolean" => Arc::new(ToBoolean),
             "ts.add" => add.clone(),
             "ts.sub" => subtract.clone(),
@@ -160,11 +155,10 @@ impl NativeFunction for ToBoolean {
 }
 
 /// `ts.add`, `a + b`, where neither operand needs ToPrimitive: two floats
-/// add, two texts join, and a float and an integer add once the integer is
-/// a float. Every other pair declines.
+/// add and two texts join. Mixed numbers decline: the body holds a
+/// conversion result that the native would not retain.
 struct Add {
     add: Arc<dyn NativeFunction>,
-    to_float: Arc<dyn NativeFunction>,
     concat: Arc<dyn NativeFunction>,
 }
 
@@ -175,14 +169,6 @@ impl NativeFunction for Add {
         match (&left, &right) {
             (Value::Float(_), Value::Float(_)) => delegate(&self.add, &mut call, &[left, right]),
             (Value::Text(_), Value::Text(_)) => delegate(&self.concat, &mut call, &[left, right]),
-            (Value::Float(_), Value::Int(_)) => {
-                let right = delegate(&self.to_float, &mut call, &[right])?;
-                delegate(&self.add, &mut call, &[left, right])
-            }
-            (Value::Int(_), Value::Float(_)) => {
-                let left = delegate(&self.to_float, &mut call, &[left])?;
-                delegate(&self.add, &mut call, &[left, right])
-            }
             _ => Err(NativeError::Decline),
         }
     }
@@ -221,36 +207,18 @@ impl Relation {
     }
 }
 
-/// `ts.lt`, `ts.le`, `ts.gt` and `ts.ge` on two floats, or on two texts by
-/// UTF-16 code units, as the body compares them after ToPrimitive leaves
-/// both as they are. Every other pair declines.
+/// Float relations have no interior holdings. Text relations decline:
+/// their body holds the integer UTF-16 comparison result before ordering it.
 struct Relate {
     relation: Relation,
-    compare: Arc<dyn NativeFunction>,
 }
 
 impl NativeFunction for Relate {
-    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         let (left, right) = pair(&call);
-        let (left, right) = (left.clone(), right.clone());
-        match (&left, &right) {
+        match (left, right) {
             (Value::Float(a), Value::Float(b)) => {
                 Ok(Value::Bool(self.relation.floats(a.get(), b.get())))
-            }
-            (Value::Text(_), Value::Text(_)) => {
-                // The body compares in the order each relation states.
-                let (first, second, negated) = match self.relation {
-                    Relation::Lt => (left, right, false),
-                    Relation::Gt => (right, left, false),
-                    Relation::Le => (right, left, true),
-                    Relation::Ge => (left, right, true),
-                };
-                let order = delegate(&self.compare, &mut call, &[first, second])?;
-                let less = match order {
-                    Value::Int(IntRef::Inline(order)) => order.is_negative(),
-                    _ => return Err(NativeError::Decline),
-                };
-                Ok(Value::Bool(less != negated))
             }
             _ => Err(NativeError::Decline),
         }
@@ -283,6 +251,9 @@ fn floats(args: &[Value], relation: Relation) -> Option<Value> {
 /// guest valueOf, is declined to the complete operation body.
 struct ToNumber;
 impl NativeFunction for ToNumber {
+    fn returns_borrowed(&self) -> bool {
+        true
+    }
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         match call.args {
             [value @ Value::Float(_)] => Ok(value.clone()),
@@ -342,6 +313,9 @@ impl ListItem {
     }
 }
 impl NativeFunction for ListItem {
+    fn returns_borrowed(&self) -> bool {
+        true
+    }
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         Self::answer(call.args).ok_or(NativeError::Decline)
     }
@@ -350,5 +324,32 @@ impl NativeFunction for ListItem {
             entry: Self::answer,
             operation: "ts.for_of.item / List",
         })
+    }
+}
+
+/// P is a record receiver, text key and a brand unequal to the empty tuple.
+/// Every other input declines before coercion or allocation.
+struct Get;
+
+impl NativeFunction for Get {
+    fn record_read_marker(&self) -> Option<&'static str> {
+        Some("__ts_brand")
+    }
+
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        use lash_kernel_doc::heap::FieldName;
+        let [Value::Record(record), Value::Text(key)] = call.args else {
+            return Err(NativeError::Decline);
+        };
+        let brand = call
+            .heap
+            .record_get(*record, FieldName::Static("__ts_brand"))?;
+        if matches!(brand, Some(Value::Tuple(tuple)) if tuple.summary.len == 0) {
+            return Err(NativeError::Decline);
+        }
+        Ok(call
+            .heap
+            .record_get(*record, FieldName::Text(key))?
+            .unwrap_or(Value::Absent))
     }
 }

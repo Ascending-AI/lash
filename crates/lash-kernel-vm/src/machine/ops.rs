@@ -29,8 +29,9 @@ use lash_kernel_doc::{EntityId, Identity, NativeCall, NativeError, TaskId, Value
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
+use super::operation_entry::AdmittedBody;
 use super::{Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
-use crate::compile::{Charge, CodeId, Executable, LibId, LibRun, StmtId};
+use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::within_depth;
 use crate::interface::Bound;
@@ -149,6 +150,9 @@ impl KernelMachine {
     /// bytes.
     #[inline(always)]
     pub(super) fn pin(&mut self, r: Reg) -> Result<(), Halt> {
+        if !self.charging && super::operation_entry::guard_immediate(&self.regs[r]) {
+            return Ok(());
+        }
         let bytes = self.pins.pin(&self.regs[r])?;
         self.reserve(bytes)
     }
@@ -156,6 +160,9 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
+        if !self.charging && super::operation_entry::guard_immediate(value) {
+            return Ok(());
+        }
         let bytes = self.pins.pin(value)?;
         self.reserve(bytes)
     }
@@ -410,15 +417,16 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        code: CodeId,
+        admitted: AdmittedBody,
         args: Reg,
         awaiting: Option<StmtId>,
     ) -> Status {
         let function = exe.lib(lib);
+        let AdmittedBody { code, entry } = admitted;
         // An argument the call leaves out is absent: the body binds every
         // parameter.
         let call = Call::new(code, args, function.arity).of_library(lib);
-        self.push_frame(task, exe, call.awaited_by(awaiting))?;
+        self.push_operation_frame(task, exe, call.awaited_by(awaiting), entry)?;
         Ok(Flow::Step)
     }
 
@@ -471,6 +479,34 @@ impl KernelMachine {
         for absent in args + given..args + function.arity {
             self.put(absent, Value::Absent);
         }
+        let entry = function
+            .operation()
+            .then(|| self.operation_entry(task, exe, lib, args))
+            .transpose()?;
+        let result = self.answer_admitted(task, exe, lib, args, out);
+        match result {
+            Ok(Answer::Body(mut body)) => {
+                body.entry = entry;
+                Ok(Answer::Body(body))
+            }
+            other => {
+                if let Some(entry) = entry {
+                    self.release_operation(entry);
+                }
+                other
+            }
+        }
+    }
+
+    fn answer_admitted(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        out: Reg,
+    ) -> Eval<Answer> {
+        let function = exe.lib(lib);
         let end = args + function.arity;
         // A function that runs its body is observed by its frame; one that
         // does not, from here to its charge. A halt ends the run and its
@@ -479,7 +515,7 @@ impl KernelMachine {
             self.observe(Event::NativeEnter { task, lib });
         }
         let result = match &function.run {
-            LibRun::Body(code) => return Ok(Answer::Body(*code)),
+            LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
@@ -507,7 +543,9 @@ impl KernelMachine {
                         // What the general call does with its result: keep
                         // it, then charge the formula.
                         self.observe(Event::NativeFast);
-                        self.pin_value(&value)?;
+                        if !function.existing_result {
+                            self.pin_value(&value)?;
+                        }
                         let units = if self.charging && function.native {
                             match fast.charge(&function.charge, &self.regs[args..end], &value) {
                                 Charge::Units(units) => units,
@@ -546,6 +584,7 @@ impl KernelMachine {
                             joins: &self.joins,
                             registers: &self.regs,
                             pinned: &self.pins.values,
+                            borrowed: &self.pins.borrowed,
                             pinned_bytes: self.pins.bytes,
                             fresh: &self.fresh,
                             refinements: &mut self.census_refinements,
@@ -566,7 +605,9 @@ impl KernelMachine {
                                 ),
                             ))
                         } else {
-                            self.pin_value(&value)?;
+                            if !function.existing_result {
+                                self.pin_value(&value)?;
+                            }
                             Ok(value)
                         }
                     }
@@ -591,7 +632,7 @@ impl KernelMachine {
                             return Err(fault("a native with no kernel body declined").into());
                         };
                         self.observe(Event::NativeExit);
-                        return Ok(Answer::Body(*body));
+                        return Ok(Answer::Body((*body).into()));
                     }
                 }
             }
@@ -617,5 +658,5 @@ pub(super) enum Answer {
     /// Its value is in the call's result register.
     Done,
     /// The kernel body runs the call.
-    Body(CodeId),
+    Body(AdmittedBody),
 }

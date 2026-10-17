@@ -112,6 +112,7 @@ pub(super) const DATA: &str = r####"{
 "7f9ec65b0e162510830b5087841c52a52936c557f91a40a9adc6d4e06f65e710":{"charge":22,"outcome":"ok {\"text\":\"-82299800183723100\"}","prepared_difference":null,"reservations":[[0,40]],"reserved":40,"spent":0},
 "7fa141b2db0bc618f9d2fa8b430728595ceff3f791de0a08fb30bd636c5c1145":[{"int":"8024208012555937233"},{"int":"6052856462263864154"}],
 "7fa59dd0aaff946f27978cee3bbfdb658de7070b8098503382baf0b12f80db5b":[{"text":"񧛄輩򧱷򪅏𞟍󳭂񓎴򑛓𼘾򫀲􊿒􎐍򝺅󯡸򸶈񌂓"},{"text":"脍󩅏𚮭򱖺󦤑ⶃ򵴘󟖢񥛉󟨤򵫐𗙥ᇉ𰮪򐤽񃡯񹿟񛔠𒁊𭺊񾮷񬖠񘨫񻷿񋵄𛜾򈇐򭋓󽾶򛎉򆂮󂷯񰡴󤥤񄋶񇯳񥷄򊑿񎋷𚣲󪤣񰺱󀣬򎯽񿵪􇐐󊳸򅶡򔝚󽝔쯺򾋭򜙨󃧤傗󊗶򴜽𱣳􃨂񆫶趣󱉸ቜ𾽸򬪦𑺳Ꙏ󝂂򖮣񫦴𖯇􊳐𲶉񭾒󏪭򳠘򭁨𮗈񧐃󃀫𽊋򓇮"},{"int":"-4090947620652683763"}],
+"7fa687156e4075fd9f4447c05abaf77a9959e237252296fec9111e0755be3df3":[{"list":[{"int":"3722982936979681332"},{"int":"-8255126905976016096"},"null",{"int":"4622542271695530363"},{"float":"7.487781432096965e-275"}]}],
 "7fa6a87d1ce5b31e133ec92605e23da1e8887ca39194d3e9affce37dc4ebe466":[{"list":[]},{"list":[{"bool":true},{"int":"5053928053317310331"},{"bool":false},{"list":0},"null",{"bool":true}]}],
 "7fa873c5a14f45d317dfe170ca2accdd2655342fb85ccd94cb9d3399b43aac16":{"charge":7,"outcome":"ok {\"int\":\"5079596032005452423\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7faa0d1e6858d70b0819e1123b2684bd2e7af7098038d1e0a5dbda95afec329d":{"charge":1,"outcome":"ok {\"map\":[[{\"text\":\"🦀𝄞\"},{\"text\":\"é\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

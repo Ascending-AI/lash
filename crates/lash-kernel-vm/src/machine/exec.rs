@@ -63,6 +63,11 @@ impl<'a> Call<'a> {
     }
 }
 
+pub(super) enum ResultOrigin {
+    Returned,
+    Delivered,
+}
+
 impl KernelMachine {
     /// Inline literals share compiled descriptors. Long immutable values enter
     /// canonical payload pages when the operation reads them.
@@ -110,6 +115,11 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
+        self.regs.prepaid = if self.charging {
+            0
+        } else {
+            exe.code(frame.code).registers
+        };
         self.scalar_blocks = frame.scalar_blocks;
         let code = frame.code;
         match frame.control.last_mut() {
@@ -253,7 +263,7 @@ impl KernelMachine {
                 Completion::Return(value)
                 | Completion::ReturnVia { value, .. }
                 | Completion::Throw(value) => {
-                    self.pins.hold(value, value_bytes(value))?;
+                    self.pins.borrowed.push(value.as_ref().clone());
                 }
                 Completion::Break | Completion::Continue => {}
             }
@@ -293,7 +303,13 @@ impl KernelMachine {
                         Ok(super::ops::Flow::Step) => return Ok(()),
                         Ok(super::ops::Flow::Done) => {
                             let value = self.take(0);
-                            departure = match self.finish_action(task, host, exe, value) {
+                            departure = match self.finish_action(
+                                task,
+                                host,
+                                exe,
+                                value,
+                                ResultOrigin::Returned,
+                            ) {
                                 Ok((_, Ran::Depart(next))) => next,
                                 Ok(_) => return Err(fault("a return policy did not return")),
                                 Err(Interrupt::Raise(value)) => Completion::Throw(value),
@@ -420,7 +436,7 @@ impl KernelMachine {
         }
         Ok(match result {
             Ok(value) => match self
-                .finish_action(task, host, exe, value)
+                .finish_action(task, host, exe, value, ResultOrigin::Returned)
                 .and_then(|ran| self.resumed(task, exe, ran))
             {
                 Ok(Completion::Normal) => None,
@@ -567,6 +583,19 @@ impl KernelMachine {
         }
     }
 
+    /// Reserves the next active call's depth unit (K-BND-002). Native
+    /// operation answers are synchronous, so their unit ends with dispatch;
+    /// a decline transfers it to the body's frame until return or raise.
+    pub(super) fn check_call_depth(&mut self, task: TaskId) -> Eval<()> {
+        // `main`'s own frame is not a call.
+        let depth =
+            self.task(task)?.frames.len() + usize::from(task != TaskId::MAIN || !self.session_cell);
+        if depth as u64 > u64::from(self.bounds.call_depth) {
+            return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
+        }
+        Ok(())
+    }
+
     /// Pushes a frame that runs `code` with the call's arguments bound to
     /// its parameters, in order; a parameter with no argument is absent
     /// (`K-FN-004`). The arguments are moved out of their registers.
@@ -575,6 +604,16 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         call: Call<'_>,
+    ) -> Eval<()> {
+        self.push_operation_frame(task, exe, call, None)
+    }
+
+    pub(super) fn push_operation_frame(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        call: Call<'_>,
+        admission: Option<super::operation_entry::OperationEntry>,
     ) -> Eval<()> {
         let Call {
             library,
@@ -595,13 +634,14 @@ impl KernelMachine {
                 ),
             );
         }
-        let frames = &self.task(task)?.frames;
-        // `main`'s own frame is not a call (`K-BND-002`).
-        let depth = frames.len() + usize::from(task != TaskId::MAIN || !self.session_cell);
-        if depth as u64 > u64::from(self.bounds.call_depth) {
-            return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
+        // An operation reserved this unit before dispatch. Its fallback
+        // frame represents that same active call, not a second one.
+        if !library.is_some_and(|lib| exe.lib(lib).operation()) {
+            self.check_call_depth(task)?;
         }
-        self.reserve_held(super::FRAME_BYTES)?;
+        if admission.is_none() {
+            self.reserve_held(super::FRAME_BYTES)?;
+        }
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
@@ -644,6 +684,7 @@ impl KernelMachine {
                 })
             }
         };
+        frame.record.registers = if code.charged { 0 } else { code.registers };
         frame.scalar_blocks = code.versions.select(&self.regs[base..base + given]);
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
@@ -688,7 +729,20 @@ impl KernelMachine {
                 true => self.regs.take(base + index, Value::Absent),
                 false => Value::Absent,
             };
-            self.bind(task, param.at, param.shared, value)?;
+            if let Some(admission) = &admission {
+                let state = match admission.shared.get(index).copied().flatten() {
+                    Some(cell) => SlotState::Cell(cell),
+                    None => SlotState::Value(value),
+                };
+                self.frame(task)?.set_slot(param.at, state);
+            } else {
+                self.bind(task, param.at, param.shared, value)?;
+            }
+        }
+        if let Some(admission) = admission {
+            self.release_operation(admission);
+            self.regs.clear();
+            self.publish_holdings()?;
         }
         if !code.free.is_empty() {
             self.bind_captures(task, code)?;
@@ -953,6 +1007,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
         value: Value,
+        origin: ResultOrigin,
     ) -> Eval<(StmtId, Ran)> {
         let frame = self.frame(task)?;
         let Some(id) = frame.awaiting.take() else {
@@ -985,7 +1040,11 @@ impl KernelMachine {
             }
             // The value is in no variable until the statement binds it.
             self.put(0, value);
-            self.pin(0)?;
+            if matches!(origin, ResultOrigin::Delivered) {
+                self.pin(0)?;
+            } else {
+                self.pins.borrowed.push(self.regs[0].clone());
+            }
             return match self.run(host, &running, running.stmt.resume())? {
                 Ran::Done => Ok((id, Ran::Done)),
                 _ => Err(fault("an action's statement did not complete").into()),
@@ -1017,7 +1076,13 @@ impl KernelMachine {
         }
         // The value is in no variable until the statement uses it.
         self.put(entry.dst.0 as usize, value);
-        self.pin(entry.dst.0 as usize)?;
+        if matches!(origin, ResultOrigin::Delivered) {
+            self.pin(entry.dst.0 as usize)?;
+        } else {
+            self.pins
+                .borrowed
+                .push(self.regs[entry.dst.0 as usize].clone());
+        }
         let pc = running.stmt.ops.start as usize + entry.resume as usize;
         let ran = self.run(host, &running, pc)?;
         Ok((id, ran))

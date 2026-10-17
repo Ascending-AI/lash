@@ -2,10 +2,12 @@
 pub(super) const DATA: &str = r####"{
 "b30004728bfe187ffdd9a2d078db3caba8f55e1c9de244800f144fa28aecb91b":{"charge":3,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b300f9b06112bad9c8de92dfab92e0f472c1a8384f2f83343ef57c51fa611962":[{"float":"9.424566537752384e163"}],
+"b304b729531a21d034fb24d4c07afa593bd048aeab9c6d62bece85d36c69a2c6":{"charge":156,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b30a5327ee1e762125125d755774b24a7d0cd03871e0462403ae5b21d8305389":{"charge":6,"outcome":"ok {\"float\":\"-1.3026742318173853e125\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b30affe95925e655858792a2df5cc0e7993a10ca2532649bc93d44116647b566":[{"list":7},{"text":"󞪏󌊚񸆟􏵜򆮦򧛱򋡜􂀬󟅬񦎎𯳉򙥰􀩂񕣖돧􇽀򦶾񳓥󛏌񷮫񻮜엫𽪠򻌕𸜳񗳽󟝄񒆪򒥩𦅻񐍹󉴿򷷅𧡾팎󿬨񉃞󝹿󝰃𶕻뽱񮩏𵱛񟨣󂴗󉒍𖛤񉼩􏩗𺑣򼗫𳲠󪫙䧌񟹟񒩣򏣷򈛆󲩋󱣟񓬮񟛘򏌵󕾓𜗬񍝧䴉󠧓𚜀𸑎񞛆󷲋𶚲󍋿򵲚󪂣󾜢󄩬񳿸𕾇򓛸𭺕񈉨񒕬򮠦򺹶󲪪󫩿򌛋􅶆𼒽󹩴👀񵖨𣄃궡𤲺𵺣򄃞񪏟򶥘󳦊󖥹⧫񩥸鉊𧷮𦲕򿴌񃗶󅀝񯯽􏍊󩨬𑈘񬘼"}],
 "b30c28b2caf1b6d1cdf2d5c33e6c154908059c6312e10f9ed156dc976803a87e":[{"map":183},"null"],
 "b30e5368c279b6f06b9b8178eec90f21d826d9c598a2dcbf427aba2fd1ef7d0b":[{"text":"݇󔊉𫡌􍨼򫺈󘗵鎾焙𴞻񛇴𣾗𳰨򨩐񈵄䍞𷙘󫚴𾃙񮅘󙚚𨄷򅏵𗸒򘹮󃛲􍠟󿉯󮡋򱵛ơ򮿢􎊽򰨸񃠬񹽜󼵢𕡸󉻈񄇵񢈶㯲򧜅󱢫󲱚󳢂遳𸶓󫑈򠌠󑌦몀󊯵󑧢򰝑񆄟񮀝𼺝쉀򵟄򍁫򩜋񧃥򜕄𜧎򅟝𫈲"}],
+"b311af06a729b85d9a48b3857cb71ff8e5d21cbd4c9ebeeac716c83c3ffb8b80":[{"bool":true},{"int":"2846678295363783976"}],
 "b311c31ce958c840e238d1207b7756e9c527a55b2e3fb0b22172599cdf66d7b8":[{"text":""},{"text":""},{"int":"9223372036854775807"}],
 "b317864d0b9b7abc7d7c01dd464608a610f6f7184a646bdf8404e88c13af8c6b":[{"list":87},{"int":"63"}],
 "b319b4066caed6d7b0fd70033e98c8f3a37b4088011d4de416ac4cc058fb37b6":{"charge":8,"outcome":"ok {\"error\":{\"data\":\"null\",\"kind\":\"[]\",\"message\":\"\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -105,7 +107,6 @@ pub(super) const DATA: &str = r####"{
 "b3b2e144fa9dc2b0c021e49b52e313ab501cef9e6f6fd648c3d9c7981a126b49":[{"list":[{"int":"-2018026141176759786"},{"int":"-6049120481582343858"}]},{"list":[{"float":"2.4301944220186568e-12"},{"text":"񴹃񉠟򜓯򑪦󥔓􀅹񶼻󱤥񪙗򠋛搞󏅖𤄴򎺶򃣫򨁚󍷚􇓡򝱈񆏰񮴷󿴭ᆗ󳙴ꌘ񋙞𓒲񗁛񈹻񂾧ﰸ񡿀򨇿򝴼򝖆󍦭񬅞򛥜󗜮所󐊄񼶁񳙚𫊶򯩓񷅧󟙅򻛩𮧄򽬗󟝡񕛏󃖢𓥉񋅻򾓙󕵐⟪𸼥򅍻񼴝񪧇𵕔򔻾򌟣򖒬񋥥򬥗󀔅򝑏􄀧󀥧􅢵򸭄􇭒󫤤񰭖񟻀񹼽񡕃󗶩𱄒񓶰韋󹠤񝀔񪲴򰛭񳎠󍿇􊶸𰣣򡠲񦺂𾣟񛛎񗀣𸈃𚿇񌽘"},"null",{"list":0},{"text":"򸈻􌯿񂾨򻯷򥵀񾟺󮂵𮰴󷳬򌤕󕯇ᚰ󻺝𤒠򜰩󐇱➲󳝽񒡓"},{"float":"-1.1986100647695368e-128"}]}],
 "b3b3fd816364e158b51a8018f60a3f6c490b3d0815e10e0ca754b76163ed6038":{"charge":394,"outcome":"ok {\"list\":[{\"list\":[{\"text\":\"󦍴򳲲񘑋񍮃󷓴񅤝񈓯𦠦񔝶򇱸𬂀򏼁񀲿𲝦󘪨񛞽򻦒󥡡좑񃝀񠔮򿲤𘁝􍒉񨽠򿑾􃘖𓯺󲌍򠠋𻻛򻝦󢦈󋇛񻡸􍼈Ⓐ򓥿𹓍򰊤񼾡򻱾񇺆𘟻򦀴񟷴񼄏\"},{\"text\":\"\"}]}]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3b6171704f38c234c44c8073dfb32d0d1e872e6b54fb600c6b8a7a0b4be72d5":[{"float":"-1.5"},{"int":"0"}],
-"b3b7bdd450f88eb66e330c22d142ba6a54aceb33bd8297d4f70b99782cb70f27":[{"float":"3.561319029105625e-132"},{"int":"-5292753448001619855"}],
 "b3bc2d843e2cdd234e79a1f1a3709532f85f7e141004224af312285f245d513f":{"charge":11,"outcome":"ok {\"float\":\"2.1880137772369877e-181\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3c2653981392bd07a28bd7b3a821cddf92c870813e25410cca019445b49eac1":[{"bytes":"61ff"},{"int":"-7"},{"int":"1"}],
 "b3c2b02a43d5f99d4a9d46f979f74e50f4ef9adba62abfefa79f86b2ba7ab8ba":{"charge":19,"outcome":"ok {\"int\":\"4118666482530775769\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -134,6 +135,7 @@ pub(super) const DATA: &str = r####"{
 "b3f03d4ed58bceddfb946957dabd938bb599f358ab5b0eade27c4a3bdce1d8f1":["null",{"int":"1"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "b3f1423efb94306c6aee38dd1d5cae6ed2c2213fd9385211a9017f47e5b96a3c":[{"list":[{"int":"9209750055853113630"},{"int":"-5782077305815612900"}]}],
 "b3f625f21725263c78d84eccbd625954928d8eda7b7c4b23eaa677c39ede449a":{"charge":428,"outcome":"ok {\"int\":\"1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"b3f7a15a497a3a216ca57d4495ac327fdd049befd90f19055147e6bd130966e7":[{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"int":"2"},{"int":"0"},{"int":"63"},{"float":"-1.5"},{"int":"-1"},{"text":"ab"}]},{"list":[{"bool":true},"null",{"list":24},{"bool":false}]}],
 "b3fa598a0e6325afbcae7f7778594f38e99be6553ba99bd1d80aa4c182397adb":{"charge":572,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3fc3dc67baaac9d1f508c9a4365772bae94473712ecc6c96a876db7c831b4a3":{"charge":244,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3fcf0226927e541c6800efa90e1af1810d0c0ee95a19325ceb0aaf6c8b19321":["absent",{"set":85}]

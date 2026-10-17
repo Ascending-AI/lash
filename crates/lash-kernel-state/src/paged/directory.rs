@@ -429,6 +429,8 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct FrameRecord {
+        /// Definition-derived logical register file, prepaid for this frame.
+        pub registers: u32,
         pub statement: SiteRef,
         pub bindings: Tree<BindingRecord>,
         pub loops: Tree<LoopRecord>,
@@ -455,6 +457,7 @@ pub mod execution {
     impl FrameRecord {
         pub fn fresh(statement: SiteRef) -> Self {
             Self {
+                registers: 0,
                 statement,
                 bindings: Tree::new(false),
                 loops: Tree::new(true),
@@ -624,7 +627,8 @@ pub mod execution {
     }
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
-            self.statement.same_version(&other.statement)
+            self.registers == other.registers
+                && self.statement.same_version(&other.statement)
                 && self.bindings.same_version(&other.bindings)
                 && self.loops.same_version(&other.loops)
                 && self.finally.same_version(&other.finally)
@@ -649,7 +653,8 @@ pub mod execution {
                 + self.pending.as_ref().map_or(0, PendingRecord::task_edges)
         }
         fn cost(&self) -> u64 {
-            64 + self.bindings.cost()
+            64 + u64::from(self.registers) * 16
+                + self.bindings.cost()
                 + self.iterated.cost()
                 + self.departing.cost()
                 + self.arguments.as_ref().map_or(0, Tree::cost)
@@ -796,7 +801,8 @@ pub mod execution {
     }
     impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(8);
+            out.seq(9);
+            self.registers.encode(out);
             self.statement.encode(out);
             self.bindings.encode(out);
             self.loops.encode(out);
@@ -807,8 +813,9 @@ pub mod execution {
             self.pending.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(8)?;
+            input.expect_struct(9)?;
             Ok(Self {
+                registers: u32::decode(input)?,
                 statement: <SiteRef>::decode(input)?,
                 bindings: <Tree<BindingRecord>>::decode(input)?,
                 loops: <Tree<LoopRecord>>::decode(input)?,

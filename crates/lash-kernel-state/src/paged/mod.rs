@@ -52,6 +52,7 @@ mod census_graph;
 mod codec;
 mod equality;
 mod publication;
+pub use publication::StatementRoots;
 pub mod tree;
 
 pub mod directory;

@@ -8,6 +8,7 @@ use num_traits::ToPrimitive;
 
 #[derive(Default)]
 pub(super) struct Registers {
+    pub(super) prepaid: u32,
     values: Vec<Value>,
     written: Vec<bool>,
     extent: usize,
@@ -112,6 +113,7 @@ impl Registers {
         }
         self.written[..self.extent].fill(false);
         self.extent = 0;
+        self.prepaid = 0;
     }
 }
 
@@ -130,6 +132,7 @@ impl From<Vec<Value>> for Registers {
         let extent = values.len();
         let owns_values = values.iter().any(|value| !reusable(value));
         Self {
+            prepaid: 0,
             values,
             written: vec![true; extent],
             extent,

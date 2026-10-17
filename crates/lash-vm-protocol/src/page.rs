@@ -323,6 +323,8 @@ impl PageRefusal {
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HeapFault {
+    #[error("frame register count {stored} differs from admitted count {expected}")]
+    FrameRegisters { stored: u32, expected: u32 },
     #[error("{detail}")]
     Missing { detail: Detail },
     #[error("{detail}")]
@@ -385,7 +387,10 @@ impl HeapFault {
     pub fn is_retryable(&self) -> bool {
         !matches!(
             self,
-            Self::Missing { .. } | Self::Corrupt { .. } | Self::Malformed { .. }
+            Self::Missing { .. }
+                | Self::Corrupt { .. }
+                | Self::Malformed { .. }
+                | Self::FrameRegisters { .. }
         )
     }
 }

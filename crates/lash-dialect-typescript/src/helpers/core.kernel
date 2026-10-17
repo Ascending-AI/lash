@@ -255,26 +255,25 @@ kernel 1
 charge 3
 native
 body {
-  let k = kind(value)
-  if same(k, "bool") {
+  if same(kind(value), "bool") {
     return value
   }
-  if same(k, "float") {
+  if same(kind(value), "float") {
     if num.is_nan(value) {
       return false
     }
     return bool.not(eq(value, 0))
   }
-  if same(k, "absent") {
+  if same(kind(value), "absent") {
     return false
   }
-  if same(k, "text") {
+  if same(kind(value), "text") {
     return bool.not(same(value, ""))
   }
-  if same(k, "null") {
+  if same(kind(value), "null") {
     return false
   }
-  if same(k, "integer") {
+  if same(kind(value), "integer") {
     return bool.not(eq(value, 0))
   }
   return true
@@ -483,24 +482,27 @@ body {
 function ts.to_string(value: Any) -> Text
 kernel 1
 errors "type_error"
-charge sum(8, deep(value))
+charge 8
+native
 body {
-  let k = kind(value)
-  if same(k, "text") {
-    return value
-  }
-  # ToPrimitive leaves a number as it is.
-  if same(k, "float") {
-    let spelled = invoke ts.number.to_string(value)
+  if same(kind(value), "text") { return value }
+  let dynamic = fn(value) {
+    let k = kind(value)
+    # ToPrimitive leaves a number as it is.
+    if same(k, "float") {
+      let spelled = invoke ts.number.to_string(value)
+      return spelled
+    }
+    if same(k, "integer") {
+      let spelled = invoke ts.number.to_string(value)
+      return spelled
+    }
+    let primitive = invoke ts.to_primitive(value, "string")
+    let spelled = invoke ts.primitive_to_string(primitive)
     return spelled
   }
-  if same(k, "integer") {
-    let spelled = invoke ts.number.to_string(value)
-    return spelled
-  }
-  let primitive = invoke ts.to_primitive(value, "string")
-  let spelled = invoke ts.primitive_to_string(primitive)
-  return spelled
+  let outcome = apply dynamic(value)
+  return outcome
 }
 
 # ToNumber.
@@ -522,13 +524,16 @@ body {
 function ts.to_property_key(key: Any) -> Text
 kernel 1
 errors "type_error"
-charge sum(8, deep(key))
+charge 8
+native
 body {
-  if same(kind(key), "text") {
-    return key
+  if same(kind(key), "text") { return key }
+  let dynamic = fn(key) {
+    let spelled = invoke ts.to_string(key)
+    return spelled
   }
-  let spelled = invoke ts.to_string(key)
-  return spelled
+  let outcome = apply dynamic(key)
+  return outcome
 }
 
 # `a + b`.
@@ -540,17 +545,16 @@ native
 body {
   # Two numbers add and two texts join, whatever their conversions would
   # say.
-  let left_kind = kind(left)
-  if same(left_kind, kind(right)) {
-    if same(left_kind, "float") { return num.add(left, right) }
-    if same(left_kind, "text") { return text.concat(left, right) }
+  if same(kind(left), kind(right)) {
+    if same(kind(left), "float") { return num.add(left, right) }
+    if same(kind(left), "text") { return text.concat(left, right) }
   }
   # Keep the float-pair exit above these mixed host-number guards.
   # Convert integers just as ToNumber does, including its range errors.
-  if same(left_kind, "float") {
+  if same(kind(left), "float") {
     if same(kind(right), "integer") { return num.add(left, num.to_float(right)) }
   } else {
-    if same(left_kind, "integer") {
+    if same(kind(left), "integer") {
       if same(kind(right), "float") { return num.add(num.to_float(left), right) }
     }
   }
@@ -914,7 +918,7 @@ errors "type_error"
 charge sum(20, deep(left), deep(right))
 native
 body {
-  # Float pairs already have ECMA Number semantics, including NaN and zero.
+  # The native answers float pairs without a conversion operation.
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.lt(left, right) }
   }
@@ -931,6 +935,10 @@ errors "type_error"
 charge sum(20, deep(left), deep(right))
 native
 body {
+  # The native answers float pairs without a conversion operation.
+  if same(kind(left), "float") {
+    if same(kind(right), "float") { return num.lt(right, left) }
+  }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
     return num.lt(text.utf16_compare(operands[2], operands[1]), 0)
@@ -944,6 +952,10 @@ errors "type_error"
 charge sum(20, deep(left), deep(right))
 native
 body {
+  # The native answers float pairs without a conversion operation.
+  if same(kind(left), "float") {
+    if same(kind(right), "float") { return num.le(left, right) }
+  }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
     return bool.not(num.lt(text.utf16_compare(operands[2], operands[1]), 0))
@@ -957,6 +969,10 @@ errors "type_error"
 charge sum(20, deep(left), deep(right))
 native
 body {
+  # The native answers float pairs without a conversion operation.
+  if same(kind(left), "float") {
+    if same(kind(right), "float") { return num.le(right, left) }
+  }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
     return bool.not(num.lt(text.utf16_compare(operands[1], operands[2]), 0))
@@ -988,6 +1004,7 @@ body {
 function ts.hole_value(value: Any) -> Any
 kernel 1
 charge 1
+native
 body {
   if same(value, ()) { return absent }
   return value
@@ -1087,167 +1104,180 @@ body {
 function ts.number_index(key: Any, length: Number) -> Number
 kernel 1
 charge 4
+native
 body {
-  let k = kind(key)
-  if same(k, "float") {} else {
-    if same(k, "integer") {} else { return -2.0 }
-  }
-  # NaN and the infinities fall outside the range; -0 names 0.
-  if num.le(0, key) {
-    if num.lt(key, length) {
-      if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
+  let dynamic = fn(key, length) {
+    let k = kind(key)
+    if same(k, "float") {} else {
+      if same(k, "integer") {} else { return -2.0 }
     }
+    # NaN and the infinities fall outside the range; -0 names 0.
+    if num.le(0, key) {
+      if num.lt(key, length) {
+        if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
+      }
+    }
+    return -1.0
   }
-  return -1.0
+  let outcome = apply dynamic(key, length)
+  return outcome
 }
 
 # The position a property key names in a list of `length` elements, or -1
 # when it names none.
 function ts.list_index(key: Any, length: Number) -> Number
 kernel 1
-charge sum(6, size(key))
+charge 6
+native
 body {
-  let name = key
-  if same(kind(key), "text") {} else {
-    let numbered = invoke ts.number_index(key, length)
-    if num.lt(-2.0, numbered) { return numbered }
-    set name = invoke ts.to_property_key(key)
+  let dynamic = fn(key, length) {
+    let name = key
+    if same(kind(key), "text") {} else {
+      let numbered = invoke ts.number_index(key, length)
+      if num.lt(-2.0, numbered) { return numbered }
+      set name = invoke ts.to_property_key(key)
+    }
+    # The text of an index begins with a digit; no other name is one.
+    let first = text.slice(name, 0, 1)
+    if same(first, "") { return -1.0 }
+    if num.lt(text.compare(first, "0"), 0) { return -1.0 }
+    if num.lt(0, text.compare(first, "9")) { return -1.0 }
+    let position = invoke ts.number.parse(name)
+    if num.is_finite(position) {} else { return -1.0 }
+    if eq(num.floor(position), position) {} else { return -1.0 }
+    if num.lt(position, 0) { return -1.0 }
+    let canonical = invoke ts.number.to_string(position)
+    if same(canonical, name) {} else { return -1.0 }
+    if num.lt(position, length) { return num.to_float(position) }
+    return -1.0
   }
-  # The text of an index begins with a digit; no other name is one.
-  let first = text.slice(name, 0, 1)
-  if same(first, "") { return -1.0 }
-  if num.lt(text.compare(first, "0"), 0) { return -1.0 }
-  if num.lt(0, text.compare(first, "9")) { return -1.0 }
-  let position = invoke ts.number.parse(name)
-  if num.is_finite(position) {} else { return -1.0 }
-  if eq(num.floor(position), position) {} else { return -1.0 }
-  if num.lt(position, 0) { return -1.0 }
-  let canonical = invoke ts.number.to_string(position)
-  if same(canonical, name) {} else { return -1.0 }
-  if num.lt(position, length) { return num.to_float(position) }
-  return -1.0
+  let outcome = apply dynamic(key, length)
+  return outcome
 }
 
 # `target[key]` and `target.key` where no built-in row answers.
 function ts.get(target: Any, key: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(12, deep(key))
+charge 12
+native
 body {
-  let k = kind(target)
-  # A plain object and an array first: the kinds most reads have. An
-  # object without the internal tuple marker is plain without asking ts.receiver,
-  # and its field is read in place unless the key is no text, which raises
-  # `type_error` and takes the generic read below.
-  if same(k, "record") {
-    try {
+  # P: an existing plain-record field is constant work, even on native decline.
+  if same(kind(target), "record") {
+    if same(kind(key), "text") {
       if bool.not(same(target.__ts_brand, ())) { return target[key] }
-    } catch generic {}
-  }
-  if same(k, "list") {
-    let length = list.len(target)
-    let position = invoke ts.number_index(key, length)
-    if same(position, -2.0) {
-      let name = invoke ts.to_property_key(key)
-      if same(name, "length") { return num.to_float(length) }
-      set position = invoke ts.list_index(name, length)
     }
-    if num.lt(position, 0) {
-      let other = invoke ts.exotic.get(target, key)
-      return other
-    }
-    let value = target[position]
-    if same(value, ()) { return absent }
-    return value
   }
-  set k = invoke ts.receiver(target)
-  if same(k, "record") {
-    let name = invoke ts.to_property_key(key)
-    return target[name]
-  }
-  if same(k, "closure") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
-    if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
-    if same(kind(target), "tuple") {
-      if same(target[1], "") {
-        # A function the program made has its own `name` and `length`;
-        # once one is deleted it reads Function.prototype's.
-        let deleted = target[5]
-        if same(name, "name") {
-          if record.contains(deleted, name) { return "" }
-          return target[2]
-        }
-        if same(name, "length") {
-          if record.contains(deleted, name) { return 0.0 }
-          return target[3]
-        }
-        return absent
+  # K-CHG-007: only dynamic work crosses the ordinary closure boundary.
+  let dynamic = fn(target, key) {
+    let k = kind(target)
+    if same(k, "list") {
+      let length = list.len(target)
+      let position = invoke ts.number_index(key, length)
+      if same(position, -2.0) {
+        let name = invoke ts.to_property_key(key)
+        if same(name, "length") { return num.to_float(length) }
+        set position = invoke ts.list_index(name, length)
       }
+      if num.lt(position, 0) {
+        let other = invoke ts.exotic.get(target, key)
+        return other
+      }
+      let value = target[position]
+      if same(value, ()) { return absent }
+      return value
     }
-  }
-  if same(k, "brand:ts.arguments") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
-    return target.properties[name]
-  }
-  if same(k, "text") {
-    let length = text.utf16_len(target)
-    if same(key, "length") { return num.to_float(length) }
-    let position = invoke ts.list_index(key, length)
-    if num.lt(position, 0) { return absent }
-    let index = float.to_int(position)
-    try { return text.utf16_slice(target, index, num.add(index, 1)) } catch boundary {
-      throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String index contains a lone surrogate", null)
+    set k = invoke ts.receiver(target)
+    if same(k, "record") {
+      let name = invoke ts.to_property_key(key)
+      return target[name]
     }
-  }
-  if same(k, "brand:regex.ecma") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "lastIndex") { return target.lastIndex }
-    if same(name, "source") {
-      let pattern = target.pattern
-      let source = invoke ts.regexp.escaped_source(pattern)
-      return source
-    }
-    if same(name, "flags") { return target.flags }
-    for pair in [["global", "g"], ["ignoreCase", "i"], ["multiline", "m"], ["dotAll", "s"], ["unicode", "u"], ["sticky", "y"]] {
-      if same(name, pair[0]) { return num.le(0, text.utf16_find(target.flags, pair[1], 0)) }
-    }
-    return absent
-  }
-  if same(k, "brand:regex.match") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "length") { return num.to_float(list.len(target.items)) }
-    for field in ["index", "input", "groups"] { if same(name, field) { return target[name] } }
-    let arg_1 = list.len(target.items)
-    let position = invoke ts.list_index(key, arg_1)
-    if num.lt(position, 0) { return absent }
-    let element = target.items[position]
-    let outcome = invoke ts.hole_value(element)
-    return outcome
-  }
-  if same(k, "brand:ts.iterator") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "next") { return target.next }
-    return absent
-  }
-  if same(kind(target), "tuple") {
     if same(k, "closure") {
       let name = invoke ts.to_property_key(key)
-      if same(name, "name") { return target[2] }
-      if same(name, "length") { return target[3] }
+      if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
+      if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+      if same(kind(target), "tuple") {
+        if same(target[1], "") {
+          # A function the program made has its own `name` and `length`;
+          # once one is deleted it reads Function.prototype's.
+          let deleted = target[5]
+          if same(name, "name") {
+            if record.contains(deleted, name) { return "" }
+            return target[2]
+          }
+          if same(name, "length") {
+            if record.contains(deleted, name) { return 0.0 }
+            return target[3]
+          }
+          return absent
+        }
+      }
     }
-    if same(k, "tuple") {} else {
-      throw error.new("TS_REFLECTION_UNSUPPORTED", "Reading a built-in's properties generically is outside the TypeScript dialect", null)
+    if same(k, "brand:ts.arguments") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
+      return target.properties[name]
     }
+    if same(k, "text") {
+      let length = text.utf16_len(target)
+      if same(key, "length") { return num.to_float(length) }
+      let position = invoke ts.list_index(key, length)
+      if num.lt(position, 0) { return absent }
+      let index = float.to_int(position)
+      try { return text.utf16_slice(target, index, num.add(index, 1)) } catch boundary {
+        throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String index contains a lone surrogate", null)
+      }
+    }
+    if same(k, "brand:regex.ecma") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "lastIndex") { return target.lastIndex }
+      if same(name, "source") {
+        let pattern = target.pattern
+        let source = invoke ts.regexp.escaped_source(pattern)
+        return source
+      }
+      if same(name, "flags") { return target.flags }
+      for pair in [["global", "g"], ["ignoreCase", "i"], ["multiline", "m"], ["dotAll", "s"], ["unicode", "u"], ["sticky", "y"]] {
+        if same(name, pair[0]) { return num.le(0, text.utf16_find(target.flags, pair[1], 0)) }
+      }
+      return absent
+    }
+    if same(k, "brand:regex.match") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "length") { return num.to_float(list.len(target.items)) }
+      for field in ["index", "input", "groups"] { if same(name, field) { return target[name] } }
+      let arg_1 = list.len(target.items)
+      let position = invoke ts.list_index(key, arg_1)
+      if num.lt(position, 0) { return absent }
+      let element = target.items[position]
+      let outcome = invoke ts.hole_value(element)
+      return outcome
+    }
+    if same(k, "brand:ts.iterator") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "next") { return target.next }
+      return absent
+    }
+    if same(kind(target), "tuple") {
+      if same(k, "closure") {
+        let name = invoke ts.to_property_key(key)
+        if same(name, "name") { return target[2] }
+        if same(name, "length") { return target[3] }
+      }
+      if same(k, "tuple") {} else {
+        throw error.new("TS_REFLECTION_UNSUPPORTED", "Reading a built-in's properties generically is outside the TypeScript dialect", null)
+      }
+    }
+    let nullish = invoke ts.is_nullish(target)
+    if nullish {
+      let name = invoke ts.to_property_key(key)
+      throw error.new("type_error", text.concat("Cannot read properties of undefined or null (reading '", text.concat(name, "')")), null)
+    }
+    let other = invoke ts.exotic.get(target, key)
+    return other
   }
-  let nullish = invoke ts.is_nullish(target)
-  if nullish {
-    let name = invoke ts.to_property_key(key)
-    throw error.new("type_error", text.concat("Cannot read properties of undefined or null (reading '", text.concat(name, "')")), null)
-  }
-  let other = invoke ts.exotic.get(target, key)
-  return other
+  let outcome = apply dynamic(target, key)
+  return outcome
 }
 
 # `target[key] = value`.

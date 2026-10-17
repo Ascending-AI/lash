@@ -486,6 +486,7 @@ impl Frame {
 /// Comparison metadata must not keep binding leaves (or the other mutable
 /// holdings trees) shared after the real publication has been retired.
 pub(super) struct Publication {
+    registers: u32,
     statement: lash_kernel_state::paged::SiteRef,
     bindings: Version<BindingRecord>,
     loops: Version<LoopRecord>,
@@ -517,6 +518,7 @@ impl RolesPublication {
 impl Publication {
     fn new(record: &FrameRecord) -> Self {
         Self {
+            registers: record.registers,
             statement: record.statement.clone(),
             bindings: record.bindings.version(),
             loops: record.loops.version(),
@@ -539,7 +541,8 @@ impl Publication {
         }
     }
     fn same_holdings(&self, record: &FrameRecord) -> bool {
-        self.bindings.matches(&record.bindings)
+        self.registers == record.registers
+            && self.bindings.matches(&record.bindings)
             && self.iterated.matches(&record.iterated)
             && self.departing.matches(&record.departing)
             && match (&self.arguments, &record.arguments) {
@@ -832,6 +835,13 @@ fn restore(
         .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
         .ok_or_else(|| malformed("a frame has no admitted code body"))?;
     let code = exe.code(code_id);
+    let expected = if code.charged { 0 } else { code.registers };
+    if record.registers != expected {
+        return Err(HeapFault::FrameRegisters {
+            stored: record.registers,
+            expected,
+        });
+    }
     let mut depth = code.site.path.len();
     let mut block = code.body;
     let mut control = Vec::new();
@@ -1272,6 +1282,27 @@ fn continuation(
 #[cfg(test)]
 mod laws {
     use crate::laws::embedder::Embedder;
+
+    /// K-BND-002: cold frames cannot choose their prepaid register price.
+    #[test]
+    fn a_frame_refuses_a_register_count_that_differs_from_its_definition() {
+        use super::*;
+        let embedder = Embedder::new("main { return pair.twice(1) }");
+        let exe = Arc::clone(&embedder.machine.exe);
+        let site = Site::new(Unit::Library(embedder.library.ids["pair.twice"]), []);
+        let code = exe.code(exe.code_at(&site).unwrap());
+        let expected = code.registers;
+        assert!(expected > 0);
+        let access = embedder.machine.heap.pages().clone();
+        let mut record = FrameRecord::fresh(
+            lash_kernel_state::paged::SiteRef::new(&site.child(0), &access).unwrap(),
+        );
+        record.registers = expected + 1;
+        let error = restore(record, ParkKind::Fresh, access, exe).err().unwrap();
+        assert!(
+            matches!(error, HeapFault::FrameRegisters { stored, expected: actual } if stored == expected + 1 && actual == expected)
+        );
+    }
 
     /// FIG-6586: obsolete task/frame/publication owners must not make a
     /// hot binding copy its neighbours. Real snapshots still require COW,

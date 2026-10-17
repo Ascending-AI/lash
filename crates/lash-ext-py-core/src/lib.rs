@@ -39,7 +39,7 @@ pub const OPERATIONS: [&str; 2] = ["py.truth", "py.add"];
 /// Adds its native to each of `helpers` that this crate implements
 /// ([`OPERATIONS`]), each looked up by the name its definition carries.
 /// The registry must hold the kernel library already: the natives call
-/// its `add`, `text.concat`, `list.concat` and `tuple.concat`.
+/// its `add`, `text.concat` and `list.concat`.
 ///
 /// # Errors
 ///
@@ -58,7 +58,6 @@ pub fn implement(
         add: kernel("add")?,
         text: kernel("text.concat")?,
         list: kernel("list.concat")?,
-        tuple: kernel("tuple.concat")?,
     });
     let mut natives: Vec<(FunctionId, Arc<dyn NativeFunction>)> = Vec::new();
     for function in helpers {
@@ -78,11 +77,12 @@ pub fn implement(
     Ok(())
 }
 
-/// `py.truth`, `bool(value)`: total, for it calls no guest code.
+/// Scalar truth needs no intermediate length value. Collection and tuple
+/// truth declines to the body, which holds that length before comparing it.
 struct Truth;
 
 impl Truth {
-    /// The truth of a value whose answer reads no object, or `None`.
+    /// The truth of a value whose body holds no intermediate length.
     fn scalar(value: &Value) -> Option<bool> {
         Some(match value {
             Value::Bool(value) => *value,
@@ -92,7 +92,7 @@ impl Truth {
             // `eq(value, 0)`, which NaN is not and -0 is.
             Value::Float(value) => value.get() != 0.0,
             Value::Text(text) => text.summary.utf8_bytes != 0,
-            Value::Tuple(tuple) => tuple.summary.len != 0,
+            Value::Tuple(_) => return None,
             Value::List(_) | Value::Map(_) | Value::Record(_) | Value::Set(_) => return None,
             _ => true,
         })
@@ -104,10 +104,7 @@ impl NativeFunction for Truth {
         let value = call.args.first().unwrap_or(&Value::Absent);
         let truth = match Self::scalar(value) {
             Some(truth) => truth,
-            None => match value.object() {
-                Some(object) => call.heap.len(object)? != 0,
-                None => true,
-            },
+            None => return Err(NativeError::Decline),
         };
         Ok(Value::Bool(truth))
     }
@@ -120,14 +117,13 @@ impl NativeFunction for Truth {
     }
 }
 
-/// `py.add`, `a + b`: two numbers add, and two texts, lists or tuples
-/// concatenate. Every other pair declines, and the body raises its
-/// `TypeError`.
+/// Two numbers add, and two texts or lists concatenate. Tuple addition
+/// declines because its body releases argument-construction pins before
+/// allocating the result. Unsupported pairs retain the body's `TypeError`.
 struct Add {
     add: Arc<dyn NativeFunction>,
     text: Arc<dyn NativeFunction>,
     list: Arc<dyn NativeFunction>,
-    tuple: Arc<dyn NativeFunction>,
 }
 
 impl NativeFunction for Add {
@@ -140,7 +136,9 @@ impl NativeFunction for Add {
             (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => &self.add,
             (Value::Text(_), Value::Text(_)) => &self.text,
             (Value::List(_), Value::List(_)) => &self.list,
-            (Value::Tuple(_), Value::Tuple(_)) => &self.tuple,
+            // The body releases argument-construction pins before tuple
+            // concatenation. An inline native retains those extra holdings.
+            (Value::Tuple(_), Value::Tuple(_)) => return Err(NativeError::Decline),
             _ => return Err(NativeError::Decline),
         };
         native.call(call)

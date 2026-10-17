@@ -14,6 +14,7 @@ fn certificate(upper: u64, entities: u64) -> AccountingCertificate {
 }
 fn empty() -> TransientRoots<'static> {
     TransientRoots {
+        borrowed: &[],
         registers: &[],
         pinned: &[],
         native_args: &[],
@@ -171,5 +172,35 @@ fn last_and_nonlast_alias_removal_keep_u_an_upper_bound() {
         census.refine(&mut graph, &empty(), pending).unwrap(),
         RefinedDecision::Granted(_)
     ));
+    assert!(!graph.present);
+}
+
+/// RESULT-TRANSFER: an existing allocation remains reachable during handoff,
+/// without pricing a second allocation for the transfer root itself.
+#[test]
+fn transfer_roots_keep_referents_without_another_allocation() {
+    let mut graph = Graph {
+        roots: vec![],
+        cost: 32,
+        present: true,
+    };
+    let mut census = Census::restore(certificate(32, 1), LogicalBytes(32)).unwrap();
+    let value = [Value::List(entity())];
+    let roots = TransientRoots {
+        borrowed: &value,
+        ..empty()
+    };
+    let pending = PendingReservation {
+        bytes: LogicalBytes(0),
+        overflowed: false,
+    };
+    assert!(matches!(
+        census.refine(&mut graph, &roots, pending).unwrap(),
+        RefinedDecision::Granted(_)
+    ));
+    assert_eq!(census.certificate().upper, LogicalBytes(32));
+    assert!(graph.present);
+    census.refine(&mut graph, &empty(), pending).unwrap();
+    assert_eq!(census.certificate().upper, LogicalBytes(0));
     assert!(!graph.present);
 }

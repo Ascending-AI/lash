@@ -105,6 +105,8 @@ pub enum CensusFault {
 /// allocations not yet stored, and outstanding reservations.
 #[derive(Clone, Copy, Debug)]
 pub struct TransientRoots<'a> {
+    /// Reachability during an ownership transfer, with no new allocation.
+    pub borrowed: &'a [Value],
     pub registers: &'a [Value],
     pub pinned: &'a [Value],
     pub native_args: &'a [Value],

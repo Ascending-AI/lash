@@ -21,6 +21,7 @@ fn id(n: u64) -> EntityId {
 }
 fn empty() -> TransientRoots<'static> {
     TransientRoots {
+        borrowed: &[],
         registers: &[],
         pinned: &[],
         native_args: &[],
@@ -325,6 +326,7 @@ fn refinement_counts_registers_native_args_and_reservations() {
     }))];
     let pinned = [Value::Ref(Identity::Task(TaskId(10)))];
     let transient = TransientRoots {
+        borrowed: &[],
         registers: &registers,
         pinned: &pinned,
         native_args: &native_args,
@@ -381,6 +383,7 @@ fn an_interrupted_refinement_is_infrastructure() {
     let mut scalars = Graph::default();
     let args = [Value::Null];
     let scalar_roots = TransientRoots {
+        borrowed: &[],
         registers: &[],
         pinned: &[],
         native_args: &args,

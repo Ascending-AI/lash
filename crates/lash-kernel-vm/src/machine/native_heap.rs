@@ -18,6 +18,7 @@ pub(super) struct Roots<'a> {
     pub(super) joins: &'a Tree<ListJoinRecord>,
     pub(super) registers: &'a super::registers::Registers,
     pub(super) pinned: &'a [Value],
+    pub(super) borrowed: &'a [Value],
     pub(super) pinned_bytes: u64,
     pub(super) fresh: &'a [EntityId],
     pub(super) refinements: &'a mut u64,
@@ -41,12 +42,24 @@ impl Roots<'_> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.reconcile(heap)?;
+        let mut registers = self.registers.projection();
+        let occupied = registers.len().min(self.registers.prepaid as usize);
+        for value in registers.iter_mut().take(occupied) {
+            if super::operation_entry::guard_immediate(value) {
+                *value = Value::Null;
+            }
+        }
+        let prepaid = occupied as u64 * 16;
         heap.update_execution_roots(
             self.joins.clone(),
-            &self.registers.projection(),
-            self.pinned,
-            self.pinned_bytes,
-            self.fresh,
+            lash_kernel_state::paged::StatementRoots {
+                registers: &registers,
+                pinned: self.pinned,
+                pinned_bytes: self.pinned_bytes,
+                prepaid,
+                borrowed: self.borrowed,
+                fresh: self.fresh,
+            },
             || {
                 if coordinates {
                     self.tasks.roots()
@@ -346,6 +359,7 @@ mod laws {
                     joins: &machine.joins,
                     registers: &machine.regs,
                     pinned: &machine.pins.values,
+                    borrowed: &machine.pins.borrowed,
                     pinned_bytes: machine.pins.bytes,
                     fresh: &machine.fresh,
                     refinements: &mut machine.census_refinements,
@@ -415,6 +429,7 @@ mod laws {
                 joins: &machine.joins,
                 registers: &machine.regs,
                 pinned: &machine.pins.values,
+                borrowed: &machine.pins.borrowed,
                 pinned_bytes: machine.pins.bytes,
                 fresh: &machine.fresh,
                 refinements: &mut machine.census_refinements,
@@ -507,6 +522,12 @@ mod scalar_laws {
         let certificates = counted.certificates.clone();
         machine.heap.set_census(Box::new(counted)).unwrap();
         certificates.set(0);
+        machine
+            .pin_value(&Value::Float(lash_kernel_doc::Float::new(1.5)))
+            .unwrap();
+        assert_eq!(machine.heap.certificate().upper.0, before.upper.0 + 16);
+        // K-BND-003: Boolean guard answers are immediate, so they add no
+        // allocation beyond the Float holding already installed here.
         machine.pin_value(&Value::Bool(true)).unwrap();
         assert_eq!(machine.heap.certificate().upper.0, before.upper.0 + 16);
         machine.heap.release_statement_roots().unwrap();

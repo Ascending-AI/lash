@@ -28,9 +28,13 @@ impl CensusGraph for PagedHeap {
         let tasks = self.tasks.cost().checked_sub(retained).ok_or_else(|| {
             HeapFault::Malformed("retained task results exceed the task root cost".into())
         })?;
-        Ok(LogicalBytes(checked_sum(
-            [self.session.cost(), tasks, self.joins.cost()].into_iter(),
-        )?))
+        Ok(LogicalBytes(
+            checked_sum([self.session.cost(), tasks, self.joins.cost()].into_iter())?
+                .checked_sub(self.holdings.prepaid)
+                .ok_or_else(|| {
+                    HeapFault::Malformed("register credit exceeds persistent frame holdings".into())
+                })?,
+        ))
     }
     fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
         Ok(LogicalBytes(value_cost(value)))

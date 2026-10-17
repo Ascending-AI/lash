@@ -48,6 +48,7 @@ impl Compiler<'_> {
             captures: Vec::new(),
             free: free.then(Vec::new),
         });
+        let registers = super::registers::canonical_registers(body);
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
             main,
@@ -94,6 +95,7 @@ impl Compiler<'_> {
             slots_by_at[*at as usize] = slot as u32;
         }
         Code {
+            registers,
             versions: BlockVersions::new(params.len(), self.layout),
             site,
             params,

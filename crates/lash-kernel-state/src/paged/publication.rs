@@ -20,13 +20,27 @@ thread_local! {
     pub(super) static RELEASE_DELTA_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// Statement roots and the operation register cells they occupy.
+#[derive(Clone, Copy)]
+pub struct StatementRoots<'a> {
+    pub registers: &'a [Value],
+    pub pinned: &'a [Value],
+    pub borrowed: &'a [Value],
+    pub pinned_bytes: u64,
+    pub prepaid: u64,
+    pub fresh: &'a [EntityId],
+}
+
 /// What the machine holds outside the heap's trees: the running
 /// statement's roots and holds, what it holds for its frames since it last
 /// published, and whether the installed roots are its current ones.
 pub(super) struct Holdings {
     temporary: Vec<Value>,
+    borrowed: Vec<Value>,
     /// Pinned immediate values need their local cost, but no tracing descriptor.
     scalar_bytes: u64,
+    /// Register cells already owned by an operation frame.
+    pub(super) prepaid: u64,
     fresh: Vec<EntityId>,
     /// What the running statement holds: credit for its writes, released
     /// at the statement's end.
@@ -50,7 +64,9 @@ impl Default for Holdings {
     fn default() -> Self {
         Self {
             temporary: Vec::new(),
+            borrowed: Vec::new(),
             scalar_bytes: 0,
+            prepaid: 0,
             fresh: Vec::new(),
             reserved: 0,
             held: 0,
@@ -196,6 +212,17 @@ impl PagedHeap {
             .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
+    /// Transfers an admitted frame's cell allocation from persistent holding
+    /// credit to write credit, without changing its already reserved cost.
+    pub fn transfer_held_to_reservation(&mut self, bytes: u64) -> Result<(), HeapFault> {
+        self.holdings.held = self
+            .holdings
+            .held
+            .checked_sub(bytes)
+            .ok_or_else(|| HeapFault::Malformed("operation entry credit underflow".into()))?;
+        self.holdings.reserve(bytes)
+    }
+
     /// Refines exactly over the roots the machine has just published, with
     /// `bytes` pending: after it, a hold or write of `bytes` is granted.
     ///
@@ -260,6 +287,7 @@ impl PagedHeap {
         Ok(())
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
+        self.holdings.borrowed.clear();
         if self.holdings.temporary.is_empty()
             && self.holdings.scalar_bytes == 0
             && self.holdings.reserved == 0
@@ -277,7 +305,11 @@ impl PagedHeap {
                     .iter()
                     .map(value_cost)
                     .chain([self.holdings.scalar_bytes, self.holdings.reserved]),
-            )?;
+            )?
+            .checked_sub(self.holdings.prepaid)
+            .ok_or_else(|| {
+                HeapFault::Malformed("register credit exceeds statement roots".into())
+            })?;
             census
                 .changed(LogicalBytes(released), LogicalBytes(0))
                 .map_err(census_fault)?;
@@ -285,6 +317,7 @@ impl PagedHeap {
         }
         self.holdings.temporary.clear();
         self.holdings.scalar_bytes = 0;
+        self.holdings.prepaid = 0;
         self.holdings.fresh.clear();
         self.holdings.reserved = 0;
         if before != self.accounting {
@@ -305,17 +338,22 @@ impl PagedHeap {
         checked_sum([self.outstanding_reserved(), self.holdings.scalar_bytes].into_iter())
             .map(LogicalBytes)
     }
-    pub(super) fn install_transient(
-        &mut self,
-        values: &[Value],
-        pinned: &[Value],
-        pinned_bytes: u64,
-        fresh: &[EntityId],
-    ) {
+    pub(super) fn install_transient(&mut self, roots: StatementRoots<'_>) {
+        let StatementRoots {
+            registers: values,
+            pinned,
+            pinned_bytes,
+            prepaid,
+            borrowed,
+            fresh,
+        } = roots;
         self.holdings.temporary.clear();
         self.holdings.temporary.extend_from_slice(values);
         self.holdings.temporary.extend_from_slice(pinned);
         self.holdings.scalar_bytes = pinned_bytes;
+        self.holdings.prepaid = prepaid;
+        self.holdings.borrowed.clear();
+        self.holdings.borrowed.extend_from_slice(borrowed);
         self.holdings.fresh.clear();
         self.holdings.fresh.extend_from_slice(fresh);
     }
@@ -326,12 +364,14 @@ impl PagedHeap {
         pending: u64,
     ) -> Result<(), HeapWriteError> {
         let registers = self.holdings.temporary.clone();
+        let borrowed = self.holdings.borrowed.clone();
         let reserved = self.transient_reserved()?;
         let mut seeds = self.holdings.fresh.clone();
         seeds.extend_from_slice(fresh);
         let decision = census.refine(
             self,
             &TransientRoots {
+                borrowed: &borrowed,
                 registers: &registers,
                 pinned: &[],
                 native_args: &[],
@@ -417,10 +457,12 @@ impl PagedHeap {
         }
         let fresh = self.holdings.fresh.clone();
         let mut values = self.holdings.temporary.clone();
+        let borrowed = self.holdings.borrowed.clone();
         values.extend_from_slice(extra);
         self.reserve_logical(
             LogicalBytes(bytes),
             &TransientRoots {
+                borrowed: &borrowed,
                 registers: &values,
                 pinned: &[],
                 native_args: &[],
@@ -458,10 +500,14 @@ impl PagedHeap {
         self.install_execution_roots(
             (previous, tasks),
             joins,
-            registers,
-            pinned,
-            pinned_bytes,
-            fresh,
+            StatementRoots {
+                registers,
+                pinned,
+                pinned_bytes,
+                prepaid: 0,
+                borrowed: &[],
+                fresh,
+            },
         )
     }
     /// Synchronously consumes obsolete installed task ownership before the
@@ -472,33 +518,27 @@ impl PagedHeap {
     pub fn update_execution_roots(
         &mut self,
         joins: Tree<ListJoinRecord>,
-        registers: &[Value],
-        pinned: &[Value],
-        pinned_bytes: u64,
-        fresh: &[EntityId],
+        roots: StatementRoots<'_>,
         update: impl FnOnce() -> Result<Tree<TaskRecord>, HeapFault>,
     ) -> Result<(), HeapWriteError> {
         self.holdings.roots_current = false;
         let previous = PreviousTasks::new(std::mem::take(&mut self.tasks));
         let tasks = update()?;
-        self.install_execution_roots(
-            (previous, tasks),
-            joins,
-            registers,
-            pinned,
-            pinned_bytes,
-            fresh,
-        )
+        self.install_execution_roots((previous, tasks), joins, roots)
     }
     fn install_execution_roots(
         &mut self,
         (previous, tasks): (PreviousTasks, Tree<TaskRecord>),
         joins: Tree<ListJoinRecord>,
-        registers: &[Value],
-        pinned: &[Value],
-        pinned_bytes: u64,
-        fresh: &[EntityId],
+        roots: StatementRoots<'_>,
     ) -> Result<(), HeapWriteError> {
+        let StatementRoots {
+            registers,
+            pinned,
+            pinned_bytes,
+            prepaid,
+            ..
+        } = roots;
         // The proposed roots are current: a precision check installing them
         // traces them, and what the machine held for them is their credit.
         self.holdings.roots_current = true;
@@ -507,19 +547,23 @@ impl PagedHeap {
                 .into_iter()
                 .chain(self.statement_roots().iter().map(value_cost))
                 .chain([self.holdings.scalar_bytes]),
-        )?;
+        )?
+        .checked_sub(self.holdings.prepaid)
+        .ok_or_else(|| HeapFault::Malformed("register credit exceeds installed roots".into()))?;
         let after = checked_sum(
             [tasks.cost(), joins.cost()]
                 .into_iter()
                 .chain(registers.iter().chain(pinned).map(value_cost))
                 .chain([pinned_bytes]),
-        )?;
+        )?
+        .checked_sub(prepaid)
+        .ok_or_else(|| HeapFault::Malformed("register credit exceeds proposed roots".into()))?;
         // Republishing the installed trees changes only the statement
         // roots: their task edges are those already counted (FIG-6318).
         if previous.version.matches(&tasks) && joins.same_version(&self.joins) {
             self.replace_holding(before, after, 0, 0, |heap| {
                 heap.tasks = tasks;
-                heap.install_transient(registers, pinned, pinned_bytes, fresh);
+                heap.install_transient(roots);
             })?;
             return self.release_held();
         }
@@ -536,7 +580,7 @@ impl PagedHeap {
         self.replace_holding(before, after, old_tasks, new_tasks, |heap| {
             heap.tasks = tasks.with_task_edges(task_edges);
             heap.joins = joins.with_task_edges(join_edges);
-            heap.install_transient(registers, pinned, pinned_bytes, fresh);
+            heap.install_transient(roots);
         })?;
         self.release_held()
     }
@@ -619,11 +663,13 @@ impl PagedHeap {
                     .map_err(HeapWriteError::from),
                 ReservationDecision::NeedsPrecision(_) => {
                     let registers = self.statement_roots().to_vec();
+                    let borrowed = self.holdings.borrowed.clone();
                     let fresh = self.fresh_roots().to_vec();
                     let reserved = self.transient_reserved()?;
                     match census.refine(
                         self,
                         &TransientRoots {
+                            borrowed: &borrowed,
                             registers: &registers,
                             pinned: &[],
                             native_args: &[],

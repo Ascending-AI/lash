@@ -119,23 +119,44 @@ impl KernelMachine {
                     let value = self.read_local(task, running.exe, local)?;
                     self.put(at(dst), value);
                 }
-                Op::Nested { act, args } if self.scalar_blocks => {
+                Op::Nested { act, args } => {
                     if let crate::compile::NestedKind::Body(lib) =
                         running.stream.nested[act.ix()].kind
-                        && self
-                            .scalar_answer(
-                                task,
-                                running.exe,
-                                lib,
-                                at(args.start),
-                                args.len as usize,
-                                at(args.start),
-                            )
-                            .map_err(|interrupt| {
-                                interrupt.in_function(&running.exe.lib(lib).definition.name)
-                            })?
                     {
-                        continue;
+                        let answer =
+                            if let Some(hint) = running.stream.index_hints.get(&(pc as u32 - 1)) {
+                                self.record_answer(
+                                    task,
+                                    running.exe,
+                                    lib,
+                                    at(args.start),
+                                    args.len as usize,
+                                    hint,
+                                )
+                            } else {
+                                Ok(false)
+                            };
+                        if answer.map_err(|interrupt| {
+                            interrupt.in_function(&running.exe.lib(lib).definition.name)
+                        })? {
+                            continue;
+                        }
+                        if self.scalar_blocks
+                            && self
+                                .scalar_answer(
+                                    task,
+                                    running.exe,
+                                    lib,
+                                    at(args.start),
+                                    args.len as usize,
+                                    at(args.start),
+                                )
+                                .map_err(|interrupt| {
+                                    interrupt.in_function(&running.exe.lib(lib).definition.name)
+                                })?
+                        {
+                            continue;
+                        }
                     }
                     if let Some(ran) = self.run_rare(host, running, op, pc as u32 - 1)? {
                         return Ok(ran);
@@ -495,9 +516,28 @@ impl KernelMachine {
                 ),
             );
         }
-        let tuple = Value::Tuple(
-            self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
-        );
+        let tuple = if items.is_empty() && !self.charging {
+            use lash_kernel_doc::heap::{LogicalBytes, TupleRef, TupleSummary};
+            static EMPTY: std::sync::OnceLock<Arc<TupleRef>> = std::sync::OnceLock::new();
+            Value::Tuple(Arc::clone(EMPTY.get_or_init(|| {
+                Arc::new(TupleRef {
+                    normal: Default::default(),
+                    summary: TupleSummary {
+                        len: 0,
+                        cost: LogicalBytes(0),
+                        task_edges: 0,
+                        has_edges: false,
+                        depth: 1,
+                    },
+                    body: Payload::Resident(Arc::from([])),
+                    family: None,
+                })
+            })))
+        } else {
+            Value::Tuple(
+                self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
+            )
+        };
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())

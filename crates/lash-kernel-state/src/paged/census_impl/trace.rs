@@ -332,6 +332,10 @@ pub(super) fn trace(
         reachable = add(reachable, graph.value_cost(value)?.0)?;
         marks.edges(|out| graph.value_edges(value, out))?;
     }
+    for value in transient.borrowed {
+        marks.tick()?;
+        marks.edges(|out| graph.value_edges(value, out))?;
+    }
     reachable = add(reachable, transient.reserved.0)?;
     for entity in transient.fresh {
         marks.mark(Identity::Object(*entity))?;

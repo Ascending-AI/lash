@@ -17,6 +17,7 @@ mod issued;
 mod loops;
 mod native_heap;
 mod observing;
+mod operation_entry;
 mod ops;
 mod queue;
 mod registers;
@@ -407,6 +408,8 @@ impl std::fmt::Debug for KernelMachine {
 #[derive(Default)]
 struct Pins {
     values: Vec<Value>,
+    /// Values being transferred between an existing register and its caller.
+    borrowed: Vec<Value>,
     /// Local costs of immediate pins, which have no edges to trace.
     bytes: u64,
     #[cfg(test)]
@@ -438,6 +441,9 @@ impl Pins {
     /// reserve for it.
     #[inline(always)]
     fn pin(&mut self, value: &Value) -> Result<u64, Halt> {
+        if matches!(value, Value::Bool(_)) {
+            return Ok(0);
+        }
         let bytes = value_bytes(value);
         self.hold(value, bytes)?;
         Ok(bytes)
@@ -446,6 +452,9 @@ impl Pins {
     /// Holds `value`, of `bytes` bytes.
     #[inline(always)]
     fn hold(&mut self, value: &Value, bytes: u64) -> Result<(), Halt> {
+        if matches!(value, Value::Bool(_)) {
+            return Ok(());
+        }
         #[cfg(test)]
         {
             if self.force_precision && Self::scalar(value) {
@@ -482,6 +491,7 @@ impl Pins {
             self.scalar_locations.push(None);
         }
         self.values.clear();
+        self.borrowed.clear();
         self.bytes = 0;
     }
 }
@@ -609,6 +619,7 @@ impl KernelMachine {
             joins: &self.joins,
             registers: &self.regs,
             pinned: &self.pins.values,
+            borrowed: &self.pins.borrowed,
             pinned_bytes: self.pins.bytes,
             fresh: &self.fresh,
             refinements: &mut self.census_refinements,
@@ -732,7 +743,9 @@ impl KernelMachine {
             Some(incoming) => {
                 self.refresh_charging(task, exe)?;
                 self.resume(task, exe, incoming)
-                    .and_then(|value| self.finish_action(task, host, exe, value))
+                    .and_then(|value| {
+                        self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)
+                    })
                     .and_then(|ran| self.resumed(task, exe, ran))
             }
             None => self.advance(task, host, exe),
@@ -749,6 +762,11 @@ impl KernelMachine {
                 (exe.code(frame.code).charged, frame.scalar_blocks)
             });
         self.charging = charging;
+        self.regs.prepaid = if charging {
+            0
+        } else {
+            self.frame(task)?.record.registers
+        };
         self.scalar_blocks = scalar_blocks;
         Ok(())
     }

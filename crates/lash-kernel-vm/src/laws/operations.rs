@@ -348,3 +348,29 @@ main {
         assert_eq!(observe(program, bounds, plan), natural, "plan {index}");
     }
 }
+
+/// PLAN-INDEP / K-BND-002: entering an operation reserves one depth unit
+/// before either implementation runs. Its body represents that same unit.
+#[test]
+fn operation_depth_is_reserved_before_either_implementation_answers() {
+    for expression in ["op.step(41)", "op.fill(10)", "op.step(fn() { return 7 })"] {
+        let program = format!(
+            "main {{ let probe = fn() {{ return {expression} }} let out = apply probe() return out }}"
+        );
+        for depth in 1..=4 {
+            let bounds = Bounds {
+                call_depth: depth,
+                ..ROOMY
+            };
+            let plans = plans();
+            let reference = observe(&program, bounds, &plans[0]);
+            for (index, plan) in plans.iter().enumerate().skip(1) {
+                assert_eq!(
+                    observe(&program, bounds, plan),
+                    reference,
+                    "{expression}, depth={depth}, plan {index}"
+                );
+            }
+        }
+    }
+}

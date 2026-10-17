@@ -43,6 +43,7 @@ mod formula;
 mod lower;
 mod preparation;
 mod reads;
+mod registers;
 mod scopes;
 mod versions;
 
@@ -354,7 +355,25 @@ impl PreparedLibrary {
                 } else {
                     None
                 };
+                let record_read = match (&run, &definition.charge) {
+                    (
+                        LibRun::Native {
+                            native,
+                            body: Some(_),
+                        },
+                        doc::Formula::Constant(units),
+                    ) if limit.is_none() && layout.0.is_multiple_of(2) => {
+                        native.record_read_marker().map(|marker| (marker, *units))
+                    }
+                    _ => None,
+                };
+                let existing_result = match &run {
+                    LibRun::Native { native, .. } => native.returns_borrowed(),
+                    _ => false,
+                };
                 Lib {
+                    existing_result,
+                    record_read,
                     id: *function,
                     arity: params.len(),
                     native: definition.has_native(),
@@ -642,6 +661,8 @@ impl Executable {
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
+    /// Full logical register file, derived from the complete definition.
+    pub(crate) registers: u32,
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
     pub(crate) params: Vec<Local>,
@@ -693,6 +714,8 @@ pub(crate) struct Block {
 }
 
 pub(crate) struct Lib {
+    pub(crate) existing_result: bool,
+    pub(crate) record_read: Option<(&'static str, u64)>,
     pub(crate) id: FunctionId,
     pub(crate) definition: Arc<FunctionDefinition>,
     pub(crate) run: LibRun,
@@ -707,6 +730,14 @@ pub(crate) struct Lib {
     /// Odd layouts and heap-dependent natives use the general call.
     pub(crate) prepared: Option<(PreparedNative, Fast)>,
     pub(crate) scalar: Option<ScalarCall>,
+}
+
+impl Lib {
+    /// Native-stating functions with a complete body have a semantic call
+    /// depth unit even when their native answers (K-BND-002).
+    pub(crate) fn operation(&self) -> bool {
+        self.native && self.definition.body().is_some()
+    }
 }
 
 pub(crate) enum LibRun {
@@ -1258,7 +1289,13 @@ impl<'a> Compiler<'a> {
             .ops
             .iter()
             .enumerate()
-            .filter(|(_, op)| matches!(op, Op::Index { .. }))
+            .filter(|(_, op)| match op {
+                Op::Index { .. } => true,
+                Op::Nested { act, .. } => {
+                    matches!(self.stream.nested[act.ix()].kind, NestedKind::Body(_))
+                }
+                _ => false,
+            })
             .filter_map(|(at, _)| ReadHint::new(self.layout).map(|hint| (at as u32, hint)))
             .collect();
         let base = self.base;
