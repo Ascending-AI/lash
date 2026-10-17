@@ -956,7 +956,7 @@ CREATE TABLE IF NOT EXISTS lash_actor_mail (
 
 CREATE TABLE IF NOT EXISTS lash_model_call_pins (
     session_id TEXT NOT NULL, run TEXT NOT NULL, call TEXT NOT NULL, call_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL CHECK (attempt > 0), answered BOOLEAN NOT NULL,
+    attempt BIGINT NOT NULL CONSTRAINT lash_model_call_pins_attempt_check CHECK (attempt > 0), answered BOOLEAN NOT NULL,
     enclosing_owner TEXT, enclosing_run BIGINT, enclosing_call TEXT,
     PRIMARY KEY (session_id, run, call), UNIQUE (session_id, run, call_id)
 );
