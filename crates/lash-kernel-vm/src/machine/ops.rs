@@ -119,11 +119,6 @@ impl KernelMachine {
         })
     }
 
-    /// Whether `value` nests within the run's value depth (`K-VAL-034`).
-    pub(super) fn within_depth(&self, value: &Value) -> bool {
-        self.arena.borrow().summary_of(value).depth as usize <= self.limits.value_depth()
-    }
-
     /// The logical cost of `value` where it is held.
     #[inline]
     pub(super) fn cost_of(&self, value: &Value) -> u64 {
@@ -264,7 +259,20 @@ impl KernelMachine {
         out: Reg,
     ) -> Eval<()> {
         let value = match self.regs[target] {
-            Value::Record(record) => self.in_arena(|arena| field.read(arena, record))?,
+            Value::Record(record) => {
+                let slot = field.site.and_then(|site| self.sites.slot(site));
+                let (value, found) = self.in_arena(|arena| {
+                    crate::compile::find_property(arena, record, slot, &field.name, || {
+                        Ok(field.key.clone())
+                    })
+                })?;
+                if let Some(site) = field.site
+                    && found != slot
+                {
+                    self.sites.keep(site, found);
+                }
+                value.unwrap_or(Value::Absent)
+            }
             Value::Error(error) => {
                 let parts = self.in_arena(|arena| match arena.body(error)? {
                     lash_kernel_doc::arena::Body::Error(parts) => Ok(*parts),
@@ -288,7 +296,7 @@ impl KernelMachine {
         target: Reg,
         index: Reg,
         out: Reg,
-        hint: Option<&crate::compile::ReadHint>,
+        site: Option<crate::compile::ReadSite>,
     ) -> Eval<()> {
         let index = self.regs[index];
         let value = match self.regs[target] {
@@ -315,17 +323,20 @@ impl KernelMachine {
                 if !matches!(index, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
                 }
-                self.in_arena(|arena| {
-                    let found = match hint {
-                        Some(hint) => {
-                            let key = arena.key(&index)?;
-                            let name = arena.semantics().text(&index)?.to_owned();
-                            hint.read(arena, record, &key, &name)?
-                        }
-                        None => arena.table_get(record, &index)?,
-                    };
-                    Ok(found.unwrap_or(Value::Absent))
-                })?
+                let Some(site) = site else {
+                    let found = self.in_arena(|arena| arena.table_get(record, &index))?;
+                    self.put(out, found.unwrap_or(Value::Absent));
+                    return Ok(());
+                };
+                let slot = self.sites.slot(site);
+                let (found, at) = self.in_arena(|arena| {
+                    let name = arena.semantics().text(&index)?;
+                    crate::compile::find_property(arena, record, slot, name, || arena.key(&index))
+                })?;
+                if at != slot {
+                    self.sites.keep(site, at);
+                }
+                found.unwrap_or(Value::Absent)
             }
             Value::Map(map) => match self.in_arena(|arena| arena.table_get(map, &index))? {
                 Some(value) => value,
@@ -574,7 +585,7 @@ impl KernelMachine {
                     .map_err(|interrupt| interrupt.in_function(&function.definition.name))
             })
             .transpose()?;
-        let result = self.answer_admitted(task, exe, lib, args, out, entry.as_ref());
+        let result = self.answer_admitted(task, exe, lib, args, out, entry.as_ref(), true);
         match result {
             Ok(Answer::Body(mut body)) => {
                 body.entry = entry;
@@ -584,6 +595,100 @@ impl KernelMachine {
         }
     }
 
+    /// An operator's call (`Op::Operator`, or a nested call lowered as
+    /// one): its arguments are its parameters', one each, and its value
+    /// goes to `out`. Its depth is checked first; its prepared entry
+    /// answers when its guard holds, and otherwise its native's general
+    /// call, then its plan, then its body runs the call as [`Self::answer`]
+    /// would, from the same registers.
+    #[inline(always)]
+    pub(super) fn operator(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        out: Reg,
+    ) -> Eval<Answer> {
+        let function = exe.lib(lib);
+        let entry = if function.operation() {
+            Some(
+                self.operation_entry(task, exe, lib, args)
+                    .map_err(|interrupt| interrupt.in_function(&function.definition.name))?,
+            )
+        } else {
+            None
+        };
+        if let Some((prepared, fast)) = &function.prepared
+            && let Some(value) = (prepared.entry)(&self.regs[args..args + function.arity])
+        {
+            self.observe(Event::NativeEnter { task, lib });
+            self.prepared_answered(exe, lib, args, out, value, fast)?;
+            return Ok(Answer::Done);
+        }
+        self.operator_missed(task, exe, lib, args, out, entry)
+    }
+
+    /// An operator whose prepared entry declined, or that has none.
+    #[inline(never)]
+    fn operator_missed(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        out: Reg,
+        entry: Option<super::operation_entry::OperationEntry>,
+    ) -> Eval<Answer> {
+        match self.answer_admitted(task, exe, lib, args, out, entry.as_ref(), false)? {
+            Answer::Body(mut body) => {
+                body.entry = entry;
+                Ok(Answer::Body(body))
+            }
+            other => Ok(other),
+        }
+    }
+
+    /// What the general call does with a prepared entry's value: keep it,
+    /// charge the formula and put it in `out`.
+    #[inline(always)]
+    fn prepared_answered(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        out: Reg,
+        value: Value,
+        fast: &crate::compile::Fast,
+    ) -> Eval<()> {
+        let function = exe.lib(lib);
+        let end = args + function.arity;
+        self.observe(Event::NativeFast);
+        self.pin_value(&value)?;
+        let units = if self.charging {
+            match fast.charge(&function.charge, &self.regs[args..end], &value) {
+                Charge::Units(units) => units,
+                Charge::Plan(plan) => {
+                    self.warm_formula(plan, args, Some(&value))?;
+                    self.in_formula(lib, true, |machine| {
+                        machine.formula(plan, &machine.regs[args..end], Some(&value))
+                    })?
+                }
+            }
+        } else {
+            0
+        };
+        self.charge_call(exe, lib, units)?;
+        self.observe(Event::NativeExit);
+        self.put(out, value);
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "an operator's miss enters past its prepared entry"
+    )]
+    #[inline(always)]
     fn answer_admitted(
         &mut self,
         task: TaskId,
@@ -592,6 +697,7 @@ impl KernelMachine {
         args: Reg,
         out: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
+        prepared: bool,
     ) -> Eval<Answer> {
         let function = exe.lib(lib);
         let end = args + function.arity;
@@ -632,37 +738,13 @@ impl KernelMachine {
                 body,
                 fallback,
             } => {
-                if let Some((prepared, fast)) = &function.prepared {
+                if prepared
+                    && let Some((entry, fast)) = &function.prepared
                     // A prepared entry reads and builds no arena object.
-                    if let Some(value) = (prepared.entry)(&self.regs[args..end]) {
-                        // What the general call does with its result: keep
-                        // it, then charge the formula.
-                        self.observe(Event::NativeFast);
-                        if !function.existing_result {
-                            self.pin_value(&value)?;
-                        }
-                        let units = if self.charging {
-                            match fast.charge(&function.charge, &self.regs[args..end], &value) {
-                                Charge::Units(units) => units,
-                                Charge::Plan(plan) => {
-                                    self.warm_formula(plan, args, Some(&value))?;
-                                    self.in_formula(lib, true, |machine| {
-                                        machine.formula(
-                                            plan,
-                                            &machine.regs[args..end],
-                                            Some(&value),
-                                        )
-                                    })?
-                                }
-                            }
-                        } else {
-                            0
-                        };
-                        self.charge_call(exe, lib, units)?;
-                        self.observe(Event::NativeExit);
-                        self.put(out, value);
-                        return Ok(Answer::Done);
-                    }
+                    && let Some(value) = (entry.entry)(&self.regs[args..end])
+                {
+                    self.prepared_answered(exe, lib, args, out, value, fast)?;
+                    return Ok(Answer::Done);
                 }
                 let limit = match &function.limit {
                     Some(limit) => {
@@ -744,9 +826,7 @@ impl KernelMachine {
                                 ),
                             ))
                         } else {
-                            if !function.existing_result {
-                                self.pin_value(&value)?;
-                            }
+                            self.pin_value(&value)?;
                             Ok(value)
                         }
                     }

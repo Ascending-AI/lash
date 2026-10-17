@@ -107,7 +107,6 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
-        self.scalar_blocks = frame.scalar_blocks;
         let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
@@ -722,7 +721,6 @@ impl KernelMachine {
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
                     code: code_id,
-                    scalar_blocks: false,
                     slots: super::frames::Slots::default(),
                     statement: entry,
                     pending: super::frames::Continuation::default(),
@@ -774,7 +772,6 @@ impl KernelMachine {
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
         let mut frame = self.fresh_frame(exe, code_id)?;
-        frame.scalar_blocks = code.versions.select(&self.regs[base..base + given]);
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
             block: code.body,

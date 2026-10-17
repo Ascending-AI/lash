@@ -804,22 +804,6 @@ pub trait NativeFunction: Send + Sync {
     fn prepare(&self) -> Option<PreparedNative> {
         None
     }
-
-    /// Answers an existing argument or a value reached through one,
-    /// building nothing for its result, or an immediate: the machine holds
-    /// no second copy of it.
-    fn returns_borrowed(&self) -> bool {
-        self.record_read_marker().is_some()
-    }
-
-    /// Offers a guarded record-read specialization: the native answers
-    /// exactly an existing field for `[Record, Text]` when field `marker`
-    /// is not the empty tuple, and declines every other input. The machine
-    /// reads both fields itself; a position hint verifies the field name.
-    /// The native still supplies the general call.
-    fn record_read_marker(&self) -> Option<&'static str> {
-        None
-    }
 }
 
 /// A native's certified entry that reads no arena object.

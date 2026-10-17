@@ -245,20 +245,10 @@ impl KernelMachine {
             // An operation's native answers at once; only a call whose body
             // runs, its native declining or absent, stands at the action.
             NestedKind::Body(lib) => {
-                match self
+                let answer = self
                     .answer(task, exe, *lib, args, count, args)
-                    .map_err(|interrupt| interrupt.answering(exe.lib(*lib)))?
-                {
-                    super::ops::Answer::Done => Ok(Flow::Done),
-                    super::ops::Answer::Body(code) => {
-                        self.capture(task, entry, act, PhaseRecord::Called)?;
-                        self.enter_body(task, exe, *lib, code, args, Some(stmt))
-                    }
-                    super::ops::Answer::Yielded => {
-                        self.capture(task, entry, act, PhaseRecord::Called)?;
-                        self.stand_segments(task, exe, Some(stmt))
-                    }
-                }
+                    .map_err(|interrupt| interrupt.answering(exe.lib(*lib)))?;
+                self.body_answered(running, act, *lib, args, answer)
             }
             NestedKind::Spawn(callee) => {
                 let (target, at) = self.nested_target(exe, callee, args)?;
@@ -481,6 +471,50 @@ impl KernelMachine {
 
     /// An action that completed at once left its value in `at`, its
     /// arguments' first register: the value is the action's, in `dst`.
+    /// A nested operator (`Nested::operator`): its call answered as an
+    /// operator's ([`Self::operator`]).
+    #[inline(always)]
+    pub(super) fn nested_operator(
+        &mut self,
+        running: &Running<'_>,
+        act: lash_kernel_exec::ActIx,
+        lib: LibId,
+        args: Reg,
+    ) -> Status {
+        let answer = self
+            .operator(running.task, running.exe, lib, args, args)
+            .map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))?;
+        match answer {
+            super::ops::Answer::Done => Ok(Flow::Done),
+            answer => self.body_answered(running, act, lib, args, answer),
+        }
+    }
+
+    /// Where an operation's call stands once answered: done, or at the
+    /// action while its body or its plan's segment runs.
+    fn body_answered(
+        &mut self,
+        running: &Running<'_>,
+        act: lash_kernel_exec::ActIx,
+        lib: LibId,
+        args: Reg,
+        answer: super::ops::Answer,
+    ) -> Status {
+        let (task, exe, stmt) = (running.task, running.exe, running.id);
+        let entry = &running.stream.nested[act.ix()];
+        match answer {
+            super::ops::Answer::Done => Ok(Flow::Done),
+            super::ops::Answer::Body(code) => {
+                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.enter_body(task, exe, lib, code, args, Some(stmt))
+            }
+            super::ops::Answer::Yielded => {
+                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.stand_segments(task, exe, Some(stmt))
+            }
+        }
+    }
+
     fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
         if flow == Flow::Done && at != dst {
             let value = self.take(at);

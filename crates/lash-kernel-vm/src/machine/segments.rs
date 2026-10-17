@@ -294,7 +294,6 @@ impl KernelMachine {
             self.reserve_growth(self.cost_of(&self.regs[at]))?;
         }
         let mut frame = self.fresh_frame(exe, code_id)?;
-        frame.scalar_blocks = code.versions.select(&self.regs[args..args + arity]);
         frame.slots.fresh(code.slots_by_at.len());
         for (index, at) in segment.params.iter().enumerate() {
             let value = self.regs[args + index];

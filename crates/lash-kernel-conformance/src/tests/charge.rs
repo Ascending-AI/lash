@@ -1,7 +1,8 @@
 //! The charge oracle on the corpus (`K-CHG-001`, `K-CHG-002`, PLAN-INDEP;
 //! `docs/design/kernel-end-state.md` §B): the per-unit reference charger
-//! equals the machine, under every current layout, at every bound around
-//! every event of every case's charge program.
+//! equals the machine, under every current layout and random charge
+//! region layouts, at every bound around every event of every case's
+//! charge program.
 
 use lash_kernel_exec::charge::{Ending, ReferenceCharger, Weight};
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
@@ -11,9 +12,18 @@ use crate::machine::{Park, Run, run_case_in};
 use crate::{Case, ExpectedEnd, HarnessError, Observations};
 
 /// The natural layout; an odd one, through every native's general call;
-/// one whose record hints all miss; one where every native beside a body
-/// declines, so the body runs.
-const LAYOUTS: [Layout; 4] = [Layout(0), Layout(1), Layout(2), Layout(3)];
+/// one whose property caches all miss; one where every native beside a
+/// body declines, so the body runs; and two random ones, one with operator
+/// opcodes and caches. Every layout but the natural one splits its charge
+/// regions at random.
+const LAYOUTS: [Layout; 6] = [
+    Layout(0),
+    Layout(1),
+    Layout(2),
+    Layout(3),
+    Layout(0x9e37_79b9_7f4a_7c14),
+    Layout(0x5eed),
+];
 
 /// One run of a case: what it observed, the charges it made, and how many
 /// charges preceded each print and each park (with that park's requests).

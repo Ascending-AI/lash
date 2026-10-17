@@ -35,10 +35,10 @@ mod sem;
 mod verify;
 
 pub use boundary::{BoundaryKind, StepEdge};
-pub use charge::{ReferenceCharger, Weight};
+pub use charge::{ReferenceCharger, RegionEvent, RegionTable, Weight};
 pub use kir::{
     ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpKind,
-    OpRange, Operand, Reg, RegRange,
+    OpRange, Operand, Reg, RegRange, RegionIx, SiteIx,
 };
 pub use sem::{ChargeEvent, OpSpec, SEMANTICS};
 pub use verify::{CoverageError, KirError, StmtRanges, Tables, verify_semantics, verify_stream};

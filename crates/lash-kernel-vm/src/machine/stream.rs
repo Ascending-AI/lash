@@ -11,7 +11,8 @@
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{Float, Name, NativeError, NewObject, TaskId, Value};
-use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
+use lash_kernel_exec::charge::Crossed;
+use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx, StepEdge};
 
 use super::ops::Flow;
 use super::{
@@ -42,11 +43,16 @@ fn at(r: Reg) -> usize {
 
 /// The error a read of a variable no scope binds raises.
 pub(super) fn unbound<T>(name: &Name) -> Eval<T> {
-    Err(Interrupt::Refuse(Box::new(Refusal {
+    Err(unbound_variable(name))
+}
+
+/// The refusal of a read of a variable no scope binds.
+fn unbound_variable(name: &Name) -> Interrupt {
+    Interrupt::Refuse(Box::new(Refusal {
         kind: "unbound_variable".into(),
         message: format!("no variable `{name}` is bound here"),
         data: Some(name.as_str().to_owned()),
-    })))
+    }))
 }
 
 /// The statement a stream runs: its task, executable and ops.
@@ -76,9 +82,36 @@ impl<'a> Running<'a> {
     }
 }
 
+/// The value of `$result`, an op's inside a charge region; an exit there
+/// leaves the region with the events before the op.
+macro_rules! inside {
+    ($machine:ident, $running:ident, $pc:ident, $result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(exit) => return Err($machine.exit($running, $pc, exit.into())),
+        }
+    };
+}
+
+/// A charge region admitted whole (`docs/design/kernel-end-state.md` §B):
+/// the charge it was entered at and which region of the running stream it
+/// is. Nothing it executes is charged until it closes
+/// ([`KernelMachine::close_region`]) or an exit inside it leaves it
+/// ([`KernelMachine::leave_region`]): each commits the entry charge plus
+/// the events executed, never a suffix ahead.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Admitted {
+    entry: u64,
+    /// What the region commits when it closes: the entry plus its total.
+    end: u64,
+    region: RegionIx,
+}
+
 impl KernelMachine {
     /// Runs a statement's ops from `pc`. The common ops run here; the rest
-    /// in [`Self::run_rare`].
+    /// in [`Self::in_region`] and [`Self::run_rare`]. Every op that stands
+    /// in no region closes the one it follows first; an exit inside a
+    /// region commits the events before the op that left it.
     pub(super) fn run(
         &mut self,
         host: &mut dyn Host,
@@ -92,77 +125,87 @@ impl KernelMachine {
             let op = ops[pc];
             pc += 1;
             match op {
-                Op::Charge { units } => self.charge_nodes(units)?,
-                Op::ChargeLocal { units, dst, local } => {
-                    self.charge_nodes(u32::from(units))?;
-                    let value = self.read_local(task, running.exe, local)?;
-                    self.put(at(dst), value);
-                }
-                Op::ChargeConst { units, dst, c } => {
-                    self.charge_nodes(u32::from(units))?;
-                    let value = self.literal(&running.stream.consts[c.ix()])?;
-                    self.put(at(dst), value);
-                }
+                Op::Region { region, total } => self.enter_region(running, region, total, pc)?,
                 Op::Const { dst, c } => {
-                    let value = self.literal(&running.stream.consts[c.ix()])?;
+                    let value = inside!(
+                        self,
+                        running,
+                        pc,
+                        self.literal(&running.stream.consts[c.ix()])
+                    );
                     self.put(at(dst), value);
                 }
                 Op::Local { dst, local } => {
-                    let value = self.read_local(task, running.exe, local)?;
+                    let value =
+                        inside!(self, running, pc, self.read_local(task, running.exe, local));
                     self.put(at(dst), value);
                 }
-                Op::Nested { act, args } => {
-                    if let crate::compile::NestedKind::Body(lib) =
-                        running.stream.nested[act.ix()].kind
-                    {
-                        let answer =
-                            if let Some(hint) = running.stream.index_hints.get(&(pc as u32 - 1)) {
-                                self.record_answer(
-                                    task,
-                                    running.exe,
-                                    lib,
-                                    at(args.start),
-                                    args.len as usize,
-                                    hint,
-                                )
-                            } else {
-                                Ok(false)
-                            };
-                        if answer.map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))? {
-                            continue;
-                        }
-                        if self.scalar_blocks
-                            && self
-                                .scalar_answer(
-                                    task,
-                                    running.exe,
-                                    lib,
-                                    at(args.start),
-                                    args.len as usize,
-                                    at(args.start),
-                                )
-                                .map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))?
-                        {
-                            continue;
-                        }
-                    }
-                    if let Some(ran) = self.run_rare(host, running, op, pc as u32 - 1)? {
-                        return Ok(ran);
-                    }
+                Op::LetBind { local, src } => {
+                    let value = self.take(at(src));
+                    inside!(self, running, pc, self.bind(task, local.at, false, value));
                 }
-                Op::Call { lib, args } => {
-                    let (lib, count) = (LibId(lib.0), args.len as usize);
-                    self.call_answered(task, running.exe, lib, at(args.start), count)?;
+                Op::LetEnd { local } => {
+                    inside!(self, running, pc, self.frame(task))
+                        .set_slot(local.at, SlotState::Empty);
                 }
                 Op::Session { dst, name } => {
                     let name = &running.stream.names[name.ix()];
-                    let value = match self.session_get(name)? {
+                    let value = match inside!(self, running, pc, self.session_get(name)) {
                         Some(value) => value,
-                        None => return unbound(name),
+                        None => return Err(self.exit(running, pc, unbound_variable(name))),
                     };
                     self.put(at(dst), value);
                 }
+                Op::LetBindShared { .. }
+                | Op::Unbound { .. }
+                | Op::Field { .. }
+                | Op::Index { .. }
+                | Op::MakeTuple { .. }
+                | Op::MakeList { .. }
+                | Op::MakeSet { .. }
+                | Op::MakeMap { .. }
+                | Op::MakeRecord { .. }
+                | Op::Closure { .. }
+                | Op::Pin { .. } => {
+                    inside!(self, running, pc, self.in_region_rare(running, op));
+                }
+                Op::Nested { act, args } => {
+                    self.close_region(running.stream);
+                    let nested = &running.stream.nested[act.ix()];
+                    if nested.operator
+                        && let crate::compile::NestedKind::Body(lib) = nested.kind
+                    {
+                        if self.nested_operator(running, act, lib, at(args.start))? == Flow::Step {
+                            return Ok(Ran::Step);
+                        }
+                    } else if let Some(ran) = self.run_rare(host, running, op)? {
+                        return Ok(ran);
+                    }
+                }
+                Op::Operator { lib, args } => {
+                    self.close_region(running.stream);
+                    let lib = LibId(lib.0);
+                    let start = at(args.start);
+                    match self
+                        .operator(task, running.exe, lib, start, start)
+                        .map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))?
+                    {
+                        super::ops::Answer::Done => {}
+                        _ => {
+                            return Err(fault(
+                                "a call that runs its body was lowered as an operator that answers",
+                            )
+                            .into());
+                        }
+                    }
+                }
+                Op::Call { lib, args } => {
+                    self.close_region(running.stream);
+                    let (lib, count) = (LibId(lib.0), args.len as usize);
+                    self.call_answered(task, running.exe, lib, at(args.start), count)?;
+                }
                 Op::WriteSession { name, src } => {
+                    self.close_region(running.stream);
                     let value = self.take(at(src));
                     self.reserve(self.cost_of(&value))?;
                     let name = &running.stream.names[name.ix()];
@@ -171,35 +214,32 @@ impl KernelMachine {
                     }
                     return Ok(Ran::Done);
                 }
-                Op::Jump { skip } => pc += skip as usize,
-                Op::JumpIfFalse { cond, skip } => match self.take(at(cond)) {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => pc += skip as usize,
-                    _ => return raise("type_error", "an `if` condition must be a bool"),
-                },
-                Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
-                    let value = self.take(at(src));
-                    self.bind(
-                        task,
-                        local.at,
-                        matches!(op, Op::LetBindShared { .. }),
-                        value,
-                    )?;
+                Op::Jump { skip } => {
+                    self.close_region(running.stream);
+                    pc += skip as usize;
                 }
-                Op::LetEnd { local } => {
-                    self.frame(task)?.set_slot(local.at, SlotState::Empty);
+                Op::JumpIfFalse { cond, skip } => {
+                    self.close_region(running.stream);
+                    match self.take(at(cond)) {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => pc += skip as usize,
+                        _ => return raise("type_error", "an `if` condition must be a bool"),
+                    }
                 }
                 Op::Bind { local, src } => {
+                    self.close_region(running.stream);
                     let value = self.take(at(src));
                     self.bind(task, local.at, false, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::WriteLocal { local, src } => {
+                    self.close_region(running.stream);
                     let value = self.take(at(src));
                     self.write_local(task, running.exe, local, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::Branch { cond, then_, else_ } => {
+                    self.close_region(running.stream);
                     let block = match self.take(at(cond)) {
                         Value::Bool(true) => BlockId(then_.0),
                         Value::Bool(false) => BlockId(else_.0),
@@ -214,14 +254,19 @@ impl KernelMachine {
                     return Ok(Ran::Step);
                 }
                 Op::Test { cond } => {
+                    self.close_region(running.stream);
                     let Value::Bool(tested) = self.take(at(cond)) else {
                         return raise("type_error", "a `while` condition must be a bool");
                     };
                     return Ok(Ran::Tested(tested));
                 }
-                Op::End => return Ok(Ran::Done),
+                Op::End => {
+                    self.close_region(running.stream);
+                    return Ok(Ran::Done);
+                }
                 op => {
-                    if let Some(ran) = self.run_rare(host, running, op, pc as u32 - 1)? {
+                    self.close_region(running.stream);
+                    if let Some(ran) = self.run_rare(host, running, op)? {
                         return Ok(ran);
                     }
                 }
@@ -229,61 +274,222 @@ impl KernelMachine {
         }
     }
 
-    /// The ops [`Self::run`] leaves out of its loop: `Some` ends the range.
+    /// Admits charge region `region`, headed at the op before `pc` with
+    /// its `total`, once the one before it is closed. A region that cannot
+    /// pass the bound or reach the slice's end runs whole, charged when it
+    /// closes (`RegionSummary::admit`); one that passes the bound replays
+    /// as the reference charges it ([`Self::replay`]).
+    #[inline(always)]
+    fn enter_region(
+        &mut self,
+        running: &Running<'_>,
+        region: RegionIx,
+        total: u32,
+        pc: usize,
+    ) -> Eval<()> {
+        self.close_region(running.stream);
+        if !self.charging {
+            if self.observer.is_some() {
+                let entry = self.charged;
+                self.region = Some(Admitted {
+                    entry,
+                    end: entry,
+                    region,
+                });
+            }
+            return Ok(());
+        }
+        let entry = self.charged;
+        match entry.checked_add(u64::from(total)) {
+            Some(end) if end <= self.bounds.charge && end < self.slice_end && total < u32::MAX => {
+                self.region = Some(Admitted { entry, end, region });
+                Ok(())
+            }
+            _ => self.admit_slowly(running, region, entry, pc),
+        }
+    }
+
+    /// A region that may pass the bound or reach the slice's end: it
+    /// replays when an event passes the bound, and otherwise runs whole.
+    #[cold]
+    #[inline(never)]
+    fn admit_slowly(
+        &mut self,
+        running: &Running<'_>,
+        region: RegionIx,
+        entry: u64,
+        pc: usize,
+    ) -> Eval<()> {
+        let table = &running.stream.regions;
+        if let Some((event, crossed)) = table.crossing(region.0, entry, self.bounds.charge) {
+            return self.replay(running, region, entry, event, crossed, pc);
+        }
+        let end = table.commit(region.0, entry, usize::MAX);
+        self.region = Some(Admitted { entry, end, region });
+        Ok(())
+    }
+
+    /// Runs region `region`, entered charged `entry`, up to its event
+    /// `event`, which passes the bound: the ops before it as the reference
+    /// runs them, an exit among them charged with the events before it;
+    /// then the run ends charged as the reference charges `crossed`, with
+    /// the events before it and nothing after.
+    #[cold]
+    #[inline(never)]
+    fn replay(
+        &mut self,
+        running: &Running<'_>,
+        region: RegionIx,
+        entry: u64,
+        event: usize,
+        crossed: Crossed,
+        pc: usize,
+    ) -> Eval<()> {
+        let table = &running.stream.regions;
+        let stop = table.at(region.0)[event] as usize;
+        self.region = Some(Admitted {
+            entry,
+            end: crossed.charged,
+            region,
+        });
+        for op_at in pc..stop {
+            let op = running.stream.ops[op_at];
+            if let Err(exit) = self.in_region(running, op) {
+                self.leave_region(running.stream, op_at as u32);
+                return Err(exit);
+            }
+        }
+        self.region = None;
+        if self.observer.is_some() {
+            let events = table.events(region.0);
+            self.observe_region(&events[..event]);
+            self.observe_crossing(events[event], crossed.unit);
+        }
+        self.charged = crossed.charged;
+        Err(bound(Bound::Charge, self.bounds.charge).into())
+    }
+
+    /// Closes the region the running statement stands in: it is charged
+    /// whole.
+    #[inline(always)]
+    pub(super) fn close_region(&mut self, stream: &Stream) {
+        if let Some(admitted) = self.region.take() {
+            self.charged = admitted.end;
+            if self.observer.is_some() {
+                self.observe_region(stream.regions.events(admitted.region.0));
+            }
+        }
+    }
+
+    /// The exit of the op before `pc`, inside the running statement's
+    /// region: the region is left there.
+    #[cold]
+    #[inline(never)]
+    fn exit(&mut self, running: &Running<'_>, pc: usize, exit: Interrupt) -> Interrupt {
+        self.leave_region(running.stream, pc as u32 - 1);
+        exit
+    }
+
+    /// Leaves the region the running statement stands in at an exit at op
+    /// `op`: it is charged with the events before it, never a suffix
+    /// ahead.
+    pub(super) fn leave_region(&mut self, stream: &Stream, op: u32) {
+        if let Some(admitted) = self.region.take() {
+            let table = &stream.regions;
+            let executed = table.executed(admitted.region.0, op);
+            if self.charging {
+                self.charged = table.commit(admitted.region.0, admitted.entry, executed);
+            }
+            if self.observer.is_some() {
+                self.observe_region(&table.events(admitted.region.0)[..executed]);
+            }
+        }
+    }
+
+    /// The ops that stand in a charge region: they charge nothing of their
+    /// own. The common ones run here; the rest in
+    /// [`Self::in_region_rare`].
+    #[inline(always)]
+    fn in_region(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
+        let task = running.task;
+        match op {
+            Op::Const { dst, c } => {
+                let value = self.literal(&running.stream.consts[c.ix()])?;
+                self.put(at(dst), value);
+            }
+            Op::Local { dst, local } => {
+                let value = self.read_local(task, running.exe, local)?;
+                self.put(at(dst), value);
+            }
+            Op::LetBind { local, src } => {
+                let value = self.take(at(src));
+                self.bind(task, local.at, false, value)?;
+            }
+            Op::LetEnd { local } => {
+                self.frame(task)?.set_slot(local.at, SlotState::Empty);
+            }
+            Op::Session { dst, name } => {
+                let name = &running.stream.names[name.ix()];
+                let value = match self.session_get(name)? {
+                    Some(value) => value,
+                    None => return unbound(name),
+                };
+                self.put(at(dst), value);
+            }
+            op => self.in_region_rare(running, op)?,
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn in_region_rare(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
+        let (task, exe, stream) = (running.task, running.exe, running.stream);
+        match op {
+            Op::Unbound { name, .. } => unbound(&stream.names[name.ix()]),
+            Op::LetBindShared { local, src } => {
+                let value = self.take(at(src));
+                Ok(self.bind(task, local.at, true, value)?)
+            }
+            Op::Field { at: r, field } => {
+                let r = at(r);
+                self.read_field(r, &stream.fields[field.ix()], r)
+            }
+            Op::Index { at: r, site } => {
+                let r = at(r);
+                let site = crate::compile::ReadSite::new(site.0, stream.layout);
+                self.read_index(r, r + 1, r, site)
+            }
+            Op::MakeTuple { items } => self.make_tuple(items),
+            Op::MakeList { items } => self.make_list(items),
+            Op::MakeSet { items } => self.make_set(items),
+            Op::MakeMap { entries } => self.make_map(entries),
+            Op::MakeRecord { fields, values } => {
+                let names = stream.field_lists[fields.ix()]
+                    .iter()
+                    .map(|name| name.as_str());
+                self.make_record(names, values)
+            }
+            Op::Closure { dst, code } => {
+                let closure = Value::Closure(self.closure(task, exe, CodeId(code.0))?);
+                self.put(at(dst), closure);
+                Ok(())
+            }
+            Op::Pin { src } => Ok(self.pin(at(src))?),
+            _ => Err(fault("an op that stands in no charge region ran in one").into()),
+        }
+    }
+
+    /// The ops [`Self::run`] leaves out of its loop: `Some` ends the
+    /// range.
     #[inline(never)]
     fn run_rare(
         &mut self,
         host: &mut dyn Host,
         running: &Running<'_>,
         op: Op,
-        op_at: u32,
     ) -> Eval<Option<Ran>> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         let ran = match op {
-            Op::Unbound { name, .. } => return unbound(&stream.names[name.ix()]),
-            Op::Field { at: r, field } => {
-                let r = at(r);
-                self.read_field(r, &stream.fields[field.ix()], r)?;
-                return Ok(None);
-            }
-            Op::Index { at: r } => {
-                let r = at(r);
-                let hint = if matches!(self.regs[r], Value::Record(_)) {
-                    stream.index_hints.get(&op_at)
-                } else {
-                    None
-                };
-                self.read_index(r, r + 1, r, hint)?;
-                return Ok(None);
-            }
-            Op::MakeTuple { items } => {
-                self.make_tuple(items)?;
-                return Ok(None);
-            }
-            Op::MakeList { items } => {
-                self.make_list(items)?;
-                return Ok(None);
-            }
-            Op::MakeSet { items } => {
-                self.make_set(items)?;
-                return Ok(None);
-            }
-            Op::MakeMap { entries } => {
-                self.make_map(entries)?;
-                return Ok(None);
-            }
-            Op::MakeRecord { fields, values } => {
-                let names = stream.field_lists[fields.ix()]
-                    .iter()
-                    .map(|name| name.as_str());
-                self.make_record(names, values)?;
-                return Ok(None);
-            }
-            Op::Closure { dst, code } => {
-                let closure = Value::Closure(self.closure(task, exe, CodeId(code.0))?);
-                self.put(at(dst), closure);
-                return Ok(None);
-            }
             Op::Clock { dst } => {
                 self.report_ran(host);
                 let now = host.clock();
@@ -302,10 +508,6 @@ impl KernelMachine {
             Op::HostRead { at: r } => {
                 let r = at(r);
                 self.host_read(host, exe, r, r + 1, r)?;
-                return Ok(None);
-            }
-            Op::Pin { src } => {
-                self.pin(at(src))?;
                 return Ok(None);
             }
             Op::Act => {
@@ -405,14 +607,23 @@ impl KernelMachine {
                 let value = self.take(at(src));
                 return Err(Halt::Fail(Box::new(self.copy_out(&value)?)).into());
             }
-            Op::Charge { .. }
-            | Op::ChargeLocal { .. }
-            | Op::ChargeConst { .. }
+            Op::Region { .. }
             | Op::Const { .. }
             | Op::Local { .. }
             | Op::Session { .. }
+            | Op::Unbound { .. }
+            | Op::Field { .. }
+            | Op::Index { .. }
+            | Op::MakeTuple { .. }
+            | Op::MakeList { .. }
+            | Op::MakeSet { .. }
+            | Op::MakeMap { .. }
+            | Op::MakeRecord { .. }
+            | Op::Closure { .. }
+            | Op::Pin { .. }
             | Op::WriteSession { .. }
             | Op::Call { .. }
+            | Op::Operator { .. }
             | Op::Bind { .. }
             | Op::WriteLocal { .. }
             | Op::Branch { .. }
@@ -427,39 +638,10 @@ impl KernelMachine {
         Ok(Some(ran))
     }
 
-    /// The charge anchor of `units` one-unit events (`K-CHG-002`): each is
-    /// charged, then observed. Where the sum crosses the bound, the run is
-    /// charged and observed up to the event that crosses, as charging them
-    /// one at a time would leave it.
-    #[inline(always)]
-    fn charge_nodes(&mut self, units: u32) -> Result<(), Halt> {
-        if self.charging {
-            let charged = self.charged.saturating_add(u64::from(units));
-            if charged > self.bounds.charge {
-                return Err(self.cross_nodes());
-            }
-            self.charged = charged;
-        }
-        self.observe_nodes(units);
-        Ok(())
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn cross_nodes(&mut self) -> Halt {
-        // The events before the one that crosses stay within the bound.
-        let within = self.bounds.charge.saturating_sub(self.charged);
-        self.charged = self.charged.saturating_add(within).saturating_add(1);
-        self.observe_nodes(u32::try_from(within).unwrap_or(u32::MAX));
-        // The unit that crosses is charged, and ends the run.
-        self.observe_atomic(1);
-        bound(Bound::Charge, self.bounds.charge)
-    }
-
-    /// Takes a construction's members out of their registers, charging
-    /// them (`K-CHG-002`); gives where the construction goes.
+    /// Takes a construction's members out of their registers, which its
+    /// charge region charged (`K-CHG-002`); gives where the construction
+    /// goes.
     fn members(&mut self, items: RegRange) -> Eval<(usize, Vec<Value>)> {
-        self.charge(u64::from(items.len))?;
         let start = at(items.start);
         let members = (start..start + items.len as usize)
             .map(|r| self.take(r))
@@ -490,7 +672,6 @@ impl KernelMachine {
     /// first of them.
     pub(super) fn make_map(&mut self, entries: RegRange) -> Eval<()> {
         let start = at(entries.start);
-        self.charge(u64::from(entries.len / 2))?;
         let mut table = Vec::new();
         for pair in (start..start + entries.len as usize).step_by(2) {
             let written = self.take(pair);

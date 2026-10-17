@@ -1,4 +1,5 @@
-//! PLAN-INDEP for numeric block versions and their declining call guards.
+//! PLAN-INDEP for operator opcodes and their declining guards: a guard
+//! miss runs the native's general call, then its body.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -237,14 +238,15 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
     )
 }
 
-/// PLAN-INDEP: a numeric entry selects scalar blocks; changing its parameter
-/// to a guest closure fails the call guard and executes the complete body.
+/// PLAN-INDEP: an operator's prepared entry answers a number; changing its
+/// parameter to a guest closure misses its guard, and the general call
+/// declines to the complete body.
 /// Errors, guest effects and memory refusal are the generic plan's,
 /// uninterrupted and cold-restored at each safepoint with empty caches. The
 /// refusing fill is far past `K-BND-003`'s declared slack, so every plan
 /// refuses at the same statement.
 #[test]
-fn numeric_block_versions_fall_back_after_a_parameter_changes_kind() {
+fn operators_fall_back_to_the_body_after_a_parameter_changes_kind() {
     let reference = observe(PROGRAM, ROOMY, Layout(0), false);
     assert_eq!(reference.0, format!("finished {:?}", text("park")));
     assert_eq!(
@@ -361,4 +363,44 @@ fn fused_list_items_decline_and_resume_through_the_original_header() {
             );
         }
     }
+}
+
+/// `K-BND-002`, PLAN-INDEP: an operator's call depth is checked before its
+/// prepared entry answers. Under every call-depth bound around a recursion
+/// whose innermost call is an operator, the operator opcode refuses where
+/// the general call and the body refuse, and answers where they answer.
+#[test]
+fn an_operator_past_the_depth_bound_is_refused_before_its_prepared_entry_answers() {
+    const DEEP: &str = r#"
+fn up(n) {
+  if num.lt(n, 3) { return call up(num.add(n, 1)) }
+  return law.scalar(1.0)
+}
+main { return call up(0) }
+"#;
+    let (mut answered, mut refused) = (0, 0);
+    for call_depth in 1..9 {
+        let bounds = Bounds {
+            call_depth,
+            ..ROOMY
+        };
+        let reference = observe(DEEP, bounds, Layout(1), false);
+        if reference.0.starts_with("finished") {
+            answered += 1;
+        } else {
+            assert!(reference.0.contains("CallDepth"), "{}", reference.0);
+            refused += 1;
+        }
+        for layout in [Layout(0), Layout(2), Layout(3), Layout(4), Layout(0x5eed)] {
+            assert_eq!(
+                observe(DEEP, bounds, layout, false),
+                reference,
+                "call depth {call_depth}, {layout:?}"
+            );
+        }
+    }
+    assert!(
+        answered > 0 && refused > 0,
+        "{answered} answered, {refused} refused"
+    );
 }

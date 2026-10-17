@@ -1,8 +1,9 @@
 //! The flat stream (`lash_kernel_exec::Op`): each statement runs as one
 //! range of decoded ops. Its expression nodes are charged at their
-//! pre-order positions by `Charge` ops that coalesce adjacent events
-//! (`K-CHG-002`). An odd layout runs the general path: no charge joined to
-//! a read, no prepared native entry (`K-MACH-008`).
+//! pre-order positions by charge regions, which every layout but the
+//! natural one splits at random (`K-CHG-002`). An odd layout runs the
+//! general path: no prepared native entry or operator opcode
+//! (`K-MACH-008`).
 
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{Datum, Name, parse_document};
@@ -271,10 +272,10 @@ fn value(node: &Node) -> u64 {
     }
 }
 
-/// Each way the laws run a tree: the stream as an even layout runs it,
-/// with its charges joined to reads and the prepared native entry; an
-/// odd layout's general path; and an even shuffled layout with
-/// `pair.twice` run as its kernel body.
+/// Each way the laws run a tree: the stream as the natural layout runs
+/// it, in whole charge regions with operator opcodes; an odd layout's
+/// general path; and an even shuffled layout with `pair.twice` run as its
+/// kernel body. Both others split their regions at random.
 const RUNS: [(Layout, bool); 3] = [(Layout(0), true), (Layout(1), true), (Layout(2), false)];
 
 fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
@@ -327,9 +328,10 @@ fn halted(end: &End) -> bool {
 /// at every charge from 0 to its whole charge ends the same way in each
 /// layout, and the same as charging each event one at a time in the
 /// order the cost table states: each node before what is under it. A run
-/// that crosses its bound inside joined charges is charged exactly to the
-/// event that crosses, and one that would raise under a node the bound
-/// ends at halts instead.
+/// that crosses its bound inside a charge region is charged exactly to the
+/// event that crosses, one that raises inside a region is charged the
+/// events before the raise, and one that would raise under a node the
+/// bound ends at halts instead.
 #[test]
 fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
     let mut random = Seeded(0x5eed_cafe);

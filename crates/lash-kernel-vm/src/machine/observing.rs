@@ -13,7 +13,7 @@ use crate::observe::{
     Observer, PathRecorder, WorkReport,
 };
 use crate::{ObservationMode, SiteCounts};
-use lash_kernel_exec::Weight;
+use lash_kernel_exec::{RegionEvent, Weight};
 
 impl KernelMachine {
     /// Selects observation for this machine. A resumed machine starts Off
@@ -212,15 +212,6 @@ impl KernelMachine {
         }
     }
 
-    /// `count` expression nodes are evaluated, their one-unit charge
-    /// events charged as one run when the code is charged.
-    #[inline(always)]
-    pub(super) fn observe_nodes(&mut self, count: u32) {
-        if self.observer.is_some() {
-            self.observe_expressions_unlikely(count, true);
-        }
-    }
-
     #[cold]
     #[inline(never)]
     fn observe_expressions_unlikely(&mut self, count: u32, charged: bool) {
@@ -234,6 +225,41 @@ impl KernelMachine {
             for _ in 0..count {
                 observer.expression(self.charging);
             }
+        }
+    }
+
+    /// A charge region's `events` are executed: each unit run's expression
+    /// nodes evaluated, each charged as its own run when the code is
+    /// charged, and each construction charged whole.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn observe_region(&mut self, events: &[RegionEvent]) {
+        for event in events {
+            match event.weight {
+                Weight::Units(units) => {
+                    self.observe_expressions_unlikely(
+                        u32::try_from(units).unwrap_or(u32::MAX),
+                        true,
+                    );
+                }
+                Weight::Atomic(units) if self.charging => self.observe_atomic(units),
+                Weight::Atomic(_) => {}
+            }
+        }
+    }
+
+    /// The region event `event` passes the bound at its `unit`th unit: a
+    /// unit run's nodes before it are evaluated and that unit is charged
+    /// whole, and an atomic event is charged whole.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn observe_crossing(&mut self, event: RegionEvent, unit: u64) {
+        match event.weight {
+            Weight::Units(_) => {
+                self.observe_expressions_unlikely(u32::try_from(unit).unwrap_or(u32::MAX), true);
+                self.observe_atomic(1);
+            }
+            Weight::Atomic(units) => self.observe_atomic(units),
         }
     }
 

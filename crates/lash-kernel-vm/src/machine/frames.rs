@@ -1496,7 +1496,6 @@ fn restore(
     Ok(Box::new(Frame {
         slots,
         code: code_id,
-        scalar_blocks: false,
         statement: record.statement.clone(),
         pending: Continuation {
             saved: if pending.is_some() {

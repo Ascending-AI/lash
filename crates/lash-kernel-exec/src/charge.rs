@@ -21,10 +21,11 @@
 //!   neither the bound nor the slice threshold; otherwise its events replay
 //!   in order, as the reference charges them.
 //!
-//! Today's machine charges each anchor itself (`lash-kernel-vm`'s
-//! `charge` and `charge_nodes`); laws compare it with the reference. The
-//! instruction-set stage admits regions through [`RegionSummary`] and keeps
-//! the reference as its oracle.
+//! The machine admits each region of its streams' [`RegionTable`] by the
+//! total its head states, which the stream verifier checks against the
+//! region's [`RegionSummary`], and keeps the reference as its oracle: a
+//! region that may pass the bound replays its events through
+//! [`ReferenceCharger`].
 
 use crate::sem::ChargeEvent;
 
@@ -186,6 +187,8 @@ pub enum RegionError {
         stated: u64,
         expected: u64,
     },
+    #[error("event {at} stands at op {op}, not after the region's head and its earlier events")]
+    Position { at: usize, op: u32 },
 }
 
 /// A region's summary: the units committed after each prefix of its
@@ -271,6 +274,154 @@ impl RegionSummary {
     pub fn commit(&self, entry: u64, executed: usize) -> Option<u64> {
         entry.checked_add(*self.prefixes.get(executed)?)
     }
+}
+
+/// A stream's charge regions: the cold side table of its fixed charge
+/// events (`docs/design/kernel-end-state.md` §B). Region `r` is headed by
+/// an `Op::Region` that states its total inline; each of its events is
+/// charged before the op it stands at. The ops from the head to the first
+/// op that is not [`crate::OpKind::in_region`] are the region's own, and
+/// an event may stand at that op, the one that closes it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegionTable {
+    /// Each region's head op and its first event.
+    heads: Vec<(u32, u32)>,
+    at: Vec<u32>,
+    events: Vec<RegionEvent>,
+}
+
+impl RegionTable {
+    /// Adds the region headed at op `head` with `events`, event `i`
+    /// charged before op `at[i]`, and gives its index and total. Positions
+    /// follow the head and never decrease.
+    pub fn push(
+        &mut self,
+        head: u32,
+        at: impl IntoIterator<Item = u32>,
+        events: &[RegionEvent],
+    ) -> Result<(u32, u64), RegionError> {
+        let first = self.at.len();
+        self.at.extend(at);
+        let placed = &self.at[first..];
+        let refused = if placed.len() != events.len() {
+            Some(RegionError::Length {
+                stated: placed.len(),
+                events: events.len(),
+            })
+        } else {
+            placed
+                .iter()
+                .enumerate()
+                .position(|(index, op)| *op <= head || index > 0 && *op < placed[index - 1])
+                .map(|index| RegionError::Position {
+                    at: index,
+                    op: placed[index],
+                })
+        };
+        let total = match refused {
+            Some(refused) => Err(refused),
+            None => total(events),
+        };
+        let total = match total {
+            Ok(total) => total,
+            Err(refused) => {
+                self.at.truncate(first);
+                return Err(refused);
+            }
+        };
+        self.events.extend_from_slice(events);
+        self.heads.push((head, first as u32));
+        Ok((self.heads.len() as u32 - 1, total))
+    }
+
+    /// How many regions the table holds.
+    pub fn len(&self) -> usize {
+        self.heads.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.heads.is_empty()
+    }
+
+    fn range(&self, region: u32) -> std::ops::Range<usize> {
+        let index = region as usize;
+        let first = self.heads[index].1 as usize;
+        let end = self
+            .heads
+            .get(index + 1)
+            .map_or(self.events.len(), |(_, next)| *next as usize);
+        first..end
+    }
+
+    /// The op that heads region `region`.
+    pub fn head(&self, region: u32) -> u32 {
+        self.heads[region as usize].0
+    }
+
+    /// Each event's op.
+    pub fn at(&self, region: u32) -> &[u32] {
+        &self.at[self.range(region)]
+    }
+
+    pub fn events(&self, region: u32) -> &[RegionEvent] {
+        &self.events[self.range(region)]
+    }
+
+    /// The region's summary, built from its events.
+    pub fn summary(&self, region: u32) -> Result<RegionSummary, RegionError> {
+        RegionSummary::of(self.events(region))
+    }
+
+    /// How many of the region's events an exit at op `op` has executed:
+    /// those charged before it or before an op ahead of it.
+    pub fn executed(&self, region: u32, op: u32) -> usize {
+        self.at(region).partition_point(|at| *at <= op)
+    }
+
+    /// What a region entered at charge `entry` commits after `executed` of
+    /// its events: the entry plus their prefix, saturating.
+    pub fn commit(&self, region: u32, entry: u64, executed: usize) -> u64 {
+        self.events(region)
+            .iter()
+            .take(executed)
+            .fold(entry, |charged, event| {
+                charged.saturating_add(event.weight.units())
+            })
+    }
+
+    /// The event that passes `bound` when region `region` is entered
+    /// charged `entry`, and where the reference charger ends there; `None`
+    /// when every event stays within it.
+    pub fn crossing(&self, region: u32, entry: u64, bound: u64) -> Option<(usize, Crossed)> {
+        let mut charger = ReferenceCharger::new(entry, bound);
+        self.events(region)
+            .iter()
+            .enumerate()
+            .find_map(|(index, event)| {
+                charger
+                    .charge(event.weight)
+                    .err()
+                    .map(|crossed| (index, crossed))
+            })
+    }
+}
+
+/// The whole charge of fixed `events`.
+fn total(events: &[RegionEvent]) -> Result<u64, RegionError> {
+    events
+        .iter()
+        .enumerate()
+        .try_fold(0_u64, |total, (at, event)| {
+            if !event.event.is_fixed() {
+                return Err(RegionError::Dynamic {
+                    at,
+                    event: event.event,
+                });
+            }
+            total
+                .checked_add(event.weight.units())
+                .ok_or(RegionError::Overflow)
+        })
 }
 
 #[cfg(test)]

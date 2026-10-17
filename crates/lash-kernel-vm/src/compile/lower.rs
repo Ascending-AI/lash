@@ -2,13 +2,16 @@
 //! of the flat stream (`lash_kernel_exec::Op`).
 //!
 //! A statement's expressions lower in evaluation order, each node's value
-//! to the register its depth names, after an explicit `Charge` at the
+//! to the register its depth names, its one-unit charge event at the
 //! node's pre-order position (`K-CHG-002`): a node is charged before its
 //! sub-expressions are evaluated, so a bound crossed at the node ends the
-//! run before anything under it can raise. Adjacent charges coalesce; the
-//! machine charges a run that crosses its bound inside them up to the
-//! event that crosses. Children compile in their child order, so closures
-//! take their codes in the order the document's sites give them.
+//! run before anything under it can raise. No op charges a fixed event:
+//! each straight-line run of them is a charge region, headed by an
+//! `Op::Region` and stated in the stream's side table, which the machine
+//! admits whole when it cannot pass the bound and replays as the reference
+//! charges otherwise. Where regions split is a function of the layout, so
+//! the laws compare splits. Children compile in their child order, so
+//! closures take their codes in the order the document's sites give them.
 //!
 //! Each statement's ops are gathered apart and appended whole when the
 //! statement is done, after the statements of the blocks it holds, so
@@ -17,53 +20,135 @@
 
 use lash_kernel_doc as doc;
 use lash_kernel_doc::{FunctionId, Name};
+use lash_kernel_exec::charge::RegionEvent;
 use lash_kernel_exec::{
-    ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpRange,
-    Reg, RegRange,
+    ActIx, BlockIx, ChargeEvent, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx,
+    Op, OpRange, Reg, RegRange, RegionIx, RegionTable, SiteIx, Weight,
 };
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
-    NestedKind, Runs, Stmt, Var, Via,
+    NestedKind, Runs, Shuffler, Stmt, Var, Via,
 };
 
-/// One statement's ops and its static kill set: the dense register interval
-/// its expression tree uses, in document evaluation order. This interval is
-/// independent of instruction fusion and register write history.
+/// One statement's ops, the charge regions they head, and its static
+/// kill set: the dense register interval its expression tree uses, in
+/// document evaluation order. This interval is independent of instruction
+/// fusion and register write history.
 struct Ops {
     ops: Vec<Op>,
     regs: u32,
-    /// Whether a charge joins the read after it, as an even layout's
-    /// stream runs them.
-    fuse: bool,
+    regions: Regions,
+    /// Whether the last region is open: the ops since its head stand in it.
+    open: bool,
+    /// Chooses, for a layout other than 0, where a region splits.
+    split: Option<Shuffler>,
+}
+
+/// The charge regions of a statement's ops as they are gathered: each
+/// region's head and first event, and each event with the position of the
+/// op it is charged before. Emptied ones are reused.
+#[derive(Default)]
+pub(super) struct Regions {
+    heads: Vec<(u32, u32)>,
+    at: Vec<u32>,
+    events: Vec<RegionEvent>,
+}
+
+impl Regions {
+    fn clear(&mut self) {
+        self.heads.clear();
+        self.at.clear();
+        self.events.clear();
+    }
 }
 
 impl Ops {
+    /// Pushes `op`; one that stands in no region closes the open one.
     fn push(&mut self, op: Op) {
-        if self.fuse
-            && let Some(Op::Charge { units }) = self.ops.last()
-            && let Ok(units) = u8::try_from(*units)
-        {
-            let fused = match op {
-                Op::Local { dst, local } => Some(Op::ChargeLocal { units, dst, local }),
-                Op::Const { dst, c } => Some(Op::ChargeConst { units, dst, c }),
-                _ => None,
-            };
-            if let (Some(fused), Some(last)) = (fused, self.ops.last_mut()) {
-                *last = fused;
-                return;
-            }
+        if !op.kind().in_region() {
+            self.open = false;
         }
         self.ops.push(op);
     }
 
-    /// One more one-unit charge event, joined to the one before it when
-    /// nothing comes between them.
-    fn charge(&mut self) {
-        match self.ops.last_mut() {
-            Some(Op::Charge { units }) => *units += 1,
-            _ => self.ops.push(Op::Charge { units: 1 }),
+    /// Ends the open region: what follows is a jump's target.
+    fn close(&mut self) {
+        self.open = false;
+    }
+
+    /// A fixed charge event before the next op, in the open region or one
+    /// headed here; adjacent one-unit events at one op join.
+    fn event(&mut self, event: ChargeEvent, weight: Weight) {
+        if self.open
+            && let Some(split) = &mut self.split
+            && split.next() % 3 == 0
+        {
+            self.open = false;
         }
+        let regions = &mut self.regions;
+        if !self.open {
+            regions
+                .heads
+                .push((self.ops.len() as u32, regions.at.len() as u32));
+            self.ops.push(Op::Region {
+                region: RegionIx(u32::MAX),
+                total: 0,
+            });
+            self.open = true;
+        }
+        let at = self.ops.len() as u32;
+        let first = regions.heads.last().map_or(0, |(_, first)| *first as usize);
+        if regions.at.len() > first
+            && regions.at.last() == Some(&at)
+            && let Some(previous) = regions.events.last_mut()
+            && previous.event == event
+            && let (Weight::Units(units), Weight::Units(more)) = (&mut previous.weight, weight)
+        {
+            *units += more;
+            return;
+        }
+        regions.at.push(at);
+        regions.events.push(RegionEvent { event, weight });
+    }
+
+    /// One more one-unit charge event: an expression node's.
+    fn charge(&mut self) {
+        self.event(ChargeEvent::ExprNode, Weight::Units(1));
+    }
+
+    /// A construction's members, charged whole before it allocates.
+    fn construction(&mut self, members: u32) {
+        if members > 0 {
+            self.event(
+                ChargeEvent::Construction,
+                Weight::Atomic(u64::from(members)),
+            );
+        }
+    }
+
+    /// Appends `other`'s ops, which run right after these, and the regions
+    /// they head; gives back its emptied buffers.
+    fn append(&mut self, mut other: Ops) -> (Vec<Op>, Regions) {
+        let offset = self.ops.len() as u32;
+        let events = self.regions.at.len() as u32;
+        let regions = &mut self.regions;
+        regions.heads.extend(
+            other
+                .regions
+                .heads
+                .iter()
+                .map(|(head, first)| (head + offset, first + events)),
+        );
+        regions
+            .at
+            .extend(other.regions.at.iter().map(|at| at + offset));
+        regions.events.append(&mut other.regions.events);
+        self.open = other.open;
+        self.regs = self.regs.max(other.regs);
+        self.ops.append(&mut other.ops);
+        other.regions.clear();
+        (other.ops, other.regions)
     }
 
     /// Notes that register `reg` is used.
@@ -166,14 +251,14 @@ impl Compiler<'_> {
                     self.live.truncate(live);
                     let form = self.child(next, |c| c.rhs(&mut ops, value));
                     ops.push(Op::Pin { src: Reg(0) });
-                    ops.regs = ops.regs.max(written.regs);
                     // The place's actions resume in the statement's range.
                     let offset = ops.ops.len() as u32;
                     for nested in &mut self.stream.nested[first_nested..place_nested] {
                         nested.resume += offset;
                     }
-                    ops.ops.append(&mut written.ops);
-                    self.spare.push(written.ops);
+                    let (spare, regions) = ops.append(written);
+                    self.spare.push(spare);
+                    self.spare_regions.push(regions);
                     let (target, src) = (Reg(1), Reg(0));
                     ops.push(match target_of(field) {
                         Target::Field(field) => Op::SetField { target, field, src },
@@ -319,8 +404,11 @@ impl Compiler<'_> {
         };
         let start = self.stream.ops.len() as u32;
         let len = ops.ops.len() as u32;
+        place_regions(&mut ops, &mut self.stream.regions, start);
         self.stream.ops.append(&mut ops.ops);
         self.spare.push(ops.ops);
+        ops.regions.clear();
+        self.spare_regions.push(ops.regions);
         let mut range = OpRange { start, len };
         if let Form::While { test, .. } = &mut form {
             // The `while` op alone starts the statement; its condition is
@@ -357,10 +445,13 @@ impl Compiler<'_> {
 
     /// A statement's ops, gathered in a buffer an earlier statement left.
     fn ops(&mut self) -> Ops {
+        let layout = self.layout.0;
         Ops {
             ops: self.spare.pop().unwrap_or_default(),
             regs: 0,
-            fuse: self.layout.0.is_multiple_of(2),
+            regions: self.spare_regions.pop().unwrap_or_default(),
+            open: false,
+            split: (layout != 0).then_some(Shuffler(layout ^ self.stream.ops.len() as u64)),
         }
     }
 
@@ -546,11 +637,16 @@ impl Compiler<'_> {
         let act = ActIx(self.stream.nested.len() as u32);
         let op = Op::Nested { act, args };
         self.stream.nested_at.insert(site.clone(), act);
+        let operator = match kind {
+            NestedKind::Body(lib) => self.resolve.operator(lib, args.len as usize),
+            _ => false,
+        };
         self.stream.nested.push(Nested {
             occurrence: usize::MAX,
             site,
             depth: self.stmt_depth,
             kind,
+            operator,
             resume: ops.ops.len() as u32 + 1,
             dst,
             roles,
@@ -575,14 +671,17 @@ impl Compiler<'_> {
             }
             doc::Expr::Tuple(items) => {
                 let items = self.exprs(ops, items, dst);
+                ops.construction(items.len);
                 ops.push(Op::MakeTuple { items });
             }
             doc::Expr::List(items) => {
                 let items = self.exprs(ops, items, dst);
+                ops.construction(items.len);
                 ops.push(Op::MakeList { items });
             }
             doc::Expr::Set(items) => {
                 let items = self.exprs(ops, items, dst);
+                ops.construction(items.len);
                 ops.push(Op::MakeSet { items });
             }
             doc::Expr::Map(entries) => {
@@ -592,6 +691,7 @@ impl Compiler<'_> {
                     self.expr_at(ops, index, &entry.key, key);
                     self.expr_at(ops, index + 1, &entry.value, value);
                 }
+                ops.construction(entries.len() as u32);
                 ops.push(Op::MakeMap {
                     entries: RegRange {
                         start: dst,
@@ -608,6 +708,7 @@ impl Compiler<'_> {
                 self.stream
                     .field_lists
                     .push(entries.iter().map(|entry| entry.field.clone()).collect());
+                ops.construction(entries.len() as u32);
                 ops.push(Op::MakeRecord {
                     fields,
                     values: RegRange {
@@ -625,7 +726,8 @@ impl Compiler<'_> {
                 doc::Member::Index { target, index } => {
                     self.expr_at(ops, 0, target, dst);
                     self.expr_at(ops, 1, index, dst.next());
-                    ops.push(Op::Index { at: dst });
+                    let site = self.read_site();
+                    ops.push(Op::Index { at: dst, site });
                 }
             },
             doc::Expr::Closure(closure) => {
@@ -650,9 +752,11 @@ impl Compiler<'_> {
                 }
                 Some(lib) => {
                     let args = self.exprs(ops, args, dst);
-                    ops.push(Op::Call {
-                        lib: LibIx(lib.0),
-                        args,
+                    let lib_ix = LibIx(lib.0);
+                    ops.push(if self.resolve.operator(lib, args.len as usize) {
+                        Op::Operator { lib: lib_ix, args }
+                    } else {
+                        Op::Call { lib: lib_ix, args }
                     });
                 }
                 None => {
@@ -671,6 +775,8 @@ impl Compiler<'_> {
                 ops.push(Op::Jump { skip: 0 });
                 let otherwise = ops.ops.len();
                 self.child(2, |c| c.expr(ops, r#else, dst));
+                // Both arms reach what follows: a region of its own.
+                ops.close();
                 let end = ops.ops.len();
                 ops.ops[test] = Op::JumpIfFalse {
                     cond: dst,
@@ -787,10 +893,46 @@ impl Compiler<'_> {
 
     fn field(&mut self, field: &str) -> FieldIx {
         let at = self.stream.fields.len() as u32;
+        let site = self.read_site();
         self.stream
             .fields
-            .push(super::Field::new(field, self.layout));
+            .push(super::Field::new(field, site.0, self.layout));
         FieldIx(at)
+    }
+
+    /// A new property read site.
+    fn read_site(&mut self) -> SiteIx {
+        let site = SiteIx(self.sites);
+        self.sites += 1;
+        site
+    }
+}
+
+/// Adds the regions `ops` heads to the stream's `table`, its ops starting
+/// at `start`, and states each in its head.
+#[expect(
+    clippy::expect_used,
+    reason = "lowering states each region's fixed events after its head, in order"
+)]
+fn place_regions(ops: &mut Ops, table: &mut RegionTable, start: u32) {
+    let regions = &ops.regions;
+    for (index, (head, first)) in regions.heads.iter().enumerate() {
+        let end = regions
+            .heads
+            .get(index + 1)
+            .map_or(regions.events.len(), |(_, next)| *next as usize);
+        let first = *first as usize;
+        let (region, total) = table
+            .push(
+                start + head,
+                regions.at[first..end].iter().map(|at| start + at),
+                &regions.events[first..end],
+            )
+            .expect("lowering states a fixed region");
+        ops.ops[*head as usize] = Op::Region {
+            region: RegionIx(region),
+            total: u32::try_from(total).unwrap_or(u32::MAX),
+        };
     }
 }
 

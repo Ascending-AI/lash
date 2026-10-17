@@ -102,7 +102,6 @@ impl Compiler<'_> {
         });
         let ats_by_name = by_name.into_iter().map(|slot| positions[slot]).collect();
         Code {
-            versions: BlockVersions::new(params.len(), self.layout),
             site,
             params,
             body,
@@ -344,10 +343,7 @@ impl Placer<'_> {
     fn ops(&self, ops: &mut [Op], closures: &mut Vec<CodeId>) {
         for op in ops {
             match op {
-                Op::Local { local, .. }
-                | Op::ChargeLocal { local, .. }
-                | Op::LetEnd { local }
-                | Op::WriteLocal { local, .. } => {
+                Op::Local { local, .. } | Op::LetEnd { local } | Op::WriteLocal { local, .. } => {
                     local.at = self.positions[local.slot as usize];
                 }
                 Op::LetBind { local, src } => {

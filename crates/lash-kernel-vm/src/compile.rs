@@ -33,8 +33,8 @@ use lash_kernel_doc::{
     PreparedNative, Site, Type, Unit,
 };
 use lash_kernel_exec::{
-    ActIx, BoundaryKind, KirError, Op, OpRange, Reg, StepEdge, StmtRanges, Tables as StreamTables,
-    verify_stream,
+    ActIx, BoundaryKind, KirError, Op, OpRange, Reg, RegionTable, StepEdge, StmtRanges,
+    Tables as StreamTables, verify_stream,
 };
 
 use crate::functions::{MachineFunction, machine_function};
@@ -46,25 +46,22 @@ mod preparation;
 mod reads;
 mod scopes;
 pub(crate) mod segments;
-mod versions;
-
-pub(crate) use versions::{BlockVersions, ScalarCall};
-
-pub(crate) use reads::{Field, ReadHint};
+pub(crate) use reads::{Field, ReadSite, find as find_property};
 
 pub(crate) use formula::{Charge, Fast, Plan, Source};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
 /// each frame's slots, and an odd one also calls every native
-/// implementation through its general call, never its fast path. One that
+/// implementation through its general call, never its fast path or an
+/// operator opcode. One that
 /// leaves 3 when divided by 4 declines for every native that stands beside a
 /// kernel body: the body runs every call of such a function. It exists for
-/// tests: every layout runs a document the same way. Even layouts use verified
-/// record-position hints; one leaving 2 modulo 4 forces every hint to miss.
-/// Layouts divisible by 4 also select numeric block versions from actual
-/// parameter kinds and fuse the list cursor's item handoff. None of this
-/// cache state is saved.
+/// tests: every layout runs a document the same way. Even layouts keep
+/// per-site property caches; one leaving 2 modulo 4 makes every cache miss.
+/// Layouts divisible by 4 also fuse the list cursor's item handoff. Every
+/// layout but 0 splits charge regions at its own choice of events. None of
+/// this cache state is saved.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Layout(pub u64);
 
@@ -167,8 +164,10 @@ impl Tables {
             blocks,
             libs,
             nested: stream.nested.len(),
+            regions: stream.regions.len(),
+            sites: stream.sites as usize,
         };
-        verify_stream(&stream.ops, &stmts, &sizes)?;
+        verify_stream(&stream.ops, &stmts, &sizes, &stream.regions)?;
         Ok(stmts.len())
     }
 }
@@ -199,6 +198,9 @@ struct Prepared {
     /// Each installed segment whose sites its body does not state, and
     /// why: its body runs instead.
     unresolved: Vec<String>,
+    /// Where the library's property read sites, its plans' among them,
+    /// end.
+    sites: u32,
     documents: std::sync::Mutex<preparation::Documents>,
 }
 
@@ -248,6 +250,7 @@ impl PreparedLibrary {
                 blocks: 0,
                 stmts: 0,
                 occurrences: 0,
+                sites: 0,
             },
             tables.codes.len(),
             tables.blocks.len(),
@@ -287,18 +290,25 @@ impl PreparedLibrary {
             .enumerate()
             .map(|(index, (function, _))| (*function, LibId(index as u32)))
             .collect();
+        // Which functions the machine runs itself, recognised once.
+        let machine: Vec<Option<MachineFunction>> = library
+            .iter()
+            .map(|(_, registered)| machine_function(registered.definition()))
+            .collect();
         let mut units: Vec<(FunctionId, &FunctionDefinition)> = library
             .iter()
-            .filter(|(_, registered)| machine_function(registered.definition()).is_none())
-            .filter(|(_, registered)| registered.definition().body().is_some())
-            .map(|(function, registered)| (*function, registered.definition().as_ref()))
+            .zip(&machine)
+            .filter(|(_, machine)| machine.is_none())
+            .filter(|((_, registered), _)| registered.definition().body().is_some())
+            .map(|((function, registered), _)| (*function, registered.definition().as_ref()))
             .collect();
         shuffler.shuffle(layout, &mut units);
         let bodies: Vec<Runs> = library
             .iter()
-            .map(|(_, registered)| {
+            .zip(&machine)
+            .map(|((_, registered), machine)| {
                 let definition = registered.definition();
-                if machine_function(definition).is_some() || definition.body().is_none() {
+                if machine.is_some() || definition.body().is_none() {
                     Runs::Answers
                 } else {
                     Runs::Body
@@ -306,6 +316,22 @@ impl PreparedLibrary {
             })
             .collect();
 
+        // Which functions are operators: their native's prepared entry is
+        // the one `prepared` keeps below.
+        let operators: Vec<Option<usize>> = library
+            .iter()
+            .zip(&machine)
+            .map(|((_, registered), machine)| {
+                let definition = registered.definition();
+                let native = registered.native()?;
+                let runs_native =
+                    machine.is_none() && !(layout.declines() && definition.body().is_some());
+                (runs_native && definition.guard.is_none() && layout.0.is_multiple_of(2))
+                    .then(|| native.prepare())
+                    .flatten()
+                    .map(|_| definition.signature.params.len())
+            })
+            .collect();
         let no_bindings = NO_BINDINGS;
         let mut compiler = Compiler::new(
             layout,
@@ -314,6 +340,7 @@ impl PreparedLibrary {
                 lib_of: &lib_of,
                 listed: None,
                 bodies: &bodies,
+                operators: &operators,
             },
             &no_bindings,
             Base::default(),
@@ -342,33 +369,38 @@ impl PreparedLibrary {
         tables.stmts.shrink_to_fit();
         tables.stream.ops.shrink_to_fit();
         let mut unresolved = Vec::new();
+        let mut sites = tables.stream.sites;
         let libs = library
             .iter()
-            .map(|(function, registered)| {
+            .zip(machine)
+            .map(|((function, registered), machine)| {
                 let definition = Arc::clone(registered.definition());
                 let body = bodies.get(function).copied();
-                let run = match (machine_function(&definition), registered.native(), body) {
+                let run = match (machine, registered.native(), body) {
                     (Some(machine), _, _) => LibRun::Machine(machine),
                     (None, Some(_), Some(body)) if layout.declines() => LibRun::Body(body),
-                    (None, None, Some(body)) if !layout.declines() => match registered
-                        .plan()
-                        .map(|plan| PreparedPlan::new(plan, &lib_of, layout, body, &tables))
-                    {
-                        Some(Ok(plan)) => LibRun::Plan {
-                            plan: Arc::new(plan),
-                            body,
-                        },
-                        Some(Err(problem)) => {
-                            unresolved.push(format!("{}: {problem}", definition.name));
-                            LibRun::Body(body)
+                    (None, None, Some(body)) if !layout.declines() => {
+                        match registered.plan().map(|plan| {
+                            PreparedPlan::new(plan, &lib_of, layout, body, &tables, &mut sites)
+                        }) {
+                            Some(Ok(plan)) => LibRun::Plan {
+                                plan: Arc::new(plan),
+                                body,
+                            },
+                            Some(Err(problem)) => {
+                                unresolved.push(format!("{}: {problem}", definition.name));
+                                LibRun::Body(body)
+                            }
+                            None => LibRun::Body(body),
                         }
-                        None => LibRun::Body(body),
-                    },
+                    }
                     (None, Some(native), body) => LibRun::Native {
                         native: Arc::clone(native),
                         fallback: body.and_then(|body| {
                             let plan = registered.plan()?;
-                            match PreparedPlan::new(plan, &lib_of, layout, body, &tables) {
+                            match PreparedPlan::new(
+                                plan, &lib_of, layout, body, &tables, &mut sites,
+                            ) {
                                 Ok(plan) => Some(Arc::new(plan)),
                                 Err(problem) => {
                                     unresolved.push(format!("{}: {problem}", definition.name));
@@ -400,38 +432,11 @@ impl PreparedLibrary {
                 };
                 let prepared =
                     prepared.map(|entry| (entry, Fast::new(&definition.charge, params, &charge)));
-                let scalar = if matches!(run, LibRun::Native { body: Some(_), .. }) {
-                    prepared
-                        .as_ref()
-                        .and_then(|(entry, _)| ScalarCall::new(entry, &definition.charge, &charge))
-                } else {
-                    None
-                };
-                let record_read = match (&run, &definition.charge) {
-                    (
-                        LibRun::Native {
-                            native,
-                            body: Some(_),
-                            ..
-                        },
-                        doc::Formula::Constant(units),
-                    ) if limit.is_none() && layout.0.is_multiple_of(2) => {
-                        native.record_read_marker().map(|marker| (marker, *units))
-                    }
-                    _ => None,
-                };
-                let existing_result = match &run {
-                    LibRun::Native { native, .. } => native.returns_borrowed(),
-                    _ => false,
-                };
                 Lib {
-                    existing_result,
-                    record_read,
                     id: *function,
                     arity: params.len(),
                     charge,
                     limit,
-                    scalar,
                     prepared,
                     definition,
                     run,
@@ -447,6 +452,7 @@ impl PreparedLibrary {
             lib_of,
             missing,
             unresolved,
+            sites,
             documents: Default::default(),
         }))
     }
@@ -588,6 +594,7 @@ impl Executable {
                 blocks: library.blocks.len() as u32,
                 stmts: library.stmts.len() as u32,
                 occurrences: library.occurrence_keys.len(),
+                sites: self.library.0.sites,
             },
             library.codes.len() + self.own.tables.codes.len(),
             library.blocks.len() + self.own.tables.blocks.len(),
@@ -731,7 +738,6 @@ pub(crate) struct Code {
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
     pub(crate) params: Vec<Local>,
-    pub(crate) versions: BlockVersions,
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
     pub(crate) slots_by_at: Vec<u32>,
@@ -781,8 +787,6 @@ pub(crate) struct Block {
 }
 
 pub(crate) struct Lib {
-    pub(crate) existing_result: bool,
-    pub(crate) record_read: Option<(&'static str, u64)>,
     pub(crate) id: FunctionId,
     pub(crate) definition: Arc<FunctionDefinition>,
     pub(crate) run: LibRun,
@@ -791,10 +795,11 @@ pub(crate) struct Lib {
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
-    /// An unguarded native's prepared entry and its formula-derived charge.
-    /// Odd layouts and heap-dependent natives use the general call.
+    /// An unguarded native's prepared entry and its formula-derived charge:
+    /// the inline fast path of the operator op that calls it
+    /// (`Op::Operator`, or a nested call its entry marks). Odd layouts and
+    /// arena-dependent natives use the general call.
     pub(crate) prepared: Option<(PreparedNative, Fast)>,
-    pub(crate) scalar: Option<ScalarCall>,
 }
 
 impl Lib {
@@ -847,6 +852,7 @@ impl PreparedPlan {
         layout: Layout,
         body: CodeId,
         tables: &Tables,
+        sites: &mut u32,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
         let callees = plan
@@ -878,7 +884,10 @@ impl PreparedPlan {
         let fields = plan
             .fields
             .iter()
-            .map(|name| Field::new(name, layout))
+            .map(|name| {
+                *sites += 1;
+                Field::new(name, *sites - 1, layout)
+            })
             .collect();
         let code = &tables.codes[body.0 as usize];
         let locals: Vec<Option<Local>> = plan
@@ -966,14 +975,21 @@ pub(crate) struct Stream {
     pub(crate) consts: Vec<Constant>,
     pub(crate) names: Vec<BindingName>,
     pub(crate) fields: Vec<Field>,
-    /// Computed record reads, keyed by their instruction's stream offset.
-    pub(crate) index_hints: BTreeMap<u32, ReadHint>,
     pub(crate) field_lists: Vec<Box<[String]>>,
     /// The resume entries of the stream's nested actions, by [`ActIx`].
     pub(crate) nested: Vec<Nested>,
     /// Each resume entry by its action's site: where a saved continuation
     /// finds its entry under this layout.
     pub(crate) nested_at: BTreeMap<Site, ActIx>,
+    /// The charge regions the stream's `Op::Region`s head, by
+    /// `RegionIx`: the cold side table of its fixed charge events.
+    pub(crate) regions: RegionTable,
+    /// Where the stream's property read sites end: a document's follow
+    /// its library's and its library's plans'.
+    pub(crate) sites: u32,
+    /// The layout the stream was lowered under, which says whether its
+    /// read sites cache.
+    pub(crate) layout: Layout,
 }
 
 /// An action nested in a statement's expression, or a call inside an
@@ -989,6 +1005,10 @@ pub(crate) struct Nested {
     /// the action and its roles by their path suffix under it.
     pub(crate) depth: u32,
     pub(crate) kind: NestedKind,
+    /// Whether the call is an operator's (`Op::Operator`): a library call
+    /// of a native with a prepared entry and a body, with exactly its
+    /// parameters, whose entry answers inline what it can.
+    pub(crate) operator: bool,
     /// The op its statement resumes at, as an offset from the start of the
     /// statement's range.
     pub(crate) resume: u32,
@@ -1277,6 +1297,9 @@ struct Resolve<'a> {
     listed: Option<&'a BTreeMap<FunctionId, doc::FunctionName>>,
     /// How each library function, by its id, runs in this preparation.
     bodies: &'a [Runs],
+    /// Each library function whose native states a prepared entry this
+    /// layout calls, by its arity: an operator (`Op::Operator`).
+    operators: &'a [Option<usize>],
 }
 
 /// How a library function runs when it is called inside an expression.
@@ -1291,6 +1314,11 @@ enum Runs {
 
 impl Resolve<'_> {
     /// How `lib` runs when it is called.
+    /// Whether a call of `lib` with `given` arguments is an operator's.
+    fn operator(&self, lib: LibId, given: usize) -> bool {
+        self.operators.get(lib.0 as usize).copied().flatten() == Some(given)
+    }
+
     fn runs(&self, lib: LibId) -> Runs {
         self.bodies
             .get(lib.0 as usize)
@@ -1317,6 +1345,7 @@ struct Base {
     blocks: u32,
     stmts: u32,
     occurrences: usize,
+    sites: u32,
 }
 
 struct Compiler<'a> {
@@ -1333,6 +1362,10 @@ struct Compiler<'a> {
     names: BTreeMap<Name, u32>,
     /// Emptied buffers that statements gather their ops in.
     spare: Vec<Vec<Op>>,
+    /// Emptied buffers that statements gather their charge regions in.
+    spare_regions: Vec<lower::Regions>,
+    /// The next property read site.
+    sites: u32,
     declared: BTreeMap<Name, CodeId>,
     resolve: Resolve<'a>,
     /// The codes being compiled, the outermost first; each closure adds one.
@@ -1383,6 +1416,11 @@ fn compile_document(
             LibRun::Native { body: None, .. } | LibRun::Machine(_) => Runs::Answers,
         })
         .collect();
+    let operators: Vec<Option<usize>> = prepared
+        .libs
+        .iter()
+        .map(|lib| lib.prepared.as_ref().map(|_| lib.arity))
+        .collect();
     let mut compiler = Compiler::new(
         layout,
         shuffler,
@@ -1390,6 +1428,7 @@ fn compile_document(
             lib_of: &prepared.lib_of,
             listed: Some(&document.manifest.functions),
             bodies: &bodies,
+            operators: &operators,
         },
         &document.private_bindings,
         Base {
@@ -1397,6 +1436,7 @@ fn compile_document(
             blocks: prepared.tables.blocks.len() as u32,
             stmts: prepared.tables.stmts.len() as u32,
             occurrences: prepared.tables.occurrence_keys.len(),
+            sites: prepared.sites,
         },
     );
     let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
@@ -1471,6 +1511,8 @@ impl<'a> Compiler<'a> {
             stream: Stream::default(),
             names: BTreeMap::new(),
             spare: Vec::new(),
+            spare_regions: Vec::new(),
+            sites: base.sites,
             declared: BTreeMap::new(),
             resolve,
             scopes: Vec::new(),
@@ -1490,20 +1532,8 @@ impl<'a> Compiler<'a> {
 
     /// The compiled tables, with every body and block found by its site.
     fn finish(mut self) -> Tables {
-        self.stream.index_hints = self
-            .stream
-            .ops
-            .iter()
-            .enumerate()
-            .filter(|(_, op)| match op {
-                Op::Index { .. } => true,
-                Op::Nested { act, .. } => {
-                    matches!(self.stream.nested[act.ix()].kind, NestedKind::Body(_))
-                }
-                _ => false,
-            })
-            .filter_map(|(at, _)| ReadHint::new(self.layout).map(|hint| (at as u32, hint)))
-            .collect();
+        self.stream.sites = self.sites;
+        self.stream.layout = self.layout;
         let (occurrence_at, occurrence_keys) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();

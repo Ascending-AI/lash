@@ -172,10 +172,10 @@ with that event; nothing after it is charged.
 | Event | Weight | Where today |
 | --- | --- | --- |
 | Statement | 1, atomic | `advance` (`machine/exec.rs`) |
-| Expression node, atom argument | 1 each, in pre-order, as a unit run | `Op::Charge` and its fused forms, `charge_nodes` (`machine/stream.rs`); an action's atom operands, `machine/actions.rs` |
-| Construction | its members, atomic | `members`, `MakeMap` (`machine/stream.rs`) |
+| Expression node, atom argument | 1 each, in pre-order, as a unit run | the stream's charge regions (`Op::Region`, `RegionTable`; `machine/stream.rs`); an action's atom operands, `machine/actions.rs` |
+| Construction | its members, atomic | the charge region the construction stands in (`machine/stream.rs`) |
 | Loop test | the cost table's, atomic | `machine/loops.rs` |
-| Library formula | its formula at completion (on a raise, with an absent result), atomic | `charge_call` (`machine/exec.rs`, `machine/ops.rs`, `machine/versions.rs`) |
+| Library formula | its formula at completion (on a raise, with an absent result), atomic | `charge_call` (`machine/exec.rs`, `machine/ops.rs`) |
 | Copy-out, decode | the value's deep size, atomic | `machine/exec.rs` |
 
 - **Weights.** `Weight::Units(n)` is n one-unit events: a run passing the bound
@@ -243,8 +243,8 @@ An op inside a region that can raise or halt is an exit. Its executed prefix
   charge the run makes, in order: each unit run as `Units`, every other charge
   as `Atomic`, and, when a run passes its bound inside a unit run, the units
   within the bound and then the unit that passes. It is an observation: one
-  branch on whether anything observes, at the two anchors (`charge` and
-  `charge_nodes`), and it changes no result, charge, park or export. Under
+  branch on whether anything observes, at the anchors (`charge` and a
+  region's close, exit and replay), and it changes no result, charge, park or export. Under
   kdec-api it becomes one of `MachineOptions`' observers.
 - **Law** (`lash-kernel-conformance`,
   `tests::charge::every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends`):

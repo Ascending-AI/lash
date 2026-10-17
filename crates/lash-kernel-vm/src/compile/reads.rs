@@ -1,85 +1,86 @@
-//! Per-site field-position hints. A hint retains no guest value and is
-//! never part of a checkpoint. Every hit verifies the current entry's
-//! name; a record with another layout, deletion or reinsertion simply
-//! misses.
-
-use std::sync::atomic::{AtomicU64, Ordering};
+//! Property read sites. Each field read and each record index read is a
+//! site ([`SiteIx`]) whose per-site monomorphic cache its machine keeps
+//! (`docs/design/kernel-end-state.md` §3.4): the slot the last record it
+//! read held the property at. A hit is the record's entry at that slot,
+//! guarded by the entry's key being the read's name, so a record with
+//! another layout, a deletion or a reinsertion simply misses. A cache
+//! retains no guest value and is never part of a checkpoint; a restored
+//! machine starts with none.
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
+use lash_kernel_exec::SiteIx;
 use lash_kernel_state::arena::{Arena, text_key};
 
 use super::Layout;
 
-pub(crate) struct ReadHint {
-    position: AtomicU64,
-    forced_miss: bool,
+/// A read site under a layout that caches: odd layouts read through the
+/// record's index always, and layouts 2 mod 4 consult the cache and miss.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ReadSite {
+    pub(crate) at: SiteIx,
+    pub(crate) missing: bool,
 }
 
-impl ReadHint {
-    pub(super) fn new(layout: Layout) -> Option<Self> {
-        layout.0.is_multiple_of(2).then(|| Self {
-            position: AtomicU64::new(u64::MAX),
-            forced_miss: layout.0 % 4 == 2,
+impl ReadSite {
+    #[inline]
+    pub(crate) fn new(at: u32, layout: Layout) -> Option<Self> {
+        layout.0.is_multiple_of(2).then_some(Self {
+            at: SiteIx(at),
+            missing: layout.0 % 4 == 2,
         })
     }
-
-    /// The value of field `name`, keyed `key`, of `record`.
-    pub(crate) fn read(
-        &self,
-        arena: &Arena,
-        record: ArenaHandle,
-        key: &NormalKey,
-        name: &str,
-    ) -> Result<Option<Value>, NativeError> {
-        let position = if self.forced_miss {
-            u64::MAX
-        } else {
-            self.position.load(Ordering::Relaxed)
-        };
-        if position != u64::MAX {
-            let entries = arena.entries(record)?;
-            let at = position as usize * 2;
-            if let Some(pair) = entries.get(at..at + 2)
-                && arena.semantics().text(&pair[0]).ok() == Some(name)
-            {
-                return Ok(Some(pair[1]));
-            }
-        }
-        let found = arena.table_find(record, key)?;
-        if !self.forced_miss {
-            self.position.store(
-                found.map_or(u64::MAX, |(at, _)| at as u64),
-                Ordering::Relaxed,
-            );
-        }
-        Ok(found.map(|(_, value)| value))
-    }
 }
 
+/// A field name a read, a write or a removal names.
 pub(crate) struct Field {
     pub(crate) name: String,
     /// The name's normal form, which the record's index keys it by.
     pub(crate) key: NormalKey,
-    hint: Option<ReadHint>,
+    /// The read's site, when it is one that caches.
+    pub(crate) site: Option<ReadSite>,
 }
 
 impl Field {
-    pub(super) fn new(name: &str, layout: Layout) -> Self {
+    pub(super) fn new(name: &str, site: u32, layout: Layout) -> Self {
         Self {
             name: name.to_owned(),
             key: text_key(name),
-            hint: ReadHint::new(layout),
+            site: ReadSite::new(site, layout),
         }
     }
+}
 
-    /// The value of this field of `record`, absent when it has none.
-    pub(crate) fn read(&self, arena: &Arena, record: ArenaHandle) -> Result<Value, NativeError> {
-        let value = match &self.hint {
-            Some(hint) => hint.read(arena, record, &self.key, &self.name)?,
-            None => arena.table_find(record, &self.key)?.map(|(_, value)| value),
-        };
-        Ok(value.unwrap_or(Value::Absent))
+/// The value of `record` under the key whose text is `name` and whose
+/// normal form `key` gives, the cached `slot` tried first, and the slot
+/// the value was found at.
+pub(crate) fn find(
+    arena: &Arena,
+    record: ArenaHandle,
+    slot: Option<usize>,
+    name: &str,
+    key: impl FnOnce() -> Result<NormalKey, NativeError>,
+) -> Result<(Option<Value>, Option<usize>), NativeError> {
+    if let Some(slot) = slot {
+        let entries = arena.entries(record)?;
+        let at = slot * 2;
+        if let Some(pair) = entries.get(at..at + 2)
+            && keyed(arena, &pair[0], name)
+        {
+            return Ok((Some(pair[1]), Some(slot)));
+        }
+    }
+    let found = arena.table_find(record, &key()?)?;
+    Ok((found.map(|(_, value)| value), found.map(|(at, _)| at)))
+}
+
+/// Whether a record entry's key is the text `name`: the cache's guard.
+#[inline]
+fn keyed(arena: &Arena, key: &Value, name: &str) -> bool {
+    match key {
+        Value::Text(short) => short.as_str() == name,
+        Value::LongText(_) => arena.semantics().text(key).ok() == Some(name),
+        _ => false,
     }
 }

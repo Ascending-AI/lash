@@ -2,9 +2,11 @@
 //!
 //! Every statement of an admitted document and of a library body is
 //! lowered to one contiguous range of [`Op`]s: its expressions in
-//! evaluation order with an explicit [`Op::Charge`] at each node's
-//! pre-order position, then the one op that completes the statement or
-//! leaves it where its step ends. The machine's control stack (blocks,
+//! evaluation order, then the one op that completes the statement or
+//! leaves it where its step ends. No op charges a fixed event: each
+//! straight-line run of fixed events and the ops between them is a charge
+//! region that an [`Op::Region`] admits at its head, its events in the
+//! stream's cold side table ([`crate::RegionTable`]). The machine's control stack (blocks,
 //! loops, `try` statements and frames) stays the only control state. A
 //! statement's action is its first op, so its continuation, the op right
 //! after its [`Op::Act`], is the Boundary a call returns or a wait resumes
@@ -57,6 +59,10 @@ index! {
     BlockIx;
     /// A resume entry of the stream's table of nested actions.
     ActIx;
+    /// A charge region of the stream's side table.
+    RegionIx;
+    /// A property read's site: the key of the machine's per-site cache.
+    SiteIx;
 }
 
 impl Reg {
@@ -117,24 +123,15 @@ impl OpRange {
 /// runs every op apart, so that the layout laws compare the two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
-    /// `units` fixed one-unit charge events (`K-CHG-002`): expression nodes
-    /// and atom arguments, each charged before what it evaluates. Adjacent
-    /// events coalesce; a run that crosses its bound inside them is charged
-    /// up to the event that crosses, as one at a time would be.
-    Charge {
-        units: u32,
-    },
-    /// A `Charge` of `units` and the [`Op::Local`] after it, as one op.
-    ChargeLocal {
-        units: u8,
-        dst: Reg,
-        local: LocalRef,
-    },
-    /// A `Charge` of `units` and the [`Op::Const`] after it, as one op.
-    ChargeConst {
-        units: u8,
-        dst: Reg,
-        c: ConstIx,
+    /// The head of charge region `region`: its fixed events (`K-CHG-002`),
+    /// each charged before the op it stands at, are admitted together
+    /// against the bound. The region's ops are [`OpKind::in_region`] ones,
+    /// up to the first op that is not, which closes it.
+    Region {
+        region: RegionIx,
+        /// The region's whole charge, or `u32::MAX` for one that does not
+        /// fit, which always replays.
+        total: u32,
     },
     Const {
         dst: Reg,
@@ -164,6 +161,7 @@ pub enum Op {
     /// `K-FORM-010`: what `at` holds at the index in the next register.
     Index {
         at: Reg,
+        site: SiteIx,
     },
     MakeTuple {
         items: RegRange,
@@ -190,6 +188,16 @@ pub enum Op {
     /// guard, call, retry after a collection, pin and formula (`K-LIB-002`);
     /// a body runs in a frame instead, through [`Op::Nested`].
     Call {
+        lib: LibIx,
+        args: RegRange,
+    },
+    /// A library call inside an expression of a native that states a
+    /// prepared entry (seam F `prepare`), with exactly its parameters: an
+    /// opcode. Its entry answers inline what it can, charged the formula;
+    /// a guard miss has done nothing a run sees and runs the native's
+    /// general call, then its plan or body, as [`Op::Call`] does, without
+    /// checking the call again.
+    Operator {
         lib: LibIx,
         args: RegRange,
     },
@@ -342,9 +350,7 @@ pub enum Op {
 /// The kind of an [`Op`], without its operands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpKind {
-    Charge,
-    ChargeLocal,
-    ChargeConst,
+    Region,
     Const,
     Local,
     Session,
@@ -358,6 +364,7 @@ pub enum OpKind {
     MakeRecord,
     Closure,
     Call,
+    Operator,
     Clock,
     Random,
     HostRead,
@@ -399,9 +406,7 @@ impl OpKind {
     /// Every kind, in declaration order: the order [`crate::SEMANTICS`]
     /// states them in.
     pub const ALL: &'static [Self] = &[
-        Self::Charge,
-        Self::ChargeLocal,
-        Self::ChargeConst,
+        Self::Region,
         Self::Const,
         Self::Local,
         Self::Session,
@@ -415,6 +420,7 @@ impl OpKind {
         Self::MakeRecord,
         Self::Closure,
         Self::Call,
+        Self::Operator,
         Self::Clock,
         Self::Random,
         Self::HostRead,
@@ -457,9 +463,7 @@ impl OpKind {
     pub const fn is_terminator(self) -> bool {
         !matches!(
             self,
-            Self::Charge
-                | Self::ChargeLocal
-                | Self::ChargeConst
+            Self::Region
                 | Self::Const
                 | Self::Local
                 | Self::Session
@@ -473,6 +477,7 @@ impl OpKind {
                 | Self::MakeRecord
                 | Self::Closure
                 | Self::Call
+                | Self::Operator
                 | Self::Clock
                 | Self::Random
                 | Self::HostRead
@@ -481,6 +486,33 @@ impl OpKind {
                 | Self::Nested
                 | Self::Jump
                 | Self::JumpIfFalse
+                | Self::LetBind
+                | Self::LetBindShared
+                | Self::LetEnd
+        )
+    }
+
+    /// Whether an op of this kind stands inside a charge region: it charges
+    /// nothing of its own and is not a Boundary, a jump or a jump's target,
+    /// a call, a host observation or a handler entry. It may raise or halt:
+    /// that exit commits the events before it. Every other op closes the
+    /// region it follows.
+    pub const fn in_region(self) -> bool {
+        matches!(
+            self,
+            Self::Const
+                | Self::Local
+                | Self::Session
+                | Self::Unbound
+                | Self::Field
+                | Self::Index
+                | Self::MakeTuple
+                | Self::MakeList
+                | Self::MakeSet
+                | Self::MakeMap
+                | Self::MakeRecord
+                | Self::Closure
+                | Self::Pin
                 | Self::LetBind
                 | Self::LetBindShared
                 | Self::LetEnd
@@ -502,14 +534,14 @@ pub enum Operand {
     Lib(LibIx),
     Block(BlockIx),
     Nested(ActIx),
+    Region(RegionIx),
+    Site(SiteIx),
 }
 
 impl Op {
     pub const fn kind(&self) -> OpKind {
         match self {
-            Self::Charge { .. } => OpKind::Charge,
-            Self::ChargeLocal { .. } => OpKind::ChargeLocal,
-            Self::ChargeConst { .. } => OpKind::ChargeConst,
+            Self::Region { .. } => OpKind::Region,
             Self::Const { .. } => OpKind::Const,
             Self::Local { .. } => OpKind::Local,
             Self::Session { .. } => OpKind::Session,
@@ -523,6 +555,7 @@ impl Op {
             Self::MakeRecord { .. } => OpKind::MakeRecord,
             Self::Closure { .. } => OpKind::Closure,
             Self::Call { .. } => OpKind::Call,
+            Self::Operator { .. } => OpKind::Operator,
             Self::Clock { .. } => OpKind::Clock,
             Self::Random { .. } => OpKind::Random,
             Self::HostRead { .. } => OpKind::HostRead,
@@ -565,13 +598,14 @@ impl Op {
     pub fn reads(&self) -> Vec<Reg> {
         match *self {
             Self::Field { at, .. } => vec![at],
-            Self::Index { at } | Self::HostRead { at } => vec![at, at.next()],
+            Self::Index { at, .. } | Self::HostRead { at } => vec![at, at.next()],
             Self::MakeTuple { items }
             | Self::MakeList { items }
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
             | Self::Call { args: items, .. }
+            | Self::Operator { args: items, .. }
             | Self::Nested { args: items, .. } => items.regs().collect(),
             Self::Pin { src }
             | Self::LetBind { src, .. }
@@ -596,9 +630,7 @@ impl Op {
                 vec![cond]
             }
             Self::ForIn { iterable } => vec![iterable],
-            Self::Charge { .. }
-            | Self::ChargeLocal { .. }
-            | Self::ChargeConst { .. }
+            Self::Region { .. }
             | Self::Const { .. }
             | Self::Local { .. }
             | Self::Session { .. }
@@ -621,21 +653,20 @@ impl Op {
     pub const fn writes(&self) -> Option<Reg> {
         match *self {
             Self::Const { dst, .. }
-            | Self::ChargeConst { dst, .. }
-            | Self::ChargeLocal { dst, .. }
             | Self::Local { dst, .. }
             | Self::Session { dst, .. }
             | Self::Unbound { dst, .. }
             | Self::Closure { dst, .. }
             | Self::Clock { dst }
             | Self::Random { dst } => Some(dst),
-            Self::Field { at, .. } | Self::Index { at } | Self::HostRead { at } => Some(at),
+            Self::Field { at, .. } | Self::Index { at, .. } | Self::HostRead { at } => Some(at),
             Self::MakeTuple { items }
             | Self::MakeList { items }
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
             | Self::Call { args: items, .. }
+            | Self::Operator { args: items, .. }
             | Self::Nested { args: items, .. } => Some(items.start),
             Self::Act => Some(Reg(0)),
             _ => None,
@@ -646,9 +677,9 @@ impl Op {
     pub fn operands(&self) -> Vec<Operand> {
         use Operand as O;
         let mut out: Vec<Operand> = match *self {
-            Self::Const { c, .. } | Self::ChargeConst { c, .. } => vec![O::Const(c)],
+            Self::Region { region, .. } => vec![O::Region(region)],
+            Self::Const { c, .. } => vec![O::Const(c)],
             Self::Local { local, .. }
-            | Self::ChargeLocal { local, .. }
             | Self::LetBind { local, .. }
             | Self::LetBindShared { local, .. }
             | Self::LetEnd { local }
@@ -665,8 +696,9 @@ impl Op {
             | Self::RemoveField { field, .. } => vec![O::Field(field)],
             Self::MakeRecord { fields, .. } => vec![O::FieldList(fields)],
             Self::Closure { code, .. } => vec![O::Code(code)],
-            Self::Call { lib, .. } => vec![O::Lib(lib)],
+            Self::Call { lib, .. } | Self::Operator { lib, .. } => vec![O::Lib(lib)],
             Self::Nested { act, .. } => vec![O::Nested(act)],
+            Self::Index { site, .. } => vec![O::Site(site)],
             Self::Branch { then_, else_, .. } => vec![O::Block(then_), O::Block(else_)],
             Self::Try { body } => vec![O::Block(body)],
             _ => Vec::new(),
@@ -678,6 +710,7 @@ impl Op {
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
             | Self::Call { args: items, .. }
+            | Self::Operator { args: items, .. }
             | Self::Nested { args: items, .. } => out.push(O::Regs(items)),
             _ => {
                 out.extend(self.reads().into_iter().map(O::Reg));

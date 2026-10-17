@@ -258,9 +258,6 @@ fn floats(args: &[Value], relation: Relation) -> Option<Value> {
 /// guest valueOf, is declined to the complete operation body.
 struct ToNumber;
 impl NativeFunction for ToNumber {
-    fn returns_borrowed(&self) -> bool {
-        true
-    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             [value @ Value::Float(_)] => Ok(*value),
@@ -307,10 +304,6 @@ impl NativeFunction for Subtract {
 struct Get;
 
 impl NativeFunction for Get {
-    fn record_read_marker(&self) -> Option<&'static str> {
-        Some("__ts_brand")
-    }
-
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         let [

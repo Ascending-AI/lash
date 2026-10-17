@@ -26,10 +26,10 @@ mod queue;
 mod registers;
 mod segments;
 mod session;
+mod sites;
 mod steps;
 mod stream;
 mod tasks;
-mod versions;
 
 use std::sync::Arc;
 
@@ -294,8 +294,6 @@ struct Storage {
 
 struct Frame {
     code: CodeId,
-    /// The selected Kir version; cold frames start with empty caches.
-    scalar_blocks: bool,
     slots: frames::Slots,
     /// Where the frame stands when no block of its says: its body's
     /// entry, a return policy's site, or its body while a run-root cleanup
@@ -391,7 +389,16 @@ pub struct KernelMachine {
     /// until a seal completes it (seam G).
     projecting: bool,
     charging: bool,
-    scalar_blocks: bool,
+    /// The charge region the running statement stands in, admitted whole
+    /// (`stream::Admitted`): what it executed is charged when it closes or
+    /// is left.
+    region: Option<stream::Admitted>,
+    /// The charge at which the running slice returns, at its next step's
+    /// end: a region admitted whole ends strictly below it.
+    slice_end: u64,
+    /// The property read sites' caches: never saved, so a restore
+    /// discards them.
+    sites: sites::SiteCaches,
     /// How many generated plans are running: each holds its call's depth
     /// unit as the body's frame would (`K-BND-002`).
     plans: u32,
@@ -971,15 +978,11 @@ impl KernelMachine {
     }
 
     fn refresh_charging(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
-        let (charging, scalar_blocks) = self
+        self.charging = self
             .task(task)?
             .frames
             .last_mut()?
-            .map_or((true, false), |frame| {
-                (exe.code(frame.code).charged, frame.scalar_blocks)
-            });
-        self.charging = charging;
-        self.scalar_blocks = scalar_blocks;
+            .is_none_or(|frame| exe.code(frame.code).charged);
         Ok(())
     }
 
@@ -1181,6 +1184,7 @@ impl KernelMachine {
     /// charge have passed (`K-MACH-005`).
     fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         let before = self.charged;
+        self.slice_end = before.saturating_add(slice);
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {

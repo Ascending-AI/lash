@@ -47,8 +47,9 @@ impl ChargeEvent {
         Self::BodyFormula,
     ];
 
-    /// Whether lowering knows the amount: a fixed event may be an explicit
-    /// [`crate::Op::Charge`]; a dynamic one is a runtime amount.
+    /// Whether lowering knows the amount: a fixed event may stand in a
+    /// charge region ([`crate::RegionTable`]); a dynamic one is a runtime
+    /// amount.
     pub const fn is_fixed(self) -> bool {
         matches!(
             self,
@@ -62,8 +63,8 @@ impl ChargeEvent {
 pub struct OpSpec {
     pub op: OpKind,
     /// The charge events the op's semantics emits itself, in order. The
-    /// fixed one-unit events of expression nodes are explicit `Charge` ops
-    /// that lowering places before them.
+    /// fixed events of expression nodes and constructions are the charge
+    /// region's, which its head admits.
     pub events: &'static [ChargeEvent],
     /// Whether the op can raise, halt (other than by its own charge),
     /// reserve memory or call the host or a native: charges never
@@ -84,22 +85,21 @@ use OpKind as K;
 
 /// Every op kind's declared semantics, in [`OpKind::ALL`] order.
 pub const SEMANTICS: &[OpSpec] = &[
-    spec(K::Charge, &[], false),
-    spec(K::ChargeLocal, &[], true),
-    spec(K::ChargeConst, &[], false),
+    spec(K::Region, &[E::ExprNode, E::Construction], true),
     spec(K::Const, &[], false),
     spec(K::Local, &[], true),
     spec(K::Session, &[], true),
     spec(K::Unbound, &[], true),
     spec(K::Field, &[], true),
     spec(K::Index, &[], true),
-    spec(K::MakeTuple, &[E::Construction], true),
-    spec(K::MakeList, &[E::Construction], true),
-    spec(K::MakeSet, &[E::Construction], true),
-    spec(K::MakeMap, &[E::Construction], true),
-    spec(K::MakeRecord, &[E::Construction], true),
+    spec(K::MakeTuple, &[], true),
+    spec(K::MakeList, &[], true),
+    spec(K::MakeSet, &[], true),
+    spec(K::MakeMap, &[], true),
+    spec(K::MakeRecord, &[], true),
     spec(K::Closure, &[], true),
     spec(K::Call, &[E::NativeFormula, E::BodyFormula], true),
+    spec(K::Operator, &[E::NativeFormula, E::BodyFormula], true),
     spec(K::Clock, &[], true),
     spec(K::Random, &[], true),
     spec(K::HostRead, &[E::CopyOut, E::CopyOut], true),

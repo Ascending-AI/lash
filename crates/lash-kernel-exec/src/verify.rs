@@ -7,8 +7,13 @@
 //!   action is the first op of its statement so that its continuation
 //!   starts right after it, and every register a range reads was written
 //!   earlier in it. A nested action is a Boundary inside its range; what
-//!   its continuation reads, its resume entry loads (`K-EVAL-008`).
+//!   its continuation reads, its resume entry loads (`K-EVAL-008`). Every
+//!   charge region is headed by its own [`Op::Region`], whose total is the
+//!   one its verified summary states (`RegionSummary::verify`), holds only
+//!   ops that stand in a region, and states its events at ops from after
+//!   its head to the op that closes it.
 
+use crate::charge::RegionTable;
 use crate::kir::{Op, OpKind, OpRange, Operand, Reg};
 use crate::sem::{ChargeEvent, OpSpec};
 
@@ -73,6 +78,10 @@ pub struct Tables {
     pub blocks: usize,
     /// The table of nested actions' resume entries.
     pub nested: usize,
+    /// The charge regions' side table.
+    pub regions: usize,
+    /// The property read sites, in all.
+    pub sites: usize,
 }
 
 /// Why a stream is rejected: the statement, by its position in the
@@ -102,6 +111,25 @@ pub enum KirError {
     Arity { stmt: usize, op: u32 },
     #[error("op {op} of statement {stmt} jumps outside its expression range")]
     InvalidJump { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} heads a charge region that is not headed there")]
+    RegionHead { stmt: usize, op: u32 },
+    #[error("a charge event of the region op {op} of statement {stmt} heads stands outside it")]
+    RegionEvent { stmt: usize, op: u32 },
+    #[error("the region op {op} of statement {stmt} heads is refused: {error}")]
+    Region {
+        stmt: usize,
+        op: u32,
+        error: crate::charge::RegionError,
+    },
+    #[error(
+        "op {op} of statement {stmt} states a region total of {stated}; its summary's is {summary}"
+    )]
+    RegionTotal {
+        stmt: usize,
+        op: u32,
+        stated: u32,
+        summary: u64,
+    },
 }
 
 /// Checks every statement of a stream (see the module documentation),
@@ -110,11 +138,53 @@ pub fn verify_stream(
     ops: &[Op],
     stmts: &[(StmtRanges, usize)],
     tables: &Tables,
+    regions: &RegionTable,
 ) -> Result<(), KirError> {
+    let range = |stmt, range, ranges, frame, test| {
+        self::range(ops, stmt, range, ranges, frame, tables, test)?;
+        self::regions(ops, stmt, range, regions)
+    };
     for (stmt, (ranges, frame)) in stmts.iter().enumerate() {
-        range(ops, stmt, ranges.main, *ranges, *frame, tables, false)?;
+        range(stmt, ranges.main, *ranges, *frame, false)?;
         if let Some(test) = ranges.test {
-            range(ops, stmt, test, *ranges, *frame, tables, true)?;
+            range(stmt, test, *ranges, *frame, true)?;
+        }
+    }
+    Ok(())
+}
+
+/// Checks every charge region headed in `range`: its head is its own and
+/// states the total of its verified summary, its ops stand in a region,
+/// and its events stand from after its head to the op that closes it.
+fn regions(ops: &[Op], stmt: usize, range: OpRange, regions: &RegionTable) -> Result<(), KirError> {
+    for at in range.start..range.end() {
+        let Op::Region { region, total } = ops[at as usize] else {
+            continue;
+        };
+        let region = region.0;
+        if region as usize >= regions.len() || regions.head(region) != at {
+            return Err(KirError::RegionHead { stmt, op: at });
+        }
+        let refused = |error| KirError::Region {
+            stmt,
+            op: at,
+            error,
+        };
+        let summary = regions.summary(region).map_err(refused)?;
+        summary.verify(regions.events(region)).map_err(refused)?;
+        if total != u32::try_from(summary.total()).unwrap_or(u32::MAX) {
+            return Err(KirError::RegionTotal {
+                stmt,
+                op: at,
+                stated: total,
+                summary: summary.total(),
+            });
+        }
+        let close = (at + 1..range.end())
+            .find(|op| !ops[*op as usize].kind().in_region())
+            .unwrap_or(range.end());
+        if regions.at(region).iter().any(|event| *event > close) {
+            return Err(KirError::RegionEvent { stmt, op: at });
         }
     }
     Ok(())
@@ -226,5 +296,7 @@ fn fits(operand: Operand, regs: u32, frame: usize, tables: &Tables) -> bool {
         Operand::Lib(lib) => lib.ix() < tables.libs,
         Operand::Block(block) => block.ix() < tables.blocks,
         Operand::Nested(act) => act.ix() < tables.nested,
+        Operand::Region(region) => region.ix() < tables.regions,
+        Operand::Site(site) => site.ix() < tables.sites,
     }
 }

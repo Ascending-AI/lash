@@ -137,12 +137,12 @@ fn a_native_implementation_and_a_kernel_body_run_the_same() {
     assert_eq!(body, native);
 }
 
-/// PLAN-INDEP for field caches: warm a read site, fail its position guard
+/// PLAN-INDEP for per-site property caches: warm a read site, fail its guard
 /// on a different record, then delete, reinsert and mutate its field.
 /// Errors and effects retain their order and charge,
 /// also with every safepoint reopened under a different, cold plan.
 #[test]
-fn field_hints_are_exact_across_guard_failures_and_cold_plans() {
+fn property_caches_are_exact_across_guard_failures_and_cold_plans() {
     const READS: &str = r#"
 fn fetch(obj) { return obj.value }
 fn fetch_key(obj, key) { return obj[key] }
