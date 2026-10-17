@@ -1,0 +1,1498 @@
+{
+  "kind": "lash.1.0-tuning-comparison",
+  "certifying": false,
+  "baseline_source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+  "candidate_source": "a147a59f0413456b058b2c43792617b702463de3",
+  "scope": "paired local-host observations; combined source delta includes all intervening commits; no isolated child percentages added",
+  "replay": [
+    {
+      "workload": "chat-typical",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "7d3a20f923ef4313a833ae5a23d7ab99e0c84d214b7d9e0ed06494cdf68ef016",
+        "turns": 2,
+        "sessions": 1,
+        "model_calls": 2.0,
+        "allocated_bytes_median": 4064645.0,
+        "allocated_bytes_total": 8129290.0,
+        "allocated_bytes_robust_slope": -209706.0,
+        "sql_selects_total": 470.0,
+        "sql_selects_mean": 235.0,
+        "sql_statements_total": 764.0,
+        "graph_nodes_written": 5.0,
+        "instructions": 1199333015,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.16,
+        "load1_after": 2.63,
+        "peak_rss_kib": 101516,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "7d3a20f923ef4313a833ae5a23d7ab99e0c84d214b7d9e0ed06494cdf68ef016",
+        "turns": 2,
+        "sessions": 1,
+        "model_calls": 2.0,
+        "allocated_bytes_median": 3672695.5,
+        "allocated_bytes_total": 7345391.0,
+        "allocated_bytes_robust_slope": -405401.0,
+        "sql_selects_total": 439.0,
+        "sql_selects_mean": 219.5,
+        "sql_statements_total": 740.0,
+        "graph_nodes_written": 5.0,
+        "instructions": 3459287749,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.72,
+        "load1_after": 2.72,
+        "peak_rss_kib": 103316,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 188.43429687458405,
+      "allocated_bytes_median_change_percent": -9.642896243091336
+    },
+    {
+      "workload": "coding-typical",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "f5dd3cab786f12efc9cc2bf14ca1c8d6080924a3bfbd41def7b74da52fe97057",
+        "turns": 5,
+        "sessions": 1,
+        "model_calls": 22.0,
+        "allocated_bytes_median": 16084869.0,
+        "allocated_bytes_total": 72307063.0,
+        "allocated_bytes_robust_slope": -1098664.25,
+        "sql_selects_total": 2090.0,
+        "sql_selects_mean": 418.0,
+        "sql_statements_total": 4227.0,
+        "graph_nodes_written": 45.0,
+        "instructions": 1974589422,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.63,
+        "load1_after": 2.63,
+        "peak_rss_kib": 108688,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "f5dd3cab786f12efc9cc2bf14ca1c8d6080924a3bfbd41def7b74da52fe97057",
+        "turns": 5,
+        "sessions": 1,
+        "model_calls": 22.0,
+        "allocated_bytes_median": 14946258.0,
+        "allocated_bytes_total": 67761135.0,
+        "allocated_bytes_robust_slope": -1322737.25,
+        "sql_selects_total": 1970.0,
+        "sql_selects_mean": 394.0,
+        "sql_statements_total": 4140.0,
+        "graph_nodes_written": 45.0,
+        "instructions": 4236217358,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.72,
+        "load1_after": 2.72,
+        "peak_rss_kib": 109732,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 114.53661762804681,
+      "allocated_bytes_median_change_percent": -7.0787707378903715
+    },
+    {
+      "workload": "coding-heavy",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "7f68f8c2bb464b9059c39e65d8e3fe2d5b5742a364f3f3738c6f07ada88e59bb",
+        "turns": 28,
+        "sessions": 1,
+        "model_calls": 139.0,
+        "allocated_bytes_median": 27937144.5,
+        "allocated_bytes_total": 785616044.0,
+        "allocated_bytes_robust_slope": 253595.451,
+        "sql_selects_total": 13053.0,
+        "sql_selects_mean": 466.17857142857144,
+        "sql_statements_total": 26529.0,
+        "graph_nodes_written": 279.0,
+        "instructions": 10462139205,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.63,
+        "load1_after": 2.63,
+        "peak_rss_kib": 136164,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "7f68f8c2bb464b9059c39e65d8e3fe2d5b5742a364f3f3738c6f07ada88e59bb",
+        "turns": 28,
+        "sessions": 1,
+        "model_calls": 139.0,
+        "allocated_bytes_median": 25291451.5,
+        "allocated_bytes_total": 708601945.0,
+        "allocated_bytes_robust_slope": 172082.438,
+        "sql_selects_total": 12322.0,
+        "sql_selects_mean": 440.07142857142856,
+        "sql_statements_total": 25986.0,
+        "graph_nodes_written": 279.0,
+        "instructions": 12332364028,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.72,
+        "load1_after": 2.72,
+        "peak_rss_kib": 136340,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 17.87612252479105,
+      "allocated_bytes_median_change_percent": -9.470162564395224
+    },
+    {
+      "workload": "reread-heavy",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "6493eb15c5256dbf762eb3777d92babbb01fac19895add5793295c68cea60926",
+        "turns": 111,
+        "sessions": 1,
+        "model_calls": 222.0,
+        "allocated_bytes_median": 11908125.0,
+        "allocated_bytes_total": 1321222646.0,
+        "allocated_bytes_robust_slope": 55963.841,
+        "sql_selects_total": 34313.0,
+        "sql_selects_mean": 309.1261261261261,
+        "sql_statements_total": 58725.0,
+        "graph_nodes_written": 445.0,
+        "instructions": 15116762185,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.63,
+        "load1_after": 2.82,
+        "peak_rss_kib": 136080,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "6493eb15c5256dbf762eb3777d92babbb01fac19895add5793295c68cea60926",
+        "turns": 111,
+        "sessions": 1,
+        "model_calls": 222.0,
+        "allocated_bytes_median": 10421205.0,
+        "allocated_bytes_total": 1149343666.0,
+        "allocated_bytes_robust_slope": 44301.455,
+        "sql_selects_total": 31520.0,
+        "sql_selects_mean": 283.963963963964,
+        "sql_statements_total": 56924.0,
+        "graph_nodes_written": 445.0,
+        "instructions": 16301380093,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.72,
+        "load1_after": 2.83,
+        "peak_rss_kib": 137136,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 7.836452631208735,
+      "allocated_bytes_median_change_percent": -12.486600535348769
+    },
+    {
+      "workload": "fanout-heavy",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "4683547d91391cfd3c5ebb8d1b2a69f82160349b6d3843e55af9e96da4f7d0df",
+        "turns": 1,
+        "sessions": 1,
+        "model_calls": 2.0,
+        "allocated_bytes_median": 40593105.0,
+        "allocated_bytes_total": 40593105.0,
+        "allocated_bytes_robust_slope": null,
+        "sql_selects_total": 322.0,
+        "sql_selects_mean": 322.0,
+        "sql_statements_total": 609.0,
+        "graph_nodes_written": 5.0,
+        "instructions": 1559413592,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.82,
+        "load1_after": 2.82,
+        "peak_rss_kib": 116656,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "4683547d91391cfd3c5ebb8d1b2a69f82160349b6d3843e55af9e96da4f7d0df",
+        "turns": 1,
+        "sessions": 1,
+        "model_calls": 2.0,
+        "allocated_bytes_median": 37470459.0,
+        "allocated_bytes_total": 37470459.0,
+        "allocated_bytes_robust_slope": null,
+        "sql_selects_total": 307.0,
+        "sql_selects_mean": 307.0,
+        "sql_statements_total": 599.0,
+        "graph_nodes_written": 5.0,
+        "instructions": 3809234264,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.83,
+        "load1_after": 2.83,
+        "peak_rss_kib": 115384,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 144.2735066272271,
+      "allocated_bytes_median_change_percent": -7.692552713077749
+    },
+    {
+      "workload": "coding-history-50",
+      "before": {
+        "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+        "executable_sha256": "7978e22bd803d36aa63681312d3303b7e2509264a1804fb32d20530f62556c76",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "1a7d3d67a8d72b39cd656026fdcb03c3cacc88b882c7686eccd39d15fef8ed7e",
+        "turns": 50,
+        "sessions": 1,
+        "model_calls": 250.0,
+        "allocated_bytes_median": 20516576.0,
+        "allocated_bytes_total": 1029156464.0,
+        "allocated_bytes_robust_slope": 193344.917,
+        "sql_selects_total": 23561.0,
+        "sql_selects_mean": 471.22,
+        "sql_statements_total": 47585.0,
+        "graph_nodes_written": 501.0,
+        "instructions": 13595422032,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.82,
+        "load1_after": 3.0,
+        "peak_rss_kib": 127148,
+        "exit_status": 0
+      },
+      "after": {
+        "source": "a147a59f0413456b058b2c43792617b702463de3",
+        "executable_sha256": "babae363cfefdfcf44191df6c5ff25a910fbde48a97b77ef8baa887ddae04a12",
+        "identity": {
+          "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+          "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+          "allocator": "stats_alloc",
+          "build": "release",
+          "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+          "cpus": 32,
+          "heap_window": null
+        },
+        "script_digest": "1a7d3d67a8d72b39cd656026fdcb03c3cacc88b882c7686eccd39d15fef8ed7e",
+        "turns": 50,
+        "sessions": 1,
+        "model_calls": 250.0,
+        "allocated_bytes_median": 17752873.0,
+        "allocated_bytes_total": 882617114.0,
+        "allocated_bytes_robust_slope": 113499.421,
+        "sql_selects_total": 22127.0,
+        "sql_selects_mean": 442.54,
+        "sql_statements_total": 46425.0,
+        "graph_nodes_written": 501.0,
+        "instructions": 14932822065,
+        "counter_running_percent": 100.0,
+        "load1_before": 2.83,
+        "load1_after": 3.0,
+        "peak_rss_kib": 127660,
+        "exit_status": 0
+      },
+      "instructions_change_percent": 9.837135102184513,
+      "allocated_bytes_median_change_percent": -13.47058593012791
+    }
+  ],
+  "latency": {
+    "before": {
+      "source": "3f0e4e18d98355458b1c854e629d9524692e21f2",
+      "samples": 512,
+      "lanes": 16,
+      "phases": {
+        "request_to_accept": {
+          "n": 512,
+          "min": 0.649,
+          "p50": 4.181,
+          "p90": 9.586,
+          "p95": 12.373,
+          "p99": 19.547,
+          "max": 105.178,
+          "mean": 5.294
+        },
+        "accept_to_shift_admission": {
+          "n": 512,
+          "min": 0.801,
+          "p50": 16.939,
+          "p90": 28.973,
+          "p95": 33.419,
+          "p99": 53.626,
+          "max": 139.883,
+          "mean": 18.356
+        },
+        "accept_to_applied": {
+          "n": 512,
+          "min": 0.801,
+          "p50": 16.939,
+          "p90": 28.973,
+          "p95": 33.419,
+          "p99": 53.626,
+          "max": 139.883,
+          "mean": 18.356
+        },
+        "shift_admission_to_first_delta": {
+          "n": 512,
+          "min": 18.336,
+          "p50": 53.837,
+          "p90": 73.508,
+          "p95": 84.574,
+          "p99": 164.92,
+          "max": 179.038,
+          "mean": 56.97
+        },
+        "shift_admission_to_first_visible": {
+          "n": 512,
+          "min": 18.336,
+          "p50": 53.837,
+          "p90": 73.508,
+          "p95": 84.574,
+          "p99": 164.92,
+          "max": 179.038,
+          "mean": 56.97
+        },
+        "shift_admission_to_first_activity": {
+          "n": 512,
+          "min": 6.497,
+          "p50": 24.88,
+          "p90": 39.73,
+          "p95": 44.471,
+          "p99": 63.507,
+          "max": 125.883,
+          "mean": 26.703
+        },
+        "admission_observation_lag": {
+          "n": 512,
+          "min": 0.337,
+          "p50": 6.775,
+          "p90": 16.084,
+          "p95": 17.274,
+          "p99": 32.028,
+          "max": 34.14,
+          "mean": 8.058
+        },
+        "terminal_observation_lag": {
+          "n": 512,
+          "min": 0.759,
+          "p50": 29.816,
+          "p90": 47.29,
+          "p95": 49.895,
+          "p99": 54.58,
+          "max": 67.842,
+          "mean": 28.286
+        },
+        "shift_admission_to_run_settled": {
+          "n": 512,
+          "min": 40.148,
+          "p50": 89.536,
+          "p90": 118.686,
+          "p95": 130.844,
+          "p99": 198.968,
+          "max": 214.04,
+          "mean": 92.357
+        },
+        "root_settled_to_completion": {
+          "n": 512,
+          "min": 2.392,
+          "p50": 19.898,
+          "p90": 33.441,
+          "p95": 40.282,
+          "p99": 62.557,
+          "max": 143.593,
+          "mean": 22.066
+        },
+        "send_to_completion": {
+          "n": 512,
+          "min": 50.089,
+          "p50": 131.5,
+          "p90": 173.814,
+          "p95": 183.194,
+          "p99": 259.896,
+          "max": 268.443,
+          "mean": 138.073
+        },
+        "provider": {
+          "n": 512,
+          "min": 0.001,
+          "p50": 0.004,
+          "p90": 0.006,
+          "p95": 0.007,
+          "p99": 0.009,
+          "max": 0.022,
+          "mean": 0.004
+        },
+        "overhead": {
+          "n": 512,
+          "min": 50.087,
+          "p50": 131.496,
+          "p90": 173.809,
+          "p95": 183.189,
+          "p99": 259.893,
+          "max": 268.44,
+          "mean": 138.069
+        },
+        "model_span": {
+          "n": 512,
+          "min": 6.782,
+          "p50": 27.451,
+          "p90": 37.808,
+          "p95": 41.706,
+          "p99": 66.457,
+          "max": 130.62,
+          "mean": 28.344
+        },
+        "poll_detect": {
+          "n": 512,
+          "min": 75.0,
+          "p50": 175.0,
+          "p90": 175.0,
+          "p95": 175.0,
+          "p99": 375.0,
+          "max": 375.0,
+          "mean": 177.539
+        }
+      },
+      "cold_overhead": {
+        "n": 16,
+        "min": 117.173,
+        "p50": 129.362,
+        "p90": 131.609,
+        "p95": 132.453,
+        "p99": 134.394,
+        "max": 134.879,
+        "mean": 128.283
+      },
+      "warm_overhead": {
+        "n": 496,
+        "min": 50.087,
+        "p50": 131.947,
+        "p90": 174.286,
+        "p95": 183.865,
+        "p99": 260.38,
+        "max": 268.44,
+        "mean": 138.385
+      },
+      "sqlite_work": {
+        "write_transactions_per_send": 4.05078125,
+        "writer_busy_ms_per_send": 9.181367455078124,
+        "reader_busy_ms_per_send": 6.17152644921875,
+        "workers": [
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(34)",
+            "role": "writer",
+            "busy_ns": 4513026351,
+            "write_transactions": 2072,
+            "busy_ms_per_send": 8.814504591796876
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(36)",
+            "role": "reader",
+            "busy_ns": 650647314,
+            "write_transactions": 0,
+            "busy_ms_per_send": 1.27079553515625
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(37)",
+            "role": "reader",
+            "busy_ns": 919663026,
+            "write_transactions": 0,
+            "busy_ms_per_send": 1.79621684765625
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(38)",
+            "role": "reader",
+            "busy_ns": 668754609,
+            "write_transactions": 0,
+            "busy_ms_per_send": 1.306161345703125
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(39)",
+            "role": "reader",
+            "busy_ns": 919385143,
+            "write_transactions": 0,
+            "busy_ms_per_send": 1.795674107421875
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(40)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(41)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(43)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(44)",
+            "role": "writer",
+            "busy_ns": 187833786,
+            "write_transactions": 2,
+            "busy_ms_per_send": 0.36686286328125
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(45)",
+            "role": "reader",
+            "busy_ns": 411243,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.000803208984375
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(46)",
+            "role": "reader",
+            "busy_ns": 338377,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.000660892578125
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(47)",
+            "role": "reader",
+            "busy_ns": 257094,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.00050213671875
+          },
+          {
+            "pid": 1393802,
+            "thread": "ThreadId(48)",
+            "role": "reader",
+            "busy_ns": 364736,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.000712375
+          }
+        ],
+        "includes_held_predecessors": false
+      },
+      "case_window_seconds": 4.88,
+      "busiest_writer_seconds": 4.513026351,
+      "busiest_writer_busy_fraction_of_case": 0.924800481762295,
+      "verdict": {
+        "gate": "latency-gate",
+        "budget": {
+          "case": "fast",
+          "min_samples": 10000,
+          "overhead_p50_ms_lt": 50.0,
+          "overhead_p99_ms_lt": 250.0
+        },
+        "pass": false,
+        "violations": [
+          {
+            "reason": "insufficient-samples",
+            "samples": 512
+          },
+          {
+            "reason": "over-budget",
+            "percentile": "p50",
+            "observed": 131.496,
+            "budget": 50.0
+          },
+          {
+            "reason": "over-budget",
+            "percentile": "p99",
+            "observed": 259.893,
+            "budget": 250.0
+          }
+        ]
+      },
+      "instructions": 24997085849,
+      "counter_running_percent": 100.0,
+      "load1_before": 3.32,
+      "load1_after": 3.61,
+      "peak_rss_kib": 378340,
+      "exit_status": 2
+    },
+    "after": {
+      "source": "a147a59f0413456b058b2c43792617b702463de3",
+      "samples": 512,
+      "lanes": 16,
+      "phases": {
+        "request_to_accept": {
+          "n": 512,
+          "min": 0.607,
+          "p50": 3.314,
+          "p90": 7.988,
+          "p95": 10.452,
+          "p99": 14.858,
+          "max": 30.187,
+          "mean": 4.155
+        },
+        "accept_to_shift_admission": {
+          "n": 512,
+          "min": 0.737,
+          "p50": 11.338,
+          "p90": 20.038,
+          "p95": 26.124,
+          "p99": 51.972,
+          "max": 62.722,
+          "mean": 12.4
+        },
+        "accept_to_applied": {
+          "n": 512,
+          "min": 0.737,
+          "p50": 11.338,
+          "p90": 20.038,
+          "p95": 26.124,
+          "p99": 51.972,
+          "max": 62.722,
+          "mean": 12.4
+        },
+        "shift_admission_to_first_delta": {
+          "n": 512,
+          "min": 8.175,
+          "p50": 42.439,
+          "p90": 59.332,
+          "p95": 75.467,
+          "p99": 93.534,
+          "max": 115.979,
+          "mean": 44.415
+        },
+        "shift_admission_to_first_visible": {
+          "n": 512,
+          "min": 8.175,
+          "p50": 42.439,
+          "p90": 59.332,
+          "p95": 75.467,
+          "p99": 93.534,
+          "max": 115.979,
+          "mean": 44.415
+        },
+        "shift_admission_to_first_activity": {
+          "n": 512,
+          "min": 3.576,
+          "p50": 17.966,
+          "p90": 27.949,
+          "p95": 31.416,
+          "p99": 54.438,
+          "max": 66.286,
+          "mean": 19.29
+        },
+        "admission_observation_lag": {
+          "n": 512,
+          "min": 0.219,
+          "p50": 4.896,
+          "p90": 13.21,
+          "p95": 16.363,
+          "p99": 28.47,
+          "max": 39.194,
+          "mean": 6.127
+        },
+        "terminal_observation_lag": {
+          "n": 512,
+          "min": 0.719,
+          "p50": 17.151,
+          "p90": 48.101,
+          "p95": 49.977,
+          "p99": 53.124,
+          "max": 55.567,
+          "mean": 22.357
+        },
+        "shift_admission_to_run_settled": {
+          "n": 512,
+          "min": 11.027,
+          "p50": 70.035,
+          "p90": 96.914,
+          "p95": 107.981,
+          "p99": 157.467,
+          "max": 178.314,
+          "mean": 73.763
+        },
+        "root_settled_to_completion": {
+          "n": 512,
+          "min": 2.259,
+          "p50": 16.17,
+          "p90": 26.042,
+          "p95": 29.813,
+          "p99": 55.651,
+          "max": 63.315,
+          "mean": 17.514
+        },
+        "send_to_completion": {
+          "n": 512,
+          "min": 15.251,
+          "p50": 103.322,
+          "p90": 140.72,
+          "p95": 152.966,
+          "p99": 230.546,
+          "max": 241.093,
+          "mean": 107.832
+        },
+        "provider": {
+          "n": 512,
+          "min": 0.002,
+          "p50": 0.004,
+          "p90": 0.005,
+          "p95": 0.006,
+          "p99": 0.008,
+          "max": 0.022,
+          "mean": 0.004
+        },
+        "overhead": {
+          "n": 512,
+          "min": 15.247,
+          "p50": 103.319,
+          "p90": 140.716,
+          "p95": 152.962,
+          "p99": 230.541,
+          "max": 241.087,
+          "mean": 107.828
+        },
+        "model_span": {
+          "n": 512,
+          "min": 4.242,
+          "p50": 20.997,
+          "p90": 31.684,
+          "p95": 37.471,
+          "p99": 57.064,
+          "max": 75.536,
+          "mean": 22.394
+        },
+        "poll_detect": {
+          "n": 512,
+          "min": 25.0,
+          "p50": 175.0,
+          "p90": 175.0,
+          "p95": 175.0,
+          "p99": 375.0,
+          "max": 375.0,
+          "mean": 158.203
+        }
+      },
+      "cold_overhead": {
+        "n": 16,
+        "min": 72.976,
+        "p50": 96.797,
+        "p90": 102.337,
+        "p95": 102.71,
+        "p99": 103.575,
+        "max": 103.792,
+        "mean": 91.138
+      },
+      "warm_overhead": {
+        "n": 496,
+        "min": 15.247,
+        "p50": 104.051,
+        "p90": 141.291,
+        "p95": 153.119,
+        "p99": 232.05,
+        "max": 241.087,
+        "mean": 108.367
+      },
+      "sqlite_work": {
+        "write_transactions_per_send": 3.96484375,
+        "writer_busy_ms_per_send": 7.271525779296875,
+        "reader_busy_ms_per_send": 3.5872717421875,
+        "workers": [
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(34)",
+            "role": "writer",
+            "busy_ns": 3584876106,
+            "write_transactions": 2029,
+            "busy_ms_per_send": 7.00171114453125
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(36)",
+            "role": "reader",
+            "busy_ns": 446373475,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.871823193359375
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(37)",
+            "role": "reader",
+            "busy_ns": 468954806,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.91592735546875
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(38)",
+            "role": "reader",
+            "busy_ns": 460629822,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.89966762109375
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(39)",
+            "role": "reader",
+            "busy_ns": 459768655,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.897985654296875
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(40)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(41)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(43)",
+            "role": "reader",
+            "busy_ns": 0,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(44)",
+            "role": "writer",
+            "busy_ns": 138145093,
+            "write_transactions": 1,
+            "busy_ms_per_send": 0.269814634765625
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(45)",
+            "role": "reader",
+            "busy_ns": 254692,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0004974453125
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(46)",
+            "role": "reader",
+            "busy_ns": 257806,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.00050352734375
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(47)",
+            "role": "reader",
+            "busy_ns": 230004,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.0004492265625
+          },
+          {
+            "pid": 2854523,
+            "thread": "ThreadId(48)",
+            "role": "reader",
+            "busy_ns": 213872,
+            "write_transactions": 0,
+            "busy_ms_per_send": 0.00041771875
+          }
+        ],
+        "includes_held_predecessors": false
+      },
+      "case_window_seconds": 3.901,
+      "busiest_writer_seconds": 3.584876106,
+      "busiest_writer_busy_fraction_of_case": 0.9189633699051525,
+      "verdict": {
+        "gate": "latency-gate",
+        "budget": {
+          "case": "fast",
+          "min_samples": 10000,
+          "overhead_p50_ms_lt": 50.0,
+          "overhead_p99_ms_lt": 250.0
+        },
+        "pass": false,
+        "violations": [
+          {
+            "reason": "insufficient-samples",
+            "samples": 512
+          },
+          {
+            "reason": "over-budget",
+            "percentile": "p50",
+            "observed": 103.319,
+            "budget": 50.0
+          }
+        ]
+      },
+      "instructions": 23149571033,
+      "counter_running_percent": 100.0,
+      "load1_before": 3.0,
+      "load1_after": 3.32,
+      "peak_rss_kib": 380144,
+      "exit_status": 2
+    }
+  },
+  "configuration": {
+    "before": {
+      "metadata_selects": 15,
+      "body_selects": 165,
+      "body_rows": 675,
+      "body_result_bytes": 99690,
+      "body_bound_bytes": 51105,
+      "instructions": 3276556503,
+      "counter_running_percent": 100.0,
+      "load1_before": 3.4,
+      "load1_after": 3.4,
+      "peak_rss_kib": 117208,
+      "exit_status": 0
+    },
+    "after": {
+      "metadata_selects": 15,
+      "body_selects": 11,
+      "body_rows": 45,
+      "body_result_bytes": 6646,
+      "body_bound_bytes": 3407,
+      "instructions": 5502638350,
+      "counter_running_percent": 100.0,
+      "load1_before": 3.32,
+      "load1_after": 3.32,
+      "peak_rss_kib": 115112,
+      "exit_status": 0
+    }
+  },
+  "raw_evidence_root": "/workspace/kiln/lash/forks/tr-tuning/.kiln/FIG-3906",
+  "sha256": {
+    "baseline/chat-typical/command.json": "2c85e81d81d2a76666fc89db407accbaf708a8ae227f905c34c65ee7fa47029e",
+    "baseline/chat-typical/perf.csv": "51b2f8aa687d5fb43503f7c43524a75ddf9fb3921230d7875a19b3583d37f66a",
+    "baseline/chat-typical/receipt.json": "f96c71b6d529f6febed94fb849902b909aea3da3aed293a41cfd61372d9da5c2",
+    "baseline/chat-typical/resources.txt": "e63d5ccb2b3224797da0775bbdadf03f48141a47d0710fe86148bafdf06bd1d8",
+    "baseline/chat-typical/run.log": "5d32a7f71490a867c5cfe2626a017a14c5e1d983efa3605469353fcd277d7ca9",
+    "baseline/coding-typical/command.json": "1869b61f7fbd083deebe1ddac57b292149877c4b81a96cd4e049418fe858cd29",
+    "baseline/coding-typical/perf.csv": "ed09822643ab9aa0faedde087b82b5d87197d9c5968230568aa042e02e4b3ac8",
+    "baseline/coding-typical/receipt.json": "c17200f2c06a0aad0e2f32d6933f846479093f60bd55054607eef8a447feaa9c",
+    "baseline/coding-typical/resources.txt": "562ce71f7ac8371a7f5c712f22674a8b1a022c3bc96d3ece8cf0d745dd89b1aa",
+    "baseline/coding-typical/run.log": "df75e09e2a6d8538a4d2689e80985d37b834fe59394e7f968c6b6e4aa80f31e9",
+    "baseline/coding-heavy/command.json": "ed443bb005c9e39bdfa655d75e5735aaa1338b75466c592cb4d2a641b5d5079f",
+    "baseline/coding-heavy/perf.csv": "beab7bd8474c79d6e51f3f22283ce7e63be6f5f47e3581806c945ca753aa775e",
+    "baseline/coding-heavy/receipt.json": "d70e562ea51f0d2a48ea4c0b7f91e7e03aaead7d8a70f8fe9ba06ff9f5ffe87a",
+    "baseline/coding-heavy/resources.txt": "2e58bd119fa33bd33ea9f7b9974e08a34b21dff9765913f179cedb9dbc2a6f8f",
+    "baseline/coding-heavy/run.log": "2eb4a62a1d334b838c087d4b5896858367d9799ebab266e473415f6849a1f0e8",
+    "baseline/reread-heavy/command.json": "4e219de2c07ceeb1a7544c68129fa215c359e015cdd99dcec664959b97f34e68",
+    "baseline/reread-heavy/perf.csv": "d86472c1c3ec35e2ebb6b214750ab0a850bb2592171521fe79c2180f35e8f8cb",
+    "baseline/reread-heavy/receipt.json": "a05e8cc088145ac0b6d6446ad3d02895d70d41c188d51789235f5c3a65ed38c3",
+    "baseline/reread-heavy/resources.txt": "b10eccc509a3cbfb7152346a983c96d899f2534490199325bf79f442e51e4f99",
+    "baseline/reread-heavy/run.log": "6ce22fd6e843647279d88be169e5d34f82df5341b758ef61fb78330a3a00c438",
+    "baseline/fanout-heavy/command.json": "c1430f34fa9a0391117b7b646e3abfaa286aa4c8e76aea08b750368191e2d678",
+    "baseline/fanout-heavy/perf.csv": "4b14bcf63d7171275c9fce860f3cee82115495d85c372d376cd635cd86adf155",
+    "baseline/fanout-heavy/receipt.json": "2d4af17539785fbeb1c9d3104d53d221c97783695a42b177ceb1e044e27c87e9",
+    "baseline/fanout-heavy/resources.txt": "b2a7e366969949f7aa11c36b4e61385083254fb44093f05c808102d2b8d149eb",
+    "baseline/fanout-heavy/run.log": "9e028fe89254e362221046c2e7e019ccbecf495fced593819591c9e1b12b66ee",
+    "baseline/coding-history-50/command.json": "4af23a196958b2013670849d48bec990b49ee12a8eadc0e107fbc8f067acf5af",
+    "baseline/coding-history-50/perf.csv": "1b608ad7fc8c777995bdab5749ee273a0b169a49d64e590f17349d36502857f6",
+    "baseline/coding-history-50/receipt.json": "89e749892f6e98ec4027ea50e8731254a6b879c23f98bbd9150faa1cb747fa5f",
+    "baseline/coding-history-50/resources.txt": "27ae164e9d4a9825d05b2c0c659716d8d158b4dea3a5d6cd832b75f3a9f85c93",
+    "baseline/coding-history-50/run.log": "6fc773ab08bc24b731dfd5dee84a7584e03c1e40436d77739a1828d5788f84d4",
+    "baseline/fast-16/command.json": "463f5c12e90fb7653273da3da68f76f8b998d684197f7128fc585372a76c0361",
+    "baseline/fast-16/perf.csv": "e1a6ec2b248f2f05da1b88e79cb7fbd994483a4eadfc4cb7c8ae0853cd7fb9b0",
+    "baseline/fast-16/receipt.json": "37e084b801d59766e60aa49dffdf78544b5249acfbce0e27d58ba3e5acc1b9fe",
+    "baseline/fast-16/receipt.json.samples.json": "5cd57469e223027da365b42484b661689a65fe864d8a353eafb3dc33fcae2017",
+    "baseline/fast-16/resources.txt": "0a9437375d61fb93bba86d70c30e89e6f69c34f3133e77d4b4e71faef7099e55",
+    "baseline/fast-16/run.log": "cf0aa222dc17b5a41bc3bdfd3353c058b0122c20f010cf735badcef772b96974",
+    "baseline/coding-typical-observer/command.json": "ac5e09feb4390c0c323fdd432d3019f327f7c1216993c959078a052dc488a88a",
+    "baseline/coding-typical-observer/perf.csv": "fa59b7ddd6d999a27d30a2852680d0b0d97d26ef919621f472c924c7f528a0dd",
+    "baseline/coding-typical-observer/receipt.json": "a544dc33671388f3a4ac5215e0656da90f1617c9268390156d20f80cae0e10de",
+    "baseline/coding-typical-observer/resources.txt": "e4517b88699d30af4a5f687565908a690e7309c9ed5af7fab22a65ffbf197b1b",
+    "baseline/coding-typical-observer/run.log": "148429fd368085a06f9a960fe8a2bcae22377695c549be2f422a0d4b42dbd974",
+    "baseline/coding-typical-observer/sql-shapes.json": "b347bf43e59894250f5468bf8b4a7b35e3adbcf5c88350594c2cade93c76d1a5",
+    "baseline/coding-typical-observer/turn-sql-work.json": "2b421d752b770fe06242ae408960dba259f6792d0de19eb73270c0b9e4678d4b",
+    "baseline/coding-typical-observer/turn-sql-work.txt": "1063276710893bbeb0a539b7e1b1f9e7f72b8f407f9e66d2f0da2253f475be45",
+    "combined/chat-typical/command.json": "e3ecb22d1f23c6195f72dc6d31d7dcd8ce25805717c4e0a61cb42b756a38e501",
+    "combined/chat-typical/perf.csv": "c7a8b044b13b91c3b0b160ed0aff1b86a6e1ea232d7553b4f9fe638a84a359ce",
+    "combined/chat-typical/receipt.json": "e27c08518d297f1ccc609fa448dbf9be7042d91cdf90e47bddf47216ba47bf0d",
+    "combined/chat-typical/resources.txt": "5e4b0297954c0381a4ae2e3a52846acefa932f52a774808ababd9782e40ccd7a",
+    "combined/chat-typical/run.log": "82743db11e3967155e975fd49af0f852a379bd78060857efe83636699d596e79",
+    "combined/coding-typical/command.json": "8020dbd9717139b4f570dcd3fc5a9bcabf391eef67fec2a8fed52025340b3116",
+    "combined/coding-typical/perf.csv": "2aa81e9292384a549f41fc5c932ab42cc0346b6787c2b653edcba6061a1bfc9c",
+    "combined/coding-typical/receipt.json": "561f09a1b022ecec443f827cca6f318f52342d6bfea2c61dde34ded22f62a6f4",
+    "combined/coding-typical/resources.txt": "44c40af3a4fb3bab37f780184eaa03a8e9f3d4af6a8e0a95fdabb83d184cb991",
+    "combined/coding-typical/run.log": "e00c22fc46c999897bc80bc214172f1dd332dce68c03f04d812bafff1292e5dd",
+    "combined/coding-heavy/command.json": "07431a22444205839b52c3cf93c6c9dfaccd6bbba2e206e6a0715b25779e49bf",
+    "combined/coding-heavy/perf.csv": "47547e621fbf54747cc5351cff815d838a943fa241e143bc4181d23096a545f7",
+    "combined/coding-heavy/receipt.json": "55903723d77a318523878c5e3495047523ba89bab52e703ff26eed9016cb09ed",
+    "combined/coding-heavy/resources.txt": "0eafee9753f71395738cb58695d2fa46ebf00bcafb18261c76a64d5453a5e7b4",
+    "combined/coding-heavy/run.log": "2571f1fd5223aa286c433712eb2b5fbda4da30ce9868c751853b847667c234bb",
+    "combined/reread-heavy/command.json": "fa12ddacd1446e66d7f5618948de314815fd14156d22700afe7c2a145cffb235",
+    "combined/reread-heavy/perf.csv": "f3c06be527091ee9d746be1e600b8daf4255b378679bb3fe0005c03a801b0def",
+    "combined/reread-heavy/receipt.json": "679b72788fa7b34f7a714054c7b31440a762eba893a43cddfdab467fd42f73a6",
+    "combined/reread-heavy/resources.txt": "c0dfb9bb8e1e45fa5011c24fc567828b6a0d48f5bfc11c084cd7f1fda65c19e2",
+    "combined/reread-heavy/run.log": "15afea3c348d574c7b123c03637eaaa367959296980f43dee09c6b3dce0beaa6",
+    "combined/fanout-heavy/command.json": "2897414bba66a5f1ba16df516db675660f4fa1a88015a1a5cfb8069dd7c39931",
+    "combined/fanout-heavy/perf.csv": "fca951d8151531091ee29a299be598aae39afcdb76eeb1db3050a47c68631be0",
+    "combined/fanout-heavy/receipt.json": "a7555cb792b05c6f8b79a50848304e1a486803d2b38e47ef62fe135942086c54",
+    "combined/fanout-heavy/resources.txt": "683f6e394c34595190497287e4515bfca072aad25a4bbce1aed15575c4625a09",
+    "combined/fanout-heavy/run.log": "bdf669f977c96d889e14cc28f7fa2a22ff44adc61c8ee8bb091e58b16158360e",
+    "combined/coding-history-50/command.json": "918d5f722e88b3aa886a7586ca84ba3cc1924ef6daf16d967e8c9d46a35667ca",
+    "combined/coding-history-50/perf.csv": "48cac74de357e533ae128a83307a2b164fac61132caf98e8448d494bc98c76df",
+    "combined/coding-history-50/receipt.json": "78b96e73135ded684fed9a1ac882e9f8bc6c2ed39b164d044e5308bb7bf537ad",
+    "combined/coding-history-50/resources.txt": "914e55efd7d5430fa4572013890ad04347d7dda2861188f0d0ad7846e05601b7",
+    "combined/coding-history-50/run.log": "083c2a0cd652ddb0c84fd35d55a3e065e26133b07d1f04f3349b647b3cc718c3",
+    "combined/fast-16/command.json": "0d9b033cf98ebd9261d4f8adb991abe10ba663bc06f4c5f63b10135ccd5f16ad",
+    "combined/fast-16/perf.csv": "3bb8d955b8203e6408f38143b0eaf9456cfaa302243c5c2388e9e3f8cc454819",
+    "combined/fast-16/receipt.json": "59e2eb5e34e04fde1166bdd828c4b93c438d215e914cc8bbc6ebadc4baf7c0c5",
+    "combined/fast-16/receipt.json.samples.json": "7e3e7e90b2a68cc1102638fce7afa5262782591f53d651b710b6f8aa93476d17",
+    "combined/fast-16/resources.txt": "12e560f31252c88523013e754ad9d9a311af682b4f494b847253a6636a37d775",
+    "combined/fast-16/run.log": "fa44f61b7f47dbf01ed381719a8c9a6e44553949c2ba006f8916b7a655c695d9",
+    "combined/coding-typical-observer/command.json": "9cb408355927d392471aba6bd85ba61fcc52274ca401b3f073a153116b3aa0d6",
+    "combined/coding-typical-observer/perf.csv": "50b575e1145d5f7cab398f240a44719dcb7cb2f9dded8ddad2f9a6113d6c0ee0",
+    "combined/coding-typical-observer/receipt.json": "41b2f1320f111d28134c31b9259a790a944fafb5d3cb8cdc660a55e6c93ae380",
+    "combined/coding-typical-observer/resources.txt": "984df69eefba7eaa29ec814287df22e173474ed2df333d7f73408ed754ea4bea",
+    "combined/coding-typical-observer/run.log": "914e79afb70d5493d22a1c98ce802f26252942b7dc39139bcdad7a2e9f6a2fec",
+    "combined/coding-typical-observer/sql-shapes.json": "2757b2e59e6a640abc213a785832315ce78ca2d644617aabd84ca70eaa562855",
+    "combined/coding-typical-observer/turn-sql-work.json": "be719ae10858133fa135f481fd6d0204c3b69b3c6a8b05193be99687120ad82c",
+    "combined/coding-typical-observer/turn-sql-work.txt": "b3e404bfbf57591e108bcb0b22a915591161d9878fb34e838dfc326390f00e2a",
+    "combined/cpu/command.json": "3e53ec4650373a260b704a91c5049ad8cdb36000c4a90aafe5fe5da037220fe8",
+    "combined/cpu/flat-demangled.txt": "93d88ff78a4c9623c50b692cc50685bdbc98f4cd24b5dc62c53ae198758731c3",
+    "combined/cpu/flat.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "combined/cpu/flat.txt": "2850f19e8580b80b805d58ff2a7e8843a0be91bd6c834af42a9064aadc5b0881",
+    "combined/cpu/perf.data": "74eb1faeb86ba1aca31b3e11312c72cb1ced0f0a670ea3bf24f5967d4b3a28ca",
+    "combined/cpu/receipt.json": "477f94d808c3f69520c86e38974119b230d6668d51581c79d22ca80188a7e7dc",
+    "combined/cpu/receipt.json.samples.json": "f7240c2c217d7154a1100386a9e86d5a160b39d7a9250d27d67c80649833b92d",
+    "combined/cpu/record.log": "6dd9f238c6bc4d3990415571c06b34eaefe7059d15079b9a8f0192bf674e9327",
+    "combined/cpu/resources.txt": "2bb536137558b803969bf89eeb74bfe55f631ff0c1849a6e600bb36a156b6e41",
+    "combined/cpu/stacks-demangled.txt": "330013e9c428f6333585f247b027887d44cd4bfd31ea2ebe005b0ecc7bd4a5fe",
+    "combined/cpu/stacks.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "combined/cpu/stacks.txt": "c3b3138dad104e5f89d37d07db3186e6fe2cda419cfc29801586b15ee0d51276",
+    "combined/cpu-chat/command.json": "0b3cf4ccf82661db7f3f7d36dde9961ea5e8b0f3d1edbace641fc833a7da58f1",
+    "combined/cpu-chat/flat-demangled.txt": "803f60b047427a0bef26986b6d379b9eba6d0fbf9b739a53ebe0eb32e0cc0f60",
+    "combined/cpu-chat/flat.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "combined/cpu-chat/flat.txt": "90e473ff07c0ce17f6a7d467d3ad0cfe12062e46a89f7b4e07ad6faec47d033e",
+    "combined/cpu-chat/perf.data": "5573f97f2320346c94c51c6d90fc6a4b6b36b9b1b38a3770d18a32dc9f6eefca",
+    "combined/cpu-chat/receipt.json": "e87280c501e01620edd3d4449357cc6803ce3ebf55627fff92269a4e4417036f",
+    "combined/cpu-chat/record.log": "e5ce256339031f92d5213651ba6eb1ed0b12748e64aa577ed0421e81bfba6a2d",
+    "combined/cpu-chat/resources.txt": "12d0c307d321245c359bc784d72c133f3d911e75b900ed316cf64bf74e8f43e3",
+    "combined/cpu-chat/stacks-demangled.txt": "79927e026cea5a8df6289e475ae906585d000b2e877fb7f74aa2f568450cb85d",
+    "combined/cpu-chat/stacks.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "combined/cpu-chat/stacks.txt": "f282231df701ebe9a8243c607d5ba0b96a3824dee627add3abd90f70222078eb",
+    "combined/clippy.log": "d18eeebd97bf2a83b456e9dd0738528912ab5585d2f4ec0ffd51b76d9d8a1c7f",
+    "combined/clippy-events.pb.zst": "81557c33016494c025bc507096fbceb844546be024f21b6d82d285f4b85bf040",
+    "combined/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "proof": {
+    "workspace_clippy": "passed",
+    "tests_executed": 0,
+    "tests_passed": 0,
+    "tests_failed": 0,
+    "optimized_build": "passed",
+    "memory_scale_retry": false,
+    "runtime_source_changes": false,
+    "kiln_fmt": "passed",
+    "clippy_archived_receipt": "combined/clippy-events.pb.zst"
+  },
+  "children": {
+    "original_dispositions": [
+      {
+        "ticket": "FIG-4061",
+        "title": "The latency harness reads open inputs and root state by key, with backoff, not by 2 ms full listing",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-4060",
+        "title": "The per-commit session graph cache and derived read view update incrementally, not by full rebuild",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "4370e0a29105eccdbbb5fbc1a9a9668f78ed4881",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-4059",
+        "title": "Live replay retention does not keep a full read view per retained event",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "0802d47e116fea4d2134946f547bda1c7bdf348b",
+            "ancestor": true
+          },
+          {
+            "sha": "1ba1a92d0aa7f2bcb66702255c856fb28ce556f2",
+            "ancestor": true
+          },
+          {
+            "sha": "24acafa910cfa62e2f2eb7918e0880f0e70ed2de",
+            "ancestor": true
+          },
+          {
+            "sha": "ba81caf57027e92f45e8d1e9363cd18778496370",
+            "ancestor": true
+          },
+          {
+            "sha": "ec8f80aa4a3de25c121b7536738f1f5182e3104c",
+            "ancestor": true
+          },
+          {
+            "sha": "f635f865d812d6f8bbce398a2abef4bbb8af697d",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-4039",
+        "title": "The 1-lane CPU and RSS growth per turn is attributed to named sites",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "ef262903d6ceb27faee044576e35810632f6d80f",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-4036",
+        "title": "A session queues at most one pending drive invocation",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-4035",
+        "title": "A root's scope close is written in its terminal commit, not as a separate step after it",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "1ba1a92d0aa7f2bcb66702255c856fb28ce556f2",
+            "ancestor": true
+          },
+          {
+            "sha": "fe64e715db07380a74e56ba626f718c977287ada",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-4034",
+        "title": "SQLite WAL checkpoints keep up under concurrent lanes",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-4033",
+        "title": "Open-input scans use the state index, so their cost does not grow with session history",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-3986",
+        "title": "LashTurn records turn config and environment sync as one prelude step",
+        "state": "Canceled",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-3981",
+        "title": "A cross-worker follower learns its root's terminal from one open wait, not a store poll plus a capped read",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "4370e0a29105eccdbbb5fbc1a9a9668f78ed4881",
+            "ancestor": true
+          },
+          {
+            "sha": "f635f865d812d6f8bbce398a2abef4bbb8af697d",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-3980",
+        "title": "A turn journals a request digest instead of the full transcript twice, with fewer recorded steps",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-3979",
+        "title": "The turn's report is handed to its waiter at TurnPersisted, before the post-commit tail",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "068cab7982e65bc339931ba79d4adeb94dfc0329",
+            "ancestor": true
+          },
+          {
+            "sha": "23a900bf1cab28f3a9e9c8f9a08c89fda4f74dec",
+            "ancestor": true
+          },
+          {
+            "sha": "2725aa7c5f36f55748f41f670a910f3634c789ed",
+            "ancestor": true
+          },
+          {
+            "sha": "29e7e7f7d11b37e43b0f721e1c9ee296495ea8b3",
+            "ancestor": true
+          },
+          {
+            "sha": "95f7acda008daafd91f7c04a4d72d5570bfe6ccf",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-3978",
+        "title": "Turn cancel gates and settlement do not make nested index invocations",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "2ed7be33ddd2d6716dafafc85ac250d9a1425d79",
+            "ancestor": true
+          },
+          {
+            "sha": "7d0900ee93b2db9a401943ca46f96bf3b4cb33a8",
+            "ancestor": true
+          },
+          {
+            "sha": "b464fd434d1c7546963f66bb62f8d8a77ed32194",
+            "ancestor": true
+          },
+          {
+            "sha": "e5172e673833ba265012c976736fbbaee1ff5f5c",
+            "ancestor": true
+          },
+          {
+            "sha": "fd4814c4f513e1616688977f5da6fe34192cb76c",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-3977",
+        "title": "The per-session durable-wait index keeps bounded state and loads it lazily",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-3976",
+        "title": "The follower resolves its root with point reads, never the applications scan",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "4370e0a29105eccdbbb5fbc1a9a9668f78ed4881",
+            "ancestor": true
+          },
+          {
+            "sha": "d5ce17cede6f4bfd3a824ac220609850f98525d6",
+            "ancestor": true
+          },
+          {
+            "sha": "ec8f80aa4a3de25c121b7536738f1f5182e3104c",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-3975",
+        "title": "SQLite writers queue on an in-process FIFO gate instead of sleeping in busy_timeout, and statements are cached",
+        "state": "Done",
+        "commit_mentions": [
+          {
+            "sha": "95f7acda008daafd91f7c04a4d72d5570bfe6ccf",
+            "ancestor": true
+          }
+        ]
+      },
+      {
+        "ticket": "FIG-3974",
+        "title": "The latency gate's harness measures without rescanning session history",
+        "state": "Done",
+        "commit_mentions": []
+      },
+      {
+        "ticket": "FIG-3907",
+        "title": "A recovering deployment retakes a claim as soon as its holder is known dead, not only after the claim TTL",
+        "state": "Canceled",
+        "commit_mentions": [
+          {
+            "sha": "f9e748b662527c363d05ba5eba7de642dd270b01",
+            "ancestor": true
+          }
+        ]
+      }
+    ],
+    "prefix": "a147a59f0413456b058b2c43792617b702463de3",
+    "configuration": "cf8653cd5e",
+    "observer": "a5c46ac607e7c2a3fbbd2acb0c245fb3b29b076b"
+  },
+  "intervening_commits": [
+    "a147a59f04 Prompt admission carries its cached prefix incrementally instead of rebuilding its metadata on every model call (FIG-6644)",
+    "cf8653cd5e A head-metadata read reuses validated configuration by its immutable root instead of rehydrating it (FIG-6645)",
+    "0818b42b52 A cooperatively cancelled attempt keeps the failure that stopped it and the output it streamed (FIG-6654)",
+    "a5c46ac607 The joined SQL observer reaches long histories at bounded cost, and the prior-turn reader accepts its own producer (FIG-6646)",
+    "9ee7c45717 Validate the head counter before hydrating configuration (FIG-6652)",
+    "5d2527840a Exercise the timeout metric before comparing the registry (FIG-6655)",
+    "2634755718 Configuration corruption and deletion laws use graph roots (FIG-6651)",
+    "6fe82b3e99 A one-event replay window retains the named recovery law without scheduling assumptions (FIG-6656)",
+    "dcd50f813a Forge a current dynamic link before testing link safety (FIG-6653)",
+    "00c3b8efc1 Admit the binding-copy diagnostic's actual state owner (FIG-6650)",
+    "aa0b680ce5 Kir specializes reads, scalar calls and list loops (FIG-6640)",
+    "4100dd1451 Sansio's shared value vocabulary is its own crate, and the turn machine builds on it (FIG-6577)",
+    "bb87c59d0b Settled turns read their tool calls from a terminal transcript, and the terminal retires the turn's recovery ledger (FIG-6601)"
+  ],
+  "profiles": {
+    "cpu": {
+      "scope": "whole-process sampled user cycles, including startup/teardown; diagnostic capture times do not judge the budget",
+      "event": "cycles:u",
+      "sampling_frequency_hz": 199,
+      "recorded_samples": 5172,
+      "lost_samples": 0,
+      "memory_cap_bytes": 8589934592,
+      "load1_before": 4.73,
+      "load1_after": 4.59,
+      "peak_rss_kib": 381036,
+      "inclusive_percentages": {
+        "try_load_session_head_meta_from_conn": 14.67,
+        "load_config_conn": 12.92,
+        "history_window": 11.78,
+        "sqlite3Prepare": 9.26,
+        "follow": 5.37
+      },
+      "self_percentages": {
+        "rust_alloc": 9.51,
+        "rust_dealloc": 7.66,
+        "rust_realloc": 1.47
+      }
+    },
+    "cpu-chat": {
+      "scope": "whole-process sampled user cycles, including startup/teardown; diagnostic capture times do not judge the budget",
+      "event": "cycles:u",
+      "sampling_frequency_hz": 199,
+      "recorded_samples": 598,
+      "lost_samples": 0,
+      "memory_cap_bytes": 8589934592,
+      "load1_before": 3.81,
+      "load1_after": 3.81,
+      "peak_rss_kib": 102292,
+      "inclusive_file_to_sha256_percent": 28.85,
+      "self_sha256_percent": 17.55
+    }
+  },
+  "remaining": {
+    "ticket": "FIG-6660",
+    "parent": "FIG-4439",
+    "release_qualification_owner": "FIG-3843",
+    "p50_gap_ms": 53.319,
+    "p99_budget_headroom_ms": 19.459,
+    "quiet_host_wall_time_claimed": false,
+    "whole_process_instruction_increase_isolated": false
+  }
+}
