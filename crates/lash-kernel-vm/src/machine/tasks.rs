@@ -1,5 +1,5 @@
 //! The canonical task table and its bounded execution-coordinate cache.
-use super::frames::{Frames, ParkKind};
+use super::frames::{self, Frames};
 use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
@@ -347,7 +347,7 @@ impl Tasks {
             std::mem::replace(&mut record.frames, Tree::new(true)),
             self.access.clone(),
             Arc::clone(&self.exe),
-            ParkKind::of(&record.state),
+            frames::arrival(&record.state),
         );
         self.cache[slot] = Some((
             index,
@@ -491,19 +491,15 @@ fn put(
     access: &Access<'static>,
     coordinates: bool,
 ) -> Result<(), HeapFault> {
-    let sync = |task: &mut Task| {
-        if coordinates {
-            task.frames.flush()
-        } else {
-            task.frames.flush_holdings()
-        }
-    };
+    let sync = |task: &mut Task| task.frames.project(coordinates);
     let same = |task: &Task| {
         task.published
             .as_ref()
             .is_some_and(|old| old.same_version(&task.record, &task.frames.rows))
     };
-    let synced = !task.frames.has_pending_bindings();
+    // A frame that writes variables writes them into its row inside the
+    // task row's update, so the row's frame tree is the only owner.
+    let synced = !task.frames.has_edits(coordinates);
     if synced {
         sync(task)?;
         if same(task) {

@@ -531,7 +531,7 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         let mut captures = Vec::new();
         for capture in &exe.code(code).captures {
-            match frame.slot(capture.outer_at)? {
+            match frame.slot(capture.outer_at) {
                 SlotState::Cell(cell) => captures.push((
                     lash_kernel_state::paged::NameRef::new(
                         &exe.code(code).slots[capture.inner as usize].name,
@@ -598,7 +598,7 @@ impl KernelMachine {
     ) -> Eval<Value> {
         let frame = self.frame(task)?;
         let code = frame.code;
-        match frame.slot(local.at)? {
+        match frame.slot(local.at) {
             SlotState::Value(value) => Ok(value.clone()),
             SlotState::Cell(cell) => {
                 let cell = *cell;
@@ -616,7 +616,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         let frame = self.frame(task)?;
         let code = frame.code;
-        match frame.slot(local.at)? {
+        match frame.slot(local.at) {
             SlotState::Value(old) => {
                 let growth =
                     crate::heap::value_bytes(&value).saturating_sub(crate::heap::value_bytes(old));

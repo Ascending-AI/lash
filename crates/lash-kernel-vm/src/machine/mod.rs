@@ -45,9 +45,9 @@ use crate::observe::{Event, GuestPhase, Observer};
 use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
-use lash_kernel_state::kernel_internals::tree::{Access, Tree};
+use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
-    BindingRecord, BoundRecord, EndedTask, FrameRecord, HeapLifecycle, HeapWriteError,
+    BindingRecord, BoundRecord, EndedTask, HeapLifecycle, HeapWriteError,
     IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, SemanticHeap,
     TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
@@ -238,7 +238,8 @@ enum Control {
 
 struct LibraryCall {
     lib: LibId,
-    args: Tree<Value>,
+    /// The call's arguments, which its formula reads when it ends.
+    args: Box<[Value]>,
 }
 
 /// Activation storage and immutable entry references belong to this page
@@ -266,15 +267,19 @@ struct Frame {
     /// The selected Kir version; cold frames start with empty caches.
     scalar_blocks: bool,
     slots: frames::Slots,
-    record: FrameRecord,
-    access: Access<'static>,
-    exe: Arc<Executable>,
+    /// Where the frame stands when no block of its says: its body's
+    /// entry, a return policy's site, or its body while a run-root cleanup
+    /// runs.
+    statement: lash_kernel_state::paged::SiteRef,
+    /// The continuation it saved where it stands at an action nested in
+    /// its statement (`K-EVAL-008`).
+    pending: frames::Continuation,
     control: Vec<Control>,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
     /// The action nested in the awaited statement the frame stands at, by
     /// its resume entry in the statement's stream under this layout; the
-    /// record's `pending` saves it by site (`K-EVAL-008`). `None` waits in
+    /// `pending` continuation saves it by site (`K-EVAL-008`). `None` waits in
     /// the statement's own action.
     nested: Option<lash_kernel_exec::ActIx>,
     /// The library call this frame is the body of, charged when it ends.
@@ -282,8 +287,12 @@ struct Frame {
     /// The departure an entry's run-root cleanup holds while it runs: the
     /// body's result or raise, which ends the run once the cleanup returns.
     cleaning: Option<Result<Value, Value>>,
-    /// Non-owning comparison with the last row written (FIG-6586).
-    published: Option<frames::Publication>,
+    /// What the frame held outside its variables when last projected, in
+    /// control order (`frames::Frame::visit_held`).
+    held: Vec<Value>,
+    /// Whether the frame's row is its own: the frame was restored from it
+    /// or projected into it.
+    owned: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1067,6 +1076,13 @@ fn machine_error(halt: Halt) -> MachineError {
     }
 }
 
+/// The most frames one projection on this thread has visited since the
+/// last call.
+#[cfg(test)]
+pub(crate) fn take_most_visited_frames() -> usize {
+    frames::take_most_visited()
+}
+
 #[cfg(test)]
 impl KernelMachine {
     /// Sets `task`'s state as its next publication writes it: what a
@@ -1102,7 +1118,7 @@ impl KernelMachine {
             .expect("seal")
             .expect("unbounded seal");
         let access = self.heap.pages().clone();
-        struct Source(Access<'static>);
+        struct Source(lash_kernel_state::kernel_internals::tree::Access<'static>);
         impl lash_kernel_state::paged::PageSource for Source {
             fn read(
                 &mut self,
@@ -1169,13 +1185,47 @@ impl KernelMachine {
         headers
     }
 
+    /// The refusal the coordinate grammar gives the row of `task`'s frame
+    /// `index`, restored afresh as a cold open restores it.
+    pub(crate) fn restore_refusal(
+        &mut self,
+        task: TaskId,
+        index: u64,
+    ) -> Result<Option<lash_kernel_exec::coord::RestoreRefusal>, String> {
+        let task = self.task(task).map_err(|halt| format!("{halt:?}"))?;
+        task.frames
+            .refusal(index)
+            .map_err(|fault| format!("{fault:?}"))
+    }
+
+    /// Applies `edit` to the saved loop row `at` of `task`'s cold top
+    /// frame: a continuation law's tamper with the grammar. The loop's
+    /// site as it stood.
+    pub(crate) fn tamper_loop(
+        &mut self,
+        task: TaskId,
+        at: u64,
+        edit: impl FnOnce(
+            &mut lash_kernel_state::paged::LoopRecord,
+            &lash_kernel_state::kernel_internals::tree::Access<'_>,
+        ),
+    ) -> Result<lash_kernel_exec::coord::SitePath, String> {
+        let task = self.task(task).map_err(|halt| format!("{halt:?}"))?;
+        task.frames
+            .loop_mut(at, edit)
+            .map_err(|fault| format!("{fault:?}"))
+    }
+
     /// Applies `edit` to the saved continuation of `task`'s frame
     /// `index`: a continuation law's tamper with the grammar.
     pub(crate) fn tamper_pending(
         &mut self,
         task: TaskId,
         index: usize,
-        edit: impl FnOnce(&mut Option<lash_kernel_state::paged::PendingRecord>, &Access<'_>),
+        edit: impl FnOnce(
+            &mut Option<lash_kernel_state::paged::PendingRecord>,
+            &lash_kernel_state::kernel_internals::tree::Access<'_>,
+        ),
     ) -> Result<(), String> {
         let task = self.task(task).map_err(|halt| format!("{halt:?}"))?;
         let mut edit = Some(edit);

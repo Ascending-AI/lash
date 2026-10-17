@@ -1,128 +1,98 @@
-//! Derived frame coordinates beside the canonical paged frame stack.
-//! Slots are mutable while a frame executes. Synchronization publishes only
-//! their pending edits to the declaring-site tree, beside its control records.
+//! Running frames: plain mutable memory over cold descriptors
+//! (`docs/design/kernel-end-state.md`, seams A, E and G).
 //!
-//! A frame that stands at an action nested in its statement's expression
-//! is decoded through the grammar of saved continuations (`K-EVAL-008`):
-//! the action and its roles are found by site in the statement's resume
-//! entries under this layout, and the phase must agree with the action's
-//! kind and with how the task comes to the frame.
+//! A resident frame's slots, blocks, loops, cleanups, saved continuation
+//! and retained arguments are plain values, written as it runs. A frame
+//! below its task's top stays a cold descriptor, its saved [`FrameRecord`]
+//! row, until a return reaches it. At a projection point the frames that
+//! changed since the last projection, and the top, are projected into
+//! their rows; nothing else is written.
+//!
+//! A frame restored from its row is admitted through the coordinate
+//! grammar (`lash_kernel_exec::coord`, `K-EVAL-008`): the action nested in
+//! its statement that it stands at, with that action's phase and roles,
+//! its loops, its cleanups and its retained arguments, each against the
+//! code's side table under this layout and against how the task comes to
+//! the frame. Restore fails closed with the [`RestoreRefusal`] that names
+//! what it refuses.
 use super::loops::{Guard, Header};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
+use lash_kernel_exec::coord::{
+    self, ActionEntry, ActionKind, ActionPhase, Arrival, CleanupCoordinate, Departure,
+    LoopCoordinate, LoopPhase, RestoreRefusal, SitePath, StatementCoordinate,
+};
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::payload::TextCursor;
-use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree, Version};
+use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
-    FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord,
-    PendingRecord, PhaseRecord, RoleRecord, TableCursor, TaskStateRecord,
+    FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord, NameRef,
+    PendingRecord, PhaseRecord, RoleRecord, SiteRef, TableCursor, TaskStateRecord,
 };
-use std::collections::BTreeSet;
-use std::fmt;
 use std::sync::Arc;
 
 fn malformed(problem: impl Into<String>) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
 
-/// How a task comes to the top frame being decoded: what a saved
-/// continuation there may claim.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ParkKind {
-    /// The frame stands where it was last pushed or published, and nothing
-    /// resumes it: it stands between statements.
-    Fresh,
-    /// The frame above it has just returned or raised into it.
-    Returned,
-    /// The task waits on a request, or its outcome has been delivered and
-    /// its turn taken.
-    Requested,
-    /// The outcome of a `then yield` wait has been delivered, by result,
-    /// raise or `cancel`, and the task has not yet taken the one more turn
-    /// it takes before it continues (`K-TASK-005`).
-    Delivered,
-    /// A raise has been delivered: a `cancel` at the task's wait or turn.
-    Raised,
-    /// A value has been delivered: a `spawn`'s handle among them.
-    Valued { handle: bool },
-    /// The task joins, or a join has decided.
-    Joined,
-}
-
-impl ParkKind {
-    /// How a task in `state` comes to its top frame.
-    pub(super) fn of(state: &TaskStateRecord) -> Self {
-        match state {
-            TaskStateRecord::Resuming { requeue: true, .. } => Self::Delivered,
-            TaskStateRecord::Waiting(_)
-            | TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Outcome(_),
-                ..
-            } => Self::Requested,
-            TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Raise(_),
-                ..
-            } => Self::Raised,
-            TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Value(value),
-                ..
-            } => Self::Valued {
-                handle: matches!(value, Value::Task(_)),
-            },
-            TaskStateRecord::Joining(_)
-            | TaskStateRecord::JoiningMany(_)
-            | TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Joined(_),
-                ..
-            } => Self::Joined,
-            _ => Self::Fresh,
-        }
+/// How a task in `state` comes to its top frame.
+pub(super) fn arrival(state: &TaskStateRecord) -> Arrival {
+    match state {
+        TaskStateRecord::Resuming { requeue: true, .. } => Arrival::Delivered,
+        TaskStateRecord::Waiting(_)
+        | TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Outcome(_),
+            ..
+        } => Arrival::Requested,
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Raise(_),
+            ..
+        } => Arrival::Raised,
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Value(value),
+            ..
+        } => Arrival::Valued {
+            handle: matches!(value, Value::Task(_)),
+        },
+        TaskStateRecord::Joining(_)
+        | TaskStateRecord::JoiningMany(_)
+        | TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Joined(_),
+            ..
+        } => Arrival::Joined,
+        _ => Arrival::Fresh,
     }
 }
 
-/// Why a saved continuation is refused where a frame is decoded
-/// (`K-EVAL-008`): each names the site it is about.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ContinuationRefusal {
-    /// The saved action site is no action nested in the frame's statement.
-    UnknownSite { site: Site },
-    /// The phase cannot stand at that action, or where the task is.
-    IllegalPhase { site: Site, phase: &'static str },
-    /// A role the action's continuation keeps is not saved.
-    MissingRole { site: Site },
-    /// A saved role is none the action's continuation keeps.
-    ExtraRole { site: Site },
-    /// The task's state does not agree with the phase.
-    TaskState { site: Site },
+/// Why a saved frame does not restore: its coordinate is refused, or a
+/// page it needs faulted.
+enum Unrestored {
+    Refused(RestoreRefusal),
+    Fault(HeapFault),
 }
 
-impl fmt::Display for ContinuationRefusal {
-    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownSite { site } => write!(out, "no nested action at {site}"),
-            Self::IllegalPhase { site, phase } => {
-                write!(out, "the action at {site} cannot stand at phase {phase}")
-            }
-            Self::MissingRole { site } => write!(out, "the role {site} is not saved"),
-            Self::ExtraRole { site } => write!(out, "the saved role {site} is no role"),
-            Self::TaskState { site } => {
-                write!(out, "the task's state disagrees with the action at {site}")
-            }
-        }
+impl From<HeapFault> for Unrestored {
+    fn from(fault: HeapFault) -> Self {
+        Self::Fault(fault)
     }
 }
 
-fn phase_name(phase: PhaseRecord) -> &'static str {
-    match phase {
-        PhaseRecord::Yielded => "yielded",
-        PhaseRecord::Called => "called",
-        PhaseRecord::Waiting => "waiting",
-        PhaseRecord::Spawned => "spawned",
-        PhaseRecord::Joining => "joining",
+impl From<RestoreRefusal> for Unrestored {
+    fn from(refusal: RestoreRefusal) -> Self {
+        Self::Refused(refusal)
+    }
+}
+
+impl From<Unrestored> for HeapFault {
+    fn from(unrestored: Unrestored) -> Self {
+        match unrestored {
+            Unrestored::Refused(refusal) => malformed(format!("continuation refused: {refusal}")),
+            Unrestored::Fault(fault) => fault,
+        }
     }
 }
 
@@ -131,207 +101,265 @@ fn row<T: Cell>(tree: &Tree<T>, index: u64, access: &Access<'_>) -> Result<T, He
         .map(|(_, value)| value)
         .ok_or_else(|| malformed("frame control row is missing"))
 }
+
+/// Writes `value` at `index` unless the row holds that version: whether
+/// it wrote.
 fn write<T: Cell>(
     tree: &mut Tree<T>,
     index: u64,
     value: T,
     access: &Access<'_>,
-) -> Result<(), HeapFault> {
+) -> Result<bool, HeapFault> {
     let key = ordinal_key(index);
     if let Some(old) = tree.get(&key, access)?
         && old.same_version(&value)
     {
-        return Ok(());
+        return Ok(false);
     }
-    tree.write(key, value, access)
+    tree.write(key, value, access)?;
+    Ok(true)
 }
-fn truncate<T: Cell>(tree: &mut Tree<T>, len: u64, access: &Access<'_>) -> Result<(), HeapFault> {
+
+/// Removes the rows from `len` on: whether there were any.
+fn truncate<T: Cell>(tree: &mut Tree<T>, len: u64, access: &Access<'_>) -> Result<bool, HeapFault> {
+    let longer = tree.len() > len;
     while tree.len() > len {
         let (key, _) = tree
             .rank_get(tree.len() - 1, access)?
             .ok_or_else(|| malformed("frame control tail is missing"))?;
         tree.remove(&key, access)?;
     }
-    Ok(())
+    Ok(longer)
 }
 
-fn site_ref(
-    old: Option<lash_kernel_state::paged::SiteRef>,
-    site: &lash_kernel_doc::Site,
-    access: &Access<'_>,
-) -> Result<lash_kernel_state::paged::SiteRef, HeapFault> {
+fn site_ref(old: Option<SiteRef>, site: &Site, access: &Access<'_>) -> Result<SiteRef, HeapFault> {
     if let Some(old) = old
         && old.matches(site, access)?
     {
         return Ok(old);
     }
-    lash_kernel_state::paged::SiteRef::new(site, access)
+    SiteRef::new(site, access)
 }
 
-/// A slot is decoded on its first read after resume. Pending edits are
-/// authoritative until a publication; repeated assignments touch no tree.
+/// A frame's variables, by slot. Each assignment marks its slot changed
+/// until the frame is next projected.
 #[derive(Debug, Default)]
 pub(super) struct Slots {
-    values: Vec<Slot>,
-    pending: Vec<usize>,
-}
-
-#[derive(Debug)]
-struct Slot {
-    value: Option<SlotState>,
-    dirty: bool,
+    values: Vec<SlotState>,
+    changed: Vec<bool>,
+    edits: Vec<usize>,
 }
 
 impl Slots {
     pub(super) fn fresh(&mut self, len: usize) {
         self.clear();
-        self.values.resize_with(len, || Slot {
-            value: Some(SlotState::Empty),
-            dirty: false,
-        });
-    }
-
-    fn unloaded(len: usize) -> Self {
-        Self {
-            values: (0..len)
-                .map(|_| Slot {
-                    value: None,
-                    dirty: false,
-                })
-                .collect(),
-            pending: Vec::new(),
-        }
+        self.values.resize(len, SlotState::Empty);
+        self.changed.resize(len, false);
     }
 
     pub(super) fn clear(&mut self) {
         self.values.clear();
-        self.pending.clear();
+        self.changed.clear();
+        self.edits.clear();
+    }
+}
+
+/// The continuation a frame saves where it stands at an action nested in
+/// its statement (`K-EVAL-008`): the action by its site's path suffix
+/// under the statement's, its phase, and the operands its statement had
+/// evaluated as roles by site, in evaluation order.
+#[derive(Clone, Debug)]
+pub(super) struct Pending {
+    pub(super) site: Vec<u32>,
+    pub(super) phase: PhaseRecord,
+    pub(super) roles: Vec<RoleRecord>,
+}
+
+/// What a frame's row holds of its continuation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Saved {
+    /// No continuation.
+    #[default]
+    Nothing,
+    /// The frame's current continuation.
+    This,
+    /// A continuation the frame has since left.
+    Another,
+}
+
+/// A frame's saved continuation, and what its row holds of it: a
+/// continuation saved and left again between two projections leaves the
+/// row as it was.
+#[derive(Debug, Default)]
+pub(super) struct Continuation {
+    pending: Option<Pending>,
+    saved: Saved,
+}
+
+impl Continuation {
+    pub(super) fn set(&mut self, pending: Pending) {
+        self.pending = Some(pending);
+        if self.saved == Saved::This {
+            self.saved = Saved::Another;
+        }
+    }
+
+    pub(super) fn take(&mut self) -> Option<Pending> {
+        let pending = self.pending.take();
+        if self.saved == Saved::This {
+            self.saved = Saved::Another;
+        }
+        pending
+    }
+
+    /// Whether the row holds the continuation as it is.
+    fn projected(&self) -> bool {
+        match self.saved {
+            Saved::Nothing => self.pending.is_none(),
+            Saved::This => true,
+            Saved::Another => false,
+        }
+    }
+
+    /// Clears a recycled frame's continuation: the next frame's row is
+    /// written afresh.
+    pub(super) fn clear(&mut self) {
+        self.pending = None;
+        self.saved = Saved::Nothing;
     }
 }
 
 impl Frame {
-    /// Borrow the decoded state: a write need not clone the value it replaces.
-    pub(super) fn slot(&mut self, at: u32) -> Result<&SlotState, HeapFault> {
-        let slot = &mut self.slots.values[at as usize];
-        if slot.value.is_none() {
-            let code = self.exe.code(self.code);
-            let info = &code.slots[code.slots_by_at[at as usize] as usize];
-            slot.value = Some(match self.record.bindings.get(&info.key, &self.access)? {
-                None => SlotState::Empty,
-                Some(BindingRecord {
-                    value: BoundRecord::Value(value),
-                    ..
-                }) => SlotState::Value(value),
-                Some(BindingRecord {
-                    value: BoundRecord::Shared(id),
-                    ..
-                }) => SlotState::Cell(id),
-            });
-        }
-        slot.value
-            .as_ref()
-            .ok_or_else(|| malformed("a decoded slot has no value"))
+    pub(super) fn slot(&self, at: u32) -> &SlotState {
+        &self.slots.values[at as usize]
     }
 
     pub(super) fn set_slot(&mut self, at: u32, value: SlotState) {
         let at = at as usize;
-        let slot = &mut self.slots.values[at];
-        slot.value = Some(value);
-        if !slot.dirty {
-            slot.dirty = true;
-            self.slots.pending.push(at);
+        self.slots.values[at] = value;
+        if !self.slots.changed[at] {
+            self.slots.changed[at] = true;
+            self.slots.edits.push(at);
         }
     }
 
-    fn sync_slots(&mut self) -> Result<(), HeapFault> {
-        let code = self.exe.code(self.code);
-        for &at in &self.slots.pending {
-            let info = &code.slots[code.slots_by_at[at] as usize];
-            let slot = &mut self.slots.values[at];
-            let value = match slot.value.as_ref() {
-                Some(SlotState::Empty) => {
-                    self.record.bindings.remove(&info.key, &self.access)?;
-                    slot.dirty = false;
-                    continue;
-                }
-                Some(SlotState::Value(value)) => BoundRecord::Value(value.clone()),
-                Some(SlotState::Cell(id)) => BoundRecord::Shared(*id),
-                None => return Err(malformed("a pending slot has no value")),
-            };
-            let (name, declared) = match self.record.bindings.get(&info.key, &self.access)? {
-                Some(old) => (old.name, old.declared),
-                None => (
-                    lash_kernel_state::paged::NameRef::new(&info.name, &self.access)?,
-                    lash_kernel_state::paged::SiteRef::new(&info.declared, &self.access)?,
-                ),
-            };
-            self.record.bindings.write(
-                info.key.clone(),
-                BindingRecord {
-                    name,
-                    declared,
-                    value,
-                },
-                &self.access,
-            )?;
-            slot.dirty = false;
-        }
-        self.slots.pending.clear();
-        Ok(())
-    }
-}
-
-impl Frame {
-    /// Brings the record up to the frame: its coordinates and its held
-    /// values.
-    pub(super) fn sync(&mut self) -> Result<(), HeapFault> {
-        self.sync_to(true)
+    /// Whether a projection has variables of this frame to write.
+    fn has_edits(&self) -> bool {
+        !self.owned || !self.slots.edits.is_empty()
     }
 
-    /// Brings the record's held values up to the frame, leaving its
-    /// coordinates (statement, loop positions, cleanups) where they were:
-    /// what pressure accounting and a trace read (FIG-6318).
-    pub(super) fn sync_holdings(&mut self) -> Result<(), HeapFault> {
-        self.sync_to(false)
-    }
-
-    fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
-        self.sync_slots()?;
-        // A frame stands at its block's next statement, or at the statement
-        // it waits in: a `while` waits in its condition above its loop, a
-        // `for` in a protocol hook of its header.
-        let block = match self.control.as_slice() {
-            [.., Control::Block { block, next }] => Some((*block, *next)),
-            [
-                ..,
-                Control::Block { block, next },
-                Control::While { .. } | Control::For { .. },
-            ] if self.awaiting.is_some() => Some((*block, *next)),
-            _ => None,
-        };
-        if coordinates && let Some((block, next)) = block {
-            let index = if self.awaiting.is_some() {
-                next.checked_sub(1)
-                    .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
-            } else {
-                next
+    /// Visits what the frame holds outside its variables, in control
+    /// order, until `visit` declines: what each `for` walks and the item a
+    /// hook holds, each `finally`'s departing payload, and the departure a
+    /// run-root cleanup holds.
+    fn visit_held(&self, visit: &mut dyn FnMut(&Value) -> bool) {
+        for control in &self.control {
+            let more = match control {
+                Control::For { cursor, header, .. } => cursor
+                    .walked()
+                    .into_iter()
+                    .chain(header.held())
+                    .all(|value| visit(&value)),
+                Control::Try {
+                    phase:
+                        TryPhase::Finally(
+                            Completion::Return(value)
+                            | Completion::ReturnVia { value, .. }
+                            | Completion::Throw(value),
+                        ),
+                    ..
+                } => visit(value),
+                _ => true,
             };
-            let statement =
-                self.exe.block(block).site.child(
-                    u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?,
-                );
-            if !self.record.statement.matches(&statement, &self.access)? {
-                self.record.statement =
-                    lash_kernel_state::paged::SiteRef::new(&statement, &self.access)?;
+            if !more {
+                return;
             }
         }
-        // Expression evaluation may temporarily stand at a loop test or
-        // a departure. The coordinate is refreshed at its next safe point;
-        // its held values must already be visible to pressure accounting.
+        if let Some(Ok(value) | Err(value)) = &self.cleaning {
+            visit(value);
+        }
+    }
+
+    /// Whether the frame's row holds all the frame holds: no variable is
+    /// assigned and no continuation saved since its last projection, and
+    /// it holds the values it held then.
+    fn holds_as_projected(&self) -> bool {
+        if !self.slots.edits.is_empty() || !self.pending.projected() {
+            return false;
+        }
+        let mut at = 0;
+        let mut same = true;
+        self.visit_held(&mut |value| {
+            same = self
+                .held
+                .get(at)
+                .is_some_and(|held| held.same_version(value));
+            at += 1;
+            same
+        });
+        same && at == self.held.len()
+    }
+
+    /// Projects this frame into `stored`, its row as last written, or a
+    /// fresh record when the row is not its own: its variables and held
+    /// values always, and where it stands when `coordinates`. Whether the
+    /// row changed.
+    fn project(
+        &mut self,
+        stored: &mut FrameRecord,
+        coordinates: bool,
+        exe: &Executable,
+        access: &Access<'_>,
+    ) -> Result<bool, HeapFault> {
+        let code = exe.code(self.code);
+        let mut changed = !self.owned;
+        // A fresh record takes every variable the frame binds; its own
+        // row, only those assigned since.
+        let mut edits = std::mem::take(&mut self.slots.edits);
+        if !self.owned {
+            edits.clear();
+            edits.extend(0..self.slots.values.len());
+        }
+        for &at in &edits {
+            self.slots.changed[at] = false;
+            let info = &code.slots[code.slots_by_at[at] as usize];
+            let value = match &self.slots.values[at] {
+                SlotState::Empty => {
+                    changed |= stored.bindings.remove(&info.key, access)?.is_some();
+                    continue;
+                }
+                SlotState::Value(value) => BoundRecord::Value(value.clone()),
+                SlotState::Cell(id) => BoundRecord::Shared(*id),
+            };
+            let (name, declared) = match stored.bindings.get(&info.key, access)? {
+                Some(old) => (old.name, old.declared),
+                None => (
+                    NameRef::new(&info.name, access)?,
+                    SiteRef::new(&info.declared, access)?,
+                ),
+            };
+            let binding = BindingRecord {
+                name,
+                declared,
+                value,
+            };
+            stored.bindings.write(info.key.clone(), binding, access)?;
+            changed = true;
+        }
+        // Keep the edit list's capacity for the next assignments.
+        edits.clear();
+        self.slots.edits = edits;
+        if coordinates {
+            changed |= self.project_statement(stored, exe, access)?;
+        }
+        // Expression evaluation may stand at a loop test or a departure.
+        // Where the frame stands is projected at the next projection point
+        // that projects coordinates; its held values at every one.
         let mut loops = 0;
         let mut iterated = 0;
         let mut finally = 0;
         let mut departing = 0;
+        self.held.clear();
         for control in &self.control {
             match control {
                 Control::For {
@@ -341,66 +369,41 @@ impl Frame {
                     header,
                     guard,
                 } => {
-                    let Form::For { site, .. } = &self.exe.stmt(*stmt).form else {
+                    let Form::For { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(malformed("a for cursor stands at another form"));
                     };
                     if coordinates {
-                        let saved_site = site_ref(
-                            self.record
-                                .loops
-                                .get(&ordinal_key(loops), &self.access)?
-                                .map(|record| record.site),
-                            site,
-                            &self.access,
-                        )?;
-                        write(
-                            &mut self.record.loops,
-                            loops,
-                            LoopRecord {
-                                site: saved_site,
-                                started: *started,
-                                header: header_record(header),
-                                cursor: cursor_record(cursor, guard.as_deref()),
-                            },
-                            &self.access,
-                        )?;
+                        let saved = stored.loops.get(&ordinal_key(loops), access)?;
+                        let record = LoopRecord {
+                            site: site_ref(saved.map(|record| record.site), site, access)?,
+                            started: *started,
+                            header: header_record(header),
+                            cursor: cursor_record(cursor, guard.as_deref()),
+                        };
+                        changed |= write(&mut stored.loops, loops, record, access)?;
                     }
                     // What it walks, then the item a hook holds.
                     for value in cursor.walked().into_iter().chain(header.held()) {
-                        write(
-                            &mut self.record.iterated,
-                            iterated,
-                            IteratedRecord(value),
-                            &self.access,
-                        )?;
+                        self.held.push(value.clone());
+                        let held = IteratedRecord(value);
+                        changed |= write(&mut stored.iterated, iterated, held, access)?;
                         iterated += 1;
                     }
                     loops += 1;
                 }
                 Control::While { stmt, started } => {
-                    let Form::While { site, .. } = &self.exe.stmt(*stmt).form else {
+                    let Form::While { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(malformed("a while cursor stands at another form"));
                     };
                     if coordinates {
-                        let saved_site = site_ref(
-                            self.record
-                                .loops
-                                .get(&ordinal_key(loops), &self.access)?
-                                .map(|record| record.site),
-                            site,
-                            &self.access,
-                        )?;
-                        write(
-                            &mut self.record.loops,
-                            loops,
-                            LoopRecord {
-                                site: saved_site,
-                                started: *started,
-                                header: HeaderRecord::Body,
-                                cursor: None,
-                            },
-                            &self.access,
-                        )?;
+                        let saved = stored.loops.get(&ordinal_key(loops), access)?;
+                        let record = LoopRecord {
+                            site: site_ref(saved.map(|record| record.site), site, access)?,
+                            started: *started,
+                            header: HeaderRecord::Body,
+                            cursor: None,
+                        };
+                        changed |= write(&mut stored.loops, loops, record, access)?;
                     }
                     loops += 1;
                 }
@@ -408,7 +411,7 @@ impl Frame {
                     stmt,
                     phase: TryPhase::Finally(completion),
                 } => {
-                    let Form::Try { site, .. } = &self.exe.stmt(*stmt).form else {
+                    let Form::Try { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(malformed("a cleanup stands at another form"));
                     };
                     let entered = match completion {
@@ -418,21 +421,15 @@ impl Frame {
                         Completion::Return(value)
                         | Completion::ReturnVia { value, .. }
                         | Completion::Throw(value) => {
-                            write(
-                                &mut self.record.departing,
-                                departing,
-                                value.as_ref().clone(),
-                                &self.access,
-                            )?;
+                            let value = value.as_ref().clone();
+                            self.held.push(value.clone());
+                            changed |= write(&mut stored.departing, departing, value, access)?;
                             departing += 1;
                             if let Completion::ReturnVia { stmt, .. } = completion {
-                                let Form::ReturnVia { site, .. } = &self.exe.stmt(*stmt).form
-                                else {
+                                let Form::ReturnVia { site, .. } = &exe.stmt(*stmt).form else {
                                     return Err(malformed("a deferred return has no policy"));
                                 };
-                                EnteredRecord::ReturnVia(Box::new(
-                                    lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
-                                ))
+                                EnteredRecord::ReturnVia(Box::new(SiteRef::new(site, access)?))
                             } else if matches!(completion, Completion::Return(_)) {
                                 EnteredRecord::Return
                             } else {
@@ -441,23 +438,10 @@ impl Frame {
                         }
                     };
                     if coordinates {
-                        let saved_site = site_ref(
-                            self.record
-                                .finally
-                                .get(&ordinal_key(finally), &self.access)?
-                                .map(|record| record.site),
-                            site,
-                            &self.access,
-                        )?;
-                        write(
-                            &mut self.record.finally,
-                            finally,
-                            FinallyRecord {
-                                site: saved_site,
-                                entered,
-                            },
-                            &self.access,
-                        )?;
+                        let saved = stored.finally.get(&ordinal_key(finally), access)?;
+                        let site = site_ref(saved.map(|record| record.site), site, access)?;
+                        let record = FinallyRecord { site, entered };
+                        changed |= write(&mut stored.finally, finally, record, access)?;
                     }
                     finally += 1;
                 }
@@ -467,129 +451,118 @@ impl Frame {
         // A run-root cleanup runs at the body, outside every source scope.
         if let Some(departed) = &self.cleaning {
             let (value, entered) = match departed {
-                Ok(value) => (value, EnteredRecord::Return),
-                Err(value) => (value, EnteredRecord::Throw),
+                Ok(value) => (value.clone(), EnteredRecord::Return),
+                Err(value) => (value.clone(), EnteredRecord::Throw),
             };
-            write(
-                &mut self.record.departing,
-                departing,
-                value.clone(),
-                &self.access,
-            )?;
+            self.held.push(value.clone());
+            changed |= write(&mut stored.departing, departing, value, access)?;
             departing += 1;
             if coordinates {
-                let site = &self.exe.code(self.code).site;
-                let saved = self
-                    .record
-                    .finally
-                    .get(&ordinal_key(finally), &self.access)?;
-                let site = site_ref(saved.map(|record| record.site), site, &self.access)?;
+                let saved = stored.finally.get(&ordinal_key(finally), access)?;
+                let site = site_ref(saved.map(|record| record.site), &code.site, access)?;
                 let record = FinallyRecord { site, entered };
-                write(&mut self.record.finally, finally, record, &self.access)?;
+                changed |= write(&mut stored.finally, finally, record, access)?;
             }
             finally += 1;
         }
         if coordinates {
-            truncate(&mut self.record.loops, loops, &self.access)?;
-            truncate(&mut self.record.finally, finally, &self.access)?;
+            changed |= truncate(&mut stored.loops, loops, access)?;
+            changed |= truncate(&mut stored.finally, finally, access)?;
         }
-        truncate(&mut self.record.iterated, iterated, &self.access)?;
-        truncate(&mut self.record.departing, departing, &self.access)?;
-        if let Some(call) = &self.library {
-            self.record.arguments = Some(call.args.clone());
-        } else {
-            self.record.arguments = None;
+        changed |= truncate(&mut stored.iterated, iterated, access)?;
+        changed |= truncate(&mut stored.departing, departing, access)?;
+        match (&self.library, &stored.arguments) {
+            // A call's arguments are the frame's for its whole life.
+            (Some(_), Some(_)) | (None, None) => {}
+            (Some(call), None) => {
+                let mut args = Tree::new(true);
+                for (at, value) in call.args.iter().enumerate() {
+                    args.write(ordinal_key(at as u64), value.clone(), access)?;
+                }
+                stored.arguments = Some(args);
+                changed = true;
+            }
+            (None, Some(_)) => {
+                stored.arguments = None;
+                changed = true;
+            }
         }
-        Ok(())
+        // A fresh record holds no continuation.
+        if !self.owned {
+            self.pending.saved = Saved::Nothing;
+        }
+        if !self.pending.projected() {
+            stored.pending = match &self.pending.pending {
+                Some(pending) => Some(PendingRecord::new(
+                    pending.site.clone(),
+                    pending.phase,
+                    pending.roles.clone(),
+                    access,
+                )?),
+                None => None,
+            };
+            self.pending.saved = if self.pending.pending.is_some() {
+                Saved::This
+            } else {
+                Saved::Nothing
+            };
+            changed = true;
+        }
+        self.owned = true;
+        Ok(changed)
+    }
+
+    /// Projects the statement the frame stands at: its block's next, or
+    /// the one it waits in (a `while` waits in its condition above its
+    /// loop, a `for` in a protocol hook of its header). With no block it
+    /// stands where it was put: its body's entry, a return policy's site,
+    /// or its body while a run-root cleanup runs.
+    fn project_statement(
+        &self,
+        stored: &mut FrameRecord,
+        exe: &Executable,
+        access: &Access<'_>,
+    ) -> Result<bool, HeapFault> {
+        let block = match self.control.as_slice() {
+            [.., Control::Block { block, next }] => Some((*block, *next)),
+            [
+                ..,
+                Control::Block { block, next },
+                Control::While { .. } | Control::For { .. },
+            ] if self.awaiting.is_some() => Some((*block, *next)),
+            [] => None,
+            // Between a loop test or a departure and its block, the frame
+            // stands where it was last projected.
+            _ if self.owned => return Ok(false),
+            _ => None,
+        };
+        let statement = match block {
+            Some((block, next)) => {
+                let index = if self.awaiting.is_some() {
+                    next.checked_sub(1)
+                        .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
+                } else {
+                    next
+                };
+                let index =
+                    u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?;
+                let statement = exe.block(block).site.child(index);
+                if stored.statement.matches(&statement, access)? {
+                    return Ok(false);
+                }
+                SiteRef::new(&statement, access)?
+            }
+            None if stored.statement.same_version(&self.statement) => return Ok(false),
+            None => self.statement.clone(),
+        };
+        stored.statement = statement;
+        Ok(true)
     }
 }
 
-/// Comparison metadata must not keep binding leaves (or the other mutable
-/// holdings trees) shared after the real publication has been retired.
-pub(super) struct Publication {
-    statement: lash_kernel_state::paged::SiteRef,
-    bindings: Version<BindingRecord>,
-    loops: Version<LoopRecord>,
-    finally: Version<FinallyRecord>,
-    iterated: Version<IteratedRecord>,
-    departing: Version<Value>,
-    arguments: Option<Version<Value>>,
-    pending: Option<PendingPublication>,
-}
-struct PendingPublication {
-    site: Vec<u32>,
-    phase: PhaseRecord,
-    roles: RolesPublication,
-}
-enum RolesPublication {
-    Flat(std::sync::Weak<[RoleRecord]>),
-    Spilled(Version<lash_kernel_state::paged::RoleChunk>),
-}
-impl RolesPublication {
-    fn matches(&self, roles: &lash_kernel_state::paged::RolesRecord) -> bool {
-        use lash_kernel_state::paged::RolesRecord;
-        match (self, roles) {
-            (Self::Flat(a), RolesRecord::Flat(b)) => std::ptr::eq(a.as_ptr(), Arc::as_ptr(b)),
-            (Self::Spilled(a), RolesRecord::Spilled(b)) => a.matches(b),
-            _ => false,
-        }
-    }
-}
-impl Publication {
-    fn new(record: &FrameRecord) -> Self {
-        Self {
-            statement: record.statement.clone(),
-            bindings: record.bindings.version(),
-            loops: record.loops.version(),
-            finally: record.finally.version(),
-            iterated: record.iterated.version(),
-            departing: record.departing.version(),
-            arguments: record.arguments.as_ref().map(Tree::version),
-            pending: record.pending.as_ref().map(|pending| PendingPublication {
-                site: pending.site.clone(),
-                phase: pending.phase,
-                roles: match &pending.roles {
-                    lash_kernel_state::paged::RolesRecord::Flat(roles) => {
-                        RolesPublication::Flat(Arc::downgrade(roles))
-                    }
-                    lash_kernel_state::paged::RolesRecord::Spilled(tree) => {
-                        RolesPublication::Spilled(tree.version())
-                    }
-                },
-            }),
-        }
-    }
-    fn same_holdings(&self, record: &FrameRecord) -> bool {
-        self.bindings.matches(&record.bindings)
-            && self.iterated.matches(&record.iterated)
-            && self.departing.matches(&record.departing)
-            && match (&self.arguments, &record.arguments) {
-                (None, None) => true,
-                (Some(a), Some(b)) => a.matches(b),
-                _ => false,
-            }
-            && match (&self.pending, &record.pending) {
-                (None, None) => true,
-                (Some(a), Some(b)) => a.roles.matches(&b.roles),
-                _ => false,
-            }
-    }
-    fn same_version(&self, record: &FrameRecord) -> bool {
-        self.same_holdings(record)
-            && self.statement.same_version(&record.statement)
-            && self.loops.matches(&record.loops)
-            && self.finally.matches(&record.finally)
-            && match (&self.pending, &record.pending) {
-                (None, None) => true,
-                (Some(a), Some(b)) => a.site == b.site && a.phase == b.phase,
-                _ => false,
-            }
-    }
-}
-
+/// A task's frames: the resident ones by depth, over the rows of the
+/// cold ones and of those last projected.
 pub(super) struct Frames {
-    #[cfg(test)]
-    pub(super) cache_probes: usize,
     pub(super) rows: Tree<FrameRecord>,
     len: u64,
     // Resident frames are ordered by depth. Cold lower frames stay in rows
@@ -598,30 +571,50 @@ pub(super) struct Frames {
     /// The resident top validated for this statement segment. Stack edits
     /// and the task cache's segment boundaries invalidate this index.
     active: Option<usize>,
+    /// The rows below this index hold what their frames hold: only a frame
+    /// from here up, the top among them, can have changed since.
+    held: u64,
+    /// The rows below this index also stand where their frames stand.
+    placed: u64,
     access: Access<'static>,
     exe: Arc<Executable>,
-    parked: ParkKind,
+    arrival: Arrival,
 }
+
+#[cfg(test)]
+thread_local! {
+    /// The most frames one projection on this thread has visited.
+    static MOST_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The most frames one projection on this thread has visited since the
+/// last call: what the frame-projection visit law bounds.
+#[cfg(test)]
+pub(crate) fn take_most_visited() -> usize {
+    MOST_VISITED.replace(0)
+}
+
 impl Frames {
     pub(super) fn new(access: Access<'static>, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(true), access, exe, ParkKind::Fresh)
+        Self::open(Tree::new(true), access, exe, Arrival::Fresh)
     }
     pub(super) fn open(
         rows: Tree<FrameRecord>,
         access: Access<'static>,
         exe: Arc<Executable>,
-        parked: ParkKind,
+        arrival: Arrival,
     ) -> Self {
+        let len = rows.len();
         Self {
-            #[cfg(test)]
-            cache_probes: 0,
-            len: rows.len(),
+            len,
             rows,
             cache: Vec::new(),
             active: None,
+            held: len,
+            placed: len,
             access,
             exe,
-            parked,
+            arrival,
         }
     }
     pub(super) fn len(&self) -> usize {
@@ -640,38 +633,31 @@ impl Frames {
         }
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.frame_resolutions += 1);
-        #[cfg(test)]
-        {
-            self.cache_probes += 1;
-        }
         if self.is_empty() {
             return Ok(None);
         }
         let index = self.len - 1;
         if self.cache.last().is_none_or(|(at, _)| *at != index) {
             let record = row(&self.rows, index, &self.access)?;
-            let frame = restore(
-                record,
-                self.parked,
-                self.access.clone(),
-                Arc::clone(&self.exe),
-            )?;
+            let frame = restore(&record, self.arrival, &self.access, &self.exe)?;
             self.cache.push((index, frame));
         }
+        // The top is projected at every projection point.
+        self.held = self.held.min(index);
+        self.placed = self.placed.min(index);
         self.active = Some(self.cache.len() - 1);
         Ok(self.cache.last_mut().map(|(_, frame)| frame.as_mut()))
     }
     pub(super) fn push(&mut self, frame: Box<Frame>) {
         self.invalidate_active();
-        // The live cache owns unpublished calls and their callers. Only a
-        // reader needs their persistent rows; returning before that reader
-        // discards the call without ever writing it.
+        // The live cache owns the new call; its row is written at the next
+        // projection point, and never if it returns before one.
         self.cache.push((self.len, frame));
         // The push itself proves the new top resident; discard the old
         // location and seed the new segment without resolving it again.
         self.active = Some(self.cache.len() - 1);
         self.len += 1;
-        self.parked = ParkKind::Fresh;
+        self.arrival = Arrival::Fresh;
     }
     pub(super) fn pop(&mut self) -> Result<Option<Box<Frame>>, HeapFault> {
         if self.is_empty() {
@@ -681,7 +667,10 @@ impl Frames {
         self.invalidate_active();
         let frame = self.cache.pop().map(|(_, frame)| frame);
         self.len -= 1;
-        self.parked = ParkKind::Returned;
+        let top = self.len.saturating_sub(1);
+        self.held = self.held.min(top);
+        self.placed = self.placed.min(top);
+        self.arrival = Arrival::Returned;
         Ok(frame)
     }
     pub(super) fn clear(&mut self) {
@@ -689,75 +678,56 @@ impl Frames {
         self.rows = Tree::new(true);
         self.len = 0;
         self.cache.clear();
-        self.parked = ParkKind::Fresh;
+        self.held = 0;
+        self.placed = 0;
+        self.arrival = Arrival::Fresh;
     }
-    pub(super) fn has_pending_bindings(&self) -> bool {
+    /// Whether a projection has variables to write: a frame it projects
+    /// has assigned some since, or has no row of its own.
+    pub(super) fn has_edits(&self, coordinates: bool) -> bool {
+        let from = if coordinates { self.placed } else { self.held };
         self.cache
             .iter()
-            .any(|(_, frame)| !frame.slots.pending.is_empty())
+            .any(|(index, frame)| *index >= from && frame.has_edits())
     }
-    pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
-        self.publish(true)
-    }
-    /// Publishes holdings without moving the cached frame's coordinates.
-    pub(super) fn flush_holdings(&mut self) -> Result<(), HeapFault> {
-        self.publish(false)
-    }
-    fn publish(&mut self, coordinates: bool) -> Result<(), HeapFault> {
+    /// Projects the resident frames that may have changed since the last
+    /// projection, and the top, into their rows: what they hold, and where
+    /// they stand when `coordinates`. Cold frames' rows are as they stand.
+    pub(super) fn project(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         truncate(&mut self.rows, self.len, &self.access)?;
+        let from = if coordinates { self.placed } else { self.held };
+        #[cfg(test)]
+        let mut visited = 0;
         for (index, frame) in &mut self.cache {
-            let sync = |frame: &mut Frame| {
-                if coordinates {
-                    frame.sync()
-                } else {
-                    frame.sync_holdings()
-                }
-            };
-            let same = |frame: &Frame| {
-                frame.published.as_ref().is_some_and(|old| {
-                    if coordinates {
-                        old.same_version(&frame.record)
-                    } else {
-                        old.same_holdings(&frame.record)
-                    }
-                })
-            };
-            // No binding edit needs ownership transfer. Synchronize the
-            // other fields first, so unchanged rows stay cold after seal.
-            let synced = frame.slots.pending.is_empty();
-            if synced {
-                sync(frame)?;
-                if same(frame) {
+            if *index < from {
+                continue;
+            }
+            #[cfg(test)]
+            {
+                visited += 1;
+            }
+            if frame.owned {
+                // What a frame holds is projected where it changed: a
+                // frame whose row holds all it holds is not written.
+                if !coordinates && frame.holds_as_projected() {
                     continue;
                 }
-            }
-            if *index < self.rows.len() {
                 self.rows
                     .update(ordinal_key(*index), &self.access, |stored| {
-                        // Relinquish the obsolete binding owner. If all edits
-                        // were absent removals, restore the identical stored view.
-                        let previous =
-                            std::mem::replace(&mut stored.bindings, Tree::new(false)).retire();
-                        if !synced {
-                            sync(frame)?;
-                        }
-                        let changed = !same(frame);
-                        if changed {
-                            *stored = frame.record.clone();
-                            frame.published = Some(Publication::new(&frame.record));
-                        } else {
-                            stored.bindings = previous.restore()?;
-                        }
-                        Ok(changed)
+                        frame.project(stored, coordinates, &self.exe, &self.access)
                     })?;
             } else {
-                if !synced {
-                    sync(frame)?;
-                }
-                self.rows
-                    .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
-                frame.published = Some(Publication::new(&frame.record));
+                let mut record = FrameRecord::fresh(frame.statement.clone());
+                frame.project(&mut record, coordinates, &self.exe, &self.access)?;
+                self.rows.write(ordinal_key(*index), record, &self.access)?;
             }
+        }
+        #[cfg(test)]
+        MOST_VISITED.set(MOST_VISITED.get().max(visited));
+        let top = self.len.saturating_sub(1);
+        self.held = top;
+        if coordinates {
+            self.placed = top;
         }
         Ok(())
     }
@@ -793,7 +763,7 @@ impl Frames {
         Ok(operation)
     }
     /// Applies `edit` to the saved continuation of the frame at `index`:
-    /// in its decoded frame when the cache holds it, else in its row.
+    /// in the resident frame when the cache holds it, else in its row.
     /// `false` when no frame has that index.
     #[cfg(test)]
     pub(super) fn pending_mut(
@@ -803,7 +773,26 @@ impl Frames {
     ) -> Result<bool, HeapFault> {
         let access = self.access.clone();
         if let Some((_, frame)) = self.cache.iter_mut().find(|(at, _)| *at == index) {
-            edit(&mut frame.record.pending, &access);
+            let mut record = match frame.pending.take() {
+                Some(pending) => Some(PendingRecord::new(
+                    pending.site,
+                    pending.phase,
+                    pending.roles,
+                    &access,
+                )?),
+                None => None,
+            };
+            edit(&mut record, &access);
+            if let Some(record) = record {
+                frame.pending.set(Pending {
+                    roles: record.roles(&access)?,
+                    site: record.site,
+                    phase: record.phase,
+                });
+            }
+            frame.pending.saved = Saved::Another;
+            self.held = self.held.min(index);
+            self.placed = self.placed.min(index);
             return Ok(true);
         }
         let key = ordinal_key(index);
@@ -815,6 +804,47 @@ impl Frames {
         Ok(true)
     }
 
+    /// Applies `edit` to the saved loop row `at` of the top frame, cold:
+    /// a continuation law's tamper with the grammar. The loop's site as
+    /// it stood.
+    #[cfg(test)]
+    pub(super) fn loop_mut(
+        &mut self,
+        at: u64,
+        edit: impl FnOnce(&mut LoopRecord, &Access<'_>),
+    ) -> Result<SitePath, HeapFault> {
+        let index = self.len - 1;
+        if self.cache.iter().any(|(resident, _)| *resident == index) {
+            return Err(malformed("the top frame is resident"));
+        }
+        let key = ordinal_key(index);
+        let mut record = row(&self.rows, index, &self.access)?;
+        let mut saved = row(&record.loops, at, &self.access)?;
+        let site = site_path(saved.site.resolve(&self.access)?.as_ref());
+        edit(&mut saved, &self.access);
+        record.loops.write(ordinal_key(at), saved, &self.access)?;
+        self.rows.write(key, record, &self.access)?;
+        Ok(site)
+    }
+
+    /// Restores the row of the frame at `index` afresh, as a cold open
+    /// does when execution reaches it, the top by how the task comes to it
+    /// and a lower frame by a return: the refusal its coordinate meets.
+    #[cfg(test)]
+    pub(super) fn refusal(&self, index: u64) -> Result<Option<RestoreRefusal>, HeapFault> {
+        let record = row(&self.rows, index, &self.access)?;
+        let arrival = if index + 1 == self.len {
+            self.arrival
+        } else {
+            Arrival::Returned
+        };
+        match restore(&record, arrival, &self.access, &self.exe) {
+            Ok(_) => Ok(None),
+            Err(Unrestored::Refused(refusal)) => Ok(Some(refusal)),
+            Err(Unrestored::Fault(fault)) => Err(fault),
+        }
+    }
+
     /// The frames the cache holds, by their index in the stack.
     pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
         self.cache
@@ -822,12 +852,35 @@ impl Frames {
             .map(|(index, frame)| (*index as usize, frame.as_ref()))
             .collect()
     }
+    /// The loops every frame stands in, from the bottom frame up and in
+    /// each outermost first, with the iteration each has started: a
+    /// resident frame's from its control, a cold one's from its row.
     pub(super) fn loop_coordinates(
-        &mut self,
+        &self,
     ) -> Result<Vec<lash_kernel_doc::LoopIteration>, HeapFault> {
-        self.flush()?;
         let mut loops = Vec::new();
-        for index in 0..self.rows.len() {
+        let mut resident = self.cache.iter().peekable();
+        for index in 0..self.len {
+            if let Some((_, frame)) = resident.next_if(|(at, _)| *at == index) {
+                for control in &frame.control {
+                    let (stmt, started) = match control {
+                        Control::For { stmt, started, .. } | Control::While { stmt, started } => {
+                            (*stmt, *started)
+                        }
+                        _ => continue,
+                    };
+                    let (Form::For { site, .. } | Form::While { site, .. }) =
+                        &self.exe.stmt(stmt).form
+                    else {
+                        return Err(malformed("a loop stands at another form"));
+                    };
+                    loops.push(lash_kernel_doc::LoopIteration {
+                        site: site.clone(),
+                        iteration: started.saturating_sub(1),
+                    });
+                }
+                continue;
+            }
             let frame = row(&self.rows, index, &self.access)?;
             for at in 0..frame.loops.len() {
                 let record = row(&frame.loops, at, &self.access)?;
@@ -841,18 +894,210 @@ impl Frames {
     }
 }
 
+/// `saved`'s path as a coordinate of a frame of `unit`: a site of another
+/// unit is no site of the frame, and names none of its loops or cleanups.
+fn path_in(saved: &Site, unit: &Unit) -> Result<SitePath, SitePath> {
+    let path = SitePath(saved.path.as_slice().into());
+    if saved.unit == *unit {
+        Ok(path)
+    } else {
+        Err(path)
+    }
+}
+
+fn site_path(site: &Site) -> SitePath {
+    SitePath(site.path.as_slice().into())
+}
+
+/// The loop coordinate a saved loop row names, its site resolved.
+fn loop_coordinate(
+    record: &LoopRecord,
+    unit: &Unit,
+    access: &Access<'_>,
+) -> Result<LoopCoordinate, Unrestored> {
+    let site = path_in(record.site.resolve(access)?.as_ref(), unit)
+        .map_err(|site| RestoreRefusal::UnknownLoop { site })?;
+    let guard = record.cursor.and_then(|cursor| cursor.guard);
+    Ok(LoopCoordinate {
+        site,
+        started: record.started,
+        phase: match record.header {
+            HeaderRecord::Body => LoopPhase::Body,
+            HeaderRecord::Open => LoopPhase::Open,
+            HeaderRecord::Pull => LoopPhase::Pull,
+            HeaderRecord::Check => LoopPhase::Check,
+            HeaderRecord::Exhausted => LoopPhase::Exhausted,
+            HeaderRecord::Item => LoopPhase::Item,
+        },
+        cursor: record.cursor.map(|cursor| match cursor.kind {
+            CursorKind::List | CursorKind::Tuple => coord::Cursor::Sequence {
+                next: cursor.position,
+            },
+            CursorKind::Table => coord::Cursor::Table {
+                last: (cursor.position != u64::MAX).then_some(cursor.position),
+                size: guard.map_or(0, |guard| guard.size),
+            },
+            CursorKind::Text => coord::Cursor::Text {
+                next: cursor.position,
+            },
+            CursorKind::Driver => coord::Cursor::Driver,
+        }),
+        remaining: guard.map(|guard| guard.remaining),
+    })
+}
+
+/// Admits the frame's saved loop row `at` where restore finds a loop at
+/// `site`: a `for` when `walks`, else a `while`, standing in its header
+/// when `in_header`.
+fn admitted_loop(
+    record: &FrameRecord,
+    at: u64,
+    site: &Site,
+    walks: bool,
+    in_header: bool,
+    access: &Access<'_>,
+) -> Result<LoopRecord, Unrestored> {
+    let saved = row(&record.loops, at, access)?;
+    let coordinate = loop_coordinate(&saved, &site.unit, access)?;
+    coord::admit_loop(&site_path(site), walks, in_header, &coordinate)?;
+    Ok(saved)
+}
+
+/// Admits the frame's saved cleanup row `saved` where restore finds the
+/// `try` at `site` in its `finally`.
+fn admit_finally(
+    saved: &FinallyRecord,
+    site: &Site,
+    departure: Departure,
+    access: &Access<'_>,
+) -> Result<(), Unrestored> {
+    let saved = path_in(saved.site.resolve(access)?.as_ref(), &site.unit)
+        .map_err(|site| RestoreRefusal::UnknownCleanup { site })?;
+    let saved = CleanupCoordinate::Finally {
+        site: saved,
+        departure,
+    };
+    Ok(coord::admit_cleanup(&site_path(site), &saved)?)
+}
+
+/// The action kind the side table states for a nested action: `None` for
+/// a `cancel`, which never stands.
+fn action_kind(kind: &NestedKind) -> Option<ActionKind> {
+    Some(match kind {
+        NestedKind::Yield => ActionKind::Yield,
+        NestedKind::Cancel => return None,
+        NestedKind::Call(_) => ActionKind::Call,
+        NestedKind::Body(_) => ActionKind::Body,
+        NestedKind::Perform { then_yield, .. } => ActionKind::Perform {
+            then_yield: *then_yield,
+        },
+        NestedKind::Sleep { then_yield } => ActionKind::Sleep {
+            then_yield: *then_yield,
+        },
+        NestedKind::Spawn(_) => ActionKind::Spawn,
+        NestedKind::Join => ActionKind::Join,
+        NestedKind::JoinMany(_) => ActionKind::JoinMany,
+    })
+}
+
+fn action_phase(phase: PhaseRecord) -> ActionPhase {
+    match phase {
+        PhaseRecord::Yielded => ActionPhase::Yielded,
+        PhaseRecord::Called => ActionPhase::Called,
+        PhaseRecord::Waiting => ActionPhase::Waiting,
+        PhaseRecord::Spawned => ActionPhase::Spawned,
+        PhaseRecord::Joining => ActionPhase::Joining,
+    }
+}
+
+/// The resume entry of `pending`, the continuation a frame saved where it
+/// stands at an action nested in statement `stmt`, at `site`, admitted by
+/// the coordinate grammar beside `arrival` (`K-EVAL-008`): its action names
+/// one of the statement's own nested actions under this layout.
+fn continuation(
+    exe: &Executable,
+    stmt: StmtId,
+    site: &Site,
+    pending: &Pending,
+    arrival: Arrival,
+) -> Result<ActIx, RestoreRefusal> {
+    let (stream, _, _) = exe.statement(stmt);
+    let depth = site.path.len();
+    let action = SitePath(pending.site.as_slice().into());
+    let full = Site::new(
+        site.unit.clone(),
+        site.path
+            .iter()
+            .chain(&pending.site)
+            .copied()
+            .collect::<Vec<_>>(),
+    );
+    // The entry must be the statement's own: an action in a closure
+    // written inside it belongs to the closure's statement.
+    let Some((act, nested)) = stream
+        .nested_at
+        .get(&full)
+        .map(|act| (*act, &stream.nested[act.ix()]))
+        .filter(|(_, nested)| nested.depth as usize == depth)
+    else {
+        return Err(RestoreRefusal::UnknownSite { action });
+    };
+    let phase = action_phase(pending.phase);
+    let Some(kind) = action_kind(&nested.kind) else {
+        return Err(RestoreRefusal::IllegalPhase { action, phase });
+    };
+    let entry = ActionEntry {
+        action: action.clone(),
+        kind,
+        roles: nested
+            .roles
+            .iter()
+            .map(|(role, _)| SitePath(role.path[depth..].into()))
+            .collect(),
+    };
+    let saved = StatementCoordinate::Nested {
+        action,
+        phase,
+        roles: pending
+            .roles
+            .iter()
+            .map(|role| SitePath(role.site.as_slice().into()))
+            .collect(),
+    };
+    coord::admit(&entry, &saved, arrival)?;
+    Ok(act)
+}
+
+/// How many arguments a saved call retains, if any.
+fn retained(record: &FrameRecord) -> Option<u32> {
+    record
+        .arguments
+        .as_ref()
+        .map(|args| u32::try_from(args.len()).unwrap_or(u32::MAX))
+}
+
+/// Decodes the saved `record` of a frame the task comes to by `arrival`
+/// into a resident frame, admitting each of its coordinates.
 fn restore(
-    record: FrameRecord,
-    parked: ParkKind,
-    access: Access<'static>,
-    exe: Arc<Executable>,
-) -> Result<Box<Frame>, HeapFault> {
-    let site = record.statement.resolve(&access)?;
+    record: &FrameRecord,
+    arrival: Arrival,
+    access: &Access<'static>,
+    exe: &Arc<Executable>,
+) -> Result<Box<Frame>, Unrestored> {
+    let site = record.statement.resolve(access)?;
     let code_id = (0..=site.path.len())
         .rev()
         .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
         .ok_or_else(|| malformed("a frame has no admitted code body"))?;
     let code = exe.code(code_id);
+    let pending = match &record.pending {
+        Some(pending) => Some(Pending {
+            site: pending.site.clone(),
+            phase: pending.phase,
+            roles: pending.roles(access)?,
+        }),
+        None => None,
+    };
     let mut depth = code.site.path.len();
     let mut block = code.body;
     let mut control = Vec::new();
@@ -866,8 +1111,8 @@ fn restore(
     // A policy call has already left every source scope. Rebuilding the
     // path to its return would incorrectly enter those scopes again.
     let adopting = exe.stmt_at(code_id, &site).filter(|stmt| {
-        parked == ParkKind::Returned
-            && record.pending.is_none()
+        arrival == Arrival::Returned
+            && pending.is_none()
             && matches!(exe.stmt(*stmt).form, Form::ReturnVia { .. })
     });
     if let Some(stmt) = adopting {
@@ -876,21 +1121,20 @@ fn restore(
     // A run-root cleanup has left every source scope: the frame stands at
     // its body, holding the departure the cleanup returns to.
     let cleaning = if *site == code.site
-        && parked == ParkKind::Returned
-        && record.pending.is_none()
+        && arrival == Arrival::Returned
+        && pending.is_none()
         && exe.root_cleanup(code_id).is_some()
     {
-        let saved = row(&record.finally, 0, &access)?;
-        let value = row(&record.departing, 0, &access)?;
+        let saved = row(&record.finally, 0, access)?;
+        let value = row(&record.departing, 0, access)?;
         (finally, departing) = (1, 1);
-        Some(match saved.entered {
-            _ if !saved.site.matches(&code.site, &access)? => {
-                return Err(malformed("a cleanup belongs to another site"));
-            }
-            EnteredRecord::Return => Ok(value),
-            EnteredRecord::Throw => Err(value),
-            _ => return Err(malformed("a root cleanup holds no return or raise")),
-        })
+        let (cleaned, departure) = match saved.entered {
+            EnteredRecord::Return => (Ok(value), Departure::Return),
+            EnteredRecord::Throw => (Err(value), Departure::Throw),
+            _ => return Err(malformed("a root cleanup holds no return or raise").into()),
+        };
+        admit_finally(&saved, &code.site, departure, access)?;
+        Some(cleaned)
     } else {
         None
     };
@@ -898,12 +1142,9 @@ fn restore(
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
-            let next = if let Some(pending) = &record.pending {
+            let next = if let Some(pending) = &pending {
                 let stmt = *stmts.get(index).ok_or_else(nowhere)?;
-                let saved = pending.roles(&access)?;
-                let act = continuation(&exe, stmt, &site, pending, &saved, parked)
-                    .map_err(|refusal| malformed(format!("continuation refused: {refusal}")))?;
-                nested = Some(act);
+                nested = Some(continuation(exe, stmt, &site, pending, arrival)?);
                 awaiting = Some(stmt);
                 control.push(Control::Block {
                     block,
@@ -911,52 +1152,45 @@ fn restore(
                 });
                 // A `while` waits in its condition: it stands above its loop.
                 if let Form::While { site: at, .. } = &exe.stmt(stmt).form {
-                    let saved = row(&record.loops, loops, &access)?;
+                    let saved = admitted_loop(record, loops, at, false, false, access)?;
                     loops += 1;
-                    if !saved.site.matches(at, &access)? || saved.cursor.is_some() {
-                        return Err(malformed("a saved while has another site or a cursor"));
-                    }
                     control.push(Control::While {
                         stmt,
                         started: saved.started,
                     });
                 }
                 break;
-            } else if parked != ParkKind::Fresh {
+            } else if arrival != Arrival::Fresh {
                 let stmt = *stmts.get(index).ok_or_else(nowhere)?;
                 awaiting = Some(stmt);
                 match &exe.stmt(stmt).form {
                     // Only a `then yield` wait owes a turn once delivered.
                     Form::Action(action)
-                        if parked == ParkKind::Delivered && !action.kind.then_yield() =>
+                        if arrival == Arrival::Delivered && !action.kind.then_yield() =>
                     {
-                        return Err(malformed(format!(
-                            "the task's state disagrees with the action at {site}"
-                        )));
+                        let action = site_path(&site);
+                        return Err(RestoreRefusal::TaskState { action }.into());
                     }
                     Form::Action(_) => {}
                     // A `for` waits in a protocol hook of its header: it
                     // stands above its loop.
-                    Form::For { site: at, .. } if parked == ParkKind::Returned => {
-                        let saved = row(&record.loops, loops, &access)?;
+                    Form::For { site: at, .. } if arrival == Arrival::Returned => {
+                        let saved = admitted_loop(record, loops, at, true, true, access)?;
                         loops += 1;
-                        if !saved.site.matches(at, &access)? || saved.header == HeaderRecord::Body {
-                            return Err(malformed("a saved header has another site or none"));
-                        }
                         control.push(Control::Block {
                             block,
                             next: index + 1,
                         });
-                        control.push(saved_for(stmt, &saved, &record, &mut iterated, &access)?);
+                        control.push(saved_for(stmt, &saved, record, &mut iterated, access)?);
                         break;
                     }
-                    _ => return Err(malformed("a resuming frame has no action")),
+                    _ => return Err(malformed("a resuming frame has no action").into()),
                 }
                 index + 1
             } else if index <= stmts.len() {
                 index
             } else {
-                return Err(nowhere());
+                return Err(nowhere().into());
             };
             control.push(Control::Block { block, next });
             break;
@@ -977,12 +1211,9 @@ fn restore(
                 .find(|candidate| at(*candidate))
                 .ok_or_else(nowhere)?,
             Form::For { site, body, .. } if at(*body) => {
-                let saved = row(&record.loops, loops, &access)?;
+                let saved = admitted_loop(record, loops, site, true, false, access)?;
                 loops += 1;
-                if !saved.site.matches(site, &access)? || saved.header != HeaderRecord::Body {
-                    return Err(malformed("a saved loop belongs to another site or header"));
-                }
-                control.push(saved_for(stmt, &saved, &record, &mut iterated, &access)?);
+                control.push(saved_for(stmt, &saved, record, &mut iterated, access)?);
                 *body
             }
             // A loop's `else` runs once the loop has left the control.
@@ -995,11 +1226,8 @@ fn restore(
                 ..
             } if at(*else_block) => *else_block,
             Form::While { site, body, .. } if at(*body) => {
-                let saved = row(&record.loops, loops, &access)?;
+                let saved = admitted_loop(record, loops, site, false, false, access)?;
                 loops += 1;
-                if !saved.site.matches(site, &access)? || saved.cursor.is_some() {
-                    return Err(malformed("a saved while has another site or a cursor"));
-                }
                 control.push(Control::While {
                     stmt,
                     started: saved.started,
@@ -1007,7 +1235,7 @@ fn restore(
                 *body
             }
             Form::Try {
-                site,
+                site: try_site,
                 body,
                 catch,
                 finally: cleanup,
@@ -1017,46 +1245,49 @@ fn restore(
                 } else if let Some((_, catch)) = catch.filter(|(_, catch)| at(*catch)) {
                     (TryPhase::Catch, catch)
                 } else if let Some(cleanup) = cleanup.filter(|cleanup| at(*cleanup)) {
-                    let saved = row(&record.finally, finally, &access)?;
+                    let saved = row(&record.finally, finally, access)?;
                     finally += 1;
-                    if !saved.site.matches(site, &access)? {
-                        return Err(malformed("a cleanup belongs to another site"));
-                    }
                     let mut value = || {
-                        let value = row(&record.departing, departing, &access)?;
+                        let value = row(&record.departing, departing, access)?;
                         departing += 1;
                         Ok::<_, HeapFault>(value)
                     };
-                    let completion = match saved.entered {
-                        EnteredRecord::Normal => Completion::Normal,
-                        EnteredRecord::Break => Completion::Break,
-                        EnteredRecord::Continue => Completion::Continue,
-                        EnteredRecord::Throw => Completion::Throw(Box::new(value()?)),
-                        EnteredRecord::Return => Completion::Return(Box::new(value()?)),
-                        EnteredRecord::ReturnVia(site) => {
-                            let site = site.resolve(&access)?;
+                    let (completion, departure) = match &saved.entered {
+                        EnteredRecord::Normal => (Completion::Normal, Departure::Normal),
+                        EnteredRecord::Break => (Completion::Break, Departure::Break),
+                        EnteredRecord::Continue => (Completion::Continue, Departure::Continue),
+                        EnteredRecord::Throw => {
+                            (Completion::Throw(Box::new(value()?)), Departure::Throw)
+                        }
+                        EnteredRecord::Return => {
+                            (Completion::Return(Box::new(value()?)), Departure::Return)
+                        }
+                        EnteredRecord::ReturnVia(via) => {
+                            let via = via.resolve(access)?;
                             let stmt = exe
-                                .stmt_at(code_id, &site)
+                                .stmt_at(code_id, &via)
                                 .filter(|stmt| {
                                     matches!(exe.stmt(*stmt).form, Form::ReturnVia { .. })
                                 })
-                                .ok_or_else(|| {
-                                    malformed("a saved return has no admitted policy")
+                                .ok_or_else(|| RestoreRefusal::UnknownSite {
+                                    action: site_path(&via),
                                 })?;
-                            Completion::ReturnVia {
+                            let completion = Completion::ReturnVia {
                                 value: Box::new(value()?),
                                 stmt,
-                            }
+                            };
+                            (completion, Departure::ReturnVia(site_path(&via)))
                         }
                     };
+                    admit_finally(&saved, try_site, departure, access)?;
                     (TryPhase::Finally(completion), cleanup)
                 } else {
-                    return Err(nowhere());
+                    return Err(nowhere().into());
                 };
                 control.push(Control::Try { stmt, phase });
                 inner
             }
-            _ => return Err(nowhere()),
+            _ => return Err(nowhere().into()),
         };
         depth += 2;
     }
@@ -1065,35 +1296,68 @@ fn restore(
         || iterated != record.iterated.len()
         || departing != record.departing.len()
     {
-        return Err(malformed("a frame has excess saved control rows"));
+        return Err(malformed("a frame has excess saved control rows").into());
     }
     let library = match (&code.site.unit, code.site.path.is_empty()) {
         (Unit::Library(function), true) => {
             let lib = exe
                 .lib_of(function)
                 .ok_or_else(|| malformed("a frame's library is not admitted"))?;
-            let args = record
-                .arguments
-                .clone()
-                .ok_or_else(|| malformed("a library frame has no held formula arguments"))?;
-            Some(LibraryCall { lib, args })
+            let arity = u32::try_from(exe.lib(lib).arity)
+                .map_err(|_| malformed("a library function's arity overflows"))?;
+            coord::admit_arguments(retained(record), Some(arity))?;
+            let mut args = Vec::new();
+            if let Some(saved) = &record.arguments {
+                for at in 0..saved.len() {
+                    args.push(row(saved, at, access)?);
+                }
+            }
+            Some(LibraryCall {
+                lib,
+                args: args.into(),
+            })
         }
-        _ if record.arguments.is_none() => None,
-        _ => return Err(malformed("a non-library frame holds arguments")),
+        _ => {
+            coord::admit_arguments(retained(record), None)?;
+            None
+        }
     };
+    let mut slots = Slots::default();
+    slots.fresh(code.slots_by_at.len());
+    for (at, value) in slots.values.iter_mut().enumerate() {
+        let info = &code.slots[code.slots_by_at[at] as usize];
+        *value = match record.bindings.get(&info.key, access)? {
+            None => SlotState::Empty,
+            Some(BindingRecord {
+                value: BoundRecord::Value(value),
+                ..
+            }) => SlotState::Value(value),
+            Some(BindingRecord {
+                value: BoundRecord::Shared(id),
+                ..
+            }) => SlotState::Cell(id),
+        };
+    }
     Ok(Box::new(Frame {
-        slots: Slots::unloaded(code.slots_by_at.len()),
+        slots,
         code: code_id,
         scalar_blocks: false,
-        published: Some(Publication::new(&record)),
-        record,
-        access,
-        exe,
+        statement: record.statement.clone(),
+        pending: Continuation {
+            saved: if pending.is_some() {
+                Saved::This
+            } else {
+                Saved::Nothing
+            },
+            pending,
+        },
         control,
         awaiting,
         nested,
         library,
         cleaning,
+        held: Vec::new(),
+        owned: true,
     }))
 }
 
@@ -1128,9 +1392,9 @@ fn cursor_record(cursor: &Cursor, guard: Option<&Guard>) -> Option<CursorRecord>
     })
 }
 
-/// The `for` loop of statement `stmt` as `saved` records it, its held
-/// values the frame's next `iterated` rows: what it walks, then the item a
-/// hook holds (`K-ITER-005`).
+/// The `for` loop of statement `stmt` as `saved` records it, its
+/// coordinate admitted, its held values the frame's next `iterated` rows:
+/// what it walks, then the item a hook holds (`K-ITER-005`).
 fn saved_for(
     stmt: StmtId,
     saved: &LoopRecord,
@@ -1143,16 +1407,13 @@ fn saved_for(
         *iterated += 1;
         Ok::<_, HeapFault>(value)
     };
-    let (cursor, guard) = match (saved.cursor, saved.header) {
-        (None, HeaderRecord::Open) => (Cursor::Opening, None),
-        (
-            Some(CursorRecord {
-                kind,
-                position,
-                guard,
-            }),
-            header,
-        ) if header != HeaderRecord::Open => {
+    let (cursor, guard) = match saved.cursor {
+        None => (Cursor::Opening, None),
+        Some(CursorRecord {
+            kind,
+            position,
+            guard,
+        }) => {
             let cursor = match (kind, held()?) {
                 (CursorKind::List, Value::List(id)) => Cursor::List(
                     id,
@@ -1173,25 +1434,18 @@ fn saved_for(
                 (CursorKind::Driver, driver) if position == 0 => Cursor::Driver(Box::new(driver)),
                 _ => return Err(malformed("a for cursor has another kind or extent")),
             };
-            let guard = match (guard, &cursor) {
-                (None, _) => None,
-                (Some(GuardRecord { size, remaining }), Cursor::Map(..) | Cursor::Set(..)) => {
-                    Some(Box::new(Guard { size, remaining }))
-                }
-                _ => return Err(malformed("a guard stands on no map or set")),
-            };
+            let guard =
+                guard.map(|GuardRecord { size, remaining }| Box::new(Guard { size, remaining }));
             (cursor, guard)
         }
-        _ => return Err(malformed("a for's header and cursor disagree")),
     };
     let header = match saved.header {
         HeaderRecord::Body => Header::Body,
         HeaderRecord::Open => Header::Open,
-        HeaderRecord::Pull if matches!(cursor, Cursor::Driver(_)) => Header::Pull,
-        HeaderRecord::Check if guard.is_some() => Header::Check(Box::new(held()?)),
-        HeaderRecord::Exhausted if guard.is_some() => Header::Exhausted,
+        HeaderRecord::Pull => Header::Pull,
+        HeaderRecord::Check => Header::Check(Box::new(held()?)),
+        HeaderRecord::Exhausted => Header::Exhausted,
         HeaderRecord::Item => Header::Item(Box::new(held()?)),
-        _ => return Err(malformed("a for's header stands where its cursor cannot")),
     };
     Ok(Control::For {
         stmt,
@@ -1200,113 +1454,4 @@ fn saved_for(
         header,
         guard,
     })
-}
-
-/// The resume entry of `pending`, the continuation a frame saved where it
-/// stands at an action nested in statement `stmt`, at `site`: when the
-/// grammar admits it beside `parked` (`K-EVAL-008`). Its action names one
-/// of the statement's nested actions, its phase is that action's and can
-/// stand where the task is, and its roles are exactly the action's, as a
-/// set. Sites in the record are path suffixes under `site`.
-fn continuation(
-    exe: &Executable,
-    stmt: StmtId,
-    site: &Site,
-    pending: &PendingRecord,
-    saved: &[RoleRecord],
-    parked: ParkKind,
-) -> Result<ActIx, ContinuationRefusal> {
-    let (stream, _, _) = exe.statement(stmt);
-    let depth = site.path.len();
-    let at = |suffix: &[u32]| {
-        Site::new(
-            site.unit.clone(),
-            site.path.iter().chain(suffix).copied().collect::<Vec<_>>(),
-        )
-    };
-    let action = at(&pending.site);
-    // The entry must be the statement's own: an action in a closure
-    // written inside it belongs to the closure's statement.
-    let Some((act, entry)) = stream
-        .nested_at
-        .get(&action)
-        .map(|act| (*act, &stream.nested[act.ix()]))
-        .filter(|(_, entry)| entry.depth as usize == depth)
-    else {
-        return Err(ContinuationRefusal::UnknownSite { site: action });
-    };
-    let kind = matches!(
-        (pending.phase, &entry.kind),
-        (PhaseRecord::Yielded, NestedKind::Yield)
-            | (
-                PhaseRecord::Called,
-                NestedKind::Call(_) | NestedKind::Body(_)
-            )
-            | (
-                PhaseRecord::Waiting,
-                NestedKind::Perform { .. } | NestedKind::Sleep { .. }
-            )
-            | (PhaseRecord::Spawned, NestedKind::Spawn(_))
-            | (
-                PhaseRecord::Joining,
-                NestedKind::Join | NestedKind::JoinMany(_)
-            )
-    );
-    if !kind || parked == ParkKind::Fresh {
-        return Err(ContinuationRefusal::IllegalPhase {
-            site: action,
-            phase: phase_name(pending.phase),
-        });
-    }
-    let agrees = match pending.phase {
-        PhaseRecord::Yielded => matches!(
-            parked,
-            ParkKind::Valued { handle: false } | ParkKind::Raised
-        ),
-        PhaseRecord::Called => parked == ParkKind::Returned,
-        PhaseRecord::Waiting => match parked {
-            ParkKind::Requested | ParkKind::Raised => true,
-            // Only a `then yield` wait owes a turn once delivered.
-            ParkKind::Delivered => entry.kind.then_yield(),
-            _ => false,
-        },
-        PhaseRecord::Spawned => {
-            matches!(parked, ParkKind::Valued { handle: true } | ParkKind::Raised)
-        }
-        PhaseRecord::Joining => matches!(
-            parked,
-            ParkKind::Joined | ParkKind::Valued { .. } | ParkKind::Raised
-        ),
-    };
-    if !agrees {
-        return Err(ContinuationRefusal::TaskState { site: action });
-    }
-    let mut sites = BTreeSet::new();
-    if let Some(twice) = saved
-        .iter()
-        .find(|role| !sites.insert(role.site.as_slice()))
-    {
-        return Err(ContinuationRefusal::ExtraRole {
-            site: at(&twice.site),
-        });
-    }
-    let saved = sites;
-    let expected: BTreeSet<&[u32]> = entry
-        .roles
-        .iter()
-        .map(|(role, _)| &role.path[depth..])
-        .collect();
-    if let Some(extra) = saved.iter().find(|role| !expected.contains(*role)) {
-        return Err(ContinuationRefusal::ExtraRole { site: at(extra) });
-    }
-    if let Some((missing, _)) = entry
-        .roles
-        .iter()
-        .find(|(role, _)| !saved.contains(&role.path[depth..]))
-    {
-        return Err(ContinuationRefusal::MissingRole {
-            site: missing.clone(),
-        });
-    }
-    Ok(act)
 }

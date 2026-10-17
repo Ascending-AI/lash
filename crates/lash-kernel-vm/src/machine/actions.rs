@@ -29,8 +29,7 @@ use lash_kernel_doc::heap::{ErrorRef, Payload};
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
-    ObjectInit, PendingRecord, PhaseRecord, RoleRecord, SemanticHeap, WaitKindRecord, WaitPhase,
-    WaitRecord,
+    ObjectInit, PhaseRecord, RoleRecord, SemanticHeap, WaitKindRecord, WaitPhase, WaitRecord,
 };
 
 /// What a call or a `spawn` runs, once its callee is read.
@@ -523,14 +522,13 @@ impl KernelMachine {
                 value,
             });
         }
-        let pending = PendingRecord::new(
-            entry.site.path[depth..].to_vec(),
+        let pending = super::frames::Pending {
+            site: entry.site.path[depth..].to_vec(),
             phase,
             roles,
-            self.heap.pages(),
-        )?;
+        };
         let frame = self.frame(task)?;
-        frame.record.pending = Some(pending);
+        frame.pending.set(pending);
         frame.nested = Some(act);
         Ok(())
     }

@@ -11,9 +11,11 @@
 //! ([`ActionEntry`] for each nested action); restore checks every saved
 //! coordinate against it and fails closed with a [`RestoreRefusal`].
 //!
-//! The frame swap (stage 2, swap 3) moves `lash-kernel-vm`'s restore
-//! checks (`machine/frames.rs`: `continuation`, `ParkKind`,
-//! `ContinuationRefusal`) onto these types and deletes them there.
+//! `lash-kernel-vm` maps its saved records to these coordinates and
+//! admits each through [`admit`], [`admit_loop`], [`admit_cleanup`] and
+//! [`admit_arguments`] as it restores a frame.
+
+use std::collections::BTreeSet;
 
 /// A site path suffix under a frame's statement site: how a coordinate
 /// names an action or an operand.
@@ -55,6 +57,15 @@ pub enum ActionKind {
 }
 
 impl ActionKind {
+    /// Whether the task takes one more turn once the action's outcome is
+    /// in (`K-TASK-005`).
+    pub const fn then_yield(self) -> bool {
+        matches!(
+            self,
+            Self::Perform { then_yield: true } | Self::Sleep { then_yield: true }
+        )
+    }
+
     /// Whether an action of this kind can stand at `phase`.
     pub const fn stands_at(self, phase: ActionPhase) -> bool {
         matches!(
@@ -228,4 +239,155 @@ pub enum RestoreRefusal {
     UnknownCleanup { site: SitePath },
     #[error("the frame's call keeps {saved} arguments, its function takes {expected}")]
     Arguments { saved: u32, expected: u32 },
+}
+
+/// Admits a frame's saved statement coordinate against the side table's
+/// `entry` for the action it names, where the task comes to the frame by
+/// `arrival` (`K-EVAL-008`). The phase must be one the action's kind can
+/// stand at and agree with the arrival, and the saved roles must be
+/// exactly the entry's, as a set. A boundary has nothing to admit.
+///
+/// The caller finds `entry` by the saved action site among the actions
+/// nested in the frame's own statement; a site with none is
+/// [`RestoreRefusal::UnknownSite`].
+pub fn admit(
+    entry: &ActionEntry,
+    saved: &StatementCoordinate,
+    arrival: Arrival,
+) -> Result<(), RestoreRefusal> {
+    let StatementCoordinate::Nested {
+        action,
+        phase,
+        roles,
+    } = saved
+    else {
+        return Ok(());
+    };
+    if *action != entry.action {
+        return Err(RestoreRefusal::UnknownSite {
+            action: action.clone(),
+        });
+    }
+    if !entry.kind.stands_at(*phase) || arrival == Arrival::Fresh {
+        return Err(RestoreRefusal::IllegalPhase {
+            action: action.clone(),
+            phase: *phase,
+        });
+    }
+    let agrees = match phase {
+        ActionPhase::Yielded => {
+            matches!(arrival, Arrival::Valued { handle: false } | Arrival::Raised)
+        }
+        ActionPhase::Called => arrival == Arrival::Returned,
+        ActionPhase::Waiting => match arrival {
+            Arrival::Requested | Arrival::Raised => true,
+            // Only a `then yield` wait owes a turn once delivered.
+            Arrival::Delivered => entry.kind.then_yield(),
+            _ => false,
+        },
+        ActionPhase::Spawned => {
+            matches!(arrival, Arrival::Valued { handle: true } | Arrival::Raised)
+        }
+        ActionPhase::Joining => matches!(
+            arrival,
+            Arrival::Joined | Arrival::Valued { .. } | Arrival::Raised
+        ),
+    };
+    if !agrees {
+        return Err(RestoreRefusal::TaskState {
+            action: action.clone(),
+        });
+    }
+    let mut saved = BTreeSet::new();
+    if let Some(twice) = roles.iter().find(|role| !saved.insert(*role)) {
+        return Err(RestoreRefusal::ExtraRole {
+            role: twice.clone(),
+        });
+    }
+    let expected: BTreeSet<&SitePath> = entry.roles.iter().collect();
+    if let Some(extra) = saved.iter().find(|role| !expected.contains(*role)) {
+        return Err(RestoreRefusal::ExtraRole {
+            role: (*extra).clone(),
+        });
+    }
+    if let Some(missing) = entry.roles.iter().find(|role| !saved.contains(role)) {
+        return Err(RestoreRefusal::MissingRole {
+            role: missing.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Admits a frame's saved loop coordinate where restore finds a loop of
+/// its statement at `site`: a `for` when `walks`, else a `while`, standing
+/// in its header (a protocol hook of a `for`) when `in_header`, else in
+/// its body. A `while` holds no cursor and stands in its body; a `for`'s
+/// header phase must be one its cursor can stand at (`K-ITER-005`): only
+/// `open` before the cursor exists, `next` only on a protocol driver, and
+/// a `check` only with the items it still allows, which only a map's or a
+/// set's walk keeps.
+pub fn admit_loop(
+    site: &SitePath,
+    walks: bool,
+    in_header: bool,
+    saved: &LoopCoordinate,
+) -> Result<(), RestoreRefusal> {
+    if saved.site != *site {
+        return Err(RestoreRefusal::UnknownLoop {
+            site: saved.site.clone(),
+        });
+    }
+    let guarded = saved.remaining.is_some();
+    let legal = in_header != (saved.phase == LoopPhase::Body)
+        && if walks {
+            match (saved.phase, saved.cursor) {
+                (LoopPhase::Open, cursor) => cursor.is_none() && !guarded,
+                (_, None) => false,
+                (LoopPhase::Pull, Some(cursor)) => cursor == Cursor::Driver,
+                (LoopPhase::Check | LoopPhase::Exhausted, Some(_)) => guarded,
+                (LoopPhase::Body | LoopPhase::Item, Some(_)) => true,
+            }
+        } else {
+            saved.cursor.is_none() && !guarded
+        }
+        && (!guarded || matches!(saved.cursor, Some(Cursor::Table { .. })));
+    if legal {
+        Ok(())
+    } else {
+        Err(RestoreRefusal::IllegalLoop {
+            site: saved.site.clone(),
+            phase: saved.phase,
+        })
+    }
+}
+
+/// Admits a frame's saved cleanup coordinate where restore finds a `try`
+/// of its statement at `site`.
+pub fn admit_cleanup(site: &SitePath, saved: &CleanupCoordinate) -> Result<(), RestoreRefusal> {
+    let (CleanupCoordinate::Body { site: saved }
+    | CleanupCoordinate::Catch { site: saved }
+    | CleanupCoordinate::Finally { site: saved, .. }) = saved;
+    if saved == site {
+        Ok(())
+    } else {
+        Err(RestoreRefusal::UnknownCleanup {
+            site: saved.clone(),
+        })
+    }
+}
+
+/// Admits the arguments a frame's call retains, where `takes` is how many
+/// its library function takes and `None` for a frame that is no library
+/// body. A library frame keeps all of them when its formula bills the call,
+/// and none when its caller's formula covers it (`K-CHG-007`); any other
+/// frame keeps no argument list.
+pub fn admit_arguments(saved: Option<u32>, takes: Option<u32>) -> Result<(), RestoreRefusal> {
+    match (saved, takes) {
+        (None, None) => Ok(()),
+        (Some(saved), Some(takes)) if saved == takes || saved == 0 => Ok(()),
+        _ => Err(RestoreRefusal::Arguments {
+            saved: saved.unwrap_or(0),
+            expected: takes.unwrap_or(0),
+        }),
+    }
 }

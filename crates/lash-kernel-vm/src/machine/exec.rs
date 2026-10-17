@@ -18,7 +18,7 @@ use crate::interface::{Bound, Host};
 use crate::observe::Event;
 use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit, SemanticHeap};
+use lash_kernel_state::paged::{HeapLifecycle, ObjectInit, SemanticHeap};
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
@@ -267,7 +267,7 @@ impl KernelMachine {
             // continuation it saved there.
             frame.awaiting = None;
             frame.nested = None;
-            frame.record.pending = None;
+            frame.pending.take();
             // A return or a raise that no `try` of the frame can take leaves
             // the frame at once: ending the frame ends all its variables.
             if matches!(
@@ -290,9 +290,9 @@ impl KernelMachine {
                     for at in 0..exe.code(frame.code).slots_by_at.len() {
                         frame.set_slot(at as u32, SlotState::Empty);
                     }
-                    frame.record.statement =
-                        lash_kernel_state::paged::SiteRef::new(site, &frame.access)?;
                     frame.awaiting = Some(stmt);
+                    self.frame(task)?.statement =
+                        lash_kernel_state::paged::SiteRef::new(site, self.heap.pages())?;
                     self.put(0, *value);
                     match self.call_lib(task, exe, *policy, 0, 1, Some(stmt)) {
                         Ok(super::ops::Flow::Step) => return Ok(()),
@@ -402,12 +402,13 @@ impl KernelMachine {
         cleanup: LibId,
         result: Result<Value, Value>,
     ) -> Result<Option<Result<Value, Value>>, Halt> {
+        let code = exe.code(self.frame(task)?.code);
+        let statement = lash_kernel_state::paged::SiteRef::new(&code.site, self.heap.pages())?;
         let frame = self.frame(task)?;
-        for at in 0..exe.code(frame.code).slots_by_at.len() {
+        for at in 0..code.slots_by_at.len() {
             frame.set_slot(at as u32, SlotState::Empty);
         }
-        frame.record.statement =
-            lash_kernel_state::paged::SiteRef::new(&exe.code(frame.code).site, &frame.access)?;
+        frame.statement = statement;
         frame.awaiting = None;
         frame.cleaning = Some(result);
         match self.call_lib(task, exe, cleanup, 0, 0, None) {
@@ -440,12 +441,12 @@ impl KernelMachine {
         if let Some(call) = &frame.library {
             let evaluates = self.charging;
             let units = self.in_formula(call.lib, evaluates, |machine| {
-                machine.call_units_tree(exe, call.lib, &call.args, result.as_ref().ok())
+                machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
             })?;
             self.charge_call(exe, call.lib, units)?;
         }
         let result = if task == TaskId::MAIN && self.task(task)?.frames.is_empty() {
-            match &frame.exe.code(frame.code).site.unit {
+            match &exe.code(frame.code).site.unit {
                 lash_kernel_doc::Unit::Function(name)
                     if self
                         .program
@@ -534,42 +535,14 @@ impl KernelMachine {
     fn recycle(&mut self, mut frame: Box<Frame>) {
         frame.control.clear();
         frame.slots.clear();
-        frame.record.bindings = super::Tree::new(false);
-        frame.record.loops = super::Tree::new(true);
-        frame.record.finally = super::Tree::new(true);
-        frame.record.iterated = super::Tree::new(true);
-        frame.record.departing = super::Tree::new(true);
-        frame.record.arguments = None;
-        frame.record.pending = None;
+        frame.pending.clear();
         frame.awaiting = None;
         frame.nested = None;
         frame.library = None;
         frame.cleaning = None;
-        frame.published = None;
+        frame.held.clear();
+        frame.owned = false;
         self.storage.frames.push(frame);
-    }
-
-    fn call_units_tree(
-        &self,
-        exe: &Executable,
-        lib: LibId,
-        args: &super::Tree<Value>,
-        result: Option<&Value>,
-    ) -> Result<u64, Halt> {
-        if !self.charging {
-            return Ok(0);
-        }
-        self.formula_source(
-            &exe.lib(lib).charge,
-            |index, measure| {
-                let value = args.get(
-                    &lash_kernel_state::kernel_internals::directory::ordinal_key(index as u64),
-                    self.heap.pages(),
-                )?;
-                self.measure(value.as_ref(), measure)
-            },
-            result,
-        )
     }
 
     pub(super) fn formula(
@@ -709,7 +682,7 @@ impl KernelMachine {
         let mut frame = match self.storage.frames.pop() {
             Some(mut frame) => {
                 frame.code = code_id;
-                frame.record.statement = entry;
+                frame.statement = entry;
                 frame
             }
             None => {
@@ -719,15 +692,15 @@ impl KernelMachine {
                     code: code_id,
                     scalar_blocks: false,
                     slots: super::frames::Slots::default(),
-                    record: FrameRecord::fresh(entry),
-                    access: self.heap.pages().clone(),
-                    exe: Arc::clone(&self.exe),
+                    statement: entry,
+                    pending: super::frames::Continuation::default(),
                     control: Vec::new(),
                     awaiting: None,
                     nested: None,
                     library: None,
                     cleaning: None,
-                    published: None,
+                    held: Vec::new(),
+                    owned: false,
                 })
             }
         };
@@ -738,34 +711,35 @@ impl KernelMachine {
             next: 0,
         });
         if let Some(lib) = library {
-            let mut args = super::Tree::new(true);
+            let mut args = Vec::new();
             // Nested calls are covered by their caller's schedule. A new
             // task has no enclosing library frame, so its root bills its own
             // formula even when an uncharged library body spawned it.
             let keep_arguments = self.charging || self.task(task)?.frames.is_empty();
-            for at in 0..if keep_arguments { given } else { 0 } {
-                let given = self.regs[base + at].clone();
-                // Immediate arguments are already canonical. Keep the
-                // original value without entering the heap retry path.
-                let immediate = matches!(
-                    &given,
-                    Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-                ) || matches!(&given, Value::Int(lash_kernel_doc::heap::IntRef::Inline(n)) if n.bits() <= 64);
-                let value = if immediate {
-                    given
-                } else {
-                    self.heap_write(|heap| {
-                        heap.canonical_value(given.clone())
-                            .map_err(super::write_halt)
-                    })?
-                };
-                args.write(
-                    lash_kernel_state::kernel_internals::directory::ordinal_key(at as u64),
-                    value,
-                    self.heap.pages(),
-                )?;
+            if keep_arguments {
+                args.reserve_exact(given);
+                for at in 0..given {
+                    let given = self.regs[base + at].clone();
+                    // Immediate arguments are already canonical. Keep the
+                    // original value without entering the heap retry path.
+                    let immediate = matches!(
+                        &given,
+                        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
+                    ) || matches!(&given, Value::Int(lash_kernel_doc::heap::IntRef::Inline(n)) if n.bits() <= 64);
+                    args.push(if immediate {
+                        given
+                    } else {
+                        self.heap_write(|heap| {
+                            heap.canonical_value(given.clone())
+                                .map_err(super::write_halt)
+                        })?
+                    });
+                }
             }
-            frame.library = Some(LibraryCall { lib, args });
+            frame.library = Some(LibraryCall {
+                lib,
+                args: args.into(),
+            });
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
@@ -1067,7 +1041,7 @@ impl KernelMachine {
             return Err(fault("a value arrived at no statement").into());
         };
         let nested = frame.nested.take();
-        let pending = frame.record.pending.take();
+        let pending = frame.pending.take();
         if nested.is_none()
             && pending.is_none()
             && matches!(exe.stmt(id).form, Form::ReturnVia { .. })
@@ -1115,7 +1089,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("a pending action has no resume entry"))?;
         let depth = entry.depth as usize;
         let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = pending
-            .roles(self.heap.pages())?
+            .roles
             .into_iter()
             .map(|role| (role.site, role.value))
             .collect();

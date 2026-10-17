@@ -26,6 +26,9 @@ use lash_kernel_state::paged::{
     TaskStateRecord,
 };
 
+use lash_kernel_doc::Site;
+use lash_kernel_exec::coord::{ActionPhase, LoopPhase, RestoreRefusal, SitePath};
+
 use super::embedder::{self, Embedder, Setup, label};
 use crate::{Bounds, End, Layout, Machine, Request, Step};
 
@@ -628,12 +631,17 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
          return t }\n",
     ] {
         let mut embedder = park_where(source, |phases| phases == only(PhaseRecord::Waiting));
+        let mut dropped = None;
         edit_roles(&mut embedder, |roles| {
             assert!(!roles.is_empty(), "{source}");
-            roles.remove(0);
+            dropped = Some(roles.remove(0).site);
         });
-        let problem = refused(&mut embedder);
-        assert!(problem.contains("is not saved"), "{problem}: {source}");
+        let role = SitePath(dropped.unwrap().into());
+        assert_eq!(
+            refused(&mut embedder),
+            RestoreRefusal::MissingRole { role },
+            "{source}"
+        );
     }
 }
 
@@ -981,22 +989,34 @@ fn called() -> Embedder {
     park_where(NESTED_AWAIT, |phases| phases == only(PhaseRecord::Called))
 }
 
-/// Opens `embedder` cold under an odd layout and runs it on, answering
-/// requests oldest first: the refusal it ends with.
-fn refused(embedder: &mut Embedder) -> String {
-    if let Err(error) = embedder.try_reopen(Layout(0x9e37_79b9 | 1), true) {
-        return error;
-    }
-    loop {
+/// Opens `embedder` cold under an odd layout: the refusal the grammar
+/// gives `main`'s bottom frame there, which the run then ends with.
+fn refused(embedder: &mut Embedder) -> RestoreRefusal {
+    embedder
+        .try_reopen(Layout(0x9e37_79b9 | 1), true)
+        .expect("the run reopens");
+    refused_here(embedder)
+}
+
+/// The refusal the grammar gives `main`'s bottom frame as `embedder`
+/// stands, cold: the run, run on and answered oldest first, ends with that
+/// refusal once it reaches the frame.
+fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
+    let refusal = embedder
+        .machine
+        .restore_refusal(TaskId::MAIN, 0)
+        .expect("the frame row reads")
+        .expect("the grammar refuses the frame");
+    let problem = loop {
         let step = match embedder.machine.run(&mut embedder.world, 0) {
             Ok(step) => step,
-            Err(error) => return format!("{error:?}"),
+            Err(error) => break format!("{error:?}"),
         };
         if let Step::Parked(park) = &step {
             embedder.pending.extend(park.requests.iter().cloned());
         }
         match step {
-            Step::Ended(end) => return format!("{end:?}"),
+            Step::Ended(end) => break format!("{end:?}"),
             Step::Slice => {}
             Step::Parked(_) => {
                 let request = embedder.pending.remove(0);
@@ -1004,11 +1024,18 @@ fn refused(embedder: &mut Embedder) -> String {
                     .machine
                     .deliver(embedder::wait_of(&request), embedder::answer(&request))
                 {
-                    return format!("{error:?}");
+                    break format!("{error:?}");
                 }
             }
         }
-    }
+    };
+    let named = format!("continuation refused: {refusal}");
+    assert!(problem.contains(&named), "{problem} names no {named}");
+    refusal
+}
+
+fn path<const N: usize>(path: [u32; N]) -> SitePath {
+    SitePath(path.into())
 }
 
 /// Edits the roles of `main`'s saved continuation.
@@ -1035,8 +1062,12 @@ fn an_unknown_site_is_refused() {
             pending.as_mut().unwrap().site = vec![9, 9];
         })
         .unwrap();
-    let problem = refused(&mut embedder);
-    assert!(problem.contains("no nested action at"), "{problem}");
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::UnknownSite {
+            action: path([9, 9])
+        }
+    );
 }
 
 /// CONT-GRAMMAR: a call's phase saved at a wait.
@@ -1049,10 +1080,12 @@ fn a_called_phase_at_a_wait_is_refused() {
             pending.as_mut().unwrap().phase = PhaseRecord::Called;
         })
         .unwrap();
-    let problem = refused(&mut embedder);
-    assert!(
-        problem.contains("cannot stand at phase called"),
-        "{problem}"
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::IllegalPhase {
+            action: path([0, 1]),
+            phase: ActionPhase::Called
+        }
     );
 }
 
@@ -1066,10 +1099,12 @@ fn a_waiting_phase_at_a_call_is_refused() {
             pending.as_mut().unwrap().phase = PhaseRecord::Waiting;
         })
         .unwrap();
-    let problem = refused(&mut embedder);
-    assert!(
-        problem.contains("cannot stand at phase waiting"),
-        "{problem}"
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::IllegalPhase {
+            action: path([0, 0]),
+            phase: ActionPhase::Waiting
+        }
     );
 }
 
@@ -1087,10 +1122,12 @@ fn a_continuation_on_a_fresh_frame_is_refused() {
             );
         })
         .unwrap();
-    let problem = refused(&mut embedder);
-    assert!(
-        problem.contains("cannot stand at phase called"),
-        "{problem}"
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::IllegalPhase {
+            action: path([0, 0]),
+            phase: ActionPhase::Called
+        }
     );
 }
 
@@ -1098,11 +1135,12 @@ fn a_continuation_on_a_fresh_frame_is_refused() {
 #[test]
 fn a_missing_role_is_refused() {
     let mut embedder = waiting();
+    let mut dropped = None;
     edit_roles(&mut embedder, |roles| {
-        roles.remove(0);
+        dropped = Some(roles.remove(0).site);
     });
-    let problem = refused(&mut embedder);
-    assert!(problem.contains("is not saved"), "{problem}");
+    let role = SitePath(dropped.unwrap().into());
+    assert_eq!(refused(&mut embedder), RestoreRefusal::MissingRole { role });
 }
 
 /// CONT-GRAMMAR: a saved role the action does not keep.
@@ -1115,8 +1153,24 @@ fn an_extra_role_is_refused() {
             value: Value::Null,
         });
     });
-    let problem = refused(&mut embedder);
-    assert!(problem.contains("is no role"), "{problem}");
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::ExtraRole { role: path([9]) }
+    );
+}
+
+/// CONT-GRAMMAR: a role the action keeps, saved twice.
+#[test]
+fn a_role_saved_twice_is_refused() {
+    let mut embedder = waiting();
+    let mut twice = None;
+    edit_roles(&mut embedder, |roles| {
+        let role = roles[0].clone();
+        twice = Some(role.site.clone());
+        roles.push(role);
+    });
+    let role = SitePath(twice.unwrap().into());
+    assert_eq!(refused(&mut embedder), RestoreRefusal::ExtraRole { role });
 }
 
 /// CONT-GRAMMAR: a saved wait on a task that a value, not its request,
@@ -1134,8 +1188,55 @@ fn a_task_state_that_disagrees_is_refused() {
             },
         )
         .unwrap();
-    let problem = refused(&mut embedder);
-    assert!(problem.contains("task's state disagrees"), "{problem}");
+    assert_eq!(
+        refused(&mut embedder),
+        RestoreRefusal::TaskState {
+            action: path([0, 1])
+        }
+    );
+}
+
+/// CONT-GRAMMAR: a frame waiting in the body of a `for` over a list,
+/// opened cold, refuses a saved loop header moved past its cursor (to a
+/// check, which only a guarded table walk holds) and a saved loop moved
+/// to a site no loop of the frame's statement stands at.
+#[test]
+fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
+    const IN_LOOP: &str = "main { let out = []\n\
+        for x in [1, 2, 3] { let v = perform echo(x) as Any set out[list.len(out)] = v }\n\
+        return out }";
+    let parked = || {
+        let mut embedder = Embedder::with(IN_LOOP, setup(u64::MAX));
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        embedder.reopen(Layout(0x9e37_79b9 | 1), true);
+        embedder
+    };
+    let mut embedder = parked();
+    let site = embedder
+        .machine
+        .tamper_loop(TaskId::MAIN, 0, |record, _| {
+            record.header = HeaderRecord::Check
+        })
+        .unwrap();
+    assert_eq!(
+        refused_here(&mut embedder),
+        RestoreRefusal::IllegalLoop {
+            site,
+            phase: LoopPhase::Check
+        }
+    );
+    let mut embedder = parked();
+    embedder
+        .machine
+        .tamper_loop(TaskId::MAIN, 0, |record, access| {
+            let moved = Site::new(lash_kernel_doc::Unit::Main, [9, 9]);
+            record.site = lash_kernel_state::paged::SiteRef::new(&moved, access).unwrap();
+        })
+        .unwrap();
+    assert_eq!(
+        refused_here(&mut embedder),
+        RestoreRefusal::UnknownLoop { site: path([9, 9]) }
+    );
 }
 
 /// A continuation keeps up to `ROLE_FLAT` roles flat in its frame's row

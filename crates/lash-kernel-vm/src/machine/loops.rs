@@ -565,11 +565,11 @@ impl KernelMachine {
     /// The innermost `while` loop's condition gave `value`: its next
     /// iteration starts, `Step`, or it ends (`K-FORM-013`).
     pub(super) fn tested(&mut self, task: TaskId, value: bool) -> Status {
+        let exe = Arc::clone(&self.exe);
         let frame = self.frame(task)?;
         let Some(Control::While { stmt, started }) = frame.control.last_mut() else {
             return Err(fault("a `while` condition stands in no `while` loop").into());
         };
-        let exe = Arc::clone(&frame.exe);
         let stmt = *stmt;
         let Form::While { body, .. } = &exe.stmt(stmt).form else {
             return Err(fault("a `while` loop is not at a `while`").into());
