@@ -2134,7 +2134,32 @@ async fn a_reserved_retry_lost_with_its_process_never_reuses_its_ordinal() {
         call.record.attempts[2].outcome,
         lash::provider::AttemptOutcome::Completed
     );
-    assert_eq!(call.usage().unwrap(), deployment.usage().await);
+    assert!(
+        call.record.attempts[..2]
+            .iter()
+            .all(|attempt| attempt.usage.is_none()),
+        "both crash-lost attempts lack reported usage"
+    );
+    assert_eq!(call.record.attempts[2].usage, Some(USAGE));
+    // FIG-6570: two absent attempts make one logical call unknown. Derive
+    // the reported totals from the script, independently of LlmCallRecord.
+    let expected = LlmUsage {
+        input_tokens: 11,
+        output_tokens: 7,
+        unknown_calls: 1,
+        ..Default::default()
+    };
+    assert_eq!(call.usage().unwrap(), expected);
+    assert_eq!(deployment.usage().await, expected);
+    let mut known_zero = call.record.clone();
+    for attempt in &mut known_zero.attempts {
+        attempt.usage = Some(LlmUsage::default());
+    }
+    assert_eq!(
+        known_zero.usage().unwrap(),
+        LlmUsage::default(),
+        "explicitly reported zero is known, including an interrupted attempt"
+    );
     deployment.end();
 }
 

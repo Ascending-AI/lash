@@ -61,6 +61,10 @@ pub struct SessionDeleteBlobHandles {
     /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
     /// handle for their backend.
     pub factory: Arc<dyn crate::DeploymentStore>,
+    /// Open fresh catalog connections over the same durable databases.
+    /// Conformance-suite embedders preserve the original catalog and clock;
+    /// this callback must never reset or recreate the fixture's contents.
+    pub reopen: Arc<dyn Fn() -> Arc<dyn crate::DeploymentStore> + Send + Sync>,
     /// Backend-specific exact-blob observation and fault handle.
     ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** supply this

@@ -1212,6 +1212,7 @@ pub async fn an_owner_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphT
 /// replay of the enclosing outcome transaction.
 pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
     tier: &dyn GraphTier,
+    peer: &dyn DurableStore,
 ) -> LawOutcome {
     use crate::domain::{ModelCallId, ModelCallWrite, PromptCallKey};
     use lash_core_store::model_calls::{ModelCallEnd, ModelCallFact};
@@ -1220,25 +1221,30 @@ pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
     let run = turn("call-key-run");
     let mut nodes = staging();
     let mut writes = Vec::new();
-    for (address, id) in [
-        (
-            ModelCallId::Turn {
-                run: run.clone(),
-                ordinal: 1,
-            },
-            "turn-model",
-        ),
-        (
+    let addresses = (1..=12)
+        .map(|ordinal| {
+            (
+                ModelCallId::Turn {
+                    run: run.clone(),
+                    ordinal,
+                },
+                format!("turn-model-{ordinal}"),
+                ordinal,
+            )
+        })
+        .chain(std::iter::once((
             ModelCallId::Owned {
                 owner: run.to_string(),
                 key: "tool-attempt:1/direct:1".into(),
             },
-            "nested-model",
-        ),
-    ] {
-        let call_id = LlmCallId(id.into());
+            "nested-model".to_owned(),
+            0,
+        )));
+    let mut expected = Vec::new();
+    for (address, id, ordinal) in addresses {
+        let call_id = LlmCallId(id);
         let fact = ModelCallFact {
-            call: if id == "turn-model" { 1 } else { 0 },
+            call: ordinal,
             call_id: call_id.clone(),
             end: ModelCallEnd::Answered,
             record: LlmCallRecord {
@@ -1248,6 +1254,7 @@ pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
                 replay_drops: Vec::new(),
             },
         };
+        expected.push(fact.clone());
         let record = fact
             .stage(&mut nodes)
             .map_err(|error| refused("model fact", error))?;
@@ -1262,17 +1269,26 @@ pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
     }
     let nodes = nodes.into_nodes();
     owner_commit(tier, &owner, nodes.clone(), writes.clone()).await?;
-    let first = tier
-        .store()
+    // The owned partition sorts first; turn calls are numeric across 9/10.
+    expected.rotate_right(1);
+    let first = peer
         .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
         .await?;
     ensure!(
-        first.len() == 2 && first[0].call_id != first[1].call_id,
-        "a nested model call collided with the turn ordinal: {first:?}"
+        first
+            .iter()
+            .map(|row| ModelCallFact {
+                call: row.call,
+                call_id: row.call_id.clone(),
+                end: row.end.clone(),
+                record: row.record.clone()
+            })
+            .collect::<Vec<_>>()
+            == expected,
+        "cold read lost an identity, record or numeric ordinal: {first:?}"
     );
     owner_commit(tier, &owner, nodes, writes).await?;
-    let replayed = tier
-        .store()
+    let replayed = peer
         .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
         .await?;
     ensure!(

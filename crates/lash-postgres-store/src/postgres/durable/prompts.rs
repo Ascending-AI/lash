@@ -745,6 +745,7 @@ mod tests {
     use lash_core_store::store::SessionCatalogStore as _;
     use lash_core_store::store::StoreMaintenance as _;
     use lash_core_store::store::Target;
+    use lash_core_store::store::TurnInputStore as _;
     use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
 
     /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
@@ -887,6 +888,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["shared", "unique-131", "request", "prefix"]
         );
+        // FIG-6607/6611: exercise the real owner program with a second
+        // page of ingress, rather than inferring input release from audits.
+        let mut ingress = Vec::new();
+        for index in 0..129 {
+            let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                lash_core_store::turn_input_vocabulary::TurnInput::text(format!(
+                    "backlog body {index}"
+                )),
+            )
+            .with_source_key(format!("backlog-{index}"));
+            let input = catalog
+                .enqueue_pending_turn_input(draft.clone())
+                .await
+                .unwrap();
+            sqlx::query(
+                "UPDATE lash_pending_turn_inputs SET state = 'completed',
+                admitted_run = 'settled', terminal_at_ms = 0 WHERE input_id = $1",
+            )
+            .bind(input.input_id.as_str())
+            .execute(storage.pool())
+            .await
+            .unwrap();
+            let digest = catalog
+                .turn_input_submission_digest(&session, &format!("backlog-{index}"))
+                .await
+                .unwrap();
+            ingress.push((draft, input.input_id, digest));
+        }
+        let pending_input = catalog
+            .enqueue_pending_turn_input(
+                lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
+                    session.clone(),
+                    lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                    lash_core_store::turn_input_vocabulary::TurnInput::text("unconsumed control"),
+                )
+                .with_source_key("unconsumed-control"),
+            )
+            .await
+            .unwrap();
         // Settling the last request does not erase previously expired identities.
         let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
@@ -909,6 +951,58 @@ mod tests {
             .commit(tx, CommitLabel::new("model.done"))
             .await
             .unwrap();
+        let physical_inputs = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM lash_pending_turn_inputs
+                WHERE state = 'completed' AND input_json IS NOT NULL",
+            )
+            .fetch_one(storage.pool())
+            .await
+            .unwrap()
+        };
+        assert_eq!(
+            physical_inputs().await,
+            1,
+            "the owner program clears exactly 128 input bodies"
+        );
+        for (index, (draft, id, digest)) in ingress.into_iter().enumerate() {
+            let replay = catalog.enqueue_pending_turn_input(draft).await.unwrap();
+            assert_eq!(replay.input_id, id);
+            assert!(
+                replay.input.retained().is_none(),
+                "undrained expired bodies already read Released"
+            );
+            assert_eq!(
+                catalog
+                    .turn_input_submission_digest(&session, &format!("backlog-{index}"))
+                    .await
+                    .unwrap(),
+                digest
+            );
+        }
+        let reopened = crate::testing::connect(database.url()).await.unwrap();
+        reopened
+            .session_store_factory()
+            .gc_unreachable()
+            .await
+            .unwrap();
+        assert_eq!(
+            physical_inputs().await,
+            0,
+            "reopened maintenance drains without owner commits"
+        );
+        assert!(
+            reopened
+                .session_store_factory()
+                .pending_turn_input(&session, &pending_input.input_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .input
+                .input
+                .retained()
+                .is_some()
+        );
         assert_eq!(
             store.prompt_texts(&hashes).await.unwrap(),
             [text("prefix")],

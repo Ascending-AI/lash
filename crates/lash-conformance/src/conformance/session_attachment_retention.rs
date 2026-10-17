@@ -91,6 +91,28 @@ impl HoldLaw {
         self.view.store()
     }
 
+    async fn reopen(&mut self) {
+        self.reopen_on((self.handles.reopen)()).await;
+    }
+
+    async fn reopen_on(&mut self, factory: Arc<dyn crate::DeploymentStore>) {
+        self.handles.factory = factory;
+        let request = session_store_request(&self.session_id, MODEL, crate::SessionRelation::Root);
+        self.view = self
+            .handles
+            .factory
+            .live_view_for(&request)
+            .await
+            .expect("reopen the catalog")
+            .expect("the session remains live");
+        self.facade = crate::RuntimeAttachmentStore::new(
+            Arc::clone(&self.handles.attachments),
+            Arc::clone(self.view.store()) as Arc<dyn crate::AttachmentReferrers>,
+            crate::RuntimeOwner::Session(self.session_id.clone()),
+            crate::AttachmentPolicy::standard(),
+        );
+    }
+
     async fn put(&self, bytes: &[u8]) -> crate::AttachmentRef {
         self.facade
             .put(
@@ -227,6 +249,7 @@ pub async fn session_attachment_holds_follow_their_holders<F>(backend: &str, mak
 where
     F: Fn() -> SessionDeleteBlobHandles,
 {
+    bounded_attachment_release(make()).await;
     for (label, retention) in [
         ("head-only", crate::Retention::HeadOnly),
         ("until-gc", crate::Retention::UntilGc),
@@ -318,4 +341,163 @@ where
             });
         }
     }
+}
+
+/// FIG-6611: a published continuation survives reopening and makes progress
+/// without another owner commit, both within one session and across sessions.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture checks every operation"
+)]
+async fn bounded_attachment_release(handles: SessionDeleteBlobHandles) {
+    let mut law = HoldLaw::new(handles, "attachment-page", crate::Retention::HeadOnly).await;
+    let history = law.put(b"page-history").await;
+    let mut released = Vec::new();
+    for index in 0..129 {
+        released.push(law.put(format!("page-{index}").as_bytes()).await);
+    }
+    law.commit(
+        |state| {
+            state
+                .session_graph
+                .append_message(message("page-history", &[&history]));
+        },
+        &[&history],
+    )
+    .await;
+    let references: Vec<_> = released.iter().collect();
+    let withdrawn = law.enqueue("page-withdrawn", &references).await;
+    law.end_staging(&references).await;
+    law.end_staging(&[&history]).await;
+    law.view
+        .cancel_pending_turn_input(withdrawn.input_id.as_str())
+        .await
+        .expect("withdraw");
+    let vacuum = law
+        .view
+        .vacuum()
+        .await
+        .expect("queue the ended holder's attachments");
+    assert_eq!(vacuum.removed_pending_turn_input_tombstone_count, 1);
+    // One HeadOnly owner commit runs exactly one release page. The history
+    // neighbor is live but is not part of this release queue.
+    law.commit(
+        |state| {
+            state
+                .session_graph
+                .append_message(message("page-next", &[]));
+        },
+        &[],
+    )
+    .await;
+    assert_eq!(
+        held_count(&law, &released).await,
+        1,
+        "one page releases exactly 128 edges"
+    );
+    law.reopen().await;
+    assert_eq!(
+        held_count(&law, &released).await,
+        1,
+        "the outstanding edge is durable"
+    );
+    law.handles
+        .factory
+        .gc_unreachable()
+        .await
+        .expect("continue the queued page");
+    assert_eq!(held_count(&law, &released).await, 0);
+    assert!(
+        law.session_holds(&history).await,
+        "history keeps its exact share"
+    );
+    law.reclaim().await;
+    for reference in &released {
+        assert!(law.bytes_absent(reference).await);
+    }
+    law.facade
+        .read(&history)
+        .await
+        .expect("history bytes survive");
+
+    // Queue one otherwise unheld attachment in each of 129 sessions. No
+    // owner commits follow: maintenance alone must exhaust the session scan.
+    let mut sessions = Vec::new();
+    for index in 0..129 {
+        let handles = SessionDeleteBlobHandles {
+            factory: Arc::clone(&law.handles.factory),
+            reopen: Arc::clone(&law.handles.reopen),
+            probe: Arc::clone(&law.handles.probe),
+            attachments: Arc::clone(&law.handles.attachments),
+        };
+        let other = HoldLaw::new(
+            handles,
+            &format!("attachment-session-{index:03}"),
+            crate::Retention::UntilGc,
+        )
+        .await;
+        let reference = other.put(format!("session-page-{index}").as_bytes()).await;
+        let input = other.enqueue("withdrawn", &[&reference]).await;
+        other.end_staging(&[&reference]).await;
+        other
+            .view
+            .cancel_pending_turn_input(input.input_id.as_str())
+            .await
+            .expect("withdraw");
+        other.view.vacuum().await.expect("queue the ended holder");
+        assert!(
+            other.session_holds(&reference).await,
+            "vacuum publishes continuation"
+        );
+        sessions.push((other, reference));
+    }
+    law.reopen().await;
+    for (session, reference) in &mut sessions {
+        session.reopen_on(Arc::clone(&law.handles.factory)).await;
+        assert!(session.session_holds(reference).await);
+    }
+    let mut remaining = 129;
+    // Two 128-session pages suffice for 129 sessions.
+    for _ in 0..2 {
+        law.handles
+            .factory
+            .gc_unreachable()
+            .await
+            .expect("advance the session scan");
+        law.reopen().await;
+        let mut next = 0;
+        for (session, reference) in &mut sessions {
+            session.reopen_on(Arc::clone(&law.handles.factory)).await;
+            next += usize::from(session.session_holds(reference).await);
+        }
+        assert!(
+            next < remaining || remaining == 0,
+            "maintenance makes durable progress"
+        );
+        remaining = next;
+        assert!(law.session_holds(&history).await);
+        if remaining == 0 {
+            break;
+        }
+    }
+    assert_eq!(
+        remaining, 0,
+        "maintenance eventually exhausts all 129 sessions"
+    );
+    law.reclaim().await;
+    for (session, reference) in &sessions {
+        assert!(session.bytes_absent(reference).await);
+    }
+    law.facade
+        .read(&history)
+        .await
+        .expect("the retained neighbor stays readable");
+}
+
+async fn held_count(law: &HoldLaw, references: &[crate::AttachmentRef]) -> usize {
+    let mut held = 0;
+    for reference in references {
+        held += usize::from(law.session_holds(reference).await);
+    }
+    held
 }

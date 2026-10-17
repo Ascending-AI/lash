@@ -1147,4 +1147,24 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     assert_eq!(writes, EXPECTED, "the park's write count: {receipt:?}");
 }
 
-law!(turn_and_owned_model_calls_survive_an_idempotent_outcome_commit);
+mod turn_and_owned_model_calls_survive_an_idempotent_outcome_commit {
+    use super::*;
+
+    async fn run(file: bool) {
+        let tier = two_node_tier(file).await;
+        let peer = tier.peer.as_ref().map_or(&tier.store, |(_, store)| store);
+        laws::turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(&tier, peer)
+            .await
+            .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test]
+    async fn memory() {
+        run(false).await;
+    }
+
+    #[tokio::test]
+    async fn file() {
+        run(true).await;
+    }
+}

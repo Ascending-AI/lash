@@ -908,4 +908,13 @@ async fn a_build_catalog_closure_hydrates_whole_without_reading_it_back() {
     }
 }
 
-law!(turn_and_owned_model_calls_survive_an_idempotent_outcome_commit);
+#[tokio::test]
+async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit() {
+    let tier = tier_with(crate::testing::fixture_config(), true)
+        .await
+        .expect("the hermetic PostgreSQL target supplies a database");
+    let peer = &tier.peer.as_ref().expect("a cold peer").1;
+    laws::turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(&tier, peer)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}

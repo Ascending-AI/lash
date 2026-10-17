@@ -4,6 +4,7 @@ lash_conformance::session_delete_blob_reclaim_tests!({
     ((), "sqlite", || {
         let backend = TestBackend::blocking(SUBSTRATE);
         let factory = backend.blocking_store();
+        let reopen_backend = backend.clone();
         let attachments = backend.attachment_store();
         let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
             backend.database_uri(),
@@ -12,6 +13,11 @@ lash_conformance::session_delete_blob_reclaim_tests!({
         ));
         lash_conformance::SessionDeleteBlobHandles {
             factory: factory as Arc<dyn DeploymentStore>,
+            reopen: Arc::new(move || {
+                let backend = reopen_backend.clone();
+                sync_await(async move { backend.reopen().await.store().await })
+                    as Arc<dyn DeploymentStore>
+            }),
             probe,
             attachments,
         }

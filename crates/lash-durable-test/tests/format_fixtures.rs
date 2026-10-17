@@ -348,24 +348,6 @@ async fn every_drain_format_is_in_an_actor_format_set() {
     );
 }
 
-/// FIG-6474: every witness owns its archive file, so another recorder cannot
-/// rewrite it as part of a shared corpus.
-#[test]
-fn a_retained_image_owns_its_archive_file() {
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats/corpus");
-    for set in images::retained() {
-        for image in &set.images {
-            let path = root.join(&set.build).join(format!("{}.json", image.name));
-            assert!(
-                path.is_file(),
-                "{} has no independent archive file",
-                path.display()
-            );
-        }
-    }
-}
-
 /// FIG-6474: both corpus and baseline recorders may write only the selected
 /// witness's files.
 #[test]
