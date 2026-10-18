@@ -36,7 +36,7 @@ mod positional;
 mod primitive_methods;
 mod process;
 mod statements;
-mod walk;
+pub(crate) mod walk;
 
 pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 
@@ -331,8 +331,6 @@ pub(crate) struct Lowerer<'a> {
     /// What the closure just emitted is, as its source wrote it, until the
     /// statement that binds it takes it.
     written: Option<lash_kernel_dialect::Written>,
-    /// Every name the source assigns to.
-    assigned: &'a BTreeSet<String>,
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
@@ -421,7 +419,6 @@ pub(crate) fn lower(
                 .collect(),
             environment.effects,
         ),
-        assigned: &program.assigned,
         narrowed: Vec::new(),
         paths: Vec::new(),
         declared: BTreeMap::new(),
@@ -654,15 +651,16 @@ impl Lowerer<'_> {
             .find_map(|(index, scope)| scope.bindings.get_mut(name).map(|binding| (index, binding)))
     }
 
-    /// Whether `name` is a function declaration that nothing assigns to,
-    /// which therefore always holds the token of the function it declares.
+    /// Whether the program's spelling `name` reads a function declaration
+    /// that nothing assigns to, which therefore always holds the token of
+    /// the function it declares.
     pub(crate) fn holds_declared_function(&self, name: &str) -> bool {
         self.scopes
             .iter()
             .rev()
             .find_map(|scope| scope.bindings.get(name))
             .is_some_and(|binding| binding.kind == BindingKind::Function)
-            && !self.assigned.contains(name)
+            && !self.facts.assigned(name)
     }
 
     pub(crate) fn is_bound(&self, name: &str) -> bool {
@@ -1105,7 +1103,9 @@ impl Lowerer<'_> {
 
     // Types.
 
-    /// The type of the source binding `name`, where lowering now stands.
+    /// The type of the source binding `name` reads, where lowering now
+    /// stands. `name` is the program's own spelling of the read, which the
+    /// type analysis resolved to its binding.
     pub(crate) fn type_of_binding(&self, name: &str) -> Ty {
         if let Some((_, ty)) = self.narrowed.iter().rev().find(|(entry, _)| entry == name) {
             return ty.clone();
@@ -1120,7 +1120,7 @@ impl Lowerer<'_> {
                 .narrowable(name)
                 .then(|| self.type_of_binding(name))
         };
-        let undefined = self.facts.of("undefined").is_none() && !self.is_bound("undefined");
+        let undefined = !self.facts.names("undefined") && !self.is_bound("undefined");
         crate::types::narrow(test, &current, undefined)
     }
 

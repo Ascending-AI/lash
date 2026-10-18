@@ -1,11 +1,17 @@
-//! The type of every binding of a source, by name.
+//! The type of every binding of a source.
 //!
-//! One pass over the whole tree collects, for each name the source
-//! declares, every declaration and every assignment that names it, in
-//! whatever scope or function. A name's type is what all of them agree on,
-//! so the answer holds for every binding that spells the name and whichever
-//! one a read resolves to; two bindings of one name that disagree are
-//! unknown. That is coarser than scoping and needs no second resolver.
+//! One pass over the whole tree resolves each spelling of a name, whether
+//! it declares, assigns or reads, to the binding it names, in the scopes
+//! the lowerer gives the source: a function's parameters, its `var`s and
+//! its body's own declarations share one scope, and a block, a loop's
+//! head, a `switch`'s clauses, a `catch` and a named function expression's
+//! name each open one. A binding's type is what all of its
+//! declarations and assignments agree on, so two bindings that share a
+//! name are typed apart, and a read is the type of the binding it names.
+//!
+//! A spelling is known by where the program holds its text: the lowerer
+//! reads the same tree, so the spelling it reads is the one resolved here,
+//! and a name it makes up resolves to nothing and is unknown.
 //!
 //! A binding with an annotation is believed to be what the annotation says,
 //! whatever is assigned to it. One without is inferred: a `const`, or a
@@ -44,6 +50,11 @@ fn effect_path(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Where the analysed program holds a spelling's text (see the module).
+fn spelling(name: &str) -> usize {
+    name.as_ptr().addr()
+}
+
 /// One declaration of a name, or one assignment to it.
 enum Source<'a> {
     /// A value the analysis says nothing about.
@@ -59,11 +70,22 @@ enum Source<'a> {
     ElementOf(&'a Expr),
 }
 
-#[derive(Default)]
+/// One binding, with every declaration and assignment of it.
 struct Entry<'a> {
+    name: String,
+    /// Declared in the program's own scope, which is the session's: a name
+    /// an earlier cell left is that cell's binding.
+    session_scope: bool,
     sources: Vec<Source<'a>>,
     declarations: usize,
     annotated: usize,
+    assignments: usize,
+}
+
+/// What the source does with a name, in every scope.
+#[derive(Default)]
+struct Tally {
+    declarations: usize,
     assignments: usize,
     /// A `var`, a function or an enum: it exists before its declaration
     /// runs, so a test of it proves nothing about a later read.
@@ -73,14 +95,23 @@ struct Entry<'a> {
 /// How a pattern's names come to exist.
 #[derive(Clone, Copy)]
 enum Role {
-    Declared { hoisted: bool },
+    /// Declared in the innermost scope.
+    Declared {
+        hoisted: bool,
+    },
+    /// A `var`: declared in its function's scope, before any of it runs.
+    Var,
     Assigned,
 }
 
 #[derive(Default)]
 struct Collector<'a> {
-    entries: HashMap<&'a str, Entry<'a>>,
-    order: Vec<&'a str>,
+    bindings: Vec<Entry<'a>>,
+    /// The bindings each open scope declares, innermost last.
+    scopes: Vec<HashMap<String, usize>>,
+    /// The binding each spelling names.
+    spellings: HashMap<usize, usize>,
+    names: HashMap<&'a str, Tally>,
     plain: super::plain::Collector<'a>,
     function_depth: usize,
     aliases: Vec<(&'a str, &'a TypeAnnotation)>,
@@ -91,7 +122,13 @@ struct Collector<'a> {
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
     plain: super::plain::Facts,
-    types: HashMap<String, Ty>,
+    /// Each binding's type, by its index in the collector.
+    types: Vec<Ty>,
+    /// Whether an assignment or an update writes each binding.
+    assigned: Vec<bool>,
+    spellings: HashMap<usize, usize>,
+    /// Every name the source declares or assigns.
+    named: HashSet<String>,
     narrowable: HashSet<String>,
     aliases: BTreeMap<String, Ty>,
     direct_calls: HashSet<String>,
@@ -109,6 +146,9 @@ impl Facts {
         effects: &BTreeMap<EffectName, Signature>,
     ) -> Self {
         let mut collector = Collector::default();
+        collector.scopes.push(HashMap::new());
+        collector.declare_vars(&program.statements);
+        collector.declare_block(&program.statements);
         collector.statements(&program.statements);
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
         let mut facts = Self {
@@ -117,7 +157,7 @@ impl Facts {
                 .filter(|(name, _)| {
                     let root = name.as_str().split('.').next().unwrap_or_default();
                     !crate::builtins::is_global(root)
-                        && !collector.entries.contains_key(root)
+                        && !collector.names.contains_key(root)
                         && !session.contains(&Name::new(root))
                 })
                 .map(|(name, signature)| {
@@ -130,10 +170,17 @@ impl Facts {
                 .map(|name| (*name).to_owned())
                 .collect(),
             plain: std::mem::take(&mut collector.plain).finish(session, terminal),
-            types: collector
-                .order
+            types: vec![Ty::Never; collector.bindings.len()],
+            assigned: collector
+                .bindings
                 .iter()
-                .map(|name| ((*name).to_string(), Ty::Never))
+                .map(|entry| entry.assignments > 0)
+                .collect(),
+            spellings: std::mem::take(&mut collector.spellings),
+            named: collector
+                .names
+                .keys()
+                .map(|name| (*name).to_owned())
                 .collect(),
             narrowable: HashSet::new(),
             aliases,
@@ -141,10 +188,10 @@ impl Facts {
         let mut settled = false;
         for _ in 0..MAX_ROUNDS {
             let mut changed = false;
-            for name in &collector.order {
-                let ty = facts.entry_type(name, &collector.entries[name]);
-                if facts.types.get(*name) != Some(&ty) {
-                    facts.types.insert((*name).to_string(), ty);
+            for (binding, entry) in collector.bindings.iter().enumerate() {
+                let ty = facts.entry_type(binding, entry);
+                if facts.types[binding] != ty {
+                    facts.types[binding] = ty;
                     changed = true;
                 }
             }
@@ -153,18 +200,21 @@ impl Facts {
                 break;
             }
         }
-        for (name, ty) in &mut facts.types {
-            if !settled || *ty == Ty::Never || session.contains(&Name::new(name.as_str())) {
+        for (ty, entry) in facts.types.iter_mut().zip(&collector.bindings) {
+            if !settled
+                || *ty == Ty::Never
+                || (entry.session_scope && session.contains(&Name::new(entry.name.as_str())))
+            {
                 *ty = Ty::Unknown;
             }
         }
         facts.narrowable = collector
-            .entries
+            .names
             .iter()
-            .filter(|(name, entry)| {
-                entry.declarations == 1
-                    && entry.assignments == 0
-                    && !entry.hoisted
+            .filter(|(name, tally)| {
+                tally.declarations == 1
+                    && tally.assignments == 0
+                    && !tally.hoisted
                     && !session.contains(&Name::new(**name))
             })
             .map(|(name, _)| (*name).to_string())
@@ -192,15 +242,34 @@ impl Facts {
         self.plain.primitive(expr)
     }
 
-    /// The type of the source's bindings named `name`, or `None` when the
-    /// source declares no such name.
-    pub(crate) fn of(&self, name: &str) -> Option<&Ty> {
-        self.types.get(name)
+    /// The type of the binding a spelling of the program names, or `None`
+    /// when it names none of the source's: a session binding, a global, or
+    /// a name the lowerer made up. `spelling` is the program's own text of
+    /// it, as the lowerer reads it, not a copy.
+    pub(crate) fn of(&self, spelling: &str) -> Option<&Ty> {
+        self.binding(spelling).map(|binding| &self.types[binding])
+    }
+
+    fn binding(&self, name: &str) -> Option<usize> {
+        self.spellings.get(&spelling(name)).copied()
+    }
+
+    /// Whether an assignment or an update may write the binding a spelling
+    /// of the program names. One that names none of the source's bindings
+    /// may be written.
+    pub(crate) fn assigned(&self, spelling: &str) -> bool {
+        self.binding(spelling)
+            .is_none_or(|binding| self.assigned[binding])
+    }
+
+    /// Whether the source declares or assigns `name` in any scope.
+    pub(crate) fn names(&self, name: &str) -> bool {
+        self.named.contains(name)
     }
 
     /// Whether a test of `name` says what a later read of it holds: the
-    /// source declares the name once, never assigns it, and it does not
-    /// exist before its declaration.
+    /// source declares the name once, in any scope, never assigns it, and
+    /// it does not exist before its declaration.
     pub(crate) fn narrowable(&self, name: &str) -> bool {
         self.narrowable.contains(name)
     }
@@ -217,7 +286,7 @@ impl Facts {
         ))
     }
 
-    fn entry_type(&self, name: &str, entry: &Entry<'_>) -> Ty {
+    fn entry_type(&self, binding: usize, entry: &Entry<'_>) -> Ty {
         // A name every declaration annotates is what the annotations say.
         let trusted = entry.declarations > 0 && entry.annotated == entry.declarations;
         let mut ty = Ty::Never;
@@ -230,8 +299,7 @@ impl Facts {
                 Source::Returns(return_ty) => self.function(*return_ty),
                 Source::Value(value) => self.type_of(value),
                 Source::Compound(op, value) => {
-                    let current = self.types.get(name).cloned().unwrap_or(Ty::Unknown);
-                    binary_result(*op, &current, &self.type_of(value))
+                    binary_result(*op, &self.types[binding], &self.type_of(value))
                 }
                 Source::ElementOf(iterated) => self.type_of(iterated).element(),
             };
@@ -250,8 +318,8 @@ impl Facts {
             Expr::Number(_) => Ty::Float,
             Expr::String(_) => Ty::Text,
             Expr::Template { .. } => Ty::Text,
-            Expr::Ident(name, _) => match self.types.get(name.as_str()) {
-                Some(ty) => ty.clone(),
+            Expr::Ident(name, _) => match self.binding(name) {
+                Some(binding) => self.types[binding].clone(),
                 None => match name.as_str() {
                     "undefined" => Ty::Undefined,
                     "NaN" | "Infinity" => Ty::Float,
@@ -276,10 +344,8 @@ impl Facts {
                     AssignOp::Binary(op),
                 ) => {
                     let current = self
-                        .types
-                        .get(name.as_str())
-                        .cloned()
-                        .unwrap_or(Ty::Unknown);
+                        .binding(name)
+                        .map_or(Ty::Unknown, |binding| self.types[binding].clone());
                     binary_result(*op, &current, &self.type_of(value))
                 }
                 _ => Ty::Unknown,
@@ -364,11 +430,70 @@ fn resolve_aliases(
 }
 
 impl<'a> Collector<'a> {
-    fn entry(&mut self, name: &'a str) -> &mut Entry<'a> {
-        if !self.entries.contains_key(name) {
-            self.order.push(name);
+    /// Runs `walk` in a scope of its own.
+    fn scoped(&mut self, walk: impl FnOnce(&mut Self)) {
+        self.scopes.push(HashMap::new());
+        walk(self);
+        self.scopes.pop();
+    }
+
+    /// Runs `walk` where the innermost scope is not yet open: the lowerer
+    /// lowers a loop's iterated value and a `switch`'s tests before it
+    /// opens the scope of the loop's head or the clauses.
+    fn outside(&mut self, walk: impl FnOnce(&mut Self)) {
+        let scope = self.scopes.pop();
+        walk(self);
+        self.scopes.extend(scope);
+    }
+
+    /// Declares `name` in the innermost scope, or gives the binding it
+    /// already declares there: `var` twice, a function over a `var`, a
+    /// parameter named again.
+    fn declare(&mut self, name: &str) -> usize {
+        let session_scope = self.scopes.len() == 1;
+        let Some(scope) = self.scopes.last_mut() else {
+            unreachable!("the program's scope is open");
+        };
+        *scope.entry(name.to_owned()).or_insert_with(|| {
+            self.bindings.push(Entry {
+                name: name.to_owned(),
+                session_scope,
+                sources: Vec::new(),
+                declarations: 0,
+                annotated: 0,
+                assignments: 0,
+            });
+            self.bindings.len() - 1
+        })
+    }
+
+    /// Declares what a pattern binds.
+    fn declare_pattern(&mut self, pattern: &'a Pattern) {
+        let mut names = Vec::new();
+        crate::lower::walk::pattern_names(pattern, &mut names);
+        self.declare_names(names);
+    }
+
+    fn declare_names(&mut self, names: Vec<String>) {
+        for name in names {
+            self.declare(&name);
         }
-        self.entries.entry(name).or_default()
+    }
+
+    /// The binding `name` names where the walk stands.
+    fn lookup(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    /// A read: the binding its spelling names, for the lowerer's read of
+    /// the same spelling.
+    fn read(&mut self, name: &'a str) {
+        if let Some(binding) = self.lookup(name) {
+            self.spellings.insert(spelling(name), binding);
+        }
     }
 
     fn name(&mut self, name: &'a str, role: Role, source: Source<'a>) {
@@ -377,16 +502,39 @@ impl<'a> Collector<'a> {
             _ => None,
         };
         self.plain.name(name, value);
-        let entry = self.entry(name);
+        let tally = self.names.entry(name).or_default();
         match role {
             Role::Declared { hoisted } => {
-                entry.declarations += 1;
-                entry.hoisted |= hoisted;
-                if matches!(source, Source::Annotated(_)) {
-                    entry.annotated += 1;
-                }
+                tally.declarations += 1;
+                tally.hoisted |= hoisted;
             }
-            Role::Assigned => entry.assignments += 1,
+            Role::Var => {
+                tally.declarations += 1;
+                tally.hoisted = true;
+            }
+            Role::Assigned => tally.assignments += 1,
+        }
+        let binding = match role {
+            Role::Declared { .. } => Some(self.declare(name)),
+            // The function's scope declared every `var` of its body, and no
+            // scope between can declare the name again.
+            Role::Var => Some(self.lookup(name).unwrap_or_else(|| self.declare(name))),
+            // A name no scope declares is a session binding or a global,
+            // which nothing here types.
+            Role::Assigned => self.lookup(name),
+        };
+        let Some(binding) = binding else {
+            return;
+        };
+        self.spellings.insert(spelling(name), binding);
+        let entry = &mut self.bindings[binding];
+        if let Role::Assigned = role {
+            entry.assignments += 1;
+        } else {
+            entry.declarations += 1;
+            if matches!(source, Source::Annotated(_)) {
+                entry.annotated += 1;
+            }
         }
         entry.sources.push(source);
     }
@@ -396,7 +544,9 @@ impl<'a> Collector<'a> {
         match pattern {
             Pattern::Ident(name, annotation) => {
                 let source = match (annotation, role) {
-                    (Some(annotation), Role::Declared { .. }) => Source::Annotated(annotation),
+                    (Some(annotation), Role::Declared { .. } | Role::Var) => {
+                        Source::Annotated(annotation)
+                    }
                     _ => Source::Opaque,
                 };
                 self.name(name, role, source);
@@ -407,9 +557,10 @@ impl<'a> Collector<'a> {
                 self.expr(object);
                 self.property(property);
             }
+            // The default runs before its target is declared.
             Pattern::Assign { target, default } => {
-                self.pattern(target, role);
                 self.expr(default);
+                self.pattern(target, role);
             }
             Pattern::Array { elements, rest } => {
                 for element in elements.iter().flatten() {
@@ -469,15 +620,18 @@ impl<'a> Collector<'a> {
                     self.expr(value);
                 }
             }
-            Stmt::Block(body) => self.statements(body),
+            Stmt::Block(body) => self.scoped(|this| {
+                this.declare_block(body);
+                this.statements(body);
+            }),
             Stmt::Var { kind, declarations } => {
                 for declaration in declarations {
-                    let hoisted = *kind == VarKind::Var;
-                    let source = match &declaration.init {
-                        Some(init) if !hoisted => Source::Value(init),
-                        _ => Source::Opaque,
+                    let (role, source) = match (&declaration.init, kind) {
+                        (_, VarKind::Var) => (Role::Var, Source::Opaque),
+                        (Some(init), _) => (Role::Declared { hoisted: false }, Source::Value(init)),
+                        (None, _) => (Role::Declared { hoisted: false }, Source::Opaque),
                     };
-                    self.bound(&declaration.pattern, Role::Declared { hoisted }, source);
+                    self.bound(&declaration.pattern, role, source);
                     if let Some(init) = &declaration.init {
                         self.expr(init);
                     }
@@ -512,91 +666,150 @@ impl<'a> Collector<'a> {
                 self.expr(test);
                 self.statement(body);
             }
+            // The head's `let` and `const` are declared before it runs.
             Stmt::For {
                 init,
                 test,
                 update,
                 body,
-            } => {
+            } => self.scoped(|this| {
                 if let Some(init) = init {
-                    self.statement(init);
+                    if let Stmt::Var { kind, declarations } = init.unspanned()
+                        && *kind != VarKind::Var
+                    {
+                        for declaration in declarations {
+                            this.declare_pattern(&declaration.pattern);
+                        }
+                    }
+                    this.statement(init);
                 }
                 for expr in [test, update].into_iter().flatten() {
-                    self.expr(expr);
+                    this.expr(expr);
                 }
-                self.statement(body);
-            }
+                this.statement(body);
+            }),
             Stmt::ForOf {
                 pattern,
                 kind,
                 iterable,
                 body,
-            } => {
-                self.bound(
+            } => self.scoped(|this| {
+                this.bound(
                     pattern,
                     loop_role(*kind),
                     loop_source(*kind, Source::ElementOf(iterable)),
                 );
-                self.plain.escape(iterable);
-                self.expr(iterable);
-                self.statement(body);
-            }
+                this.outside(|this| {
+                    this.plain.escape(iterable);
+                    this.expr(iterable);
+                });
+                this.statement(body);
+            }),
             Stmt::ForIn {
                 pattern,
                 kind,
                 object,
                 body,
-            } => {
+            } => self.scoped(|this| {
                 // `for...in` visits property names.
-                self.bound(
+                this.bound(
                     pattern,
                     loop_role(*kind),
                     loop_source(*kind, Source::Is(Ty::Text)),
                 );
-                self.plain.escape(object);
-                self.expr(object);
-                self.statement(body);
-            }
+                this.outside(|this| {
+                    this.plain.escape(object);
+                    this.expr(object);
+                });
+                this.statement(body);
+            }),
+            // Every clause shares one scope.
             Stmt::Switch {
                 discriminant,
                 cases,
             } => {
                 self.expr(discriminant);
-                for case in cases {
-                    if let Some(test) = &case.test {
-                        self.expr(test);
+                self.scoped(|this| {
+                    for case in cases {
+                        this.declare_block(&case.consequent);
                     }
-                    self.statements(&case.consequent);
-                }
+                    for case in cases {
+                        if let Some(test) = &case.test {
+                            this.outside(|this| this.expr(test));
+                        }
+                        this.statements(&case.consequent);
+                    }
+                });
             }
             Stmt::Try {
                 body,
                 catch,
                 finally,
             } => {
-                self.statements(body);
+                self.scoped(|this| this.block(body));
                 if let Some(Catch { binding, body }) = catch {
-                    if let Some(binding) = binding {
-                        self.bound(binding, Role::Declared { hoisted: false }, Source::Opaque);
-                    }
-                    self.statements(body);
+                    self.scoped(|this| {
+                        if let Some(binding) = binding {
+                            this.bound(binding, Role::Declared { hoisted: false }, Source::Opaque);
+                        }
+                        this.block(body);
+                    });
                 }
                 if let Some(finally) = finally {
-                    self.statements(finally);
+                    self.scoped(|this| this.block(finally));
                 }
             }
         }
     }
 
+    /// A block's statements, in the scope just opened for them.
+    fn block(&mut self, statements: &'a [Stmt]) {
+        self.declare_block(statements);
+        self.statements(statements);
+    }
+
+    /// Declares what a block's own statements declare lexically, which
+    /// exists for the whole block: `let`, `const`, functions and enums.
+    fn declare_block(&mut self, statements: &'a [Stmt]) {
+        for statement in statements {
+            match statement.unspanned() {
+                Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
+                    for declaration in declarations {
+                        self.declare_pattern(&declaration.pattern);
+                    }
+                }
+                Stmt::Function { name, .. } | Stmt::Enum { name, .. } => {
+                    self.declare(name);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Declares every `var` of a function's body, or of the program, in
+    /// the scope just opened for it.
+    fn declare_vars(&mut self, statements: &'a [Stmt]) {
+        let mut names = Vec::new();
+        crate::lower::walk::var_names(statements, &mut names);
+        self.declare_names(names);
+    }
+
+    /// A function's parameters, each declared once what comes before it has
+    /// run, and its body, in one scope.
     fn function(&mut self, function: &'a Function) {
         self.function_depth += 1;
-        for param in &function.params {
-            self.pattern(param, Role::Declared { hoisted: false });
-        }
-        match &function.body {
-            FunctionBody::Block(body) => self.statements(body),
-            FunctionBody::Expression(value) => self.expr(value),
-        }
+        self.scoped(|this| {
+            for param in &function.params {
+                this.pattern(param, Role::Declared { hoisted: false });
+            }
+            match &function.body {
+                FunctionBody::Block(body) => {
+                    this.declare_vars(body);
+                    this.block(body);
+                }
+                FunctionBody::Expression(value) => this.expr(value),
+            }
+        });
         self.function_depth -= 1;
     }
 
@@ -649,9 +862,9 @@ impl<'a> Collector<'a> {
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::RegExp { .. }
-            | Expr::Ident(..)
             | Expr::This
             | Expr::LoneSurrogateString => {}
+            Expr::Ident(name, _) => self.read(name),
             Expr::Array(elements) => {
                 for element in elements {
                     match element {
@@ -737,16 +950,19 @@ impl<'a> Collector<'a> {
                     self.expr(expression);
                 }
             }
-            Expr::Function(function) => {
-                if let Some(name) = function.name.as_deref().filter(|_| !function.is_arrow) {
-                    self.name(
+            // A function expression's name is a binding only its own body
+            // sees.
+            Expr::Function(function) => match function.name.as_deref() {
+                Some(name) if !function.is_arrow => self.scoped(|this| {
+                    this.name(
                         name,
                         Role::Declared { hoisted: true },
                         Source::Returns(function.return_ty.as_ref()),
                     );
-                }
-                self.function(function);
-            }
+                    this.function(function);
+                }),
+                _ => self.function(function),
+            },
             Expr::Call { callee, args, .. } => {
                 if let Expr::Ident(name, _) = callee.as_ref()
                     && args.iter().all(|arg| matches!(arg, CallArg::Value(_)))
@@ -788,9 +1004,8 @@ impl<'a> Collector<'a> {
 /// that exist.
 fn loop_role(kind: Option<VarKind>) -> Role {
     match kind {
-        Some(kind) => Role::Declared {
-            hoisted: kind == VarKind::Var,
-        },
+        Some(VarKind::Var) => Role::Var,
+        Some(_) => Role::Declared { hoisted: false },
         None => Role::Assigned,
     }
 }

@@ -58,7 +58,7 @@ impl Lowerer<'_> {
                 }
                 ast::Stmt::Function { name, function } => {
                     self.declare(name, BindingKind::Function);
-                    if !self.assigned.contains(name)
+                    if !self.facts.assigned(name)
                         && self.facts.has_direct_call(name)
                         && super::positional::eligible(function)
                     {

@@ -342,7 +342,7 @@ impl Lowerer<'_> {
     pub(super) fn read(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Operand> {
         let span = span.or(self.span);
         if let Some(kernel) = self.resolve(name, span)? {
-            let stable = !self.assigned.contains(name)
+            let stable = !self.facts.assigned(name)
                 && self.binding_mut(name).is_some_and(|(_, binding)| {
                     binding.live
                         && binding.kernel == kernel

@@ -235,6 +235,91 @@ fn a_built_in_array_methods_new_array_is_a_list() {
     );
 }
 
+/// A type belongs to a binding, not to its name. A parameter and an outer
+/// `const` of one name, an outer `let` and a function's own `const`, and a
+/// block's `const` under an outer one are each typed by what that binding
+/// alone holds: the list keeps the list's own `push` whatever the other
+/// binding holds, and the binding that may hold anything keeps the helper.
+/// So is whether something assigns it: a receiver is held aside from the
+/// call's arguments, and a declared function is called through what its
+/// binding holds now, only when an assignment may write that binding.
+#[test]
+fn a_shadowed_name_types_each_binding_by_what_it_holds() {
+    // How many pushes take the list's own path, how many of those read the
+    // receiver from a temporary it was held in, and whether any push takes
+    // the helper.
+    let pushes = |source: &str| {
+        let text = main_text(source);
+        let receivers: Vec<String> = text
+            .lines()
+            .filter_map(|line| {
+                let (receiver, _) = line.trim().strip_prefix("set ")?.split_once("[list.len(")?;
+                Some(receiver.to_owned())
+            })
+            .collect();
+        let held = receivers
+            .iter()
+            .filter(|receiver| {
+                receiver
+                    .strip_prefix('t')
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
+            .count();
+        (
+            receivers.len(),
+            held,
+            text.contains("invoke ts.member.push("),
+        )
+    };
+    for (source, expected) in [
+        (
+            "function demo(items) { items.push(1); return items; } \
+             const items = []; items.push(2); demo(items);",
+            (1, 0, true),
+        ),
+        (
+            "let result = null; function one() { return 1; } \
+             function body() { const result = []; result.push(one()); return result; } \
+             result = body(); result.push(2);",
+            (1, 0, true),
+        ),
+        (
+            "const xs = []; function f(o) { { const xs = o; xs.push(1); } } xs.push(2); f(xs);",
+            (1, 0, true),
+        ),
+        (
+            "const xs = []; { let xs = 'a'; xs = xs + 'b'; } xs.push(1);",
+            (1, 0, false),
+        ),
+        (
+            "let ys = []; function g() { ys = []; return 1; } \
+             function h() { const ys = []; ys.push(g()); return ys; } ys.push(g()); h();",
+            (2, 1, false),
+        ),
+    ] {
+        assert_eq!(pushes(source), expected, "{source}");
+    }
+    assert_eq!(
+        finished(
+            "function demo(items) { return items.push('own'); } \
+             const items = []; items.push(1); \
+             const custom = demo({ push(x) { return 'custom ' + x; } }); \
+             let result = null; \
+             function body() { const result = []; result.push(2); return result; } \
+             result = body(); \
+             let ys = [0]; function g() { ys = ['new']; return 1; } \
+             function h() { const ys = []; ys.push(g()); return ys; } \
+             const before = ys; ys.push(g()); const inner = h(); \
+             function pick() { return 'declared'; } \
+             function other() { function pick() { return 'inner'; } \
+               pick = () => 'replaced'; return pick(); } \
+             await finish(JSON.stringify([items, custom, result, before, ys, inner, \
+               pick(), other()]));"
+        ),
+        r#"[[1],"custom own",[2],[0,1],["new"],[1],"declared","replaced"]"#
+    );
+}
+
 /// TS-PLAIN-PATH: a closed, source-built record spine needs no repeated
 /// kind/brand admission, and leaf writes preserve its heap graph.
 #[test]

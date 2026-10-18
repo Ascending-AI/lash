@@ -66,7 +66,7 @@ pub(super) fn always_leaves(statement: &Stmt) -> bool {
 }
 
 /// The names a pattern binds, in source order.
-pub(super) fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
+pub(crate) fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
     match pattern {
         Pattern::Ident(name, _) => names.push(name.clone()),
         Pattern::Rest(inner) => pattern_names(inner, names),
@@ -93,7 +93,7 @@ pub(super) fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
 
 /// The names `var` declares anywhere in `statements`, outside nested
 /// functions: they belong to the enclosing function.
-pub(super) fn var_names(statements: &[Stmt], names: &mut Vec<String>) {
+pub(crate) fn var_names(statements: &[Stmt], names: &mut Vec<String>) {
     for statement in statements {
         var_names_of(statement, names);
     }
