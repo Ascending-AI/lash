@@ -498,6 +498,9 @@ pub(crate) struct Executable {
     document: Arc<Document>,
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
+    /// This executable's process-local identity, which the code a closure
+    /// last ran under it is cached by (`arena::LocalCode`).
+    local: u64,
 }
 
 /// Immutable document tables, independent of any run or owning document.
@@ -691,6 +694,12 @@ impl Executable {
             Unit::Library(function) => self.reaches(function).then_some(&self.library.0.tables),
             Unit::Main | Unit::Function(_) => Some(&self.own.tables),
         }
+    }
+
+    /// The process-local identity that names this executable's code
+    /// numbering, unique among the executables the process prepares.
+    pub(crate) fn local(&self) -> u64 {
+        self.local
     }
 
     /// The function body or closure body whose site is `site`.
@@ -1000,6 +1009,9 @@ pub(crate) struct Nested {
     /// The action's site: what its waits, its occurrences and its saved
     /// continuation name.
     pub(crate) site: Site,
+    /// The action's site as a path under its statement's: what a
+    /// continuation saved at it names it by.
+    pub(crate) suffix: Suffix,
     pub(crate) occurrence: usize,
     /// The length of its statement's site path: a saved continuation names
     /// the action and its roles by their path suffix under it.
@@ -1019,7 +1031,24 @@ pub(crate) struct Nested {
     /// expression that produced it and the register it is in under this
     /// layout. They are the continuation's roles, `live_roles` of the
     /// action's site.
-    pub(crate) roles: Box<[(Site, Reg)]>,
+    pub(crate) roles: Box<[NestedRole]>,
+}
+
+/// A site's path under its statement's, as a saved continuation names its
+/// action and its roles: built once by the compiler and shared by every
+/// continuation the machine saves there, copied out only where a frame's
+/// row is written.
+pub(crate) type Suffix = Arc<[u32]>;
+
+/// An operand a statement has evaluated when one of its nested actions is
+/// reached: a role of the action's continuation (`K-EVAL-008`).
+pub(crate) struct NestedRole {
+    /// The site of the expression that produced it.
+    pub(crate) site: Site,
+    /// The site as a path under the statement's.
+    pub(crate) suffix: Suffix,
+    /// The register it is in under this layout.
+    pub(crate) reg: Reg,
 }
 
 /// What a nested action does.

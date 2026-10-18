@@ -28,7 +28,7 @@ use lash_kernel_exec::{
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
-    NestedKind, Runs, Shuffler, Stmt, Var, Via,
+    NestedKind, NestedRole, Runs, Shuffler, Stmt, Var, Via,
 };
 
 /// One statement's ops, the charge regions they head, and its static
@@ -607,16 +607,22 @@ impl Compiler<'_> {
         args: &[doc::Expr],
         dst: Reg,
     ) {
+        let statement = self.stmt_depth as usize;
         let roles = self
             .live
             .iter()
             .map(|&(depth, index, reg)| {
                 let mut path = self.path[..depth as usize].to_vec();
                 path.push(index);
-                (doc::Site::new(self.unit.clone(), path), reg)
+                NestedRole {
+                    suffix: path[statement..].into(),
+                    site: doc::Site::new(self.unit.clone(), path),
+                    reg,
+                }
             })
             .collect();
         let site = self.site();
+        let suffix = site.path[statement..].into();
         let args = match read {
             // The callee comes before the arguments (`K-EVAL-004`), a role
             // of the actions in them under the action's own site.
@@ -644,6 +650,7 @@ impl Compiler<'_> {
         self.stream.nested.push(Nested {
             occurrence: usize::MAX,
             site,
+            suffix,
             depth: self.stmt_depth,
             kind,
             operator,

@@ -9,12 +9,13 @@
 //! is refused: the machine runs the body.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use lash_kernel_doc::plan::{HelperPlan, PlanLoop};
 use lash_kernel_doc::{Site, Unit};
 use lash_kernel_exec::ActIx;
 
-use super::{BlockId, CodeId, Form, Local, StmtId, Tables};
+use super::{BlockId, CodeId, Form, Local, StmtId, Suffix, Tables};
 
 /// A segment's sites and variables under one layout.
 pub(crate) struct Segment {
@@ -33,11 +34,11 @@ pub(crate) struct SegmentSite {
     /// The frame's control there, outermost first.
     pub(crate) control: Vec<SiteControl>,
     /// The action's site as a path under its statement's.
-    pub(crate) pending: Vec<u32>,
+    pub(crate) pending: Suffix,
     /// The operands the statement holds, in the body's evaluation order:
     /// each by its path under the statement's, and the plan register
     /// holding it.
-    pub(crate) roles: Vec<(Vec<u32>, u32)>,
+    pub(crate) roles: Vec<(Suffix, u32)>,
     /// The register the action's value goes to.
     pub(crate) dst: u32,
     /// The plan variables in scope there.
@@ -218,19 +219,19 @@ fn resolve_site(
             control.push(SiteControl::While { stmt });
         }
         let mut roles = Vec::with_capacity(nested.roles.len());
-        for (role, _) in nested.roles.iter() {
+        for role in nested.roles.iter() {
             let reg = site
                 .roles
                 .iter()
-                .find(|stated| stated.path == role.path.as_slice())
-                .ok_or_else(|| format!("the role {:?} is not stated", role.path))?
+                .find(|stated| stated.path == role.site.path.as_slice())
+                .ok_or_else(|| format!("the role {:?} is not stated", role.site.path))?
                 .reg;
-            roles.push((role.path[index..].to_vec(), reg));
+            roles.push((Arc::clone(&role.suffix), reg));
         }
         if roles.len() != site.roles.len() {
             return Err("the site states a role the body does not hold".into());
         }
-        (Some(*act), path[index..].to_vec(), roles)
+        (Some(*act), Arc::clone(&nested.suffix), roles)
     } else {
         // The statement's own action: its frame holds no role there.
         let Form::Action(action) = form else {
@@ -239,7 +240,7 @@ fn resolve_site(
         if action.site != full || path.len() != statement.len() + 1 || !site.roles.is_empty() {
             return Err("the statement's action is elsewhere".into());
         }
-        (None, Vec::new(), Vec::new())
+        (None, Suffix::from([]), Vec::new())
     };
     if loops.next().is_some() {
         return Err("the site states a loop the body does not hold".into());

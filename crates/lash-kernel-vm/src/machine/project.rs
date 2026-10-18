@@ -528,7 +528,7 @@ fn open(
             )
         }
         StoredHead::Small(StoredObject::Closure { site, captures }) => {
-            let site = site.resolve(pages)?.as_ref().clone();
+            let site = site.resolve(pages)?;
             let code = exe.code(closure_code(exe, &site)?);
             let mut named = Vec::with_capacity(captures.len());
             for (name, cell) in captures {
@@ -548,6 +548,7 @@ fn open(
                 Body::Closure {
                     site,
                     captures: cells.into_boxed_slice(),
+                    code: None,
                 },
                 None,
             )
@@ -805,7 +806,7 @@ fn stored(
     enum Held {
         List(Vec<Value>),
         Table(ObjectKind, Vec<Value>, Vec<u64>, u64),
-        Closure(Site, Vec<ArenaHandle>),
+        Closure(Arc<Site>, Vec<ArenaHandle>),
         Cell(Value),
     }
     let held = match arena.body(handle).map_err(arena_fault)? {
@@ -831,7 +832,7 @@ fn stored(
                 index.next(),
             )
         }
-        Body::Closure { site, captures } => Held::Closure(site.clone(), captures.to_vec()),
+        Body::Closure { site, captures, .. } => Held::Closure(site.clone(), captures.to_vec()),
         Body::Cell(value) => Held::Cell(*value),
         _ => return Err(malformed("a dirty handle names an immutable")),
     };

@@ -57,6 +57,7 @@ pub use ops::invalid_key;
 pub use tables::{Index, Place};
 
 use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::arena::{
     ArenaHandle, Body, Bytes, Chunk, ErrorBody, LongText, Objects, Sequence, ShortText,
@@ -149,6 +150,15 @@ pub enum ProxyKind {
     Unknown,
 }
 
+/// The site a cold closure's placeholder body holds until it is decoded:
+/// one shared empty site, so a proxy allocates none.
+static COLD_CLOSURE_SITE: LazyLock<Arc<lash_kernel_doc::Site>> = LazyLock::new(|| {
+    Arc::new(lash_kernel_doc::Site::new(
+        lash_kernel_doc::Unit::Main,
+        &[] as &[u32],
+    ))
+});
+
 impl ProxyKind {
     /// The cold placeholder body of a proxy of this kind.
     pub fn placeholder(self) -> Body {
@@ -176,8 +186,9 @@ impl ProxyKind {
                 chunks: cold(),
             }),
             Self::Closure => Body::Closure {
-                site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, &[] as &[u32]),
+                site: Arc::clone(&*COLD_CLOSURE_SITE),
                 captures: Box::new([]),
+                code: None,
             },
             Self::Cell | Self::Unknown => Body::Cell(Value::Absent),
         }

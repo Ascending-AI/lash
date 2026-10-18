@@ -232,7 +232,9 @@ impl KernelMachine {
                 let call = Call::new(code, args, count)
                     .sharing(&captures)
                     .awaited_by(awaiting);
-                self.push_frame(task, exe, call)?;
+                let pushed = self.push_frame(task, exe, call);
+                self.spent_captures(captures);
+                pushed?;
                 Ok(Flow::Step)
             }
         }

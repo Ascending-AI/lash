@@ -18,7 +18,7 @@
 use super::loops::{Guard, Header, TextCursor};
 use super::project::{SharedArena, admit, admit_cell, project, project_cell};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
-use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
+use crate::compile::{Executable, Form, LibId, NestedKind, StmtId, Suffix};
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_doc::{Site, Unit, Value};
@@ -169,10 +169,11 @@ impl Slots {
 /// The continuation a frame saves where it stands at an action nested in
 /// its statement (`K-EVAL-008`): the action by its site's path suffix
 /// under the statement's, its phase, and the operands its statement had
-/// evaluated as roles by site, in evaluation order.
+/// evaluated as roles by site, in evaluation order. The suffixes are the
+/// compiler's, shared; a frame's row gets its own copy when written.
 #[derive(Clone, Debug)]
 pub(super) struct Pending {
-    pub(super) site: Vec<u32>,
+    pub(super) site: Suffix,
     pub(super) phase: PhaseRecord,
     pub(super) roles: Vec<Role>,
 }
@@ -182,7 +183,7 @@ pub(super) struct Pending {
 /// continuation left before the next projection point gives no id.
 #[derive(Clone, Debug)]
 pub(super) struct Role {
-    pub(super) site: Vec<u32>,
+    pub(super) site: Suffix,
     pub(super) value: Value,
 }
 
@@ -561,7 +562,7 @@ impl Frame {
         if !self.pending.projected() {
             stored.pending = match &self.pending.pending {
                 Some(pending) => Some(PendingRecord::new(
-                    pending.site.clone(),
+                    pending.site.to_vec(),
                     pending.phase,
                     role_records(arena, access, &pending.roles)?,
                     access,
@@ -887,7 +888,7 @@ impl Frames {
             let mut arena = self.arena.borrow_mut();
             let mut record = match frame.pending.take() {
                 Some(pending) => Some(PendingRecord::new(
-                    pending.site,
+                    pending.site.to_vec(),
                     pending.phase,
                     role_records(&mut arena, &access, &pending.roles)?,
                     &access,
@@ -898,7 +899,7 @@ impl Frames {
             if let Some(record) = record {
                 frame.pending.set(Pending {
                     roles: admit_roles(&mut arena, &access, record.roles(&access)?)?,
-                    site: record.site,
+                    site: record.site.into(),
                     phase: record.phase,
                 });
             }
@@ -1132,7 +1133,7 @@ fn role_records(
         .iter()
         .map(|role| {
             Ok(RoleRecord {
-                site: role.site.clone(),
+                site: role.site.to_vec(),
                 value: project(arena, access, &role.value)?,
             })
         })
@@ -1150,7 +1151,7 @@ fn admit_roles(
         .map(|role| {
             Ok(Role {
                 value: admit(arena, access, &role.value)?,
-                site: role.site,
+                site: role.site.into(),
             })
         })
         .collect()
@@ -1179,12 +1180,12 @@ fn continuation(
 ) -> Result<ActIx, RestoreRefusal> {
     let (stream, _, _) = exe.statement(stmt);
     let depth = site.path.len();
-    let action = SitePath(pending.site.as_slice().into());
+    let action = SitePath(pending.site[..].into());
     let full = Site::new(
         site.unit.clone(),
         site.path
             .iter()
-            .chain(&pending.site)
+            .chain(pending.site.iter())
             .copied()
             .collect::<Vec<_>>(),
     );
@@ -1208,7 +1209,7 @@ fn continuation(
         roles: nested
             .roles
             .iter()
-            .map(|(role, _)| SitePath(role.path[depth..].into()))
+            .map(|role| SitePath(role.site.path[depth..].into()))
             .collect(),
     };
     let saved = StatementCoordinate::Nested {
@@ -1217,7 +1218,7 @@ fn continuation(
         roles: pending
             .roles
             .iter()
-            .map(|role| SitePath(role.site.as_slice().into()))
+            .map(|role| SitePath(role.site[..].into()))
             .collect(),
     };
     coord::admit(&entry, &saved, arrival)?;
@@ -1249,7 +1250,7 @@ fn restore(
     let code = exe.code(code_id);
     let pending = match &record.pending {
         Some(pending) => Some(Pending {
-            site: pending.site.clone(),
+            site: pending.site.as_slice().into(),
             phase: pending.phase,
             roles: admit_roles(arena, access, pending.roles(access)?)?,
         }),

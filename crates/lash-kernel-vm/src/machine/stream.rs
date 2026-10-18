@@ -9,6 +9,8 @@
 //! statement stands at it, its evaluated operands saved as roles, and its
 //! resume entry runs it on from the op after the action's (`K-EVAL-008`).
 
+use std::sync::Arc;
+
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{Float, Name, NativeError, NewObject, TaskId, Value};
 use lash_kernel_exec::charge::Crossed;
@@ -733,14 +735,23 @@ impl KernelMachine {
 
     /// Both body and plan create the same closure at its semantic site,
     /// sharing the cells allocated when its captured variables were bound.
+    /// Every closure of a code shares the one site the machine built for it.
     pub(super) fn make_closure(
         &mut self,
         exe: &Executable,
         code: CodeId,
         cells: &[ArenaHandle],
     ) -> Eval<ArenaHandle> {
-        let mut site = exe.code(code).site.clone();
-        site.path.pop();
+        let at = code.0 as usize;
+        if self.storage.closure_sites.len() <= at {
+            self.storage.closure_sites.resize_with(at + 1, || None);
+        }
+        let site = self.storage.closure_sites[at].get_or_insert_with(|| {
+            let mut site = exe.code(code).site.clone();
+            site.path.pop();
+            Arc::new(site)
+        });
+        let site = Arc::clone(site);
         let (closure, cost) = self.arena.borrow_mut().new_closure(site, cells.to_vec());
         self.grow(cost)?;
         Ok(closure)

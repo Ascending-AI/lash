@@ -6,7 +6,7 @@
 //! marks its object dirty, with the card it changed, and gives its logical
 //! growth, which the machine holds before the heap receives it.
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Sequence};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LocalCode, Sequence};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
@@ -356,21 +356,52 @@ impl Arena {
         self.table_after(handle, after)
     }
 
-    /// A closure's code site and the cells it shares.
-    pub fn closure(&self, handle: ArenaHandle) -> Result<(&Site, &[ArenaHandle]), NativeError> {
+    /// A closure's code site, the cells it shares and the code a call last
+    /// found for the site.
+    pub fn closure(
+        &self,
+        handle: ArenaHandle,
+    ) -> Result<(&Site, &[ArenaHandle], Option<LocalCode>), NativeError> {
         self.warm(handle)?;
         match self.body(handle)? {
-            Body::Closure { site, captures } => Ok((site, captures)),
+            Body::Closure {
+                site,
+                captures,
+                code,
+            } => Ok((site, captures, *code)),
+            _ => Err(malformed("a closure handle names another body")),
+        }
+    }
+
+    /// Keeps the code a call found for a closure's site for its next calls.
+    /// The cache is the process's alone: nothing projects it, so the
+    /// object does not change.
+    pub fn found_closure_code(
+        &mut self,
+        handle: ArenaHandle,
+        found: LocalCode,
+    ) -> Result<(), NativeError> {
+        self.warm(handle)?;
+        match self.objects.get_mut(handle) {
+            Some(Body::Closure { code, .. }) => {
+                *code = Some(found);
+                Ok(())
+            }
             _ => Err(malformed("a closure handle names another body")),
         }
     }
 
     /// Allocates a closure of `site` over `captures`, a fresh mutable
     /// object; gives its handle and logical cost.
-    pub fn new_closure(&mut self, site: Site, captures: Vec<ArenaHandle>) -> (ArenaHandle, u64) {
+    pub fn new_closure(
+        &mut self,
+        site: std::sync::Arc<Site>,
+        captures: Vec<ArenaHandle>,
+    ) -> (ArenaHandle, u64) {
         let handle = self.insert_created(Body::Closure {
             site,
             captures: captures.into_boxed_slice(),
+            code: None,
         });
         let cost = self
             .facts

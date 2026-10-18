@@ -708,12 +708,15 @@ impl KernelMachine {
         }
         let entry = self.storage.entry_sites[at]
             .as_ref()
-            .ok_or_else(|| fault("a prepared body has no entry site"))?
-            .clone();
+            .ok_or_else(|| fault("a prepared body has no entry site"))?;
         Ok(match self.storage.frames.pop() {
             Some(mut frame) => {
                 frame.code = code_id;
-                frame.statement = entry;
+                // A spent frame of the same body left standing at its entry
+                // keeps that copy; only another site is replaced.
+                if !frame.statement.same_version(entry) {
+                    frame.statement = entry.clone();
+                }
                 frame
             }
             None => {
@@ -722,7 +725,7 @@ impl KernelMachine {
                 Box::new(Frame {
                     code: code_id,
                     slots: super::frames::Slots::default(),
-                    statement: entry,
+                    statement: entry.clone(),
                     pending: super::frames::Continuation::default(),
                     control: Vec::new(),
                     awaiting: None,
@@ -1135,18 +1138,24 @@ impl KernelMachine {
             .nested
             .get(act.ix())
             .ok_or_else(|| fault("a pending action has no resume entry"))?;
-        let depth = entry.depth as usize;
-        let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = Default::default();
-        for role in pending.roles {
-            saved.insert(role.site, role.value);
-        }
-        for (site, reg) in &entry.roles {
-            let role = saved
-                .remove(&site.path[depth..])
-                .ok_or_else(|| fault("a saved continuation role is missing"))?;
+        let mut saved = pending.roles;
+        for (index, role) in entry.roles.iter().enumerate() {
+            // Saved in the entry's order, unless a restore admitted them
+            // in another layout's.
+            let at = match saved.get(index) {
+                Some(stood) if stood.site == role.suffix => index,
+                _ => saved
+                    .iter()
+                    .position(|stood| stood.site == role.suffix)
+                    .ok_or_else(|| fault("a saved continuation role is missing"))?,
+            };
             // Back in the register it was evaluated to, as if the
             // statement had never stopped.
-            self.put(reg.0 as usize, role);
+            self.put(role.reg.0 as usize, saved[at].value);
+        }
+        if saved.capacity() > 0 {
+            saved.clear();
+            self.storage.roles.push(saved);
         }
         // The value is in no variable until the statement uses it.
         self.put(entry.dst.0 as usize, value);

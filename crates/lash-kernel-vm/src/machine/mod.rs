@@ -281,6 +281,13 @@ struct Storage {
     #[expect(clippy::vec_box, reason = "reuse the frame allocation across calls")]
     frames: Vec<Box<Frame>>,
     entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
+    /// Each closure code's site, which every closure of it shares.
+    closure_sites: Vec<Option<Arc<lash_kernel_doc::Site>>>,
+    /// A spent closure call's capture buffer, which the next one's cells
+    /// are copied into.
+    captures: Vec<ArenaHandle>,
+    /// Spent continuations' role buffers, which the next saved ones fill.
+    roles: Vec<Vec<frames::Role>>,
     #[cfg(test)]
     formula_sources: std::cell::RefCell<Vec<usize>>,
     /// Values moved into or out of a register or a frame slot.

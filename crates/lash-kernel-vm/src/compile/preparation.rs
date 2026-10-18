@@ -14,6 +14,9 @@ use lash_kernel_doc::{
 use super::{DocumentCode, Executable, Missing, PreparedLibrary, compile_document};
 use crate::{OpenError, StartError};
 
+/// The next prepared executable's process-local identity.
+static NEXT_LOCAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[derive(Default)]
 pub(super) struct Documents(BTreeMap<(usize, usize), Arc<Admission>>);
 
@@ -107,6 +110,7 @@ impl Admission {
             document: Arc::clone(document),
             own: Arc::clone(own),
             admission: Arc::clone(self),
+            local: NEXT_LOCAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }))
     }
 }

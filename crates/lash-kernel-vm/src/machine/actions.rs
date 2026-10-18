@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::arena::{ArenaHandle, Body, LocalCode};
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{Datum, EffectName, JoinMode, NewObject, Site, TaskId, Type, Value};
 use lash_kernel_state::arena::Arena;
@@ -544,7 +544,8 @@ impl KernelMachine {
     /// `entry`, in `phase`, keeping the operands its statement evaluated as
     /// the continuation's roles. Registers are never saved: each role is
     /// saved by its site, as the path suffix under its statement's, held by
-    /// the frame as a variable's value is (`K-EVAL-008`).
+    /// the frame as a variable's value is (`K-EVAL-008`). The suffixes are
+    /// the entry's own, and the roles go to a spent continuation's buffer.
     fn capture(
         &mut self,
         task: TaskId,
@@ -552,21 +553,23 @@ impl KernelMachine {
         act: lash_kernel_exec::ActIx,
         phase: PhaseRecord,
     ) -> Result<(), Halt> {
-        let depth = entry.depth as usize;
-        let mut roles = Vec::with_capacity(entry.roles.len());
+        let mut roles = match entry.roles.is_empty() {
+            true => Vec::new(),
+            false => self.storage.roles.pop().unwrap_or_default(),
+        };
         // Each role moves from its register to the frame, held as a bound
         // value is until the frames are next published: a refinement while
         // the frame stands here counts it once, as the frame's.
-        for (site, reg) in &entry.roles {
-            let value = self.take(reg.0 as usize);
+        for role in &entry.roles {
+            let value = self.take(role.reg.0 as usize);
             self.reserve_growth(self.cost_of(&value))?;
             roles.push(super::frames::Role {
-                site: site.path[depth..].to_vec(),
+                site: Arc::clone(&role.suffix),
                 value,
             });
         }
         let pending = super::frames::Pending {
-            site: entry.site.path[depth..].to_vec(),
+            site: Arc::clone(&entry.suffix),
             phase,
             roles,
         };
@@ -603,10 +606,20 @@ impl KernelMachine {
                 let call = Call::new(code, args, count)
                     .sharing(&captures)
                     .awaited_by(Some(stmt));
-                self.push_frame(task, exe, call)?;
+                let pushed = self.push_frame(task, exe, call);
+                self.spent_captures(captures);
+                pushed?;
                 Ok(Flow::Step)
             }
             Target::Library(lib) => self.call_lib(task, exe, lib, args, count, Some(stmt)),
+        }
+    }
+
+    /// Keeps a spent capture buffer for the next closure call's cells.
+    pub(super) fn spent_captures(&mut self, mut captures: Vec<ArenaHandle>) {
+        if captures.capacity() > self.storage.captures.capacity() {
+            captures.clear();
+            self.storage.captures = captures;
         }
     }
 
@@ -642,15 +655,35 @@ impl KernelMachine {
     }
 
     /// The function a closure or a function reference names (`K-FN-005`).
+    /// A closure finds its code by its site once per executable and keeps
+    /// it; its cells are copied into the machine's spare capture buffer.
     pub(super) fn target(&mut self, exe: &Executable, value: Value) -> Eval<Target> {
         match value {
             Value::Closure(closure) => {
-                let (site, captures) = self.in_arena(|arena| {
-                    let (site, captures) = arena.closure(closure)?;
-                    Ok((site.clone(), captures.to_vec()))
+                let executable = exe.local();
+                let mut cells = std::mem::take(&mut self.storage.captures);
+                let found = self.in_arena(|arena| {
+                    let (site, captures, code) = arena.closure(closure)?;
+                    cells.clear();
+                    cells.extend_from_slice(captures);
+                    Ok(match code {
+                        Some(code) if code.executable == executable => Ok(CodeId(code.code)),
+                        _ => Err(site.clone()),
+                    })
                 })?;
-                let code = super::project::closure_code(exe, &site)?;
-                Ok(Target::Code(code, captures))
+                let code = match found {
+                    Ok(code) => code,
+                    Err(site) => {
+                        let code = super::project::closure_code(exe, &site)?;
+                        let found = LocalCode {
+                            executable,
+                            code: code.0,
+                        };
+                        self.in_arena(|arena| arena.found_closure_code(closure, found))?;
+                        code
+                    }
+                };
+                Ok(Target::Code(code, cells))
             }
             Value::Function(_) | Value::LongFunction(_) => {
                 let name = self.in_arena(|arena| Ok(arena.semantics().text(&value)?.to_owned()))?;
@@ -919,9 +952,12 @@ impl KernelMachine {
         // A native answer bills the same root formula as a body frame.
         self.refresh_charging(child, exe)?;
         let started = match target {
-            Target::Code(code, captures) => self
-                .push_frame(child, exe, Call::new(code, args, count).sharing(&captures))
-                .map(|()| Flow::Step),
+            Target::Code(code, captures) => {
+                let pushed =
+                    self.push_frame(child, exe, Call::new(code, args, count).sharing(&captures));
+                self.spent_captures(captures);
+                pushed.map(|()| Flow::Step)
+            }
             Target::Library(lib) => self.call_lib(child, exe, lib, args, count, None),
         };
         match started {
@@ -1259,4 +1295,58 @@ fn append<T: Cell>(
         })?,
     };
     tree.write(ordinal_key(index), value, access)
+}
+
+#[cfg(test)]
+mod laws {
+    use super::Target;
+    use crate::compile::CodeId;
+    use crate::laws::embedder::Embedder;
+    use lash_kernel_doc::arena::LocalCode;
+    use lash_kernel_doc::{Unit, Value};
+
+    /// K-FN-005: the code a call found for a closure's site is cached on
+    /// the closure for the executable that found it alone. A cache naming
+    /// any other executable's numbering is never read: the call finds the
+    /// code by the closure's site again, and keeps that.
+    #[test]
+    fn a_closure_reads_its_cached_code_only_under_the_executable_that_found_it() {
+        let mut run = Embedder::new(
+            "main { let f = fn() { return 1 } let g = fn() { return 2 } return null }",
+        );
+        let exe = std::sync::Arc::clone(&run.machine.exe);
+        let mut closures: Vec<CodeId> = (0..exe.code_count() as u32)
+            .map(CodeId)
+            .filter(|code| *code != exe.main && exe.code(*code).site.unit == Unit::Main)
+            .collect();
+        closures.sort_by(|a, b| exe.code(*a).site.path.cmp(&exe.code(*b).site.path));
+        let [f, g] = closures[..] else {
+            panic!("the document makes two closures: {closures:?}");
+        };
+        let closure = run.machine.make_closure(&exe, f, &[]).unwrap();
+        let cached = |run: &Embedder| run.machine.arena.borrow().closure(closure).unwrap().2;
+        let called = |run: &mut Embedder| match run.machine.target(&exe, Value::Closure(closure)) {
+            Ok(Target::Code(code, _)) => code,
+            _ => panic!("a closure calls its code"),
+        };
+        let found = LocalCode {
+            executable: exe.local(),
+            code: f.0,
+        };
+        assert_eq!(cached(&run), None);
+        assert_eq!(called(&mut run), f);
+        assert_eq!(cached(&run), Some(found));
+        // Another executable numbers `g`'s body as this one numbers `f`'s.
+        let elsewhere = LocalCode {
+            executable: exe.local() + 1,
+            code: g.0,
+        };
+        run.machine
+            .arena
+            .borrow_mut()
+            .found_closure_code(closure, elsewhere)
+            .unwrap();
+        assert_eq!(called(&mut run), f);
+        assert_eq!(cached(&run), Some(found));
+    }
 }

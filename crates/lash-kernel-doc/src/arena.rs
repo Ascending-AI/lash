@@ -317,14 +317,29 @@ pub enum Body {
     Map(Table),
     Set(Table),
     Record(Table),
-    /// A closure: its code's site and its captured variables' cells.
+    /// A closure: its code's site, shared with every closure of that code,
+    /// its captured variables' cells, and the code a call last found for
+    /// the site.
     Closure {
-        site: crate::Site,
+        site: std::sync::Arc<crate::Site>,
         captures: Box<[ArenaHandle]>,
+        code: Option<LocalCode>,
     },
     /// A variable a closure shares (`K-CLO-001`), or a `for` iteration's
     /// fresh one (`K-CLO-002`): not a value kind, only a holder of one.
     Cell(Value),
+}
+
+/// The code a closure runs, as one prepared executable numbers its codes:
+/// a process-local cache of the lookup by the closure's site. Like an
+/// [`ArenaHandle`] it is never persisted, keyed or observed, and it names
+/// its executable, so another executable's numbering never answers for
+/// it. A closure admitted from pages starts without one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalCode {
+    /// The executable's process-local identity.
+    pub executable: u64,
+    pub code: u32,
 }
 
 /// The arena's bodies by handle: what a native call borrows for its
