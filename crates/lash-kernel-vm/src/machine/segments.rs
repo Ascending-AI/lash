@@ -30,7 +30,7 @@ use lash_kernel_state::paged::PhaseRecord;
 
 use super::actions::Target;
 use super::exec::Call;
-use super::frames::{Pending, Role};
+use super::frames::Role;
 use super::islands::Ran;
 use super::loops::Header;
 use super::operation_entry::AdmittedBody;
@@ -332,11 +332,6 @@ impl KernelMachine {
                     )?;
                 }
             }
-            for (_, reg) in &site.roles {
-                self.reserve_growth_metered(
-                    self.cost_of_metered(&self.regs[base + *reg as usize]),
-                )?;
-            }
         }
         let mut frame = self.fresh_frame(exe, code_id)?;
         frame.slots.fresh(code.slots_by_at.len());
@@ -391,20 +386,22 @@ impl KernelMachine {
             return Err(fault("a segment holds a loop its site is not in").into());
         }
         frame.awaiting = Some(site.stmt);
-        frame.nested = site.act;
-        if site.act.is_some() {
-            let mut roles = Vec::with_capacity(site.roles.len());
-            for (path, reg) in &site.roles {
-                roles.push(Role {
-                    site: path.clone(),
-                    value: self.regs[base + *reg as usize],
-                });
-            }
-            frame.pending.set(Pending {
-                site: site.pending.clone(),
-                phase: PhaseRecord::Called,
-                roles,
-            });
+        if let Some(act) = site.act {
+            // The roles stay in the plan's registers as well: the frame
+            // holds a copy of each.
+            let pending = self.continuation(
+                &site.pending,
+                PhaseRecord::Called,
+                site.roles.len(),
+                |machine, at| {
+                    let (path, reg) = &site.roles[at];
+                    Role {
+                        site: Arc::clone(path),
+                        value: machine.regs[base + *reg as usize],
+                    }
+                },
+            )?;
+            frame.stand_at(act, pending);
         }
         let args = match kept {
             Kept::Window { keep: true } => self.regs[args..args + arity].to_vec().into(),

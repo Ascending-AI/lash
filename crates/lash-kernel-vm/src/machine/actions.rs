@@ -584,7 +584,7 @@ impl KernelMachine {
     /// the continuation's roles. Registers are never saved: each role is
     /// saved by its site, as the path suffix under its statement's, held by
     /// the frame as a variable's value is (`K-EVAL-008`). The suffixes are
-    /// the entry's own, and the roles go to a spent continuation's buffer.
+    /// the entry's own; each role moves from its register to the frame.
     pub(super) fn capture(
         &mut self,
         task: TaskId,
@@ -592,29 +592,15 @@ impl KernelMachine {
         act: lash_kernel_exec::ActIx,
         phase: PhaseRecord,
     ) -> Result<(), Halt> {
-        let mut roles = match entry.roles.is_empty() {
-            true => Vec::new(),
-            false => self.storage.roles.pop().unwrap_or_default(),
-        };
-        // Each role moves from its register to the frame, held as a bound
-        // value is until the frames are next published: a refinement while
-        // the frame stands here counts it once, as the frame's.
-        for role in &entry.roles {
-            let value = self.take(role.reg.0 as usize);
-            self.reserve_growth(self.cost_of(&value))?;
-            roles.push(super::frames::Role {
-                site: Arc::clone(&role.suffix),
-                value,
-            });
-        }
-        let pending = super::frames::Pending {
-            site: Arc::clone(&entry.suffix),
-            phase,
-            roles,
-        };
-        let frame = self.frame(task)?;
-        frame.pending.set(pending);
-        frame.nested = Some(act);
+        let pending =
+            self.continuation(&entry.suffix, phase, entry.roles.len(), |machine, at| {
+                let role = &entry.roles[at];
+                super::frames::Role {
+                    site: Arc::clone(&role.suffix),
+                    value: machine.take(role.reg.0 as usize),
+                }
+            })?;
+        self.frame(task)?.stand_at(act, pending);
         Ok(())
     }
 

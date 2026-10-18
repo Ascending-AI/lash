@@ -18,7 +18,6 @@ use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::{ActIx, RegRange};
 use lash_kernel_state::paged::PhaseRecord;
 
-use super::super::frames::Pending;
 use super::super::ops::Flow;
 use super::super::stream::Running;
 use super::super::{Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
@@ -454,16 +453,12 @@ impl KernelMachine {
             Stands::Boundary => None,
             Stands::Running { stmt, pc, regs } => Some((stmt, pc, regs)),
             Stands::Called { stmt, act, roles } => {
-                for role in &roles {
-                    self.reserve_growth(self.cost_of(&role.value))?;
-                }
                 let entry = &exe.document_stream().nested[act.ix()];
-                frame.pending.set(Pending {
-                    site: std::sync::Arc::clone(&entry.suffix),
-                    phase: PhaseRecord::Called,
-                    roles,
-                });
-                frame.nested = Some(act);
+                let pending =
+                    self.continuation(&entry.suffix, PhaseRecord::Called, roles.len(), |_, at| {
+                        roles[at].clone()
+                    })?;
+                frame.stand_at(act, pending);
                 frame.awaiting = Some(stmt);
                 None
             }

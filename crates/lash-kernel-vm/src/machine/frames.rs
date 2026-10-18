@@ -20,7 +20,9 @@ use restore::frame as restore_frame;
 
 use super::loops::{Guard, Header, TextCursor};
 use super::project::{SharedArena, admit, admit_cell, project, project_cell};
-use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
+use super::{
+    Completion, Control, Cursor, Frame, Halt, KernelMachine, LibraryCall, SlotState, TryPhase,
+};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId, Suffix};
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
@@ -251,7 +253,50 @@ impl Continuation {
     }
 }
 
+impl KernelMachine {
+    /// The continuation a frame saves where it stands at the action nested
+    /// in its statement whose site is `site`, in `phase` (`K-EVAL-008`),
+    /// holding `count` roles. `role` gives the roles in semantic order, the
+    /// statement's evaluation order; each is admitted as it is given, held
+    /// as a bound value is until the frames are next published, before the
+    /// next is asked for: a refinement while the frame stands there counts
+    /// it once, as the frame's. A caller moves or copies each value as its
+    /// producer owns it. The roles go to a spent continuation's buffer.
+    pub(super) fn continuation(
+        &mut self,
+        site: &Suffix,
+        phase: PhaseRecord,
+        count: usize,
+        mut role: impl FnMut(&mut Self, usize) -> Role,
+    ) -> Result<Pending, Halt> {
+        let mut roles = match count {
+            0 => Vec::new(),
+            _ => self.storage.roles.pop().unwrap_or_default(),
+        };
+        let metered = self.bounds.memory_meter != crate::MemoryMeter::Off;
+        for at in 0..count {
+            let role = role(self, at);
+            if metered {
+                self.reserve_growth_metered(self.cost_of_metered(&role.value))?;
+            }
+            roles.push(role);
+        }
+        Ok(Pending {
+            site: Arc::clone(site),
+            phase,
+            roles,
+        })
+    }
+}
+
 impl Frame {
+    /// Stands the frame at its statement's nested action `act`, saving
+    /// `pending` as its continuation there.
+    pub(super) fn stand_at(&mut self, act: ActIx, pending: Pending) {
+        self.pending.set(pending);
+        self.nested = Some(act);
+    }
+
     pub(super) fn slot(&self, at: u32) -> &SlotState {
         &self.slots.values[at as usize]
     }
