@@ -599,7 +599,7 @@ impl KernelMachine {
                 let Form::Action(action) = &running.stmt.form else {
                     return Err(fault("an action op stands in no action statement").into());
                 };
-                if self.act(task, host, exe, running.id, action, 0)? == Flow::Step {
+                if self.act(host, running, action, 0)? == Flow::Step {
                     return Ok(Some(Ran::Step));
                 }
                 return Ok(None);

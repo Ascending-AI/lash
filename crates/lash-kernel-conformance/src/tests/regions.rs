@@ -192,6 +192,39 @@ const ISLANDS: &[(&str, &str, u32)] = &[
          main { let r = call w(6) finish r }",
         64,
     ),
+    (
+        "texts, lists and records an island holds, passed, bound and returned, and discarded calls",
+        "fn echo(v) { return v }\n\
+         fn tag(n) { if num.lt(n, 0) { return \"negative\" } do call echo(n) return \"done\" }\n\
+         fn pass(xs, t) { let u = xs do call echo(t) do u if same(call echo(u), t) { return t } return call echo(call echo(u)) }\n\
+         main { let a = call tag(-1) let b = call tag(2) let c = call pass([1, 2], \"x\") let d = call pass({k: \"v\"}, 3) let e = call echo(\"short\") let f = call pass(\"y\", \"y\") finish (a, b, c, d, e, f) }",
+        64,
+    ),
+    (
+        "a value no island frame holds, from a capture and as an argument, left to the reference",
+        "fn outer(s) { let f = fn(n) { let t = s if num.lt(n, 1) { return t } return n } let a = apply f(0) let b = apply f(1) let c = call echo(s) return (a, b, c) }\n\
+         fn echo(v) { return v }\n\
+         main { let r = call outer(\"a text longer than fourteen bytes\") finish r }",
+        64,
+    ),
+    (
+        "operators on held texts and closures, charged their measured formulas, and a decline",
+        "fn ident(t) { return key.identity(3, absent, t) }\n\
+         fn check(v) { return collection.function_check(v) }\n\
+         fn ints(x) { return collection.int_check(x) }\n\
+         main { let f = fn(n) { return n } let a = call ident(\"tag\") let b = call check(f) let g = apply b(5) let c = call ints(4) try { let d = call ints(\"four\") finish (a, g, c, d) } catch e { finish (a, g, c, e.kind) } }",
+        64,
+    ),
+    (
+        "callbacks a helper's body applies by root call actions, one raising mid-call",
+        "main { let f = fn(x) { if num.lt(x, 3) { return num.mul(x, 2) } return num.div(12, num.sub(x, 4)) } let g = fn(x) { return num.lt(1, x) } try { let a = invoke collection.map([1, 2, 3, 5, 6], f) let b = invoke collection.filter(a, g) let c = invoke collection.map([1, 4], f) finish (a, b, c) } catch e { finish e.kind } }",
+        64,
+    ),
+    (
+        "callbacks reading their arguments' lengths and items, past an end and through a cold arm",
+        "main { let f = fn(args) { return let(t = if(num.lt(list.len(args), 1), [0], args), num.mul(t[0], 2)) } let g = fn(t) { return t[2] } try { let a = invoke collection.map([[1], [2, 3], [], [4]], f) let b = invoke collection.map([(1, 2, 3), (4, 5, 6)], g) let c = invoke collection.map([[1, 2]], g) finish (a, b, c) } catch e { finish e.kind } }",
+        64,
+    ),
 ];
 
 /// Programs whose loop regions allocate (§5, R5): they build records,
@@ -785,6 +818,32 @@ fn regions_on_and_off_agree(shard: usize) {
         }
     }
     counts.report(shard, "python-invokes", began);
+    // FIG-6759: lowered guest calls, root call actions and the callbacks a
+    // helper's plan applies run as islands, under both depths around them.
+    for (index, (lowered, program)) in crate::helper_plans::island_programs()
+        .into_iter()
+        .enumerate()
+    {
+        if index % SHARDS != shard {
+            continue;
+        }
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        assert!(
+            formed(&on, &case).1 > 0,
+            "{}: no call island forms",
+            case.name
+        );
+        assert_eq!(formed(&off, &case), (0, 0));
+        for call_depth in [3, 16] {
+            case.environment.bounds.call_depth = call_depth;
+            check(&on, &off, &case, &mut counts, &mut failures);
+        }
+    }
+    counts.report(shard, "dialect-islands", began);
     for (index, case) in super::corpus_shards()
         .iter()
         .flat_map(|shard| &shard.cases)

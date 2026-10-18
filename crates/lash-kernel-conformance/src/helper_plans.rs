@@ -1156,6 +1156,62 @@ pub(crate) fn top_level_region_programs() -> Vec<(runner::Case, Program)> {
     .collect()
 }
 
+/// FIG-6759: lowered programs whose guest calls, root call actions and
+/// callbacks a helper's plan applies run as call islands, each a
+/// `(dialect, name, source)`: the regions law runs each under both plans.
+pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
+    let sources = [
+        (
+            "typescript",
+            "map and filter callbacks",
+            "function run() {\n  const source = [];\n  for (let n = 0; n < 9; n++) { source.push(n); }\n  const doubled = source.map((item) => item * 2);\n  return doubled.filter((item) => item % 3 === 0);\n}\nconst result = run();\n",
+        ),
+        (
+            "typescript",
+            "a callback leaving its island on a text",
+            "function run() {\n  return [1, \"a\", 2].map((item) => item * 2);\n}\nconst result = run();\n",
+        ),
+        (
+            "typescript",
+            "text returns and a discarded call",
+            "function pure_echo(value) { return value; }\nfunction demo(value) {\n  if (value < 0) { return \"negative\"; }\n  pure_echo(value);\n  return \"done\";\n}\nfunction run() {\n  const out = [];\n  for (let n = -2; n < 3; n++) { out.push(demo(n)); }\n  return out;\n}\nconst result = run();\n",
+        ),
+        (
+            "typescript",
+            "texts echoed by root call actions in a loop",
+            "function pure_echo(item) { return item; }\nfunction demo(items) {\n  const out = [];\n  for (const item of items) { out.push(pure_echo(item)); }\n  return out;\n}\nconst result = demo([\"item-0\", \"item-1\", \"item-2\"]);\n",
+        ),
+        (
+            "python",
+            "text returns and a discarded call",
+            "def pure_echo(value):\n    return value\ndef demo(value):\n    if value < 0:\n        return \"negative\"\n    pure_echo(value)\n    return \"done\"\ndef run():\n    out = []\n    for n in range(-2, 3):\n        out.append(demo(n))\n    return out\nresult = run()\n",
+        ),
+        (
+            "python",
+            "texts echoed in a loop",
+            "def pure_echo(item):\n    return item\ndef demo(items):\n    out = []\n    for item in items:\n        out.append(pure_echo(item))\n    return out\nresult = demo([\"item-0\", \"item-1\", \"item-2\"])\n",
+        ),
+    ];
+    sources
+        .into_iter()
+        .map(|(dialect, name, source)| {
+            let runner = runner::Runner::new(dialect).unwrap();
+            let case = runner::Case {
+                id: format!("{dialect} islands: {name}"),
+                dialect: dialect.into(),
+                source: source.into(),
+                bits: 0,
+                stride: 0,
+                nanoseconds: 0,
+            };
+            let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+                panic!("{} lowers", case.id)
+            };
+            (case, program)
+        })
+        .collect()
+}
+
 /// FIG-6754: lowered Python branch and modulo loops reach the generated
 /// templates and form regions over unshared frame slots.
 #[test]

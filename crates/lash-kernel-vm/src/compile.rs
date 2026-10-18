@@ -58,7 +58,7 @@ pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, LoopPlan, Meter,
-    NESTING, Role, SessionSlot, UNPRODUCTIVE, scalar, store,
+    NESTING, Role, SessionSlot, UNPRODUCTIVE, measured_formula, position, scalar, store,
 };
 #[cfg(test)]
 pub(crate) use regions::{Head, RegionSlot, Step, Summary};
@@ -467,6 +467,13 @@ impl Executable {
         let at = (id.0 as usize).checked_sub(self.stmt_base)?;
         let tables = &self.own.tables;
         Some((&tables.stream, &tables.stmts[at], tables.edges[at]))
+    }
+
+    /// The document's own stream, which its codes' statements and island
+    /// plans index.
+    #[inline]
+    pub(crate) fn document_stream(&self) -> &Stream {
+        &self.own.tables.stream
     }
 
     #[inline]

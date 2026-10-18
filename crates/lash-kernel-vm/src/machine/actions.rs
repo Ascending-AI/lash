@@ -55,13 +55,12 @@ impl KernelMachine {
     /// waits in, or a call whose frame now runs.
     pub(super) fn act(
         &mut self,
-        task: TaskId,
         host: &mut dyn Host,
-        exe: &Executable,
-        stmt: StmtId,
+        running: &Running<'_>,
         action: &Action,
         out: Reg,
     ) -> Status {
+        let (task, exe, stmt) = (running.task, running.exe, running.id);
         self.observe_action(exe, &action.site);
         if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_))
             && matches!(
@@ -83,6 +82,15 @@ impl KernelMachine {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
                 self.put_atoms(task, exe, args, out)?;
+                if let Target::Code(code, cells) = &target
+                    && let Some(flow) =
+                        self.action_island(host, running, (*code, cells), out, args.len())?
+                {
+                    if let Target::Code(_, cells) = target {
+                        self.spent_captures(cells);
+                    }
+                    return Ok(flow);
+                }
                 self.call(task, exe, stmt, target, out, args.len())
             }
             ActionKind::Spawn { callee, args } => {

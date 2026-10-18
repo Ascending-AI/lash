@@ -31,6 +31,7 @@ use lash_kernel_state::paged::PhaseRecord;
 use super::actions::Target;
 use super::exec::Call;
 use super::frames::{Pending, Role};
+use super::islands::Ran;
 use super::loops::Header;
 use super::operation_entry::AdmittedBody;
 use super::ops::{Answer, Flow, Reg, Status};
@@ -78,6 +79,9 @@ pub(super) enum Callee {
         args: Reg,
         count: usize,
     },
+    /// The callee ran as an island and exited, leaving these virtual
+    /// frames, innermost first.
+    Island(Vec<super::islands::Level>),
 }
 
 /// The plans standing at callback sites of a call being offered, and what
@@ -164,13 +168,33 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
                 Ok(())
             }
             Target::Code(code, captures) => {
-                self.stand(site);
-                self.machine.segments.callee = Some(Callee::Code {
-                    code,
-                    captures,
-                    args: at + 1,
+                let ran = self.machine.callback_island(
+                    self.task,
+                    self.exe,
+                    (code, &captures),
+                    at + 1,
                     count,
-                });
+                );
+                let callee = match self.check(ran)? {
+                    Some(Ran::Returned(value)) => {
+                        self.machine.spent_captures(captures);
+                        self.machine.put(at, value);
+                        self.machine.borrow_value(value);
+                        return Ok(());
+                    }
+                    Some(Ran::Exited(levels)) => {
+                        self.machine.spent_captures(captures);
+                        Callee::Island(levels)
+                    }
+                    None => Callee::Code {
+                        code,
+                        captures,
+                        args: at + 1,
+                        count,
+                    },
+                };
+                self.stand(site);
+                self.machine.segments.callee = Some(callee);
                 Err(PlanExit::Yield)
             }
         }
@@ -235,6 +259,13 @@ impl KernelMachine {
                 let pushed = self.push_frame(task, exe, call);
                 self.spent_captures(captures);
                 pushed?;
+                Ok(Flow::Step)
+            }
+            Callee::Island(levels) => {
+                if let Some(stmt) = awaiting {
+                    self.frame(task)?.awaiting = Some(stmt);
+                }
+                self.stand_island(task, exe, levels)?;
                 Ok(Flow::Step)
             }
         }

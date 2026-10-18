@@ -26,27 +26,27 @@
 //! reference saves them, so a park or seal after the exit projects the same
 //! bytes.
 
-use std::rc::Rc;
+mod entry;
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::{TaskId, Value};
-use lash_kernel_exec::{ActIx, RegRange, Weight};
+use lash_kernel_doc::heap::LogicalBytes;
+use lash_kernel_doc::{
+    Args, KernelDataLimits, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter,
+};
+use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
-use lash_kernel_state::paged::PhaseRecord;
 
-use super::frames::{Pending, Role};
-use super::ops::Flow;
-use super::stream::Running;
+use super::frames::Role;
 use super::tasks::Occurrences;
-use super::{Control, Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
+use super::{Control, Halt, SlotState, fault};
 use crate::compile::islands::{
-    Arm, Block, Callee, Close, Expr, IslandPlan, Kind, MAX_SLOTS, Statement,
+    Arm, Block, Callee, Close, Expr, HELD_BYTES, IslandPlan, Kind, MAX_SLOTS, Statement, held,
 };
 use crate::compile::{
-    BlockId, CodeId, Entry, Executable, LibRun, NestedCallee, NestedKind, ScalarTable, scalar,
+    BlockId, Charge, CodeId, Entry, Executable, Fast, Lib, LibId, LibRun, ScalarTable,
+    measured_formula, position, scalar,
 };
 use crate::compile::{StmtId, Stream};
-use crate::interface::Host;
 use crate::observe::ChargeTape;
 
 /// The most virtual frames an island nests: the native stack it uses.
@@ -56,9 +56,9 @@ const ISLAND_DEPTH: u32 = 200;
 /// its entry with its virtual frames (§3.5).
 const ISLAND_HOLD: u64 = 1 << 16;
 
-/// The most a variable of a virtual frame costs the census: a scalar's
-/// 16 bytes and its word.
-const SLOT_BYTES: u64 = 24;
+/// The most a variable of a virtual frame costs the census: a value it
+/// may hold ([`held`]).
+const SLOT_BYTES: u64 = HELD_BYTES;
 
 /// The most arguments an island call passes.
 const MAX_ARGS: usize = MAX_SLOTS;
@@ -136,6 +136,11 @@ enum CKind {
         then_: CBlock,
         else_: CBlock,
     },
+    Discard {
+        value: Operand,
+        close: Option<Close>,
+        reg: u32,
+    },
 }
 
 /// The depth check an operator's call makes (`K-BND-002`).
@@ -150,6 +155,7 @@ enum Depth {
 
 /// A compiled operator or helper call.
 struct OperatorSite {
+    lib: LibId,
     entry: Entry,
     table: ScalarTable,
     close: Option<Close>,
@@ -159,6 +165,16 @@ struct OperatorSite {
     /// A helper whose deferred plan an observed run runs as its body, as
     /// it has no fallback (`answer_admitted`).
     body_when_observed: bool,
+    depth: Depth,
+}
+
+/// A compiled general native call.
+struct NativeSite {
+    lib: LibId,
+    close: Option<Close>,
+    pc: u32,
+    reg: u32,
+    /// The depth its prepared entry's template checks.
     depth: Depth,
 }
 
@@ -230,6 +246,11 @@ fn statement(statement: &Statement, exe: &Executable) -> Option<CStatement> {
             then_: block(then_, exe)?,
             else_: block(else_, exe)?,
         },
+        Kind::Discard { value, close, reg } => CKind::Discard {
+            value: expr(value, exe)?,
+            close: *close,
+            reg: *reg,
+        },
     };
     Some(CStatement {
         id: statement.id,
@@ -266,6 +287,7 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 Depth::None
             };
             let site = OperatorSite {
+                lib: *lib,
                 entry: entry.clone(),
                 table: fast.scalar()?.clone(),
                 close: *close,
@@ -282,6 +304,56 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 .map(|arg| self::expr(arg, exe))
                 .collect::<Option<Vec<_>>>()?;
             operator(site, operands)
+        }
+        Expr::Native {
+            lib,
+            args,
+            close,
+            pc,
+            reg,
+        } => {
+            let extra = exe
+                .lib(*lib)
+                .prepared
+                .as_ref()
+                .map_or(0, |(entry, _)| entry.depth());
+            let site = NativeSite {
+                lib: *lib,
+                close: *close,
+                pc: *pc,
+                reg: *reg,
+                depth: if extra > 0 {
+                    Depth::Template(extra)
+                } else {
+                    Depth::None
+                },
+            };
+            let operands = args
+                .iter()
+                .map(|arg| self::expr(arg, exe))
+                .collect::<Option<Vec<_>>>()?;
+            native(site, operands)
+        }
+        Expr::Index {
+            target,
+            index,
+            reg,
+            miss,
+        } => {
+            let target = self::expr(target, exe)?;
+            let index = self::expr(index, exe)?;
+            let (reg, miss) = (*reg, *miss);
+            Box::new(move |island, slots| {
+                let x = target.eval(island, slots)?;
+                let at = match index.eval(island, slots) {
+                    Ok(at) => at,
+                    Err(stop) => return Err(island.held(stop, reg, x)),
+                };
+                match island.item(x, at) {
+                    Some(value) => Ok(value),
+                    None => Err(island.at_operands(miss, reg, &[x, at])),
+                }
+            })
         }
         Expr::Call {
             callee,
@@ -353,9 +425,9 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             let (at, reg, miss) = (*at as usize, *reg, *miss);
             Box::new(move |island, slots| {
                 let bound = value.eval(island, slots)?;
-                // A scalar binding is within the headroom admitted at
-                // entry; any other is the reference's to admit.
-                if !scalar(&bound) {
+                // A held binding is within the headroom admitted at entry;
+                // any other is the reference's to admit.
+                if !held(&bound) {
                     let stop = island.at(miss);
                     return Err(island.held(stop, reg, bound));
                 }
@@ -442,6 +514,26 @@ fn call(site: CallSite, read: Option<Operand>, operands: Vec<Operand>) -> Node {
             })
         }
     }
+}
+
+/// The compiled general native call `site` over `operands`.
+fn native(site: NativeSite, operands: Vec<Operand>) -> Node {
+    Box::new(move |island, slots| {
+        let mut values = [Value::Absent; MAX_SLOTS];
+        for (index, operand) in operands.iter().enumerate() {
+            match operand.eval(island, slots) {
+                Ok(value) => values[index] = value,
+                Err(stop) => {
+                    let mut stop = stop;
+                    for (at, value) in values[..index].iter().enumerate() {
+                        stop = island.held(stop, site.reg + at as u32, *value);
+                    }
+                    return Err(stop);
+                }
+            }
+        }
+        island.native(&site, &values[..operands.len()])
+    })
 }
 
 /// The compiled operator `site` over `operands`.
@@ -555,6 +647,8 @@ struct Cached {
 /// the registers it holds there.
 type RunsOn = (StmtId, u32, Vec<(u32, Value)>);
 
+pub(super) use entry::Ran;
+
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
 pub(super) struct Scratch {
@@ -566,6 +660,20 @@ pub(super) struct Scratch {
     /// The captured values and their cells, of each cached callee.
     captured: Vec<(Value, ArenaHandle)>,
     exit: Exit,
+    /// The running slice's host observes no sites: callbacks a helper's
+    /// plan applies may run as islands.
+    pub(super) quiet: bool,
+    /// The statement the top frame a callback's island left runs on once
+    /// the step settles, in its task.
+    run_on: Option<(TaskId, RunsOn)>,
+}
+
+impl Scratch {
+    /// Whether a callback's island left a statement to run on.
+    #[inline(always)]
+    pub(super) fn runs_on(&self) -> bool {
+        self.run_on.is_some()
+    }
 }
 
 /// One island entry: what it charges and counts, and its frames' bounds.
@@ -581,6 +689,10 @@ struct Island<'a> {
     counters: Option<&'a mut Occurrences>,
     /// An observer is attached: helper calls answer as observed runs do.
     observed: bool,
+    /// The run's data limits, which natives answer under.
+    limits: KernelDataLimits,
+    /// Memory is accounted: a native answers only with nothing built.
+    memory: bool,
     /// The call depth the frames below the island hold (`K-BND-002`).
     base: u64,
     call_depth: u64,
@@ -729,8 +841,9 @@ impl Island<'_> {
         }
     }
 
-    /// The operator `site` on `args`: its prepared entry's scalar value,
-    /// charged its formula from its scalar table, or a stop at its op.
+    /// The operator `site` on `args`: its prepared entry's value, charged
+    /// its formula from its scalar table on scalars, measured otherwise, or
+    /// a stop at its op.
     #[inline(always)]
     fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
         if let Some(close) = &site.close
@@ -740,13 +853,21 @@ impl Island<'_> {
         }
         // The prepared entry answers and declines as its charged guard
         // does, and on scalars the sizes the table indexes are the values'.
-        let charge = ((!site.body_when_observed || !self.observed)
-            && self.depth_fits(site.depth)
-            && args.iter().all(scalar))
-        .then(|| site.entry.call(args))
-        .flatten()
-        .filter(scalar)
-        .and_then(|result| Some((result, site.table.units(sizes(args, &result))?)));
+        let charge =
+            if !(!site.body_when_observed || !self.observed) || !self.depth_fits(site.depth) {
+                None
+            } else if args.iter().all(scalar) {
+                match site.entry.call(args) {
+                    Some(result) if scalar(&result) => site
+                        .table
+                        .units(sizes(args, &result))
+                        .map(|units| (result, units)),
+                    Some(_) => self.measured(site, args),
+                    None => None,
+                }
+            } else {
+                self.measured(site, args)
+            };
         let Some((result, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
@@ -758,6 +879,122 @@ impl Island<'_> {
         }
         self.formula(units);
         Ok(result)
+    }
+
+    /// The operator `site` on `args`, not all scalars, or answering no
+    /// scalar: its prepared entry's answer, when the frame may hold it,
+    /// charged as the reference charges a prepared answer, by its scalar
+    /// table when the entry certifies the sizes and by its formula measured
+    /// on the values otherwise. `None` where the reference runs it: the
+    /// entry declines, the value is not [`held`], or a measured value is
+    /// not where the arena can read it.
+    #[inline(never)]
+    fn measured(&self, site: &OperatorSite, args: &[Value]) -> Option<(Value, u64)> {
+        let function = self.exe.lib(site.lib);
+        let (_, fast) = function.prepared.as_ref()?;
+        let answer = site.entry.answer(args, true)?;
+        self.answered(function, fast, args, answer)
+    }
+
+    /// A prepared entry's `answer` of `function`'s call on `args`, when the
+    /// frame may hold it, with what the reference charges it.
+    fn answered(
+        &self,
+        function: &Lib,
+        fast: &Fast,
+        args: &[Value],
+        answer: PreparedAnswer,
+    ) -> Option<(Value, u64)> {
+        let value = answer.value;
+        if !held(&value) {
+            return None;
+        }
+        let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
+            Some(units) => units,
+            None => match fast.charge(&function.charge, args, &value) {
+                Charge::Units(units) => units,
+                Charge::Plan(plan) => measured_formula(self.arena, plan, args, Some(&value))?,
+            },
+        };
+        Some((value, units))
+    }
+
+    /// The general call `site` of a native on `args`: its prepared entry's
+    /// answer or its native's, charged its formula, or a stop at its op.
+    #[inline(always)]
+    fn native(&mut self, site: &NativeSite, args: &[Value]) -> Answer {
+        if let Some(close) = &site.close
+            && !self.close(close)
+        {
+            return Err(self.at_operands(close.head, site.reg, args));
+        }
+        let charge = self
+            .native_answer(site, args)
+            .filter(|(_, units)| self.fits(*units));
+        let Some((value, units)) = charge else {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        };
+        self.formula(units);
+        Ok(value)
+    }
+
+    /// What the reference's general call answers `site` on `given`, its
+    /// other parameters absent: its prepared entry's answer where its guard
+    /// holds, its native's otherwise, with what it charges. `None` where
+    /// the reference runs it: the native builds or holds anything, raises,
+    /// declines or asks again, or answers what the frame may not hold.
+    #[inline(never)]
+    fn native_answer(&self, site: &NativeSite, given: &[Value]) -> Option<(Value, u64)> {
+        let function = self.exe.lib(site.lib);
+        let mut padded = [Value::Absent; MAX_SLOTS];
+        padded[..given.len()].copy_from_slice(given);
+        let args = &padded[..function.arity];
+        if let Some((entry, fast)) = &function.prepared
+            && self.depth_fits(site.depth)
+            && let Some(answer) = entry.answer(args, true)
+        {
+            return self.answered(function, fast, args, answer);
+        }
+        let LibRun::Native { native, .. } = &function.run else {
+            return None;
+        };
+        let arena = self.arena;
+        let limit = match &function.limit {
+            Some(limit) => Some(measured_formula(arena, limit, args, None)?),
+            None => None,
+        };
+        let mut counter = WorkCounter::new(limit);
+        let semantics = arena.semantics().with_limits(self.limits);
+        let mut nursery = if self.memory {
+            Nursery::new(arena.objects(), LogicalBytes(0))
+        } else {
+            Nursery::unaccounted(arena.objects())
+        };
+        let answer = native.call(NativeCall {
+            args: Args::new(args, arena.objects(), &semantics),
+            new: &mut nursery,
+            counter: &mut counter,
+        });
+        let built = !nursery.built().is_empty() || nursery.held().0 != 0;
+        nursery.discard();
+        let value = answer.ok().filter(|value| !built && held(value))?;
+        if arena.summary_of(&value).depth as usize > self.limits.value_depth() {
+            return None;
+        }
+        let units = measured_formula(arena, &function.charge, args, Some(&value))?;
+        Some((value, units))
+    }
+
+    /// `target[at]` of a list or a tuple, when the frame may hold it;
+    /// `None` where the reference reads it: another target, no item
+    /// there, or one the arena cannot read where it is.
+    #[inline(always)]
+    fn item(&self, target: Value, at: Value) -> Option<Value> {
+        let (Value::List(object) | Value::Tuple(object)) = target else {
+            return None;
+        };
+        let value = self.arena.item(object, position(&at)?).ok()??;
+        held(&value).then_some(value)
     }
 
     /// A stop at op `pc`, the frame holding operands `args` from register
@@ -788,7 +1025,7 @@ impl Island<'_> {
         let fits = |island: &Self, plan: u32| {
             let plan = &island.exe.islands.plans[plan as usize];
             args.len() <= plan.params.len()
-                && args.iter().all(scalar)
+                && args.iter().all(held)
                 && island.base + u64::from(island.depth) <= island.call_depth
                 && island.depth < ISLAND_DEPTH
         };
@@ -835,18 +1072,8 @@ impl Island<'_> {
     /// when one is given.
     #[inline(never)]
     fn resolve_cold(&mut self, site: Option<u32>, handle: ArenaHandle) -> Option<(u32, u32)> {
-        let arena = self.arena;
-        let (plan, cells) = closure_island(arena, self.exe, handle)?;
-        let island = &self.exe.islands.plans[plan as usize];
-        island.compiled(self.exe)?;
-        if cells.len() != island.captures.len() {
-            return None;
-        }
-        let captured = self.scratch.captured.len() as u32;
-        for cell in cells {
-            let value = arena.cell(*cell).ok()?;
-            self.scratch.captured.push((value, *cell));
-        }
+        let (plan, cells) = closure_island(self.arena, self.exe, handle)?;
+        let captured = self.captured(plan, cells)?;
         let Some(site) = site else {
             return Some((plan, captured));
         };
@@ -861,6 +1088,29 @@ impl Island<'_> {
             captured,
         });
         Some((plan, captured))
+    }
+
+    /// The island of code `code`, closed over the cells `cells`: its plan
+    /// and where its captured values start.
+    fn with_cells(&mut self, code: CodeId, cells: &[ArenaHandle]) -> Option<(u32, u32)> {
+        let plan = self.exe.island_of(code)?;
+        Some((plan, self.captured(plan, cells)?))
+    }
+
+    /// Reads the cells `cells` of a callee of plan `plan` into the captured
+    /// values: where they start.
+    fn captured(&mut self, plan: u32, cells: &[ArenaHandle]) -> Option<u32> {
+        let island = &self.exe.islands.plans[plan as usize];
+        island.compiled(self.exe)?;
+        if cells.len() != island.captures.len() {
+            return None;
+        }
+        let captured = self.scratch.captured.len() as u32;
+        for cell in cells {
+            let value = self.arena.cell(*cell).ok()?;
+            self.scratch.captured.push((value, *cell));
+        }
+        Some(captured)
     }
 
     /// Runs plan `plan` on `args` as a new virtual frame, its captured
@@ -1061,10 +1311,10 @@ fn run_statement(
                 let stop = island.held(stop, *reg, value);
                 return Err(island.stand(stmt, stop));
             }
-            // A scalar is within the headroom admitted at entry; any other
-            // value, or a write to a cell, is the reference's to admit.
+            // A held value is within the headroom admitted at entry; any
+            // other value, or a write to a cell, is the reference's to admit.
             let at = *at as usize;
-            let fits = scalar(&value) && (*bind || slots[at].is_some());
+            let fits = held(&value) && (*bind || slots[at].is_some());
             if !fits {
                 let stop = island.at(*pc);
                 let stop = island.held(stop, *reg, value);
@@ -1114,265 +1364,18 @@ fn run_statement(
                 Flow2::Fell(leaves) => Ok(Next::Done(leaves)),
             }
         }
-    }
-}
-
-impl KernelMachine {
-    /// Runs the call nested at `act` of `running`, its callee and arguments
-    /// in `args`, as an island when its callee's body is one: `Done`, its
-    /// value in `args.start`, when the island returned; `Step` when it
-    /// exited, its frames converted and the step ended or run on by the
-    /// reference. `None`: nothing changed, and the reference runs the call.
-    pub(super) fn call_island(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        act: ActIx,
-        args: RegRange,
-    ) -> Eval<Option<Flow>> {
-        let task = running.task;
-        let exe = running.exe;
-        let nested = &running.stream.nested[act.ix()];
-        let start = args.start.0 as usize;
-        let (declared, first) = match nested.kind {
-            NestedKind::Call(NestedCallee::Declared(code)) => (Some(code), start),
-            NestedKind::Call(NestedCallee::Read) => (None, start + 1),
-            _ => return Ok(None),
-        };
-        // The callee's code has an island that takes these arguments,
-        // before any guard is paid for.
-        let plan = match (declared, self.regs[start]) {
-            (Some(code), _) => exe.island_of(code),
-            (None, Value::Closure(handle)) => {
-                closure_island(&self.arena.borrow(), exe, handle).map(|(plan, _)| plan)
+        CKind::Discard { value, close, reg } => {
+            let value = value
+                .eval(island, slots)
+                .map_err(|stop| island.stand(stmt, stop))?;
+            if let Some(close) = close
+                && !island.close(close)
+            {
+                let stop = island.at(close.head);
+                let stop = island.held(stop, *reg, value);
+                return Err(island.stand(stmt, stop));
             }
-            (None, _) => None,
-        };
-        let given = start + args.len as usize - first;
-        if plan.is_none_or(|plan| {
-            given > exe.islands.plans[plan as usize].params.len()
-                || (first..first + given).any(|at| !scalar(&self.regs[at]))
-        }) {
-            return Ok(None);
+            Ok(Next::Done(statement.leaves))
         }
-        // The environment guard: nothing observes the run but a charge
-        // tape, which the island records, and no host observes sites.
-        if self.islands.held
-            || !self.charging
-            || !self.ran.is_empty()
-            || self.steps.verify
-            || host.observes_sites()
-            || self
-                .observer
-                .as_deref()
-                .is_some_and(|observer| !observer.only_charges())
-        {
-            return Ok(None);
-        }
-        #[cfg(test)]
-        if self.boundary.is_some() {
-            return Ok(None);
-        }
-        // The call's push would end the step at the slice threshold.
-        if self.charged >= self.slice_end {
-            return Ok(None);
-        }
-        // The memory headroom guard: the island's transient holdings and
-        // its virtual frames with their variables fit, and nothing inside
-        // it is admitted.
-        if self.bounds.memory_limit != crate::MemoryLimit::Off
-            && self
-                .bounds
-                .memory
-                .saturating_sub(self.heap.certificate().upper.0)
-                < ISLAND_HOLD
-                    + u64::from(ISLAND_DEPTH) * (FRAME_BYTES + MAX_SLOTS as u64 * SLOT_BYTES)
-        {
-            return Ok(None);
-        }
-        if given > MAX_ARGS {
-            return Ok(None);
-        }
-        let mut values = [Value::Absent; MAX_ARGS];
-        for (index, value) in values.iter_mut().enumerate().take(given) {
-            *value = self.regs[first + index];
-        }
-        let values = &values[..given];
-        let frames = self
-            .tasks
-            .get_mut(task.0 as usize)?
-            .ok_or_else(|| fault("no task"))?
-            .frames
-            .len();
-        let base = (frames
-            + self.plans as usize
-            + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
-        let call_depth = u64::from(self.bounds.call_depth);
-        let durable = self.durable();
-        let observed = self.observer.is_some();
-        let mut scratch = std::mem::take(&mut self.islands);
-        scratch.epoch = scratch.epoch.wrapping_add(1);
-        scratch.captured.clear();
-        let arena = Rc::clone(&self.arena);
-        let ran = {
-            let arena = arena.borrow();
-            let counters = match durable {
-                true => Some(
-                    &mut self
-                        .tasks
-                        .get_mut(task.0 as usize)?
-                        .ok_or_else(|| fault("no task"))?
-                        .counters,
-                ),
-                false => None,
-            };
-            let mut island = Island {
-                exe,
-                stream: running.stream,
-                arena: &arena,
-                tape: self
-                    .observer
-                    .as_deref()
-                    .and_then(|observer| observer.charges.as_ref()),
-                charged: self.charged,
-                bound: self.bounds.charge_limit,
-                slice_end: self.slice_end,
-                counters,
-                observed,
-                base,
-                call_depth,
-                depth: 0,
-                scratch: &mut scratch,
-            };
-            let target = match (declared, self.regs[start]) {
-                (Some(code), _) => island.declared(code),
-                (None, Value::Closure(handle)) => island.resolve_cold(None, handle),
-                (None, _) => None,
-            };
-            let plan = target.filter(|(plan, _)| {
-                let plan = &exe.islands.plans[*plan as usize];
-                given <= plan.params.len() && values.iter().all(scalar) && base <= call_depth
-            });
-            let ran = plan.map(|(plan, captured)| {
-                island
-                    .count(nested.occurrence)
-                    .and_then(|()| island.enter(plan, captured, values))
-            });
-            (ran, island.charged)
-        };
-        let (ran, charged) = ran;
-        self.charged = charged;
-        let Some(ran) = ran else {
-            self.islands = scratch;
-            return Ok(None);
-        };
-        match ran {
-            Ok(value) => {
-                self.islands = scratch;
-                self.put(start, value);
-                self.borrow_value(value);
-                Ok(Some(Flow::Done))
-            }
-            Err(Stop) => {
-                let halt = scratch.exit.halt.take();
-                let levels = std::mem::take(&mut scratch.exit.levels);
-                scratch.exit = Exit::default();
-                self.islands = scratch;
-                if let Some(halt) = halt {
-                    return Err(halt.into());
-                }
-                self.convert(host, running, act, levels)?;
-                Ok(Some(Flow::Step))
-            }
-        }
-    }
-
-    /// Converts the virtual frames an island left, `levels` innermost
-    /// first, into the machine frames the reference holds there, the
-    /// caller standing at its call `act` of `running`; then runs on a
-    /// statement the top frame stands in.
-    #[cold]
-    #[inline(never)]
-    fn convert(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        act: ActIx,
-        levels: Vec<Level>,
-    ) -> Eval<()> {
-        let (task, exe) = (running.task, running.exe);
-        let entry = &running.stream.nested[act.ix()];
-        self.capture(task, entry, act, PhaseRecord::Called)?;
-        self.frame(task)?.awaiting = Some(running.id);
-        let mut top = None;
-        for level in levels.into_iter().rev() {
-            top = self.convert_level(task, exe, running.stream, level)?;
-        }
-        let Some((stmt, pc, regs)) = top else {
-            return Ok(());
-        };
-        // The top frame runs its statement on from the op the island
-        // stopped at, holding what the island held there.
-        for (reg, value) in regs {
-            self.put(reg as usize, value);
-        }
-        self.islands.held = true;
-        let running = Running::new(task, exe, stmt);
-        let outcome = self
-            .run(host, &running, pc as usize)
-            .and_then(|ran| self.resumed(task, exe, (stmt, ran)));
-        let settled = self.settle(task, host, exe, outcome);
-        self.islands.held = false;
-        Ok(settled?)
-    }
-
-    /// Pushes the machine frame of virtual frame `level`, admitted as the
-    /// reference admits a call's frame, its variables and its roles. Gives
-    /// the statement, op and registers a running frame stands at.
-    fn convert_level(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        stream: &Stream,
-        level: Level,
-    ) -> Eval<Option<RunsOn>> {
-        self.reserve_growth(FRAME_BYTES)?;
-        let mut frame = self.fresh_frame(exe, level.code)?;
-        frame.slots.fresh(level.slots.len());
-        frame.control = level.control;
-        for (at, slot) in level.slots.into_iter().enumerate() {
-            match slot {
-                SlotState::Empty => {}
-                SlotState::Value(value) => {
-                    self.reserve_growth(self.cost_of(&value))?;
-                    frame.set_slot(at as u32, SlotState::Value(value));
-                }
-                cell @ SlotState::Cell(_) => frame.set_slot(at as u32, cell),
-            }
-        }
-        let top = match level.stands {
-            Stands::Boundary => None,
-            Stands::Running { stmt, pc, regs } => Some((stmt, pc, regs)),
-            Stands::Called { stmt, act, roles } => {
-                for role in &roles {
-                    self.reserve_growth(self.cost_of(&role.value))?;
-                }
-                let entry = &stream.nested[act.ix()];
-                frame.pending.set(Pending {
-                    site: std::sync::Arc::clone(&entry.suffix),
-                    phase: PhaseRecord::Called,
-                    roles,
-                });
-                frame.nested = Some(act);
-                frame.awaiting = Some(stmt);
-                None
-            }
-        };
-        self.task(task)?.frames.push(frame);
-        self.observe(crate::observe::Event::Push {
-            task,
-            code: level.code,
-        });
-        Ok(top)
     }
 }

@@ -1066,7 +1066,10 @@ impl KernelMachine {
             }
             None => self.advance(task, host, exe),
         };
-        self.settle(task, host, exe, outcome)
+        match self.settle(task, host, exe, outcome) {
+            Ok(()) if !self.islands.runs_on() => Ok(()),
+            settled => self.island_run_on(task, host, exe, settled),
+        }
     }
 
     /// Inlined into the step: an island's exit is its only other caller.
@@ -1306,6 +1309,9 @@ impl KernelMachine {
         // With no charge meter the scheduling budget counts machine steps.
         // The entry chooses this specialization once; Exact keeps its charge slices.
         let mut remaining = slice.max(1);
+        // A helper's callbacks run as islands only for a host that
+        // observes no sites.
+        self.islands.quiet = !host.observes_sites();
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {

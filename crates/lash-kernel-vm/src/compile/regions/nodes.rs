@@ -262,33 +262,8 @@ impl Cx<'_> {
         Some(value)
     }
 
-    /// What `plan` charges a call of `args` that gave `result`, measured
-    /// as the reference measures it; `None` when a value cannot be
-    /// measured where it is.
     fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> Option<u64> {
-        let mut failed = false;
-        let units = plan.evaluate(|source, measure| {
-            if failed {
-                return 0;
-            }
-            let value = match source {
-                Source::Arg(index) => args.get(index),
-                Source::Result => result,
-                Source::Nothing => None,
-            };
-            let measured = match (value, measure) {
-                (None, _) => Ok(0),
-                (Some(value), Measure::Size) => crate::data::size(self.arena, value),
-                (Some(value), Measure::DeepSize) => crate::data::deep_size(self.arena, value),
-                (Some(value), Measure::NestedSize) => crate::data::nested_size(self.arena, value),
-                (Some(value), Measure::Magnitude) => Ok(crate::data::magnitude(self.arena, value)),
-            };
-            measured.unwrap_or_else(|_| {
-                failed = true;
-                0
-            })
-        });
-        (!failed).then_some(units)
+        measured_formula(self.arena, plan, args, result)
     }
 
     /// The general call of native `function` on `args`, one per
@@ -361,6 +336,40 @@ impl Cx<'_> {
         self.meter.measured(units);
         Some(value)
     }
+}
+
+/// What `plan` charges a call of `args` that gave `result`, measured in
+/// `arena` as the reference measures it; `None` when a value cannot be
+/// measured where it is.
+pub(crate) fn measured_formula(
+    arena: &Arena,
+    plan: &Plan,
+    args: &[Value],
+    result: Option<&Value>,
+) -> Option<u64> {
+    let mut failed = false;
+    let units = plan.evaluate(|source, measure| {
+        if failed {
+            return 0;
+        }
+        let value = match source {
+            Source::Arg(index) => args.get(index),
+            Source::Result => result,
+            Source::Nothing => None,
+        };
+        let measured = match (value, measure) {
+            (None, _) => Ok(0),
+            (Some(value), Measure::Size) => crate::data::size(arena, value),
+            (Some(value), Measure::DeepSize) => crate::data::deep_size(arena, value),
+            (Some(value), Measure::NestedSize) => crate::data::nested_size(arena, value),
+            (Some(value), Measure::Magnitude) => Ok(crate::data::magnitude(arena, value)),
+        };
+        measured.unwrap_or_else(|_| {
+            failed = true;
+            0
+        })
+    });
+    (!failed).then_some(units)
 }
 
 /// A compiled region expression: it reads the frame's slots and answers
@@ -887,7 +896,7 @@ fn field(field: &super::super::Field, target: Node) -> Node {
 
 /// The list position `index` is, as the reference reads it; `None` where
 /// it raises.
-fn position(index: &Value) -> Option<u64> {
+pub(crate) fn position(index: &Value) -> Option<u64> {
     match index {
         Value::Int(word) => u64::try_from(*word).ok(),
         Value::Float(float) => {

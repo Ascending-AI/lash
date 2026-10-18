@@ -43,7 +43,7 @@ mod nodes;
 
 pub(crate) use nodes::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Meter, Place, Role,
-    SessionSlot, scalar, store,
+    SessionSlot, measured_formula, position, scalar, store,
 };
 
 use super::{

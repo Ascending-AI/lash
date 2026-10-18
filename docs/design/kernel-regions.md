@@ -46,6 +46,15 @@ of region are built from one unit.
 - **Call island.** A call whose callee's body consists of region statements and
   calls to region functions. It runs as virtual frames. Self-recursion was
   prototyped; mutual recursion goes through a per-site plan cache (§2.2).
+  Islands enter at nested calls, at root call actions (`call f(...)` bound
+  by `let` or discarded by `do`, counting the action's occurrence), and at
+  the callback sites of helper plans (`map`, `filter` and the other
+  collection helpers whose plans apply a guest closure), where the helper's
+  site stands for the call, the island counts no occurrence of its own, and
+  the callback charges by its own code's charging.
+  Inside, an island runs held-value operators by their prepared entries and
+  measured formulas, natives with no operation by their prepared entry or a
+  call that builds nothing, and list and tuple item reads.
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host
@@ -214,8 +223,8 @@ opcode fast path outside regions too.
     where the slice threshold is reached, or before a statement whose unit
     would pass the bound, the frames stand at that step end and the step
     ends. At an op the island cannot run (a guard miss, a value that would
-    raise or is no scalar, a charge that would pass the bound, a callee with
-    no island, a depth bound), the top frame stands in its statement at that
+    raise or that no island frame holds (§3.5), a charge that would pass the
+    bound, a callee with no island, a depth bound), the top frame stands in its statement at that
     op with the registers it holds there, and the reference runs the
     statement on from that op in the same step, with islands held off until
     the step ends. The v1 all-or-nothing exit, with its per-slice abort
@@ -348,7 +357,9 @@ on (`.kiln/FIG-6741/check/`).
   `release_statement_roots`, `collect_arena`, kill sets and pin clearing are
   skipped. That is sound because a v1 region statement holds no heap value:
   its statement roots and pins are empty, and its scalar holds net to zero at
-  statement end. A region that allocates (R5) runs the statement's kill set at
+  statement end. An island builds nothing: the heap handles it holds (§3.5)
+  are its arguments, captures and the items of those, all rooted by the
+  frames and plans below it, and a native whose result it built exits. A region that allocates (R5) runs the statement's kill set at
   each statement end, or holds its temporaries in region-owned storage
   admitted at entry.
 - **Selective continuation conversion (v2).** An island keeps each virtual
@@ -367,9 +378,13 @@ on (`.kiln/FIG-6741/check/`).
   admitted before entry, by the headroom guard over the census's own admission
   predicate (the prototype approximates it with `bounds.memory - upper`). The
   holdings are the scalar pins of its statements, and for an island its
-  virtual stack with its variables, `depth_max × (FRAME_BYTES + 12 × 24)`:
-  an island's variables hold only scalars, at most 24 bytes each, and a value
-  that is no scalar exits before it is bound or written. A loop region's slot
+  virtual stack with its variables, `depth_max × (FRAME_BYTES + 12 × 32)`:
+  an island's variables hold only held values, at most 32 bytes each
+  (`compile::islands::held`): scalars, texts and function names of at most 14
+  bytes, task handles, and the identity handles of lists, maps, sets,
+  records, closures and object references, whose content stays where the
+  caller rooted it. A value no island frame holds exits before it is bound,
+  written, passed or returned. A loop region's slot
   growth (an integer widening its `cost_of`) exits before the write, so the
   reference admits it with `reserve_growth`.
 - **Plan dependence.** An island does not make the reference's per-call

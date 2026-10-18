@@ -13,13 +13,17 @@
 //! executable: deterministic, immutable and never saved. Their compiled
 //! form is built on first entry and cached in the plan.
 //!
-//! Island ops: reads of unshared slots and of captures, resident scalar
-//! constants, prepared operators (`Op::Operator`, or `Op::Nested` of an
-//! operator), helper calls whose prepared entry has a scalar table (`call
-//! lib`, counted), calls of closures and declared functions (counted),
-//! conditional expressions and expression locals. A conditional arm of
-//! other ops is cold: taking it exits there. Every other op is a barrier,
-//! which no plan contains.
+//! Island ops: reads of unshared slots and of captures, resident constants
+//! an island frame may hold ([`held`]), prepared operators (`Op::Operator`,
+//! or `Op::Nested` of an operator), helper calls whose prepared entry has a
+//! scalar table (`call lib`, counted), general calls of natives that build
+//! nothing (`Op::Call`), reads of a list's or a tuple's items, calls of
+//! closures and declared functions (counted), conditional expressions and
+//! expression locals. A
+//! conditional arm of other ops is cold: taking it exits there. Every other
+//! op is a barrier, which no plan contains. Island statements are `return`,
+//! `set` and `let` of unshared variables, `if`, and `do`, which discards
+//! its value.
 
 use std::sync::OnceLock;
 
@@ -28,12 +32,44 @@ use lash_kernel_exec::{ActIx, Op, OpRange, Reg, RegRange};
 
 use super::{
     BlockId, CodeId, Constant, Executable, Form, Lib, LibId, LibRun, NestedCallee, NestedKind,
-    Stmt, StmtId, Tables, scalar,
+    Stmt, StmtId, Tables,
 };
 use crate::machine::islands::Compiled;
 
 /// The most variables an island frame holds.
 pub(crate) const MAX_SLOTS: usize = 12;
+
+/// The most the census prices a value an island frame holds where it is
+/// held: a short text's 16 bytes and its at most 14, word-rounded.
+pub(crate) const HELD_BYTES: u64 = 32;
+
+/// Whether an island frame may hold `value` in a variable or a register:
+/// a value that owns no storage the island would make or admit, priced at
+/// most [`HELD_BYTES`] wherever it is held. Scalars, short texts and
+/// function names, tasks, and mutable objects by identity, whose own
+/// storage is held where it was made. Any other value exits before it is
+/// bound, written or passed, and the reference admits it.
+#[inline(always)]
+pub(crate) fn held(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Null
+            | Value::Absent
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
+            | Value::Function(_)
+            | Value::Task(_)
+            | Value::TaskRef(_)
+            | Value::List(_)
+            | Value::Map(_)
+            | Value::Set(_)
+            | Value::Record(_)
+            | Value::Closure(_)
+            | Value::ObjectRef(_)
+    )
+}
 
 /// A charge region an op closes: the reference charges it whole there,
 /// and an exit before it resumes at its head.
@@ -64,6 +100,24 @@ pub(crate) enum Expr {
         pc: u32,
         reg: u32,
         counted: Option<usize>,
+    },
+    /// A general call of a native (`Op::Call`), answered without building
+    /// anything.
+    Native {
+        lib: LibId,
+        args: Box<[Expr]>,
+        close: Option<Close>,
+        pc: u32,
+        reg: u32,
+    },
+    /// `target[index]` of a list or a tuple: `miss` is where the reference
+    /// resumes when the island cannot read it, the head of the region it
+    /// stands in.
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+        reg: u32,
+        miss: u32,
     },
     /// A call of a closure read first, or of a declared function.
     Call {
@@ -148,6 +202,13 @@ pub(crate) enum Kind {
         reg: u32,
         then_: Block,
         else_: Block,
+    },
+    /// `do`: a value the statement computes in its first register and
+    /// discards.
+    Discard {
+        value: Expr,
+        close: Option<Close>,
+        reg: u32,
     },
 }
 
@@ -401,6 +462,11 @@ impl Former<'_> {
                     else_: self.block(else_block)?,
                 }
             }
+            (Form::Plain, Op::End) => Kind::Discard {
+                value: walk.take(Reg(0))?,
+                close,
+                reg: 0,
+            },
             _ => return None,
         };
         // Every value the statement computes reaches its end.
@@ -442,7 +508,7 @@ impl Former<'_> {
                     walk.define(dst, Expr::Local { at: local.at, miss })?;
                 }
                 Op::Const { dst, c } => match stream.consts.get(c.ix())? {
-                    Constant::Resident(value) if scalar(value) => {
+                    Constant::Resident(value) if held(value) => {
                         walk.define(dst, Expr::Const(*value))?;
                     }
                     _ => return None,
@@ -461,6 +527,36 @@ impl Former<'_> {
                             pc,
                             reg: args.start.0,
                             counted: None,
+                        },
+                    )?;
+                }
+                Op::Call { lib, args } => {
+                    let lib = LibId(lib.0);
+                    self.native(lib, args.len as usize)?;
+                    let operands = walk.operands(args)?;
+                    let close = walk.open.take();
+                    walk.define(
+                        args.start,
+                        Expr::Native {
+                            lib,
+                            args: operands.into(),
+                            close,
+                            pc,
+                            reg: args.start.0,
+                        },
+                    )?;
+                }
+                Op::Index { at, .. } => {
+                    let target = walk.take(at)?;
+                    let index = walk.take(Reg(at.0 + 1))?;
+                    let miss = walk.miss(pc);
+                    walk.define(
+                        at,
+                        Expr::Index {
+                            target: Box::new(target),
+                            index: Box::new(index),
+                            reg: at.0,
+                            miss,
                         },
                     )?;
                 }
@@ -604,6 +700,18 @@ impl Former<'_> {
         }))
     }
 
+    /// Whether `lib` called with `given` arguments is a native an island
+    /// calls through its general call: no operation, whose admission is
+    /// the reference's, and no plan or body.
+    fn native(&self, lib: LibId, given: usize) -> Option<()> {
+        let function = self.libs.get(lib.0 as usize)?;
+        (matches!(function.run, LibRun::Native { .. })
+            && !function.operation()
+            && given <= function.arity
+            && function.arity <= MAX_SLOTS)
+            .then_some(())
+    }
+
     /// Whether `lib` called with `given` arguments answers through its
     /// prepared entry with a scalar charge table: an operator, or a helper
     /// call when `helper`.
@@ -696,7 +804,9 @@ fn verify_block(
 ) -> Result<(), Refused> {
     for statement in &block.statements {
         match &statement.kind {
-            Kind::Return { value, close, .. } | Kind::Write { value, close, .. } => {
+            Kind::Return { value, close, .. }
+            | Kind::Write { value, close, .. }
+            | Kind::Discard { value, close, .. } => {
                 verify_expr(value, stream, calls)?;
                 verify_close(close.as_ref(), stream)?;
             }
@@ -741,6 +851,16 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
                 calls.push(*occurrence);
             }
             Ok(())
+        }
+        Expr::Native { args, close, .. } => {
+            for arg in args {
+                verify_expr(arg, stream, calls)?;
+            }
+            verify_close(close.as_ref(), stream)
+        }
+        Expr::Index { target, index, .. } => {
+            verify_expr(target, stream, calls)?;
+            verify_expr(index, stream, calls)
         }
         Expr::Call {
             callee,
