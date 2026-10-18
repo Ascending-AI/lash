@@ -57,7 +57,8 @@ pub(crate) use reads::{Field, ReadSite, find as find_property};
 
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
-    Commit, CompiledBody, CompiledHead, CompiledStep, Event, LoopPlan, Meter, NESTING, scalar,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, LoopPlan, Meter,
+    NESTING, Role, UNPRODUCTIVE, scalar, store,
 };
 #[cfg(test)]
 pub(crate) use regions::{Head, Step, Summary};
@@ -1311,14 +1312,15 @@ fn form_regions(tables: &mut Tables, library: &Prepared, loop_test: u64) -> Vec<
     {
         let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
         let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
+        let lib = |id: LibId| &library.libs[id.0 as usize];
         let lowered = || regions::Lowered {
             stream: &tables.stream,
             block: &block,
             stmt: &stmt,
+            lib: &lib,
         };
         let formation = regions::Formation {
             lowered: lowered(),
-            libs: &library.libs,
             loop_test,
         };
         for code in &tables.codes {

@@ -255,8 +255,10 @@ declaration and break) run on every shard, so every law catches the R1/R2
 charge and exit mutants on its own.
 
 - **The cases.** Every corpus case, the 64-seed smith programs, and the
-  region and island programs, each asserting that its regions or islands
-  form with regions on and none with them off. Each runs
+  region, allocating-region and island programs, each asserting that its
+  regions or islands form with regions on and none with them off. Each
+  allocating program also runs with memory off and under a 96 KiB memory
+  bound. Each runs
   as written and wrapped in a function, as `scripts/perf/kernel/embedded.py`
   wraps its bodies. At top level, variables are session bindings and no
   region forms, which is why the prototype's first check saw nothing.
@@ -350,6 +352,22 @@ on (`.kiln/FIG-6741/check/`).
   on the plan within the transient slack (spec §2), and the counters are equal
   again from the next seal (SAM-4). PLAN-INDEP leaves memory refusal out; the
   two-plan agreement law covers it.
+- **Allocating regions (R5).** A loop region whose statements build records,
+  lists, maps or tuples, read members through property caches, write members
+  or call natives enters only with a nursery of headroom (64 KiB) and no
+  statement credit outstanding. Each statement holds what the reference
+  holds, at the same anchors: a value's growth through the census before it
+  is built, a member write's growth with its dirty mark, a native's held
+  bytes before it runs and its result's pin after. At each statement end the
+  region runs the reference's kill set: it releases the statement's roots and
+  closes the arena's statement. A statement that may allocate runs whole,
+  past the slice threshold, and the region exits at the next step boundary,
+  where the reference would yield. A plan whose entries keep exiting on their
+  first statement retires. The law
+  `tests::regions::allocating_regions_hold_what_the_reference_holds` runs
+  each allocating program unsliced and under two slices, with memory
+  accounted and off, and requires the memory counter to equal the
+  reference's at every slice return and at the end.
 
 ## 4. Prototype numbers
 

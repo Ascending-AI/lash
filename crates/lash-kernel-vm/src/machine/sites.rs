@@ -6,12 +6,12 @@ use crate::compile::ReadSite;
 
 /// Each site's cached slot plus one; zero is a site with none.
 #[derive(Default)]
-pub(super) struct SiteCaches(Vec<u32>);
+pub(crate) struct SiteCaches(Vec<u32>);
 
 impl SiteCaches {
     /// The slot `site` last found its property at.
     #[inline]
-    pub(super) fn slot(&self, site: ReadSite) -> Option<usize> {
+    pub(crate) fn slot(&self, site: ReadSite) -> Option<usize> {
         if site.missing {
             return None;
         }
@@ -21,7 +21,7 @@ impl SiteCaches {
 
     /// Keeps the slot `site` found its property at, or none.
     #[inline]
-    pub(super) fn keep(&mut self, site: ReadSite, slot: Option<usize>) {
+    pub(crate) fn keep(&mut self, site: ReadSite, slot: Option<usize>) {
         if site.missing {
             return;
         }

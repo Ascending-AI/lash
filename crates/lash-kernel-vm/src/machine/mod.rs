@@ -29,7 +29,7 @@ mod regions;
 mod registers;
 mod segments;
 mod session;
-mod sites;
+pub(crate) mod sites;
 mod steps;
 mod stream;
 mod tasks;

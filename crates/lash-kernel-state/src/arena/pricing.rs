@@ -8,11 +8,11 @@
 //! ([`Arena::changed_cost`], [`Arena::price_changed`]). It assigns no id
 //! and writes nothing back.
 
-use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
+use lash_kernel_doc::{NewObject, Value};
 
-use super::{Arena, each_member, has_cold, is_mutable};
+use super::{Arena, each_member, has_cold, is_mutable, local_cost};
 
 /// What a refinement's walk gives the census's trace.
 pub enum Reached<'a> {
@@ -35,6 +35,71 @@ fn stale() -> HeapFault {
 }
 
 impl Arena {
+    /// No less than what [`Arena::install`] gives for `new`: what a region
+    /// admits before it installs what a statement built, so that their
+    /// growth is held before they exist (`docs/design/kernel-regions.md`
+    /// §3.5). A member `new` builds is priced as installing it prices it
+    /// in a holder installed after it; a table's rows as if no key
+    /// repeated, and a record's names at their whole reference.
+    pub fn install_bound(&self, new: &[(ArenaHandle, NewObject)]) -> u64 {
+        if self.unaccounted {
+            return 0;
+        }
+        let mut built: Vec<(ArenaHandle, u64)> = Vec::with_capacity(new.len());
+        let cost = |built: &[(ArenaHandle, u64)], value: &Value| {
+            value
+                .handle()
+                .and_then(|handle| built.iter().find(|(at, _)| *at == handle))
+                .map_or_else(
+                    || local_cost(&self.objects, &self.facts, value),
+                    |(_, cost)| *cost,
+                )
+        };
+        let sum = |built: &[(ArenaHandle, u64)], values: &mut dyn Iterator<Item = &Value>| {
+            values.fold(0u64, |sum, value| sum.saturating_add(cost(built, value)))
+        };
+        let mut grown = 0u64;
+        for (handle, object) in new {
+            let (rows, local) = match object {
+                NewObject::List(values) => (Some(sum(&built, &mut values.iter())), 16),
+                NewObject::Map(entries) | NewObject::Record(entries) => (
+                    Some(sum(
+                        &built,
+                        &mut entries.iter().flat_map(|(key, value)| [key, value]),
+                    )),
+                    16,
+                ),
+                NewObject::Set(members) => (
+                    Some(
+                        sum(&built, &mut members.iter())
+                            .saturating_add(16u64.saturating_mul(members.len() as u64)),
+                    ),
+                    16,
+                ),
+                NewObject::Tuple(members) => {
+                    (None, 16u64.saturating_add(sum(&built, &mut members.iter())))
+                }
+                NewObject::LongText(text) | NewObject::LongFunction(text) => {
+                    (None, 16u64.saturating_add(text.len() as u64))
+                }
+                NewObject::Bytes(bytes) => (None, 16u64.saturating_add(bytes.len() as u64)),
+                NewObject::BigInt(int) | NewObject::Timestamp(int) => {
+                    (None, 16u64.saturating_add(int.bits().div_ceil(8)))
+                }
+                NewObject::Error {
+                    kind,
+                    message,
+                    data,
+                } => (None, sum(&built, &mut [kind, message, data].into_iter())),
+            };
+            if let Some(rows) = rows {
+                grown = grown.saturating_add(32u64.saturating_add(rows));
+            }
+            built.push((*handle, local));
+        }
+        grown
+    }
+
     /// Walks what `value` reaches in memory: each object without an id
     /// once, priced at its cost and walked into; an immutable walked into,
     /// its holder pricing it, or given to `out` by its page form when it

@@ -34,10 +34,12 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
     let loop_test = Costs::of_document(&program.document).loop_test;
     let block = |id| exe.block(id);
     let stmt = |id| exe.stmt(id);
+    let lib = |id| exe.lib(id);
     let lowered = Lowered {
         stream,
         block: &block,
         stmt: &stmt,
+        lib: &lib,
     };
     assert_eq!(plan.verify(&lowered, loop_test), Ok(()));
     // Another cost table's loop test is not this plan's.
@@ -97,6 +99,16 @@ fn lowering_admits_a_loop_plan_only_as_its_stream_states_it() {
         assert_eq!(
             refused(&|plan| plan.calls = vec![0].into()),
             Err(Refused::Calls)
+        );
+        // A scalar statement stated as allocating, and a scalar plan
+        // stated as one that admits each statement (§5, R5).
+        assert_eq!(
+            refused(&|plan| edit(plan, 1, &|summary| summary.general = true)),
+            Err(Refused::Allocates { statement: 1 })
+        );
+        assert_eq!(
+            refused(&|plan| plan.allocates = true),
+            Err(Refused::Allocates { statement: 0 })
         );
         assert_eq!(
             refused(&|plan| edit(plan, 0, &|summary| summary.program =

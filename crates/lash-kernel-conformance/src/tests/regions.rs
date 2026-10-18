@@ -194,6 +194,47 @@ const ISLANDS: &[(&str, &str, u32)] = &[
     ),
 ];
 
+/// Programs whose loop regions allocate (§5, R5): they build records,
+/// lists, maps and tuples, read members through property caches, write
+/// members and call natives. Each also runs with memory off and under a
+/// memory bound its run passes.
+const ALLOCATING: &[(&str, &str)] = &[
+    (
+        "records, lists and tuples built and read in the body",
+        "fn rows(n) { let i = 0 let s = 0 while num.lt(i, n) { let r = {index: i, pair: [i, num.add(i, 1)], both: (i, 2)} set s = num.add(s, num.add(r.index, r.pair[1])) set i = num.add(i, 1) } return s }\n\
+         main { let r = call rows(10) finish r }",
+    ),
+    (
+        "a list kept by appends, its rows labelled by text natives",
+        "fn churn(n) { let i = 0 let kept = [] while num.lt(i, n) { let scratch = {index: i, pair: [i, num.add(i, 1)], label: text.concat(\"row-\", num.to_text(i))} if num.lt(num.rem_trunc(i, 4), 1) { set kept[list.len(kept)] = scratch } set i = num.add(i, 1) } return kept }\n\
+         main { let r = call churn(14) finish r }",
+    ),
+    (
+        "a map counted by key",
+        "fn tally(n) { let i = 0 let counts = map{} while num.lt(i, n) { let key = text.concat(\"key_\", num.to_text(num.rem_trunc(i, 6))) if map.contains(counts, key) { set counts[key] = num.add(map.get(counts, key), 1) } else { set counts[key] = 1 } set i = num.add(i, 1) } return counts }\n\
+         main { let r = call tally(16) finish r }",
+    ),
+    (
+        "a record whose shape changes under its field reads and writes",
+        "fn shapes(n) { let i = 0 let s = 0 while num.lt(i, n) { let r = {a: i, b: 1} if num.lt(num.rem_trunc(i, 2), 1) { set r = {b: 2, c: 3, a: i} } set s = num.add(s, r.a) set r.b = s set i = num.add(i, 1) } return s }\n\
+         main { let r = call shapes(10) finish r }",
+    ),
+    (
+        "a for over a list of records, writing a list's members",
+        "fn marks(xs) { let out = [0, 0, 0] for x in xs { set out[num.rem_trunc(x.k, 3)] = x.v } return out }\n\
+         main { try { let r = call marks([{k: 1, v: 2}, {k: 2, v: 3}, {k: 4, v: [5]}, {k: 3, v: \"a\"}, {k: 5}, {k: 6, v: 7}]) finish r } catch e { finish e.kind } }",
+    ),
+    (
+        "an index past a list's end, raised and caught",
+        "fn past(xs) { let s = 0 let i = 0 while num.lt(i, 6) { set s = num.add(s, xs[i]) set i = num.add(i, 1) } return s }\n\
+         main { try { let r = call past([1, 2, 3, 4]) finish r } catch e { finish e.kind } }",
+    ),
+];
+
+/// The memory bound an allocating program runs under besides the
+/// default: past a region's nursery, short of what the longest run holds.
+const TIGHT: u64 = 96 * 1024;
+
 /// Independent libtest laws, assigned to the target's existing Buck shards.
 const SHARDS: usize = 8;
 
@@ -586,6 +627,30 @@ fn regions_on_and_off_agree(shard: usize) {
         regions += formed_on;
         check(&on, &off, &case, &mut counts, &mut failures);
     }
+    for (index, (name, text)) in ALLOCATING.iter().enumerate() {
+        if index % SHARDS != shard {
+            continue;
+        }
+        region_programs += 1;
+        let case = program_case(name, text, 16);
+        let (formed_on, _) = formed(&on, &case);
+        assert!(formed_on > 0, "{name}: no loop region forms");
+        assert_eq!(
+            formed(&off, &case),
+            (0, 0),
+            "{name}: regions form with regions off"
+        );
+        regions += formed_on;
+        check(&on, &off, &case, &mut counts, &mut failures);
+        let mut unaccounted = case.clone();
+        unaccounted.name = format!("{name} (memory off)");
+        unaccounted.environment.bounds.memory_limit = lash_kernel_vm::MemoryLimit::Off;
+        check(&on, &off, &unaccounted, &mut counts, &mut failures);
+        let mut tight = case;
+        tight.name = format!("{name} (memory {TIGHT})");
+        tight.environment.bounds.memory = TIGHT;
+        check(&on, &off, &tight, &mut counts, &mut failures);
+    }
     counts.report(shard, "region-programs", began);
     let (mut island_programs, mut islands) = (0, 0);
     for (name, text, call_depth) in ISLANDS
@@ -673,6 +738,92 @@ fn regions_on_and_off_agree(shard: usize) {
         counts.cases,
         counts.runs,
         began.elapsed().as_secs_f64(),
+    );
+}
+
+/// What an allocating program's run under plan `L` with slice `slice`
+/// shows: its memory counter at each slice return, which no exact count
+/// has refined, and its end, its charge and its counter at its end.
+fn finished<const L: u64>(
+    program: &Program,
+    case: &Case,
+    slice: u64,
+) -> (Vec<u64>, ExpectedEnd, Option<u64>, u64) {
+    let start = lash_kernel_vm::CellStart {
+        target: lash_kernel_vm::Target::Main,
+        args: Vec::new(),
+        session: None,
+        owner: crate::pages::OWNER,
+        modes: Default::default(),
+        host: Vec::new(),
+    };
+    let mut machine = Plan::<L>::start(
+        program.clone(),
+        case.environment.bounds.into(),
+        start,
+        Box::new(crate::pages::Source::default()),
+    )
+    .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+    let mut world = crate::helper_plans::World {
+        bits: 0,
+        stride: 1,
+        nanoseconds: 0,
+        prints: Vec::new(),
+    };
+    let mut returns = Vec::new();
+    loop {
+        match machine.run(&mut world, slice) {
+            Ok(lash_kernel_vm::Step::Slice) => returns.push(machine.meters().memory),
+            Ok(lash_kernel_vm::Step::Ended(end)) => {
+                let meters = machine.meters();
+                return (
+                    returns,
+                    ExpectedEnd::from_end(end),
+                    meters.charged,
+                    meters.memory,
+                );
+            }
+            Ok(_) => panic!("{}: a run without effects parked", case.name),
+            Err(error) => panic!("{}: {error}", case.name),
+        }
+    }
+}
+
+/// Allocating regions hold what the reference holds (§3.5, §5 R5): each
+/// allocating program, run to its end unsliced and under slices, has the
+/// memory counter where the reference has it at every slice return and at
+/// its end, with memory accounted and off. PLAN-INDEP leaves memory out,
+/// so this is the law that sees a region skip a hold.
+#[test]
+fn allocating_regions_hold_what_the_reference_holds() {
+    let registry = Arc::new(super::corpus_registry());
+    let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+    let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
+    for (name, text) in ALLOCATING {
+        for memory_limit in [
+            lash_kernel_vm::MemoryLimit::Recount,
+            lash_kernel_vm::MemoryLimit::Off,
+        ] {
+            let mut case = program_case(name, text, 16);
+            case.environment.bounds.memory_limit = memory_limit;
+            let program = case_program(&on, &case).expect("an allocating program is admitted");
+            let reference = Program {
+                library: off.clone(),
+                ..program.clone()
+            };
+            for slice in [7, 50, u64::MAX] {
+                assert_eq!(
+                    finished::<ON>(&program, &case, slice),
+                    finished::<OFF>(&reference, &case, slice),
+                    "{name}, memory {memory_limit:?}, slice {slice}"
+                );
+            }
+        }
+    }
+    println!(
+        "allocating regions hold what the reference holds: programs={} paired runs={}",
+        ALLOCATING.len(),
+        ALLOCATING.len() * 6
     );
 }
 

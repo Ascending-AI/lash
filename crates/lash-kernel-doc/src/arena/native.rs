@@ -802,6 +802,12 @@ impl<'call> Nursery<'call> {
         self.held
     }
 
+    /// The objects built so far, in reservation order: what the machine
+    /// prices before it installs or discards them.
+    pub fn built(&self) -> &[(ArenaHandle, NewObject)] {
+        &self.new
+    }
+
     /// The objects built, in reservation order, for the machine to install.
     pub fn into_new(self) -> Vec<(ArenaHandle, NewObject)> {
         self.new
