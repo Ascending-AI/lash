@@ -49,7 +49,10 @@ VM_CRATE_PATTERN = re.compile(r"^lash-(kernel|dialect|ext)-|^lash-regress$")
 VM_CRATES = ("crates/lash-vm-runtime", "crates/lash-vm-library")
 WORKER_CRATE = "crates/lash-vm-worker"
 
-RAW_STRING = re.compile(r'(?:b?r)(#*)"')
+CHAR_LITERAL = re.compile(r"'(?:[^'\\\n]|\\[^\n]{1,9}?)'")
+# Search in C for the next comment or literal instead of visiting every byte
+# of generated Rust in Python. The alternatives retain the lexer's precedence.
+COMMENT_OR_LITERAL = re.compile(r'//|/\*|(?:b?r)(#*)"|' + CHAR_LITERAL.pattern + r'|"')
 STATIC_ITEM = re.compile(r"(?<![\w'])static\s+(?:mut\s+|ref\s+)?([A-Za-z_]\w*)\s*:")
 
 
@@ -85,14 +88,15 @@ def strip_comments(text: str) -> list[str]:
     """Blank comments and literals, preserving every source offset and line."""
     out = list(text)
     index = 0
-    while index < len(text):
-        start = index
-        if text.startswith("//", index):
+    while match := COMMENT_OR_LITERAL.search(text, index):
+        start = match.start()
+        token = match.group()
+        index = match.end()
+        if token == "//":
             end = text.find("\n", index)
             index = len(text) if end < 0 else end
-        elif text.startswith("/*", index):
+        elif token == "/*":
             depth = 1
-            index += 2
             while index < len(text) and depth:
                 if text.startswith("/*", index):
                     depth += 1
@@ -102,14 +106,11 @@ def strip_comments(text: str) -> list[str]:
                     index += 2
                 else:
                     index += 1
-        elif match := RAW_STRING.match(text, index):
+        elif match.group(1) is not None:
             closing = '"' + match.group(1)
             end = text.find(closing, match.end())
             index = len(text) if end < 0 else end + len(closing)
-        elif match := CHAR_LITERAL.match(text, index):
-            index = match.end()
-        elif text[index] == '"':
-            index += 1
+        elif token == '"':
             while index < len(text):
                 if text[index] == "\\":
                     index += 2
@@ -118,9 +119,6 @@ def strip_comments(text: str) -> list[str]:
                     break
                 else:
                     index += 1
-        else:
-            index += 1
-            continue
         for at in range(start, min(index, len(text))):
             if out[at] != "\n":
                 out[at] = " "
@@ -244,7 +242,6 @@ def production_sources(crate: Path) -> list[Path]:
     return sorted(seen)
 
 
-CHAR_LITERAL = re.compile(r"'(?:[^'\\\n]|\\[^\n]{1,9}?)'")
 FN_NAME = re.compile(r"(?<![\w])fn\s+(\w+)")
 
 

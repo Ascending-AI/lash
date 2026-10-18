@@ -22,6 +22,7 @@ crates/lash-vm-library/src/lib.rs::standard::STANDARD  # the shipped function re
 crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value
 crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value
 crates/lash-kernel-vm/src/perf_witness.rs::<module>::WORK  # opt-in diagnostic work counters, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
+crates/lash-kernel-vm/src/perf_witness.rs::<module>::PREPARATION  # opt-in host-installed first-use library compilation probe; receives only registered library function identities and begin/end boundaries, no guest values; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/perf_witness.rs::<module>::WORK  # opt-in fixed integer work counts and completed-trace scratch maxima, no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/paged/tree.rs::<module>::BINDING_COPIES  # opt-in binding-leaf and row copy counts, holds only two aggregate integers, no guest values or identities (ADR 0123); cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/arena/mod.rs::<module>::COLD_CLOSURE_SITE  # immutable empty Unit::Main site shared by cold closure placeholders; initialized only from constants, no guest input or mutable run state
