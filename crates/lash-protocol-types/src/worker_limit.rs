@@ -66,6 +66,13 @@ pub enum WorkerLimit {
     Memory {
         bound_bytes: u64,
     },
+    /// The execution held its workers past its configured wall time: the
+    /// sum over its checkouts, and for a code-mode cell over its
+    /// activations, of the time from a worker's admission to its release
+    /// (FIG-6786).
+    Wall {
+        bound_ms: u64,
+    },
     /// The execution spent its configured replacement attempts.
     Attempts {
         bound: u32,
@@ -78,11 +85,11 @@ impl WorkerLimit {
     /// the VM against the run's own bounds, and a step's observations
     /// against its heap budget, so every execution of the run meets them at
     /// the same point. Encoded effect values, VM state and frames likewise
-    /// meet their size bounds on every execution. The CPU budget and the
-    /// compute deadline are limits lash set on the run's worker, and the
-    /// cgroup memory ceiling one its host set on it: the same run on the
-    /// same inputs meets them again, so they are the run's own end, never a
-    /// retry (FIG-6523, FIG-6787). Only the replacement attempts are
+    /// meet their size bounds on every execution. The CPU budget, the
+    /// compute deadline and the wall time are limits lash set on the run's
+    /// workers, and the cgroup memory ceiling one its host set on it: the
+    /// same run on the same inputs meets them again, so they are the run's
+    /// own end, never a retry (FIG-6523, FIG-6786, FIG-6787). Only the replacement attempts are
     /// the host's: they count infrastructure losses, which a replay, or
     /// another host with capacity, answers differently (FIG-4451).
     pub const fn is_host_verdict(self) -> bool {
@@ -110,6 +117,12 @@ impl std::fmt::Display for WorkerLimit {
             }
             Self::Memory { bound_bytes } => {
                 write!(f, "worker memory exceeds its {bound_bytes}-byte ceiling")
+            }
+            Self::Wall { bound_ms } => {
+                write!(
+                    f,
+                    "the execution held its workers past its {bound_ms} ms wall time"
+                )
             }
             Self::Attempts { bound } => write!(f, "the execution spent its {bound} attempts"),
             other => write!(f, "{other:?}"),

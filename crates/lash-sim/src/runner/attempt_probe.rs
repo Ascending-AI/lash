@@ -318,6 +318,7 @@ mod tests {
         workers.deadlines.compute = off_clock;
         workers.deadlines.serialization = off_clock;
         workers.deadlines.cumulative_cpu = off_clock;
+        workers.deadlines.execution_wall = off_clock;
         workers.deadlines.checkout = off_clock;
         workers.protocol.no_response_watchdog = off_clock;
         let worker_clock = clock.clone();

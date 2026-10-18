@@ -85,13 +85,16 @@ pub const CELL_TASKS_OUTSTANDING: &str = "CELL_TASKS_OUTSTANDING";
 pub const CELL_DEADLOCK: &str = "CELL_DEADLOCK";
 /// The stable code of a cell that passed an execution bound.
 pub const CELL_BOUND_EXCEEDED: &str = "CELL_BOUND_EXCEEDED";
+/// The stable code of a cell whose worker died while it ran (FIG-6786).
+pub const CELL_WORKER_DIED: &str = "CELL_WORKER_DIED";
 
 /// The failure of a cell whose run met a limit of its own at the worker
-/// boundary. The CPU budget and the compute deadline are limits lash set on
-/// the cell's worker, and the cgroup memory ceiling one its host set: the
-/// same cell on the same inputs meets them again, so the cell is refused
-/// with the bound it passed and its configured value, as an execution bound
-/// is, and the model repairs from it (FIG-6523, FIG-6787).
+/// boundary. The CPU budget, the compute deadline and the held wall time
+/// are limits lash set on the cell's workers, and the cgroup memory ceiling
+/// one its host set: the same cell on the same inputs meets them again, so
+/// the cell is refused with the bound it passed and its configured value,
+/// as an execution bound is, and the model repairs from it (FIG-6523,
+/// FIG-6786, FIG-6787).
 pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFailure {
     let (what, bound, repair) = match limit {
         lash_vm_client::WorkerLimit::Cpu { bound_ms } => (
@@ -109,6 +112,11 @@ pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFa
             format!("{bound_bytes} bytes"),
             "Hold less data at once or split the work across smaller cells to fit the memory limit.",
         ),
+        lash_vm_client::WorkerLimit::Wall { bound_ms } => (
+            "worker wall time limit exceeded",
+            format!("{bound_ms} ms"),
+            "Split the work across smaller cells, each of which holds its worker for less time.",
+        ),
         other => {
             return CellFailure::new(CellFailureKind::Program, other.to_string())
                 .with_worker_limit(other);
@@ -119,6 +127,31 @@ pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFa
         format!("{CELL_BOUND_EXCEEDED}: {what} (limit {bound})\n{repair}"),
     )
     .with_worker_limit(limit)
+}
+
+/// The failure of a cell whose worker died after it began computing the
+/// cell: most often an allocation past the worker's address-space ceiling
+/// or a kill for memory. Read as its host's verdict, the turn ran the cell
+/// again pass after pass until the session parked, and the model never saw
+/// it: the death is the cell's end instead, recorded once, and the model
+/// repairs from it (FIG-6786).
+pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence) -> CellFailure {
+    let how = match evidence {
+        lash_vm_protocol::SupervisorEvidence::Signalled { signal } => {
+            format!("killed by signal {signal}")
+        }
+        lash_vm_protocol::SupervisorEvidence::Exited { code } => format!("exited with code {code}"),
+        lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall => {
+            "killed for a forbidden system call".to_owned()
+        }
+        lash_vm_protocol::SupervisorEvidence::EndOfStream => "closed its connection".to_owned(),
+    };
+    CellFailure::new(
+        CellFailureKind::Policy,
+        format!(
+            "{CELL_WORKER_DIED}: the worker running the cell died ({how})\nHold less data at once, or split the work across smaller cells."
+        ),
+    )
 }
 
 /// What the kernel or the dialect made of a cell that did not complete, as

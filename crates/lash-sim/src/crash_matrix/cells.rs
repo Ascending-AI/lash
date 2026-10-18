@@ -268,6 +268,7 @@ fn untimed_workers(clock: &Arc<SimClock>, slice: Option<u64>) -> lash::vm::Worke
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    config.deadlines.execution_wall = OFF_THE_CLOCK;
     config.deadlines.checkout = OFF_THE_CLOCK;
     config.protocol.no_response_watchdog = OFF_THE_CLOCK;
     let clock = Arc::clone(clock);

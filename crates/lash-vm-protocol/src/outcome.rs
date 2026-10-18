@@ -425,6 +425,16 @@ pub enum InfrastructureOutcome {
     },
     #[error("the worker crashed ({evidence:?})")]
     WorkerCrashed { evidence: SupervisorEvidence },
+    /// The worker died after it began computing the run, before the run
+    /// released it: an end the run may have caused, such as an allocation
+    /// abort at the address-space ceiling, a kill for memory or a crash in
+    /// a native helper. Another attempt may pass, so it is retryable, but
+    /// it spends one of the execution's attempts and is never a capacity
+    /// verdict: a run that keeps killing its worker runs out of attempts
+    /// (FIG-6786). A worker lost before it computed the run is
+    /// [`Self::WorkerCrashed`].
+    #[error("the worker died running the run ({evidence:?})")]
+    RunCrashedWorker { evidence: SupervisorEvidence },
     #[error("the worker sent nothing for {silent_ms} ms")]
     WorkerUnresponsive { silent_ms: u64 },
     #[error("the worker protocol was broken: {breach}")]
@@ -457,6 +467,7 @@ impl InfrastructureOutcome {
             Self::HeapFault { fault } => fault.is_retryable(),
             Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
             Self::WorkerCrashed { .. }
+            | Self::RunCrashedWorker { .. }
             | Self::WorkerUnresponsive { .. }
             | Self::ProtocolViolation { .. } => true,
         }
@@ -546,6 +557,7 @@ impl WorkerRefusal {
             // The page service's refusal is the parent's own evidence.
             InfrastructureOutcome::WorkerDeployment { .. }
             | InfrastructureOutcome::WorkerCrashed { .. }
+            | InfrastructureOutcome::RunCrashedWorker { .. }
             | InfrastructureOutcome::WorkerUnresponsive { .. }
             | InfrastructureOutcome::PageRefused { .. } => None,
         }

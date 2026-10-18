@@ -5744,6 +5744,29 @@
         },
         {
           "additionalProperties": false,
+          "description": "The execution held its workers past its configured wall time: the\nsum over its checkouts, and for a code-mode cell over its\nactivations, of the time from a worker's admission to its release\n(FIG-6786).",
+          "properties": {
+            "wall": {
+              "properties": {
+                "bound_ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound_ms"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "wall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The execution spent its configured replacement attempts.",
           "properties": {
             "attempts": {

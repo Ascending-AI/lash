@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+pub use crate::budget::ExecutionBudget;
 use crate::ipc::Worker;
 use crate::measurements::{
     ExecutionClass, ExecutionReceipt, Measurements, PoolMeasurements, SharedMeasurements,
@@ -14,54 +15,6 @@ use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::page::{PageCapability, PageExchangeId, PageReply, PageRequest, SealBatch};
 use lash_vm_protocol::*;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Parent-owned accounting. Carry this same value across substrate redrives
-/// and replacement checkouts. The pool never rewinds it or retries execution.
-#[derive(Clone, Debug, Default)]
-pub struct ExecutionBudget(Arc<Mutex<BudgetTotals>>);
-#[derive(Debug, Default)]
-struct BudgetTotals {
-    attempts: u32,
-    cpu_nanos: u64,
-    replacement: bool,
-}
-impl ExecutionBudget {
-    pub fn totals(&self) -> (u32, Duration) {
-        let totals = lock(&self.0);
-        (totals.attempts, Duration::from_nanos(totals.cpu_nanos))
-    }
-    pub fn restored(attempts: u32, cpu: Duration) -> Self {
-        Self(Arc::new(Mutex::new(BudgetTotals {
-            attempts,
-            cpu_nanos: nanos(cpu),
-            replacement: attempts > 0,
-        })))
-    }
-    fn admit(&self, config: &PoolConfig) -> Result<(), PoolError> {
-        let mut totals = lock(&self.0);
-        if totals.replacement && totals.attempts >= config.deadlines.max_attempts {
-            return Err(PoolError::RetryLimitExceeded {
-                bound: config.deadlines.max_attempts,
-            });
-        }
-        if totals.cpu_nanos >= nanos(config.deadlines.cumulative_cpu) {
-            return Err(limit(config.deadlines.cpu_limit()));
-        }
-        if totals.attempts == 0 || totals.replacement {
-            totals.attempts += 1;
-        }
-        totals.replacement = false;
-        Ok(())
-    }
-    fn charge(&self, delta: u64, config: &PoolConfig) -> Result<(), PoolError> {
-        let mut totals = lock(&self.0);
-        totals.cpu_nanos = totals.cpu_nanos.saturating_add(delta);
-        if totals.cpu_nanos >= nanos(config.deadlines.cumulative_cpu) {
-            return Err(limit(config.deadlines.cpu_limit()));
-        }
-        Ok(())
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PoolStats {
@@ -358,15 +311,15 @@ fn unqueue(state: &mut State, queued: bool, bytes: usize) {
         state.queued_bytes -= bytes;
     }
 }
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
-fn nanos(duration: Duration) -> u64 {
+pub(crate) fn nanos(duration: Duration) -> u64 {
     duration.as_nanos().min(u128::from(u64::MAX)) as u64
 }
-fn limit(limit: WorkerLimit) -> PoolError {
+pub(crate) fn limit(limit: WorkerLimit) -> PoolError {
     InfrastructureOutcome::WorkerLimitExceeded { limit }.into()
 }
 
@@ -421,6 +374,9 @@ pub struct Checkout {
     pool: Arc<Pool>,
     worker: Option<Worker>,
     budget: ExecutionBudget,
+    /// Whether this checkout counts in its execution's held wall time: from
+    /// its admission until it lets its worker go.
+    holding: bool,
     credited_cpu: u64,
     outgoing: MessageFence,
     incoming: MessageFence,
@@ -428,6 +384,9 @@ pub struct Checkout {
     /// Whether the lease's one `Prepare` crossed.
     prepared: bool,
     started: bool,
+    /// Whether the worker began computing the run: a death from then until
+    /// the run releases it is the run's to answer for (FIG-6786).
+    computed: bool,
     /// The run's start, until it crosses with the run's first slice.
     unsent_start: Option<Box<Start>>,
     /// Committed outcomes for the run, until they cross with its next
@@ -612,6 +571,7 @@ impl Checkout {
         }
         self.print_budget = start.bounds.memory;
         self.started = true;
+        self.computed = false;
         self.unsent_start = Some(Box::new(start));
         Ok(())
     }
@@ -757,7 +717,7 @@ impl Checkout {
             return Err(PoolError::breach(SequenceFault::WrongReadId));
         }
         if let Err(error) = self.effect_bound(answer.0.len()) {
-            self.discard();
+            self.discard_after(&error);
             return Err(error);
         }
         if let Some(scope) = self.phase_scope() {
@@ -852,7 +812,7 @@ impl Checkout {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
         if let Err(error) = self.effect_bound(outcome.0.len()) {
-            self.discard();
+            self.discard_after(&error);
             return Err(error);
         }
         self.deliveries.push(Delivery { wait, outcome });
@@ -923,10 +883,13 @@ impl Checkout {
     /// Physical stop, followed by bounded hard kill on silence. The broker
     /// retains the durable cancellation and completion winner.
     pub fn cancel(&mut self) -> Result<WorkerMessage, PoolError> {
-        let response = self.exchange(
-            ParentMessage::Cancel,
-            self.pool.config.deadlines.cancel_grace,
-        );
+        self.resettable = false;
+        self.printed_bytes = 0;
+        let grace = self.pool.config.deadlines.cancel_grace;
+        let response = self
+            .send(ParentMessage::Cancel, grace)
+            .and_then(|()| self.answer(grace, false));
+        let response = self.settle(response);
         self.discard_for(false);
         response
     }
@@ -950,7 +913,7 @@ impl Checkout {
                     return Err(PoolError::breach(SequenceFault::CpuAccountingRegressed));
                 }
                 if let Err(error) = self.charge_cpu(cpu_nanos) {
-                    self.discard();
+                    self.discard_after(&error);
                     return Err(error);
                 }
                 self.credited_cpu = cpu_nanos;
@@ -1039,8 +1002,10 @@ impl Checkout {
         self.resettable = false;
         self.printed_bytes = 0;
         let result = self
-            .send(message, timeout)
-            .and_then(|()| self.answer(timeout));
+            .budget
+            .wall(&self.pool.config)
+            .and_then(|()| self.send(message, timeout))
+            .and_then(|()| self.answer(timeout, true));
         self.settle(result)
     }
     /// [`Checkout::exchange`] of a frame already encoded under the next
@@ -1053,17 +1018,30 @@ impl Checkout {
         self.resettable = false;
         self.printed_bytes = 0;
         let result = self
-            .send_encoded(bytes, crate::measurements::IpcTraffic::RUN_KIND, timeout)
-            .and_then(|()| self.answer(timeout));
+            .budget
+            .wall(&self.pool.config)
+            .and_then(|()| {
+                self.send_encoded(bytes, crate::measurements::IpcTraffic::RUN_KIND, timeout)
+            })
+            .and_then(|()| self.answer(timeout, true));
         self.settle(result)
     }
-    /// An exchange's result: a failed one discards the worker.
+    /// An exchange's result: a failed one discards the worker. A worker
+    /// that died after it began computing the run died running it.
     fn settle(
         &mut self,
         result: Result<WorkerMessage, PoolError>,
     ) -> Result<WorkerMessage, PoolError> {
-        if result.is_err() {
-            self.discard();
+        let result = match result {
+            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { evidence }))
+                if self.started && self.computed =>
+            {
+                Err(InfrastructureOutcome::RunCrashedWorker { evidence }.into())
+            }
+            result => result,
+        };
+        if let Err(error) = &result {
+            self.discard_after(error);
             #[cfg(feature = "testing")]
             if matches!(
                 result,
@@ -1092,12 +1070,19 @@ impl Checkout {
         }
     }
     /// The worker's answer to the request just sent, its progress and
-    /// prints taken on the way.
-    fn answer(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
+    /// prints taken on the way. A `walled` answer is also held to the
+    /// execution's held wall time.
+    fn answer(&mut self, timeout: Duration, walled: bool) -> Result<WorkerMessage, PoolError> {
         // A worker answered a page exchange computes on, under a fresh
-        // compute deadline: none ran while the parent served its pages.
+        // compute deadline: none ran while the parent served its pages. The
+        // execution's wall time runs on.
         let mut phase = self.paged.take();
-        let mut deadline = Instant::now() + self.phase_bound(phase, timeout);
+        let wall = walled.then(|| self.budget.wall_deadline(&self.pool.config));
+        let bounded = |bound: Duration| {
+            let deadline = Instant::now() + bound;
+            wall.map_or(deadline, |wall| deadline.min(wall))
+        };
+        let mut deadline = bounded(self.phase_bound(phase, timeout));
         #[cfg(feature = "testing")]
         let mut phase_started = Instant::now();
         loop {
@@ -1107,6 +1092,13 @@ impl Checkout {
                 .ok_or_else(PoolError::eof)?
                 .receive(deadline);
             let frame = match received {
+                // The execution held its workers past its wall time, the
+                // run's own limit (FIG-6786).
+                Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
+                    ..
+                })) if wall.is_some_and(|wall| Instant::now() >= wall) => {
+                    return Err(limit(self.pool.config.deadlines.wall_limit()));
+                }
                 // The run's own computation or serialization outlasted its
                 // deadline: the same run meets it again (FIG-6523).
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
@@ -1170,6 +1162,7 @@ impl Checkout {
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;
                     self.worker.as_mut().ok_or_else(PoolError::eof)?.cpu_nanos = cpu_nanos;
+                    self.computed |= self.started && next == WorkerPhase::Computing;
                     if !self.execution_recorded && next == WorkerPhase::Computing {
                         if let Some(class_name) = self.execution_class {
                             let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
@@ -1205,7 +1198,7 @@ impl Checkout {
                     {
                         phase_started = Instant::now();
                     }
-                    deadline = Instant::now() + self.phase_bound(phase, timeout);
+                    deadline = bounded(self.phase_bound(phase, timeout));
                 }
                 WorkerMessage::Refused { refusal } => {
                     return Err(refusal.into_outcome().into());
@@ -1273,7 +1266,7 @@ impl Checkout {
                 }
                 WorkerMessage::Cancelled => {
                     self.discard_for(false);
-                    lock(&self.budget.0).replacement = false;
+                    self.budget.replacement(false);
                     return Ok(WorkerMessage::Cancelled);
                 }
                 message @ (WorkerMessage::Ready { .. } | WorkerMessage::ResetDone { .. }) => {
@@ -1288,6 +1281,19 @@ impl Checkout {
     fn discard(&mut self) {
         self.discard_for(true);
     }
+    /// Discards the worker after `error`: the run's own typed end, a limit
+    /// of its own or a refusal of its own inputs, is no failure of the
+    /// pool's and spends nothing of its restart window (FIG-6786).
+    fn discard_after(&mut self, error: &PoolError) {
+        let own = match error {
+            PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
+                !limit.is_host_verdict()
+            }
+            PoolError::Infrastructure(InfrastructureOutcome::RunRefused { .. }) => true,
+            _ => false,
+        };
+        self.discard_for(!own);
+    }
     fn discard_for(&mut self, failed: bool) {
         if let Some(worker) = self.worker.take() {
             if let Some(scope) = &worker.phases {
@@ -1297,8 +1303,11 @@ impl Checkout {
             let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
             if self.started || self.prepared {
-                lock(&self.budget.0).replacement = true;
+                self.budget.replacement(true);
             }
+        }
+        if std::mem::take(&mut self.holding) {
+            self.budget.unhold();
         }
         self.pending = None;
         self.split = None;
@@ -1458,6 +1467,7 @@ pub mod runtime_ops {
                         }
                     }
                     worker.used = true;
+                    budget.hold();
                     let credited_cpu = worker.cpu_nanos;
                     return Ok(Checkout {
                         #[cfg(feature = "testing")]
@@ -1467,12 +1477,14 @@ pub mod runtime_ops {
                         pool: self.0.clone(),
                         worker: Some(worker),
                         budget,
+                        holding: true,
                         credited_cpu,
                         outgoing: MessageFence::new(lease, owner_epoch, frame_epoch),
                         incoming: MessageFence::new(lease, owner_epoch, frame_epoch),
                         reservation: queued_bytes,
                         prepared: false,
                         started: false,
+                        computed: false,
                         unsent_start: None,
                         deliveries: Vec::new(),
                         paged: None,

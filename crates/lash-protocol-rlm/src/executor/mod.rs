@@ -687,7 +687,12 @@ async fn run_cell(
     }
     state.begin_code_execution();
     state.note_pages(ctx.session_pages());
-    let workers = services.workers.begin_execution();
+    // The wall time the cell held workers before this activation counts
+    // against its cap (FIG-6786).
+    let held = resumed.as_ref().map_or(std::time::Duration::ZERO, |cell| {
+        std::time::Duration::from_millis(cell.graph.state.held_ms)
+    });
+    let workers = services.workers.begin_execution(held);
     let services = CellServices {
         workers,
         ..services.clone()
@@ -910,6 +915,11 @@ async fn run_linked_cell(
         ledgers,
         envelope,
         graph: Mutex::new(graph),
+        budget: services
+            .workers
+            .execution_budget()
+            .cloned()
+            .unwrap_or_default(),
     };
     let printed = Arc::clone(&prints);
     let random = std::collections::hash_map::RandomState::new();
@@ -1338,6 +1348,16 @@ fn broker_failure(
                 return exec_response_from(
                     collected,
                     lash_core::CellOutcome::Failed(crate::feedback::worker_limit_failure(*limit)),
+                );
+            }
+            // A worker that died running the cell ends it, once: as a host
+            // verdict its turn ran it again until the session parked
+            // (FIG-6786).
+            if let lash_vm_protocol::InfrastructureOutcome::RunCrashedWorker { evidence } = &outcome
+            {
+                return exec_response_from(
+                    collected,
+                    lash_core::CellOutcome::Failed(crate::feedback::worker_died_failure(*evidence)),
                 );
             }
             // The state a resumed cell runs on from is refused: another

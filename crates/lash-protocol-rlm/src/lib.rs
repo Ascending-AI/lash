@@ -84,7 +84,8 @@ pub mod snapshot {
 }
 pub use call_feedback::{CallFeedbackPolicy, CallFeedbackPolicyError};
 pub use feedback::{
-    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
+    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, CELL_WORKER_DIED,
+    SESSION_BINDING_NOT_CARRIED,
 };
 /// The schema shapes a [`DialectPrompts`] and a tool presenter spell: the
 /// shared reading of a tool's JSON Schemas, also constructed directly by

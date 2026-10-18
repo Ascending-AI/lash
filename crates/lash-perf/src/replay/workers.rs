@@ -48,6 +48,7 @@ pub(crate) fn service(
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    config.deadlines.execution_wall = OFF_THE_CLOCK;
     Ok(lash::vm::WorkerService::new(config))
 }
 

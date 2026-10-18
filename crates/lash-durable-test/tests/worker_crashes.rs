@@ -14,9 +14,13 @@
 //! The same served turn, with no worker killed, is what a cell costs the
 //! worker boundary: one lease and a counted number of frames (FIG-5921).
 //!
-//! A worker lost to a limit lash itself set on it, its CPU budget or its
-//! compute deadline, is the cell's own end, never a crash: the cell is
-//! refused once with that limit, and the model reads it (FIG-6523).
+//! A worker lost to a limit lash itself set on it, its CPU budget, its
+//! compute deadline or the wall time its execution may hold workers, is the
+//! cell's own end, never a crash: the cell is refused once with that limit,
+//! and the model reads it (FIG-6523, FIG-6786). So is a worker the cell's
+//! own run killed, as an allocation past the worker's address-space ceiling
+//! does: before, the turn ran the cell again pass after pass until the
+//! session parked, and the model never saw it (FIG-6786).
 //!
 //! A worker names a page it sealed earlier in its activation under the
 //! grant the parent gave it, without sealing it again. What a later park
@@ -339,6 +343,12 @@ async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: T
 /// does, under [`unbounded_rlm`].
 const HEAVY: &str = "let n = 0; while (n >= 0) { n = n + 1; } await control.finish(n);";
 
+/// A cell whose regular expression backtracks over 8 million units: the
+/// matcher's stack, which no run bound meters, grows past a 1 GiB
+/// address-space ceiling long before the match reaches its guard.
+const BACKTRACK: &str =
+    "const input = \"a\".repeat(8000000); await control.finish(/^(a|aa)+$b/.test(input));";
+
 /// A limit lash sets on the cell's worker, configured small.
 #[derive(Clone, Copy, Debug)]
 enum Limit {
@@ -347,13 +357,35 @@ enum Limit {
     Cpu,
     /// One exchange's compute deadline: the parent stops waiting.
     Deadline,
+    /// The wall time the execution may hold workers (FIG-6786): the
+    /// parent stops waiting within a compute deadline it never reaches.
+    Wall,
+    /// No limit of lash's run: the worker's address-space ceiling, which
+    /// the cell's allocation passes, so the worker aborts (FIG-6786).
+    Died,
 }
 
 impl Limit {
-    fn configure(self, deadlines: &mut lash::vm::WorkerDeadlines) {
+    fn configure(self, config: &mut lash::vm::WorkerPoolConfig) {
+        let second = std::time::Duration::from_secs(1);
         match self {
-            Self::Cpu => deadlines.cumulative_cpu = std::time::Duration::from_secs(1),
-            Self::Deadline => deadlines.compute = std::time::Duration::from_secs(1),
+            Self::Cpu => config.deadlines.cumulative_cpu = second,
+            Self::Deadline => config.deadlines.compute = second,
+            Self::Wall => config.deadlines.execution_wall = second,
+            Self::Died => {
+                config.confinement.address_space_bytes = 1024 * 1024 * 1024;
+                // Room for the parser stack of the largest admitted source.
+                config.protocol.max_source_bytes = 4096;
+                config.tuning.typescript_source_bytes = 4096;
+            }
+        }
+    }
+
+    /// The cell the model writes.
+    fn cell(self) -> &'static str {
+        match self {
+            Self::Died => BACKTRACK,
+            Self::Cpu | Self::Deadline | Self::Wall => HEAVY,
         }
     }
 
@@ -362,6 +394,8 @@ impl Limit {
         match self {
             Self::Cpu => serde_json::json!({ "cpu": { "bound_ms": 1000 } }),
             Self::Deadline => serde_json::json!({ "deadline": { "bound_ms": 1000 } }),
+            Self::Wall => serde_json::json!({ "wall": { "bound_ms": 1000 } }),
+            Self::Died => serde_json::Value::Null,
         }
     }
 
@@ -372,6 +406,8 @@ impl Limit {
             Self::Deadline => {
                 "CELL_BOUND_EXCEEDED: worker compute deadline exceeded (limit 1000 ms)"
             }
+            Self::Wall => "CELL_BOUND_EXCEEDED: worker wall time limit exceeded (limit 1000 ms)",
+            Self::Died => "CELL_WORKER_DIED: the worker running the cell died (killed by signal 6)",
         }
     }
 }
@@ -431,7 +467,7 @@ async fn worker_limit_case(tier: Tier, limit: Limit) {
     config.max_workers = 1;
     // One exchange runs the loop until the limit stops it.
     config.tuning.slice = 1 << 50;
-    limit.configure(&mut config.deadlines);
+    limit.configure(&mut config);
     let workers = lash::vm::WorkerService::new(config).with_worker_receipts();
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let model = {
@@ -442,7 +478,7 @@ async fn worker_limit_case(tier: Tier, limit: Limit) {
                 let mut asked = requests.lock().unwrap();
                 asked.push(serde_json::to_string(&request.messages).expect("a request encodes"));
                 let response = if asked.len() == 1 {
-                    served::cell(HEAVY)
+                    served::cell(limit.cell())
                 } else {
                     served::text(&request, "done")
                 };
@@ -507,6 +543,14 @@ async fn a_cell_past_its_worker_compute_deadline_is_refused_once_and_the_model_r
     tier: Tier,
 ) {
     worker_limit_case(tier, Limit::Deadline).await;
+}
+
+async fn a_cell_past_its_worker_wall_time_is_refused_once_and_the_model_reads_it(tier: Tier) {
+    worker_limit_case(tier, Limit::Wall).await;
+}
+
+async fn a_cell_that_kills_its_worker_is_refused_once_and_the_model_reads_it(tier: Tier) {
+    worker_limit_case(tier, Limit::Died).await;
 }
 
 async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
@@ -645,4 +689,6 @@ tiered_laws!(
     a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease,
     a_cell_past_its_worker_cpu_budget_is_refused_once_and_the_model_reads_it,
     a_cell_past_its_worker_compute_deadline_is_refused_once_and_the_model_reads_it,
+    a_cell_past_its_worker_wall_time_is_refused_once_and_the_model_reads_it,
+    a_cell_that_kills_its_worker_is_refused_once_and_the_model_reads_it,
 );

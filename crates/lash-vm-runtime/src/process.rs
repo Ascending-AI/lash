@@ -364,7 +364,8 @@ pub struct KernelRunPolicy {
     /// How long a process whose run the worker pool lacked capacity for
     /// backs off before its next claim, doubled for each claim in a row
     /// that made no progress ([`lash_execution_contracts::process::CapacityVerdict`]). Such a run
-    /// spends none of `attempts`.
+    /// spends none of `attempts`. A worker that died running the run is no
+    /// capacity verdict: it spends one of `attempts` (FIG-6786).
     pub capacity_backoff: std::time::Duration,
     /// How long a replay's reader lease on a retained run record lives
     /// between renewals (FIG-6370): the longest a replay keeps the pages it

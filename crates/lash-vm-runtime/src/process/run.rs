@@ -641,7 +641,10 @@ fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
 /// The capacity verdict a worker failure is, by its typed outcome: the
 /// pool's queue, checkout wait or restart window, or retryable worker
 /// infrastructure (FIG-4451). A refusal of the run, a limit of the run
-/// itself and a deployment or configuration fault are none.
+/// itself and a deployment or configuration fault are none. Neither is a
+/// worker that died running the run: that is a fault of the attempt, which
+/// spends one of the step's attempts, so a run that keeps killing its
+/// worker ends once they are spent (FIG-6786).
 fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
     match outcome {
         InfrastructureOutcome::ProtocolViolation {
@@ -670,6 +673,7 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
                 .then_some(CapacityCause::RetryableInfrastructure)
         }
         InfrastructureOutcome::RunRefused { .. }
+        | InfrastructureOutcome::RunCrashedWorker { .. }
         | InfrastructureOutcome::WorkerDeployment { .. } => None,
     }
 }
@@ -856,5 +860,34 @@ impl KernelRecordedSettings {
             requests_per_park: self.requests_per_park,
             join_members: self.join_members,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-6786: a worker that died running the run is a fault of the
+    /// attempt, which spends one of the step's attempts, so a run that keeps
+    /// killing its worker ends once they are spent. A worker lost before it
+    /// computed the run stays the host's capacity verdict, which spends
+    /// none.
+    #[test]
+    fn a_worker_the_run_crashed_spends_an_attempt_and_one_lost_before_it_ran_does_not() {
+        let evidence = lash_vm_protocol::SupervisorEvidence::Signalled { signal: 9 };
+        let ran = worker_failure(KernelFailure::Worker {
+            outcome: InfrastructureOutcome::RunCrashedWorker { evidence },
+        });
+        assert!(matches!(ran, Err(Unsettled::Fault(_))));
+        let lost = worker_failure(KernelFailure::Worker {
+            outcome: InfrastructureOutcome::WorkerCrashed { evidence },
+        });
+        assert!(matches!(
+            lost,
+            Err(Unsettled::Capacity(
+                CapacityCause::RetryableInfrastructure,
+                _
+            ))
+        ));
     }
 }

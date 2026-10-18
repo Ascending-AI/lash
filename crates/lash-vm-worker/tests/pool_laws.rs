@@ -80,6 +80,8 @@ under_each_embedding!(
     a_refusing_parent_limiter_ends_the_run_where_no_limiter_does,
     a_limit_the_parent_grows_is_saved_and_a_resumed_run_keeps_it,
     worker_crash_mid_run_leaves_the_parent_running,
+    a_run_that_holds_its_worker_past_its_wall_time_ends_with_the_wall_limit,
+    a_runs_own_limit_spends_nothing_of_the_restart_window,
     a_sigxcpu_lash_did_not_cause_is_a_crash_the_host_retries,
     a_forbidden_syscall_kills_the_worker_with_typed_evidence,
     a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall,
@@ -1184,6 +1186,9 @@ main {
 
 /// A worker that dies in the middle of a run fails the exchange typed, is
 /// reaped, and leaves the parent with a pool that hands out a replacement.
+/// It died after it began computing the run, so it died running it: a
+/// verdict another attempt may pass, which still spends one of the
+/// execution's attempts (FIG-6786).
 fn worker_crash_mid_run_leaves_the_parent_running() {
     let pool = WorkerPool::new(config("abort")).expect("pool");
     let mut parent = Parent::new(DIALECT);
@@ -1201,15 +1206,85 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
     worker
         .deliver(wait, completed(argument))
         .expect("the outcome waits for the next slice");
-    assert!(matches!(
-        parent.run(&mut worker, SLICE, false),
-        Err(PoolError::Infrastructure(
-            InfrastructureOutcome::WorkerCrashed { .. }
-        ))
-    ));
+    let lost = parent.run(&mut worker, SLICE, false).err();
+    assert!(
+        matches!(
+            lost,
+            Some(PoolError::Infrastructure(
+                InfrastructureOutcome::RunCrashedWorker { .. }
+            ))
+        ),
+        "the worker died running the run: {lost:?}"
+    );
+    assert!(lost.is_some_and(|lost| lost.is_host_verdict()));
     let next = checkout(&pool);
     assert_ne!(next.pid(), Some(pid));
     next.release().expect("pristine replacement");
+}
+
+/// FIG-6786: an execution holds its workers for at most its wall time,
+/// summed over its exchanges. Every slice of an endless run returns to the
+/// parent well within the compute deadline, and each starts a fresh compute
+/// window, yet the run ends with the wall limit once it has held its worker
+/// that long: the run's own end, never the host's verdict.
+fn a_run_that_holds_its_worker_past_its_wall_time_ends_with_the_wall_limit() {
+    let mut config = config("");
+    config.deadlines.execution_wall = Duration::from_millis(200);
+    config.deadlines.cumulative_cpu = Duration::from_secs(3);
+    config.run_bounds.charge_limit = u64::MAX;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document("main { while true { } }");
+    let mut worker = checkout(&pool);
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.bounds.charge_limit = u64::MAX;
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("start");
+    let lost = loop {
+        match worker.run(10_000, false) {
+            Ok(RunStep::Slice { .. }) => {}
+            Ok(other) => panic!("the endless run only slices: {other:?}"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(
+        lost,
+        PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+            limit: WorkerLimit::Wall { bound_ms: 200 }
+        })
+    );
+    assert!(!lost.is_host_verdict(), "the run's own end: {lost:?}");
+}
+
+/// FIG-6786: the pool's restart window counts failures of its workers, not
+/// a run's own typed limit. Twice a run passes its compute deadline and
+/// loses its worker; with a window one failure fills, the pool still hands
+/// out the next worker instead of `RestartStorm`.
+fn a_runs_own_limit_spends_nothing_of_the_restart_window() {
+    let mut config = config("");
+    config.max_restarts = 1;
+    config.deadlines.compute = Duration::from_millis(100);
+    config.run_bounds.charge_limit = u64::MAX;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document("main { while true { } }");
+    for _ in 0..2 {
+        let mut worker = checkout(&pool);
+        let mut start = fresh(&document, Target::Main, Vec::new());
+        start.bounds.charge_limit = u64::MAX;
+        worker
+            .start(start, &identity, ExecutionClass::Cell)
+            .expect("start");
+        assert_eq!(
+            worker.run(u64::MAX, false).err(),
+            Some(PoolError::Infrastructure(
+                InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: WorkerLimit::Deadline { bound_ms: 100 }
+                }
+            ))
+        );
+    }
+    assert!(!pool.stats().restart_storm);
+    checkout(&pool).release().expect("a fresh worker");
 }
 
 /// FIG-6523: the kernel stops a worker with `SIGXCPU` at the CPU ceiling

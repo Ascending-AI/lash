@@ -2,6 +2,7 @@
 //! pooled worker hosts.
 #![deny(clippy::future_not_send)]
 
+mod budget;
 mod cgroup;
 mod config;
 mod error;

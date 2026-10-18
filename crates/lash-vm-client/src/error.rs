@@ -192,6 +192,9 @@ mod tests {
             InfrastructureOutcome::WorkerCrashed {
                 evidence: SupervisorEvidence::EndOfStream,
             },
+            InfrastructureOutcome::RunCrashedWorker {
+                evidence: SupervisorEvidence::Signalled { signal: 9 },
+            },
             InfrastructureOutcome::WorkerUnresponsive { silent_ms: 10 },
             ProtocolBreach::from(lash_vm_protocol::SequenceFault::UnexpectedServiceResponse).into(),
             InfrastructureOutcome::WorkerLimitExceeded {
@@ -210,6 +213,7 @@ mod tests {
             WorkerLimit::Observations,
             WorkerLimit::Cpu { bound_ms: 1 },
             WorkerLimit::Deadline { bound_ms: 1 },
+            WorkerLimit::Wall { bound_ms: 1 },
             WorkerLimit::EffectValue { size: 2, bound: 1 },
             WorkerLimit::VmState { size: 2, bound: 1 },
             WorkerLimit::Frame {

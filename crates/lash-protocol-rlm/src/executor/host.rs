@@ -208,6 +208,8 @@ pub(super) struct CellHost<'run> {
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.
     pub graph: Mutex<HostGraph>,
+    /// The cell's execution budget, whose held wall time each park saves.
+    pub budget: lash_vm_client::ExecutionBudget,
 }
 
 /// A cell host's state as the graph its parks install: what an
@@ -642,6 +644,7 @@ impl KernelEffects for CellHost<'_> {
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;
         graph.state.reads = ledgers.reads;
+        graph.state.held_ms = u64::try_from(self.budget.held().as_millis()).unwrap_or(u64::MAX);
         drop(ledgers);
         for value in prints
             .iter()

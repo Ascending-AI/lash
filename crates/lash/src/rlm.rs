@@ -95,7 +95,7 @@ pub use lash_protocol_rlm::{
 /// The stable codes of the typed observations a cell's failure carries, and
 /// the error kinds a cell's program catches from a tool call.
 pub use lash_protocol_rlm::{
-    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, CONTROL_REFUSED,
+    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, CELL_WORKER_DIED, CONTROL_REFUSED,
     SESSION_BINDING_NOT_CARRIED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
 };
 /// The code-mode dialect seam: a host selects the [`CellDialect`] its new

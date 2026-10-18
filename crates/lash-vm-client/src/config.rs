@@ -39,12 +39,23 @@ pub struct Deadlines {
     pub cancel_grace: Duration,
     pub cumulative_cpu: Duration,
     pub max_attempts: u32,
+    /// The most wall time one execution may hold workers. It counts from
+    /// each checkout's admission to its release or discard, summed over the
+    /// execution's checkouts: page answers, host reads, waits on effects
+    /// that keep the worker, lowering, compute and serialization all count.
+    /// The pool's queue and a durable park that released the worker do
+    /// not. A code-mode cell saves what it held with each park and resumes
+    /// with it, so the cap holds across its activations and owners. Passing
+    /// it ends the run with [`lash_vm_protocol::WorkerLimit::Wall`]
+    /// (FIG-6786).
+    pub execution_wall: Duration,
 }
 
 impl Deadlines {
     /// Bounded host defaults, retained after the FIG-4162 integrated matrix.
     /// Checkout 5 s, compute 30 s, serialization 5 s, cancel grace 100 ms,
-    /// cumulative CPU 10 s, and three attempts. These are provisional:
+    /// cumulative CPU 10 s, three attempts and 600 s of held wall time
+    /// (the wall time has no workload measurement). These are provisional:
     /// synthetic service times do not bound arbitrary guest computation;
     /// hosts should select deadlines for their admitted workload.
     pub const fn standard() -> Self {
@@ -55,6 +66,7 @@ impl Deadlines {
             cancel_grace: Duration::from_millis(100),
             cumulative_cpu: Duration::from_secs(10),
             max_attempts: 3,
+            execution_wall: Duration::from_secs(600),
         }
     }
 
@@ -63,6 +75,14 @@ impl Deadlines {
     pub(crate) fn cpu_limit(&self) -> lash_vm_protocol::WorkerLimit {
         lash_vm_protocol::WorkerLimit::Cpu {
             bound_ms: millis(self.cumulative_cpu),
+        }
+    }
+
+    /// What an execution meets once it has held its workers past its wall
+    /// time.
+    pub(crate) fn wall_limit(&self) -> lash_vm_protocol::WorkerLimit {
+        lash_vm_protocol::WorkerLimit::Wall {
+            bound_ms: millis(self.execution_wall),
         }
     }
 }
@@ -414,6 +434,7 @@ impl PoolConfig {
             || self.deadlines.cancel_grace.is_zero()
             || self.deadlines.cumulative_cpu.is_zero()
             || self.deadlines.max_attempts == 0
+            || self.deadlines.execution_wall.is_zero()
             || self.protocol.no_response_watchdog.is_zero()
             || largest_parser_stack
                 .is_none_or(|stack| stack >= self.confinement.address_space_bytes)

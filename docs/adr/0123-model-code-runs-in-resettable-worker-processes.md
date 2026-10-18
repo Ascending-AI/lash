@@ -267,7 +267,13 @@ before running the worker server. The pool bounds checkout, queue size,
 process count, deadlines, cumulative CPU and replacement attempts. Clean
 release resets the worker; a crash, protocol failure or exhausted limit
 discards it. Pool accounting is parent-owned and counts per activation: a
-run's attempts and cumulative CPU are not stored with its park.
+run's attempts and cumulative CPU are not stored with its park. Its held
+wall time is: an execution holds workers for at most
+`Deadlines::execution_wall`, summed from each checkout's admission to its
+release, and a code mode cell saves what it held with each park, so the cap
+holds across page answers, activations and owners. The pool's queue and a
+durable park that released the worker do not count (FIG-6786). The restart
+window counts failed workers, never a run's own typed limit or refusal.
 
 Async callers use `ServiceRuntimeOps::request_accounted`, which checkpoints
 worker accounting around a blocking-pool task. Pool saturation is a typed
@@ -302,7 +308,8 @@ processes, two queued inputs and eight MiB queued bytes, over
 64 MiB of machine memory, call depth 1,024, 1,024 live tasks, 256 requests
 per park and 1,024 `join` members. Checkout and IPC silence are five
 seconds, compute thirty seconds, serialization five seconds, cancellation
-grace 100 ms, cumulative CPU ten seconds, and attempts three. The restart
+grace 100 ms, cumulative CPU ten seconds, attempts three and held wall
+time 600 seconds. The restart
 window admits eight failed replacements per minute. `PoolConfig::codemode()`
 raises parked state to 64 MiB, frames and queued bytes to 128 MiB and decode
 allocation to 256 MiB; these allowances have no workload measurement behind
@@ -349,6 +356,14 @@ A crashed or unresponsive worker, or a broken protocol, fails the attempt
 retryably, including during lowering. `PoolError::is_host_verdict` uses the
 infrastructure outcome's retryability classification; the cell records no
 Host failure for it, and its retry runs on a replacement worker (FIG-4459).
+A worker that died after it began computing the run (`RunCrashedWorker`),
+such as an allocation abort at the address-space ceiling, is no capacity
+verdict. A process body's attempt fails retryably and spends one of its
+attempts, so a body that keeps killing its worker ends once they are spent.
+A code mode cell records the death as its failure (`CELL_WORKER_DIED`),
+which the model reads: as a host verdict its turn ran it again pass after
+pass until the session parked. A worker lost before it computed the run stays a host verdict that
+spends nothing (FIG-6786).
 A `RunRefused` is not retryable: the cell records its Host failure, since a
 retry would meet the same refusal (FIG-4645).
 

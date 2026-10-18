@@ -436,9 +436,11 @@ pub enum CapacityCause {
     CheckoutTimedOut,
     /// Repeated worker failures exhausted the host's restart window.
     RestartStorm,
-    /// Retryable worker infrastructure failed the attempt: a crashed,
-    /// unresponsive or protocol-breaking worker, or a deadline or budget of
-    /// the host's rather than of the run.
+    /// Retryable worker infrastructure failed the attempt: a worker that
+    /// crashed before it computed the run, an unresponsive or
+    /// protocol-breaking worker, or a deadline or budget of the host's
+    /// rather than of the run. A worker that died running the run is a
+    /// fault of the attempt instead, which spends one (FIG-6786).
     RetryableInfrastructure,
 }
 

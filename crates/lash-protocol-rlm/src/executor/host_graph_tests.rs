@@ -172,9 +172,10 @@ fn a_call_summary_pages_by_ordinal_and_settles_out_of_order() {
 }
 
 /// PC-OUTCOME's host half: the control attempt, the cancellation that
-/// ends the cell, the `max_tool_calls` refusal, the prints and the started
-/// processes survive a park and an immediate collection exactly; and a
-/// summary whose bits are not its outcome's is refused.
+/// ends the cell, the `max_tool_calls` refusal, the prints, the started
+/// processes and the wall time the cell held workers (FIG-6786) survive a
+/// park and an immediate collection exactly; and a summary whose bits are
+/// not its outcome's is refused.
 #[test]
 fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
     let mut staging = staging();
@@ -204,6 +205,7 @@ fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
             .push(PrintEvent(Datum::Text(format!("line {index}"))));
     }
     host.processes.push(ProcessEvent(ProcessId::fixture("p")));
+    host.held_ms = 1_234;
     let root = host.stage(&mut staging, &mut BTreeSet::new()).unwrap();
 
     let kept = collected(staging.nodes(), root);
@@ -215,6 +217,7 @@ fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
     assert_eq!(loaded.prints.items(), host.prints.items());
     assert_eq!(loaded.processes.items(), host.processes.items());
     assert_eq!(loaded.calls.items(), host.calls.items());
+    assert_eq!(loaded.held_ms, 1_234);
 
     // A summary that calls a cancelled outcome a success is refused.
     let mut forged = host.clone();

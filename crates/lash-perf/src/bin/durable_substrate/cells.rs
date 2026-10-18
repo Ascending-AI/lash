@@ -108,6 +108,7 @@ fn untimed_workers(worker: &Path) -> lash::vm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    config.deadlines.execution_wall = OFF_THE_CLOCK;
     lash::vm::WorkerService::new(config)
 }
 

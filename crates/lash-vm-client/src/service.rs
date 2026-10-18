@@ -514,8 +514,10 @@ pub mod runtime_ops {
         fn execution_budget(&self) -> Option<&ExecutionBudget>;
 
         /// This service with a fresh budget, shared by every checkout of one
-        /// execution: its attempts and CPU count from zero.
-        fn begin_execution(&self) -> Service;
+        /// execution: its attempts and CPU count from zero, and its held
+        /// wall time from `held`, what the execution's saved state says it
+        /// already held workers for (FIG-6786).
+        fn begin_execution(&self, held: std::time::Duration) -> Service;
 
         fn request_accounted(
             &self,
@@ -565,9 +567,9 @@ pub mod runtime_ops {
             self.budget.as_ref()
         }
 
-        fn begin_execution(&self) -> Service {
+        fn begin_execution(&self, held: std::time::Duration) -> Service {
             let mut service = self.clone();
-            service.budget = Some(ExecutionBudget::default());
+            service.budget = Some(ExecutionBudget::resumed(held));
             service.retained = Some(Arc::new(Mutex::new(None)));
             service
         }
