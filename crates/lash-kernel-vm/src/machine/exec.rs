@@ -237,7 +237,8 @@ impl KernelMachine {
 
     /// Carries a departure outwards until something takes it: a loop, a
     /// `catch`, a `finally`, the caller, or the task's end (`K-FORM-014`
-    /// to `K-FORM-017`).
+    /// to `K-FORM-017`). Inlined into the step, as `settle` is.
+    #[inline(always)]
     pub(super) fn complete(
         &mut self,
         task: TaskId,

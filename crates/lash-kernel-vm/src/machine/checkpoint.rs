@@ -378,6 +378,7 @@ impl KernelMachine {
             region: None,
             slice_end: u64::MAX,
             sites: Default::default(),
+            islands: Default::default(),
             plans: 0,
             segments: Default::default(),
             charged: root.meters.charged.unwrap_or(0),

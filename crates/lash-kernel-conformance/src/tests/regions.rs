@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Document, Name, parse_document, print_document};
 use lash_kernel_exec::charge::Weight;
-use lash_kernel_vm::kernel_internals::{Layout, loop_regions, prepare_with_layout};
+use lash_kernel_vm::kernel_internals::{Layout, call_islands, loop_regions, prepare_with_layout};
 use lash_kernel_vm::{Machine, PreparedLibrary, Program};
 
 use crate::machine::{Run, case_program, run_program_in};
@@ -127,6 +127,70 @@ const EXIT_PROGRAMS: &[(&str, &str, u32)] = &[
         "fn first(xs) { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\n\
          main { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
         16,
+    ),
+];
+
+/// Programs whose calls run as islands (`docs/design/kernel-regions.md`
+/// §5 R4), each named for what it reaches.
+const ISLANDS: &[(&str, &str, u32)] = &[
+    (
+        "declared recursion",
+        "fn fib(n) { if num.lt(n, 2) { return n } return num.add(call fib(num.sub(n, 1)), call fib(num.sub(n, 2))) }\n\
+         main { let r = call fib(7) finish r }",
+        64,
+    ),
+    (
+        "closure recursion through its captured self",
+        "fn outer(k) { let f = absent set f = fn(n) { if num.lt(n, 2) { return n } return num.add(apply f(num.sub(n, 1)), apply f(num.sub(n, 2))) } let r = apply f(k) return r }\n\
+         main { let r = call outer(7) finish r }",
+        64,
+    ),
+    (
+        "mutual recursion",
+        "fn even(n) { if num.lt(n, 1) { return true } return call odd(num.sub(n, 1)) }\n\
+         fn odd(n) { if num.lt(n, 1) { return false } return call even(num.sub(n, 1)) }\n\
+         main { let r = call even(17) finish r }",
+        64,
+    ),
+    (
+        "a depth bound crossed inside recursion",
+        "fn down(n) { if num.lt(n, 1) { return 0 } return num.add(call down(num.sub(n, 1)), 1) }\n\
+         main { let r = call down(40) finish r }",
+        24,
+    ),
+    (
+        "a raise deep in recursion, caught",
+        "fn f(n) { if num.lt(n, 1) { return num.div(1, n) } return num.add(call f(num.sub(n, 1)), 1) }\n\
+         main { try { let r = call f(9) finish r } catch e { finish e.kind } }",
+        64,
+    ),
+    (
+        "an integer overflowing into a big integer after a call returns",
+        "fn fact(n) { if num.lt(n, 2) { return 1 } return num.mul(n, call fact(num.sub(n, 1))) }\n\
+         main { let r = call fact(23) finish r }",
+        64,
+    ),
+    (
+        "variables, writes and nested blocks in island bodies",
+        "fn g(n) { let a = num.add(n, 1) set a = num.mul(a, 2) if num.lt(a, 12) { let b = num.add(a, 3) if num.lt(b, 9) { return b } set a = b } return num.sub(a, 1) }\n\
+         fn h(n) { if num.lt(n, 1) { return 0 } return num.add(call g(n), call h(num.sub(n, 1))) }\n\
+         main { let r = call h(5) finish r }",
+        64,
+    ),
+    (
+        "a body that falls off its end, and helper calls",
+        "fn p(n) { if num.lt(n, 0) { return 1 } }\n\
+         fn q(n) { if num.lt(n, 1) { return 0 } let x = num.add(invoke num.add(n, 1), 0) return invoke num.add(call q(num.sub(n, 1)), num.sub(x, n)) }\n\
+         fn r(n) { if num.lt(n, 1) { return call p(3) } return call r(num.sub(n, 1)) }\n\
+         main { let a = call q(5) let c = call r(4) finish (a, c) }",
+        64,
+    ),
+    (
+        "an island root nested in an expression, and an island with a print outside it",
+        "fn fib(n) { if num.lt(n, 2) { return n } return num.add(call fib(num.sub(n, 1)), call fib(num.sub(n, 2))) }\n\
+         fn w(n) { print n let r = num.add(call fib(n), 1) return r }\n\
+         main { let r = call w(6) finish r }",
+        64,
     ),
 ];
 
@@ -474,19 +538,24 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
     }
 }
 
-/// How many loop regions `case`'s document forms under `library`.
-fn formed(library: &PreparedLibrary, case: &Case) -> usize {
+/// How many loop regions and call islands `case`'s document forms under
+/// `library`.
+fn formed(library: &PreparedLibrary, case: &Case) -> (usize, usize) {
     let document = parse_document(&case.document).expect("a region program parses");
     let program = Program {
         release: crate::pages::RELEASE,
         document: Arc::new(document),
         library: library.clone(),
     };
-    loop_regions(&program).expect("a region program is admitted")
+    (
+        loop_regions(&program).expect("a region program is admitted"),
+        call_islands(&program).expect("a region program is admitted"),
+    )
 }
 
 /// PLAN-INDEP of regions (`docs/design/kernel-regions.md` §3.3): every
-/// corpus case, the 64-seed smith programs and the region programs, each
+/// corpus case, the 64-seed smith programs, the region programs and the
+/// call-island programs, each
 /// as written and wrapped in a function, run alike with regions on and
 /// off, under every bound around their charge programs' events and every
 /// slice, with each plan resuming the other's checkpoints.
@@ -507,17 +576,36 @@ fn regions_on_and_off_agree(shard: usize) {
     for (name, text, call_depth) in programs {
         region_programs += 1;
         let case = program_case(name, text, *call_depth);
-        let formed_on = formed(&on, &case);
+        let (formed_on, _) = formed(&on, &case);
         assert!(formed_on > 0, "{name}: no loop region forms");
         assert_eq!(
             formed(&off, &case),
-            0,
+            (0, 0),
             "{name}: regions form with regions off"
         );
         regions += formed_on;
         check(&on, &off, &case, &mut counts, &mut failures);
     }
     counts.report(shard, "region-programs", began);
+    let (mut island_programs, mut islands) = (0, 0);
+    for (name, text, call_depth) in ISLANDS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, program)| (index % SHARDS == shard).then_some(program))
+    {
+        island_programs += 1;
+        let case = program_case(name, text, *call_depth);
+        let (_, formed_on) = formed(&on, &case);
+        assert!(formed_on > 0, "{name}: no call island forms");
+        assert_eq!(
+            formed(&off, &case),
+            (0, 0),
+            "{name}: islands form with regions off"
+        );
+        islands += formed_on;
+        check(&on, &off, &case, &mut counts, &mut failures);
+    }
+    counts.report(shard, "island-programs", began);
     // FIG-6754: actual Python invokes preserve their atom/action charge,
     // occurrences and continuations, including declines and zero division.
     // Assign each extra program once, like the existing program families.
@@ -533,8 +621,8 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        assert!(formed(&on, &case) > 0, "{}", case.name);
-        assert_eq!(formed(&off, &case), 0);
+        assert!(formed(&on, &case).0 > 0, "{}", case.name);
+        assert_eq!(formed(&off, &case), (0, 0));
         for call_depth in [1, 2, 3, 4, 16] {
             case.environment.bounds.call_depth = call_depth;
             check(&on, &off, &case, &mut counts, &mut failures);
@@ -581,7 +669,7 @@ fn regions_on_and_off_agree(shard: usize) {
         failures.join("\n")
     );
     println!(
-        "regions on and off shard={shard}: cases={} paired runs={} region programs={region_programs} loop regions={regions} seconds={:.3}",
+        "regions on and off shard={shard}: cases={} paired runs={} region programs={region_programs} loop regions={regions} island programs={island_programs} call islands={islands} seconds={:.3}",
         counts.cases,
         counts.runs,
         began.elapsed().as_secs_f64(),

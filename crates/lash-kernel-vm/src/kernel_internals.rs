@@ -141,3 +141,24 @@ pub fn loop_regions(program: &Program) -> Result<usize, StartError> {
         })?;
     Ok(exe.regions.len())
 }
+
+/// How many call islands lowering forms for `program`'s document under its
+/// library's layout (`docs/design/kernel-regions.md` §5 R4): what the
+/// regions law checks its island-shaped programs form, and a layout
+/// without regions does not.
+///
+/// # Errors
+///
+/// [`crate::Machine::start`]'s admission refusals.
+pub fn call_islands(program: &Program) -> Result<usize, StartError> {
+    let admitted = program.library.admit(
+        &program.document,
+        lash_kernel_doc::KernelDataLimits::default(),
+    )?;
+    let exe = admitted
+        .executable(&program.document, &program.library)
+        .map_err(|missing| StartError::MissingFunction {
+            function: missing.0,
+        })?;
+    Ok(exe.islands.plans.len())
+}

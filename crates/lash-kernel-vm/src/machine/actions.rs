@@ -583,7 +583,7 @@ impl KernelMachine {
     /// saved by its site, as the path suffix under its statement's, held by
     /// the frame as a variable's value is (`K-EVAL-008`). The suffixes are
     /// the entry's own, and the roles go to a spent continuation's buffer.
-    fn capture(
+    pub(super) fn capture(
         &mut self,
         task: TaskId,
         entry: &Nested,

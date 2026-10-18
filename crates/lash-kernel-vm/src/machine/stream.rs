@@ -242,6 +242,12 @@ impl KernelMachine {
                         {
                             return Ok(Ran::Step);
                         }
+                    } else if nested.island
+                        && let Some(flow) = self.call_island(host, running, act, args)?
+                    {
+                        if flow == Flow::Step {
+                            return Ok(Ran::Step);
+                        }
                     } else if let Some(ran) = self.run_rare::<MEMORY>(host, running, op)? {
                         return Ok(ran);
                     }

@@ -13,6 +13,7 @@ mod actions;
 mod checkpoint;
 mod exec;
 mod frames;
+pub(crate) mod islands;
 mod issued;
 mod loops;
 mod observing;
@@ -424,6 +425,8 @@ pub struct KernelMachine {
     /// How many generated plans are running: each holds its call's depth
     /// unit as the body's frame would (`K-BND-002`).
     plans: u32,
+    /// The call islands' reused buffers: never saved.
+    islands: islands::Scratch,
     /// The segments standing at callback sites of a call being offered.
     segments: segments::Yielding,
     charged: u64,
@@ -1066,6 +1069,8 @@ impl KernelMachine {
         self.settle(task, host, exe, outcome)
     }
 
+    /// Inlined into the step: an island's exit is its only other caller.
+    #[inline(always)]
     fn settle(
         &mut self,
         task: TaskId,

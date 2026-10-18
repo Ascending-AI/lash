@@ -1,9 +1,11 @@
-//! The loop region verifier (`docs/design/kernel-regions.md` §1): lowering
-//! admits a plan only as its lowered code, its stream's charge regions and
-//! its statement units state it, and refuses each misstatement of a
-//! summary, of the body's tree and of a `for`'s head.
+//! The region verifiers (`docs/design/kernel-regions.md` §1): lowering
+//! admits a loop plan only as its lowered code, its stream's charge regions
+//! and its statement units state it, and refuses each misstatement of a
+//! summary, of the body's tree and of a `for`'s head; and it admits an
+//! island plan only as its stream's charge regions and occurrences state it.
 
 use super::embedder::Embedder;
+use crate::compile::islands::{self, Expr, Kind};
 use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, Step};
 use crate::costs::Costs;
 
@@ -168,4 +170,60 @@ fn lowering_admits_a_loop_body_tree_only_as_its_blocks_state_it() {
             Err(Refused::Shape { statement: 0 })
         );
     });
+}
+
+const ISLAND: &str = "fn fib(n) { if num.lt(n, 2) { return n } \
+                      return num.add(call fib(num.add(n, -1)), call fib(num.add(n, -2))) }\n\
+                      main { let r = call fib(5) finish r }";
+
+#[test]
+fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
+    let (program, _) = Embedder::new(ISLAND).program(true);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default())
+        .unwrap_or_else(|_| panic!("the island program is admitted"));
+    let exe = admitted
+        .executable(&program.document, &program.library)
+        .unwrap_or_else(|_| panic!("the island program compiles"));
+    let [plan] = &exe.islands.plans[..] else {
+        panic!("one island forms, not {}", exe.islands.plans.len());
+    };
+    let (stream, _, _) = exe.statement(plan.body.statements[0].id);
+    assert_eq!(plan.verify(stream), Ok(()));
+    let refused = |change: &dyn Fn(&mut islands::IslandPlan)| {
+        let mut misstated = plan.copied();
+        change(&mut misstated);
+        misstated.verify(stream)
+    };
+    let region = test_close(&mut plan.copied()).region;
+    assert_eq!(
+        refused(&|plan| test_close(plan).total += 1),
+        Err(islands::Refused::Region { region })
+    );
+    assert_eq!(
+        refused(&|plan| test_close(plan).head += 1),
+        Err(islands::Refused::Region { region })
+    );
+    assert_eq!(
+        refused(&|plan| plan.calls = plan.calls[1..].into()),
+        Err(islands::Refused::Calls)
+    );
+    assert_eq!(
+        refused(&|plan| plan.calls.reverse()),
+        Err(islands::Refused::Calls)
+    );
+}
+
+/// The region the island's `if` test closes at its operator.
+fn test_close(plan: &mut islands::IslandPlan) -> &mut islands::Close {
+    match &mut plan.body.statements[0].kind {
+        Kind::If {
+            cond: Expr::Operator {
+                close: Some(close), ..
+            },
+            ..
+        } => close,
+        _ => panic!("the island's test closes a region at its operator"),
+    }
 }

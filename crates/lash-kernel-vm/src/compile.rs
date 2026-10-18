@@ -39,6 +39,7 @@ use crate::costs::Costs;
 use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
+pub(crate) mod islands;
 mod library;
 pub(crate) use library::{Lib, LibRun, PreparedPlan};
 mod lazy;
@@ -54,7 +55,7 @@ pub(crate) use templates::Entry;
 pub(crate) mod segments;
 pub(crate) use reads::{Field, ReadSite, find as find_property};
 
-pub(crate) use formula::{Charge, Fast, Plan, Source};
+pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
     Commit, CompiledBody, CompiledHead, CompiledStep, Event, LoopPlan, Meter, NESTING, scalar,
 };
@@ -378,6 +379,8 @@ pub(crate) struct DocumentCode {
     /// The loop regions lowering formed, by the index their `while` and
     /// `for` statements state (`Form::While::region`, `Form::For::region`).
     pub(crate) regions: Vec<LoopPlan>,
+    /// The call islands lowering formed, by code.
+    pub(crate) islands: islands::Islands,
     pub(crate) block_ordinals: Vec<u32>,
     pub(crate) site_count: usize,
     pub(crate) action_ordinals: BTreeMap<Site, u32>,
@@ -785,6 +788,10 @@ pub(crate) struct Nested {
     /// with a native entry or generated template, with exactly its
     /// parameters, whose entry answers inline what it can.
     pub(crate) operator: bool,
+    /// Whether the call may enter an island (`docs/design/kernel-regions.md`
+    /// §5 R4): a guest call of a closure, or of a declared function lowering
+    /// formed an island of.
+    pub(crate) island: bool,
     /// The op its statement resumes at, as an offset from the start of the
     /// statement's range.
     pub(crate) resume: u32,
@@ -1262,18 +1269,26 @@ fn compile_document(
         .iter()
         .map(|(site, count)| (ordinals[site], *count))
         .collect();
-    let regions = if prepared.layout.regions() {
-        form_regions(
+    let (regions, islands) = if prepared.layout.regions() {
+        let regions = form_regions(
             &mut tables,
             prepared,
             Costs::of_document(document).loop_test,
-        )
+        );
+        let base = (
+            prepared.tables.codes.len() as u32,
+            prepared.tables.blocks.len() as u32,
+            prepared.tables.stmts.len() as u32,
+        );
+        let islands = islands::form(&mut tables, &prepared.libs, base);
+        (regions, islands)
     } else {
-        Vec::new()
+        Default::default()
     };
     Ok(DocumentCode {
         tables,
         regions,
+        islands,
         main,
         declared,
         block_ordinals,

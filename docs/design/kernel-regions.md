@@ -180,10 +180,11 @@ opcode fast path outside regions too.
   region charges what the reference charges, by construction. An island sums
   the same quantities over its virtual frames.
 - **No crossing inside.** The headroom guard admits an iteration only when
-  `c0 + iteration_max` passes neither the bound nor the slice threshold. It
-  admits an island only when its total stays within `min(bound,
-  slice_end - 1) - c0`. Charge is monotone, so no event inside can pass the
-  bound, and no step boundary inside can reach the slice threshold.
+  `c0 + iteration_max` passes neither the bound nor the slice threshold.
+  Charge is monotone, so no event inside can pass the bound, and no step
+  boundary inside can reach the slice threshold. An island instead checks
+  each event against the bound as it charges it, and the slice threshold at
+  each step end, and exits before either is crossed.
 - **Exits.** On a crossing risk, a guard miss, an error or a barrier, the
   region exits at the last committed statement boundary. The reference then
   replays from there, event by event, through `enter_region`,
@@ -196,17 +197,23 @@ opcode fast path outside regions too.
     statement `k` pushes `Control::Block { block: body, next: k }`, as
     `tested(true)` followed by `k` statement steps would leave it. An exit
     before the test leaves the loop where `next_iteration` is due.
-  - **Island exits (v1)** are all-or-nothing. An island is pure until commit,
-    so an abort discards it and the reference runs the call. A headroom abort
-    wastes at most the remaining headroom, so after one in a slice the run
-    attempts no further island in that slice: the waste is at most one
-    slice's headroom.
-  - **Island exits (v2, selective continuation conversion)** materialize the
-    virtual frames instead (§3.4).
+  - **Island exits** convert the virtual frames (selective continuation
+    conversion, §3.4). An island charges each event as the reference does,
+    in its order, so nothing it charged is ever taken back. At a step end
+    where the slice threshold is reached, or before a statement whose unit
+    would pass the bound, the frames stand at that step end and the step
+    ends. At an op the island cannot run (a guard miss, a value that would
+    raise or is no scalar, a charge that would pass the bound, a callee with
+    no island, a depth bound), the top frame stands in its statement at that
+    op with the registers it holds there, and the reference runs the
+    statement on from that op in the same step, with islands held off until
+    the step ends. The v1 all-or-nothing exit, with its per-slice abort
+    rule, was never built: R4 went to conversion directly.
 - **The tape.** With a charge tape attached, a region records its static event
   program at commit: the `RegionEvent`s of each executed path, the statement
   and loop-test units, and each formula's atomic units, in order. Recording
-  never changes admission (§B). This is required, not optional (§3.3).
+  never changes admission (§B). An island records each event as it charges
+  it. This is required, not optional (§3.3).
 
 ### 3.2 Effect identity and coordinates
 
@@ -214,19 +221,20 @@ opcode fast path outside regions too.
   barriers. A region does not park, so no request, wait id or delivery is ever
   produced inside one.
 - **Occurrences.** Calls are counted occurrences (K-EFF-008: Call and Nested
-  Call outside library units, including `call lib` helper actions). An
-  island counts each call site's occurrences in a local array. At commit it
-  advances the task's dense counters by those counts and marks them dirty
-  (`Occurrences::advance_by`), together with the root call's own occurrence.
-  The next effect therefore gets exactly the identity the reference would give
-  it. An aborted island leaves no count.
+  Call outside library units, including `call lib` helper actions). In a
+  durable run an island advances the task's dense counters
+  (`Occurrences::advance`) at the root call and at each call and counted
+  helper site, where the reference counts them, so the next effect gets
+  exactly the identity the reference would give it, and an exit leaves the
+  counts the reference holds there.
 - **Coordinates on exit.** A loop exit writes the semantic coordinates of
   §A: the `while` with its `started`, and the body block with its `next`. A
   committed island leaves no frame. The caller's statement continues in its
   registers, and its roles were never saved, so the caller's frame equals the
   reference's after `finish_action` (which clears `awaiting`, `nested` and
-  `pending`). Registers, closure handles and plan pointers are never
-  coordinates.
+  `pending`). An island that exits leaves the converted frames (§3.4), each
+  below the top standing at its call with its roles. Registers, closure
+  handles and plan pointers are never coordinates.
 - **Host site observation.** `Host::enter_site` is a host-visible event per
   occurrence, so regions are off while the host observes sites. A later lane
   may report the committed counts instead, if a host that observes sites needs
@@ -237,15 +245,18 @@ opcode fast path outside regions too.
 `lash-kernel-conformance`,
 `tests::regions::regions_on_and_off_agree_programs_0` through `_7`:
 
-The eight laws partition the region programs, corpus cases and smith seeds
-by program, so Buck can schedule them independently within the existing test
-budget. Each keeps its program's admitted document and both prepared layouts
-across the sweep; executions, page stores and host scripts start fresh. Three
-region exit witnesses (nested arms with a declaration, list iteration with
-continue, tuple iteration with a declaration and break) run on every shard,
-so every law catches the R1/R2 charge and exit mutants on its own.
+The eight laws partition the region programs, the call-island programs,
+corpus cases and smith seeds by program, so Buck can schedule them
+independently within the existing test budget. Each keeps its program's
+admitted document and both prepared layouts across the sweep; executions,
+page stores and host scripts start fresh. Three region exit witnesses (nested
+arms with a declaration, list iteration with continue, tuple iteration with a
+declaration and break) run on every shard, so every law catches the R1/R2
+charge and exit mutants on its own.
 
-- **The cases.** Every corpus case, and the 64-seed smith programs. Each runs
+- **The cases.** Every corpus case, the 64-seed smith programs, and the
+  region and island programs, each asserting that its regions or islands
+  form with regions on and none with them off. Each runs
   as written and wrapped in a function, as `scripts/perf/kernel/embedded.py`
   wraps its bodies. At top level, variables are session bindings and no
   region forms, which is why the prototype's first check saw nothing.
@@ -271,9 +282,12 @@ so every law catches the R1/R2 charge and exit mutants on its own.
 - **Mutants.** Each must fail the law once:
   - +1 unit on a loop commit;
   - +1 unit on an island commit;
-  - a dropped occurrence count;
+  - a dropped occurrence count (a call site's, a helper site's, the root
+    call's);
   - a skipped `started` increment;
-  - an exit that materializes `next` off by one.
+  - an exit that materializes `next` off by one (at an op, at a step end);
+  - a converted frame's roles dropped;
+  - the island depth guard off by one.
 
 The prototype checker (`LASH_PROTO_CHECK` in the patch's
 `kernel_perf/embedded.rs`) checked a subset of this law. It used 9 wrapped
@@ -324,9 +338,11 @@ on (`.kiln/FIG-6741/check/`).
   admitted before entry, by the headroom guard over the census's own admission
   predicate (the prototype approximates it with `bounds.memory - upper`). The
   holdings are the scalar pins of its statements, and for an island its
-  virtual stack, `depth_max × FRAME_BYTES`. Slot growth (an integer widening
-  its `cost_of`) exits before the write, so the reference admits it with
-  `reserve_growth`.
+  virtual stack with its variables, `depth_max × (FRAME_BYTES + 12 × 24)`:
+  an island's variables hold only scalars, at most 24 bytes each, and a value
+  that is no scalar exits before it is bound or written. A loop region's slot
+  growth (an integer widening its `cost_of`) exits before the write, so the
+  reference admits it with `reserve_growth`.
 - **Plan dependence.** An island does not make the reference's per-call
   `FRAME_BYTES` and parameter growth reservations; it admits its bounded
   virtual stack once instead. Its ledger is therefore lower, still
