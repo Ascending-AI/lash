@@ -73,7 +73,7 @@ impl ToolProvider for Spanning {
         *self.0.tool_span.lock().unwrap() = call.context.tool_span_context();
         span.child("tool_child").end();
         span.end();
-        ::tracing::info_span!("fetch").in_scope(|| {});
+        fetch_span().in_scope(|| {});
         tokio::spawn(trace.instrument(async {
             ::tracing::info_span!("fetch_task").in_scope(|| {});
         }))
@@ -81,6 +81,11 @@ impl ToolProvider for Spanning {
         .expect("the task");
         lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
     }
+}
+
+/// The callsite shared by tool bodies in the two extension laws.
+fn fetch_span() -> ::tracing::Span {
+    ::tracing::info_span!("fetch")
 }
 
 fn plugin(seen: Arc<Seen>) -> Arc<dyn PluginFactory> {
@@ -379,9 +384,20 @@ async fn tracing_spans_in_a_tool_body_nest_under_its_tool_span() -> Result<()> {
     let provider = SdkTracerProvider::builder()
         .with_simple_exporter(host.clone())
         .build();
+    // With just one registered dispatcher, tracing caches callsite interest
+    // from the registering thread's default. Keep two live during this
+    // scoped capture so a defaultless sibling cannot cache `never` for a
+    // callsite the tool bodies share (FIG-6756).
+    let _accounting = ::tracing::Dispatch::new(tracing_subscriber::Registry::default());
     let subscriber =
         tracing_subscriber::Registry::default().with(ActivatingLayer(provider.tracer("host")));
     let _subscriber = ::tracing::subscriber::set_default(subscriber);
+
+    // A sibling law can first use the shared tool callsite on a thread
+    // without this law's scoped subscriber. Force that registration order.
+    std::thread::spawn(|| drop(fetch_span()))
+        .join()
+        .expect("the defaultless tool callsite registers");
 
     let r1 = ::tracing::info_span!("R1");
     let seen = Arc::new(Seen::default());

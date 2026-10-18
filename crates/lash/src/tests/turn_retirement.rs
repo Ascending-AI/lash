@@ -67,6 +67,7 @@ fn tool(name: &str, deferring: bool) -> lash_core::ToolDefinition {
 /// completion key.
 struct ApprovalTools {
     keys: tokio::sync::mpsc::UnboundedSender<String>,
+    return_gate: Option<Arc<tokio::sync::Notify>>,
 }
 
 #[async_trait]
@@ -102,6 +103,9 @@ impl ToolProvider for ApprovalTools {
             Err(error) => return lash_core::ToolOutcome::err_fmt(error).into(),
         };
         let _ = self.keys.send(key.as_str().to_owned());
+        if let Some(gate) = &self.return_gate {
+            gate.notified().await;
+        }
         lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new())
     }
 }
@@ -116,6 +120,13 @@ struct World {
 
 impl World {
     async fn new(finishes: bool) -> Result<Self> {
+        Self::with_return_gate(finishes, None).await
+    }
+
+    async fn with_return_gate(
+        finishes: bool,
+        return_gate: Option<Arc<tokio::sync::Notify>>,
+    ) -> Result<Self> {
         let stores = sqlite_memory_store_set().await;
         let backend = lash_conformance::backend_over(Arc::clone(&stores) as Arc<_>);
         let (keys, received) = tokio::sync::mpsc::unbounded_channel();
@@ -126,7 +137,7 @@ impl World {
             )
             .tools(
                 crate::tool_provider_key!("tools"),
-                Arc::new(ApprovalTools { keys }),
+                Arc::new(ApprovalTools { keys, return_gate }),
             )
             .build(crate::tests::host::runtime_lease_owner())?;
         Ok(Self {
@@ -815,8 +826,11 @@ fn transcript(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_ledger() -> Result<()>
 {
+    use lash_core::durable_port::domain::{DurableReads as _, OwnerKey, RunFactKind};
+
     let (session_name, run) = ("transcript-cell", "transcript-cell-run");
-    let mut world = World::new(true).await?;
+    let return_gate = Arc::new(tokio::sync::Notify::new());
+    let mut world = World::with_return_gate(true, Some(return_gate.clone())).await?;
     let session = world.session(session_name).await?;
     let handle = session
         .send(TurnInput::text("look up, then ask"))
@@ -830,12 +844,50 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
             .is_empty(),
         "the parked cell's recovery state is saved before the terminal"
     );
+    // Receiving a key proves admission, not that the body's Pending result
+    // committed. Hold that gap open, then wait for the recorded park before
+    // losing the node: an unrecorded Once result recovers as Interrupted.
+    let snapshots = world.rows(&format!("exec_snapshots c/{session_name}/{run}/"));
+    let owner = OwnerKey::parse(
+        snapshots[0]
+            .strip_prefix("exec_snapshots ")
+            .expect("a cell snapshot key"),
+    )
+    .expect("the cell's ledger owner");
+    let store = world.stores.durable_store();
+    assert!(
+        store
+            .run_facts(&owner)
+            .await?
+            .rows
+            .iter()
+            .all(|row| row.kind != RunFactKind::XWait),
+        "the tool still holds its Pending result after handing out the key"
+    );
+    return_gate.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if store
+                .run_facts(&owner)
+                .await
+                .expect("the cell's ledger reads")
+                .rows
+                .iter()
+                .any(|row| row.kind == RunFactKind::XWait)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the approval's park commits before node loss");
     world.core.node.stop().await;
     drop((handle, session));
 
     let backend = lash_conformance::backend_over(Arc::clone(&world.stores) as Arc<_>);
     let successor = || {
-        let (keys, _) = tokio::sync::mpsc::unbounded_channel();
+        let (keys, received) = tokio::sync::mpsc::unbounded_channel();
         explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .serve_test_llm_profile(
                 text_provider("turn-retirement", cell(true)),
@@ -843,11 +895,15 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
             )
             .tools(
                 crate::tool_provider_key!("tools"),
-                Arc::new(ApprovalTools { keys }),
+                Arc::new(ApprovalTools {
+                    keys,
+                    return_gate: None,
+                }),
             )
             .build(crate::tests::host::runtime_lease_owner())
+            .map(|core| (core, received))
     };
-    let second = successor()?;
+    let (second, mut unexpected) = successor()?;
     assert_eq!(
         second
             .completions()
@@ -858,7 +914,12 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
             .await?,
         lash_core::ResolveAnswer::Resolved
     );
-    let recovered = settled_reads(&second, session_name, run, &input).await?;
+    let recovered = tokio::select! {
+        calls = settled_reads(&second, session_name, run, &input) => calls?,
+        key = unexpected.recv() => panic!(
+            "recovery must resume the recorded approval, never ask for a second one: {key:?}"
+        ),
+    };
     assert_eq!(
         recovered
             .iter()
@@ -884,7 +945,7 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
     second.shutdown().await?;
 
     world.collect().await;
-    let reopened = successor()?;
+    let (reopened, _unexpected) = successor()?;
     assert_eq!(
         settled_reads(&reopened, session_name, run, &input).await?,
         recovered,
