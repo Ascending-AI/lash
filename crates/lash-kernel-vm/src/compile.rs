@@ -38,6 +38,7 @@ use lash_kernel_exec::{
 use crate::costs::Costs;
 use crate::functions::{MachineFunction, machine_function};
 
+pub(crate) mod expr;
 mod formula;
 pub(crate) mod islands;
 mod library;

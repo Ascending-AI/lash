@@ -4,10 +4,11 @@
 
 use lash_kernel_exec::{Op, Weight};
 
+use super::super::expr::arm_ends;
 use super::super::{Atom, BindingName, BlockId, Form, NestedKind, Var};
 use super::{
     Arms, Body, End, Event, Gathered, Head, LibId, LoopPlan, Lowered, Refused, RegionSlot, Step,
-    Summary, arm_ends, barrier, general, lean, library_invoke, scalar_site,
+    Summary, barrier, general, lean, library_invoke, scalar_site,
 };
 
 /// The plan's check against the lowered code: the summaries in the order

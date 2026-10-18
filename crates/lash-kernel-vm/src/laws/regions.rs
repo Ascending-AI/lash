@@ -5,7 +5,8 @@
 //! island plan only as its stream's charge regions and occurrences state it.
 
 use super::embedder::Embedder;
-use crate::compile::islands::{self, Expr, Kind};
+use crate::compile::expr::{self, Expr};
+use crate::compile::islands::{self, Kind};
 use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
 use crate::costs::Costs;
 
@@ -263,14 +264,16 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
 }
 
 /// The region the island's `if` test closes at its operator.
-fn test_close(plan: &mut islands::IslandPlan) -> &mut islands::Close {
+fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
     match &mut plan.body.statements[0].kind {
         Kind::If {
-            cond: Expr::Operator {
-                close: Some(close), ..
-            },
+            cond:
+                Expr {
+                    kind: expr::Kind::Operator { closes, .. },
+                    ..
+                },
             ..
-        } => close,
+        } if closes.len() == 1 => &mut closes[0],
         _ => panic!("the island's test closes a region at its operator"),
     }
 }

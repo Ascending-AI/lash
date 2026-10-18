@@ -4,9 +4,12 @@
 //! of machine frames.
 //!
 //! An [`IslandPlan`] states the body's shape: per statement its kind and
-//! step edge, per expression its ops in evaluation order with the charge
-//! region each closes, the registers it holds while the next operand runs,
-//! and the op the reference resumes at when it exits there. Lowering admits
+//! step edge, and its expressions as the statement's resolved tree reads
+//! them ([`super::expr`]): their ops in evaluation order with the charge
+//! regions each closes, the registers each holds while the next operand
+//! runs, and the op the reference resumes at when it exits there. Formation
+//! admits the tree's island ops and makes a conditional arm of others cold;
+//! no op of an island closes more than one region. Lowering admits
 //! a plan only when [`IslandPlan::verify`] finds every charge region it
 //! closes stated as the stream's `RegionTable` sums it and every counted
 //! site at the occurrence the stream numbers. Plans belong to the
@@ -29,11 +32,12 @@
 use std::sync::OnceLock;
 
 use lash_kernel_doc::{Unit, Value};
-use lash_kernel_exec::{ActIx, Op, OpRange, Reg, RegRange};
+use lash_kernel_exec::{Op, Reg};
 
+use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind};
 use super::{
-    BlockId, CodeId, Constant, Executable, Form, Lib, LibId, LibRun, NestedCallee, NestedKind,
-    Stmt, StmtId, Tables,
+    BlockId, CodeId, Executable, Form, Lib, LibId, LibRun, NestedCallee, NestedKind, Stmt, StmtId,
+    Tables,
 };
 use crate::machine::islands::Compiled;
 
@@ -70,112 +74,6 @@ pub(crate) fn held(value: &Value) -> bool {
             | Value::Closure(_)
             | Value::ObjectRef(_)
     )
-}
-
-/// A charge region an op closes: the reference charges it whole there,
-/// and an exit before it resumes at its head.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Close {
-    pub(crate) region: u32,
-    pub(crate) total: u32,
-    /// The region's head op.
-    pub(crate) head: u32,
-}
-
-/// An island expression, in the order the reference runs its ops.
-#[derive(Clone)]
-pub(crate) enum Expr {
-    /// A variable read: `miss` is where the reference resumes when the
-    /// variable is unbound, the head of the region it stands in.
-    Local {
-        at: u32,
-        miss: u32,
-    },
-    /// A session binding's read, by its name in the stream: `miss` is
-    /// where the reference resumes when the island cannot read it, the
-    /// head of the region it stands in.
-    Session {
-        name: u32,
-        miss: u32,
-    },
-    Const(Value),
-    /// A prepared operator, or a helper call (`counted`, at its
-    /// occurrence) answered by its prepared entry.
-    Operator {
-        lib: LibId,
-        args: Box<[Expr]>,
-        close: Option<Close>,
-        pc: u32,
-        reg: u32,
-        counted: Option<usize>,
-    },
-    /// A general call of a native (`Op::Call`), answered without building
-    /// anything.
-    Native {
-        lib: LibId,
-        args: Box<[Expr]>,
-        close: Option<Close>,
-        pc: u32,
-        reg: u32,
-    },
-    /// `target[index]` of a list or a tuple: `miss` is where the reference
-    /// resumes when the island cannot read it, the head of the region it
-    /// stands in.
-    Index {
-        target: Box<Expr>,
-        index: Box<Expr>,
-        reg: u32,
-        miss: u32,
-    },
-    /// A call of a closure read first, or of a declared function.
-    Call {
-        callee: Callee,
-        args: Box<[Expr]>,
-        close: Option<Close>,
-        pc: u32,
-        /// The callee's register, or the first argument's.
-        reg: u32,
-        act: ActIx,
-        occurrence: usize,
-        /// The call site's place among the executable's closure call sites.
-        site: u32,
-    },
-    /// `if(cond, then, else)`.
-    Cond {
-        cond: Box<Expr>,
-        close: Option<Close>,
-        pc: u32,
-        reg: u32,
-        then_: Arm,
-        else_: Arm,
-    },
-    /// An expression local, `let(at = value, body)`: `miss` is where the
-    /// reference resumes when the island cannot bind it.
-    Let {
-        value: Box<Expr>,
-        at: u32,
-        reg: u32,
-        miss: u32,
-        body: Box<Expr>,
-    },
-}
-
-#[derive(Clone)]
-pub(crate) enum Callee {
-    Read(Box<Expr>),
-    Declared(CodeId),
-}
-
-/// A conditional expression's arm.
-#[derive(Clone)]
-pub(crate) enum Arm {
-    /// Its value, then the region its end closes.
-    Hot {
-        value: Box<Expr>,
-        close: Option<Close>,
-    },
-    /// An arm of other ops: taking it exits at its first op.
-    Cold { pc: u32 },
 }
 
 /// An island statement.
@@ -365,48 +263,13 @@ struct Former<'a> {
     writable: Vec<bool>,
 }
 
-/// The expressions a statement's ops define, by register, and the charge
-/// region open where the walk stands.
-#[derive(Default)]
-struct Walk {
-    regs: Vec<Option<Expr>>,
-    open: Option<Close>,
-    /// Each expression local bound and not yet ended: its slot, register
-    /// and value, and where an exit at its binding resumes.
-    lets: Vec<(u32, u32, Expr, u32)>,
-}
-
-impl Walk {
-    fn define(&mut self, at: Reg, expr: Expr) -> Option<()> {
-        let at = at.0 as usize;
-        if self.regs.len() <= at {
-            self.regs.resize_with(at + 1, || None);
-        }
-        if self.regs[at].is_some() {
-            return None;
-        }
-        self.regs[at] = Some(expr);
-        Some(())
-    }
-
-    fn take(&mut self, at: Reg) -> Option<Expr> {
-        self.regs.get_mut(at.0 as usize)?.take()
-    }
-
-    fn operands(&mut self, args: RegRange) -> Option<Vec<Expr>> {
-        (args.start.0..args.start.0 + args.len)
-            .map(|at| self.take(Reg(at)))
-            .collect()
-    }
-
-    /// Where an exit at in-region op `pc` resumes: the head of the region
-    /// it stands in, which nothing has charged yet.
-    fn miss(&self, pc: u32) -> u32 {
-        self.open.map_or(pc, |open| open.head)
-    }
-
-    fn held(&self) -> bool {
-        self.regs.iter().any(Option::is_some) || !self.lets.is_empty()
+/// Whether an island op closes at most one region: a head closes the
+/// region before it with nothing charged between, which no island charges.
+fn single(closes: &[Close]) -> Option<Option<Close>> {
+    match closes {
+        [] => Some(None),
+        [close] => Some(Some(*close)),
+        _ => None,
     }
 }
 
@@ -429,15 +292,12 @@ impl Former<'_> {
         let at = (id.0 - self.stmts) as usize;
         let statement: &Stmt = &self.tables.stmts[at];
         let leaves = self.tables.edges[at].leaves;
-        let OpRange { start, len } = statement.ops;
-        let end = start.checked_add(len)?.checked_sub(1)?;
-        let mut walk = Walk::default();
-        self.ops(&mut walk, start, end)?;
-        let terminal = *self.tables.stream.ops.get(end as usize)?;
-        let close = walk.open.take();
-        let kind = match (&statement.form, terminal) {
+        let end = statement.ops.end().checked_sub(1)?;
+        let mut tree = expr::statement(&self.tables.stream, statement.ops, false)?;
+        let close = single(&tree.closes)?;
+        let kind = match (&statement.form, tree.last) {
             (Form::Plain, Op::Return { src }) => Kind::Return {
-                value: walk.take(src)?,
+                value: self.admitted(tree.take(src)?)?,
                 close,
                 reg: src.0,
             },
@@ -445,12 +305,12 @@ impl Former<'_> {
                 if self.unshared(local.slot) =>
             {
                 Kind::Write {
-                    value: walk.take(src)?,
+                    value: self.admitted(tree.take(src)?)?,
                     close,
                     pc: end,
                     reg: src.0,
                     at: local.at,
-                    bind: matches!(terminal, Op::Bind { .. }),
+                    bind: matches!(tree.last, Op::Bind { .. }),
                 }
             }
             (
@@ -462,7 +322,7 @@ impl Former<'_> {
             ) if then_.0 == then_block.0 && else_.0 == else_block.0 => {
                 let (then_block, else_block) = (*then_block, *else_block);
                 Kind::If {
-                    cond: walk.take(cond)?,
+                    cond: self.admitted(tree.take(cond)?)?,
                     close,
                     pc: end,
                     reg: cond.0,
@@ -471,14 +331,14 @@ impl Former<'_> {
                 }
             }
             (Form::Plain, Op::End) => Kind::Discard {
-                value: walk.take(Reg(0))?,
+                value: self.admitted(tree.take(Reg(0))?)?,
                 close,
                 reg: 0,
             },
             _ => return None,
         };
         // Every value the statement computes reaches its end.
-        if walk.held() {
+        if !tree.spent() {
             return None;
         }
         Some(Statement { id, leaves, kind })
@@ -489,228 +349,131 @@ impl Former<'_> {
         self.writable.get(slot as usize).copied().unwrap_or(false)
     }
 
-    /// Walks ops `start..end` into `walk`.
-    fn ops(&mut self, walk: &mut Walk, start: u32, end: u32) -> Option<()> {
-        let stream = &self.tables.stream;
-        let mut pc = start;
-        while pc < end {
-            let op = *stream.ops.get(pc as usize)?;
-            match op {
-                Op::Region { region, total } => {
-                    // A head closes the region before it with nothing
-                    // charged between: the walk keeps one open region.
-                    if walk.open.is_some() || total == u32::MAX {
-                        return None;
-                    }
-                    walk.open = Some(Close {
-                        region: region.0,
-                        total,
-                        head: pc,
-                    });
-                }
-                Op::Local { dst, local } => {
-                    if !self.readable.get(local.slot as usize).copied()? {
-                        return None;
-                    }
-                    let miss = walk.miss(pc);
-                    walk.define(dst, Expr::Local { at: local.at, miss })?;
-                }
-                Op::Session { dst, name } => {
-                    stream.names.get(name.ix())?;
-                    let miss = walk.miss(pc);
-                    walk.define(dst, Expr::Session { name: name.0, miss })?;
-                }
-                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
-                    Constant::Resident(value) if held(value) => {
-                        walk.define(dst, Expr::Const(*value))?;
-                    }
-                    _ => return None,
-                },
-                Op::Operator { lib, args } => {
-                    let lib = LibId(lib.0);
-                    self.operator(lib, args.len as usize, false)?;
-                    let operands = walk.operands(args)?;
-                    let close = walk.open.take();
-                    walk.define(
-                        args.start,
-                        Expr::Operator {
-                            lib,
-                            args: operands.into(),
-                            close,
-                            pc,
-                            reg: args.start.0,
-                            counted: None,
-                        },
-                    )?;
-                }
-                Op::Call { lib, args } => {
-                    let lib = LibId(lib.0);
-                    self.native(lib, args.len as usize)?;
-                    let operands = walk.operands(args)?;
-                    let close = walk.open.take();
-                    walk.define(
-                        args.start,
-                        Expr::Native {
-                            lib,
-                            args: operands.into(),
-                            close,
-                            pc,
-                            reg: args.start.0,
-                        },
-                    )?;
-                }
-                Op::Index { at, .. } => {
-                    let target = walk.take(at)?;
-                    let index = walk.take(Reg(at.0 + 1))?;
-                    let miss = walk.miss(pc);
-                    walk.define(
-                        at,
-                        Expr::Index {
-                            target: Box::new(target),
-                            index: Box::new(index),
-                            reg: at.0,
-                            miss,
-                        },
-                    )?;
-                }
-                Op::Nested { act, args } => {
-                    let nested = stream.nested.get(act.ix())?;
-                    if matches!(nested.site.unit, Unit::Library(_)) {
-                        return None;
-                    }
-                    let expr = match nested.kind {
-                        NestedKind::Body(lib) if nested.operator => {
-                            self.operator(lib, args.len as usize, false)?;
-                            Expr::Operator {
-                                lib,
-                                args: walk.operands(args)?.into(),
-                                close: walk.open.take(),
-                                pc,
-                                reg: args.start.0,
-                                counted: None,
-                            }
-                        }
-                        NestedKind::Call(NestedCallee::Library(lib)) => {
-                            self.operator(lib, args.len as usize, true)?;
-                            self.calls.push(nested.occurrence);
-                            Expr::Operator {
-                                lib,
-                                args: walk.operands(args)?.into(),
-                                close: walk.open.take(),
-                                pc,
-                                reg: args.start.0,
-                                counted: Some(nested.occurrence),
-                            }
-                        }
-                        NestedKind::Call(NestedCallee::Read) if args.len >= 1 => {
-                            let mut operands = walk.operands(args)?.into_iter();
-                            let callee = operands.next()?;
-                            self.calls.push(nested.occurrence);
-                            let site = self.sites;
-                            self.sites += 1;
-                            Expr::Call {
-                                callee: Callee::Read(Box::new(callee)),
-                                args: operands.collect(),
-                                close: walk.open.take(),
-                                pc,
-                                reg: args.start.0,
-                                act,
-                                occurrence: nested.occurrence,
-                                site,
-                            }
-                        }
-                        NestedKind::Call(NestedCallee::Declared(code)) => {
-                            self.calls.push(nested.occurrence);
-                            Expr::Call {
-                                callee: Callee::Declared(code),
-                                args: walk.operands(args)?.into(),
-                                close: walk.open.take(),
-                                pc,
-                                reg: args.start.0,
-                                act,
-                                occurrence: nested.occurrence,
-                                site: u32::MAX,
-                            }
-                        }
-                        _ => return None,
-                    };
-                    walk.define(args.start, expr)?;
-                }
-                Op::JumpIfFalse { cond, skip } => {
-                    let close = walk.open.take();
-                    let condition = walk.take(cond)?;
-                    let then_end = pc.checked_add(1)?.checked_add(skip)?;
-                    let Op::Jump { skip: rest } = *stream.ops.get(then_end as usize - 1)? else {
-                        return None;
-                    };
-                    let else_end = then_end.checked_add(rest)?;
-                    let then_ = self.arm(pc + 1, then_end - 1, cond)?;
-                    let else_ = self.arm(then_end, else_end, cond)?;
-                    if matches!((&then_, &else_), (Arm::Cold { .. }, Arm::Cold { .. })) {
-                        return None;
-                    }
-                    walk.define(
-                        cond,
-                        Expr::Cond {
-                            cond: Box::new(condition),
-                            close,
-                            pc,
-                            reg: cond.0,
-                            then_,
-                            else_,
-                        },
-                    )?;
-                    pc = else_end;
-                    continue;
-                }
-                Op::LetBind { local, src } if self.unshared(local.slot) => {
-                    let value = walk.take(src)?;
-                    let miss = walk.miss(pc);
-                    walk.lets.push((local.at, src.0, value, miss));
-                }
-                Op::LetEnd { local } => {
-                    let (at, reg, value, miss) = walk.lets.pop()?;
-                    if at != local.at {
-                        return None;
-                    }
-                    let body = walk.take(Reg(reg))?;
-                    walk.define(
-                        Reg(reg),
-                        Expr::Let {
-                            value: Box::new(value),
-                            at,
-                            reg,
-                            miss,
-                            body: Box::new(body),
-                        },
-                    )?;
-                }
-                _ => return None,
-            }
-            pc += 1;
-        }
-        Some(())
+    /// `expr`, admitted.
+    fn admitted(&mut self, mut expr: Expr) -> Option<Expr> {
+        self.admit(&mut expr)?;
+        Some(expr)
     }
 
-    /// The arm of ops `start..end` of a conditional whose value goes to
-    /// `dst`: hot when its ops are island ops that define only `dst`.
-    fn arm(&mut self, start: u32, end: u32, dst: Reg) -> Option<Arm> {
+    /// Admits `expr` as island ops, in the order the reference runs them:
+    /// its counted sites recorded and its closure call sites numbered, and
+    /// each conditional arm of other ops made cold.
+    fn admit(&mut self, expr: &mut Expr) -> Option<()> {
+        match &mut expr.kind {
+            ExprKind::Local { local, .. } => self
+                .readable
+                .get(local.slot as usize)
+                .copied()?
+                .then_some(()),
+            ExprKind::Session { name, .. } => {
+                self.tables.stream.names.get(name.ix())?;
+                Some(())
+            }
+            ExprKind::Const(value) => held(value).then_some(()),
+            ExprKind::Operator {
+                lib,
+                invoke,
+                args,
+                closes,
+            } => {
+                for arg in args.iter_mut() {
+                    self.admit(arg)?;
+                }
+                single(closes)?;
+                let given = args.len();
+                match invoke {
+                    None => self.operator(*lib, given, false),
+                    Some(invoke) if !invoke.guest => None,
+                    Some(invoke) if invoke.call => {
+                        self.operator(*lib, given, true)?;
+                        self.calls.push(invoke.occurrence);
+                        Some(())
+                    }
+                    Some(invoke) if invoke.operator => self.operator(*lib, given, false),
+                    Some(_) => None,
+                }
+            }
+            ExprKind::Native { lib, args, closes } => {
+                for arg in args.iter_mut() {
+                    self.admit(arg)?;
+                }
+                single(closes)?;
+                self.native(*lib, args.len())
+            }
+            ExprKind::Index { target, index, .. } => {
+                self.admit(target)?;
+                self.admit(index)
+            }
+            ExprKind::Call {
+                invoke,
+                callee,
+                args,
+                closes,
+                site,
+            } => {
+                if !invoke.guest {
+                    return None;
+                }
+                if let Callee::Read(read) = callee {
+                    self.admit(read)?;
+                }
+                for arg in args.iter_mut() {
+                    self.admit(arg)?;
+                }
+                single(closes)?;
+                self.calls.push(invoke.occurrence);
+                if let Callee::Read(_) = callee {
+                    *site = self.sites;
+                    self.sites += 1;
+                }
+                Some(())
+            }
+            ExprKind::Cond {
+                cond,
+                closes,
+                then,
+                otherwise,
+            } => {
+                self.admit(cond)?;
+                single(closes)?;
+                let hot = [self.arm(then), self.arm(otherwise)];
+                hot.contains(&true).then_some(())
+            }
+            ExprKind::Let {
+                local, value, body, ..
+            } => {
+                if !self.unshared(local.slot) {
+                    return None;
+                }
+                self.admit(value)?;
+                self.admit(body)
+            }
+            ExprKind::Act
+            | ExprKind::Make { .. }
+            | ExprKind::Record { .. }
+            | ExprKind::Field { .. }
+            | ExprKind::Pin(_) => None,
+        }
+    }
+
+    /// Admits a conditional's `arm`: hot when its value is island ops that
+    /// close at most one region at its end, cold otherwise, taking it then
+    /// exiting at its first op. Whether it is hot.
+    fn arm(&mut self, arm: &mut Arm) -> bool {
         let calls = self.calls.len();
         let sites = self.sites;
-        let mut walk = Walk::default();
-        let hot = self.ops(&mut walk, start, end).and_then(|()| {
-            let close = walk.open.take();
-            let value = walk.take(dst)?;
-            (!walk.held()).then(|| Arm::Hot {
-                value: Box::new(value),
-                close,
-            })
-        });
-        Some(hot.unwrap_or_else(|| {
+        let hot = arm.closes.len() <= 1
+            && arm
+                .value
+                .as_deref_mut()
+                .is_some_and(|value| self.admit(value).is_some());
+        if !hot {
             self.calls.truncate(calls);
             self.sites = sites;
-            Arm::Cold { pc: start }
-        }))
+            arm.value = None;
+            arm.closes = Box::default();
+        }
+        hot
     }
 
     /// Whether `lib` called with `given` arguments is a native an island
@@ -815,6 +578,12 @@ fn verify_close(close: Option<&Close>, stream: &super::Stream) -> Result<(), Ref
     }
 }
 
+fn verify_closes(closes: &[Close], stream: &super::Stream) -> Result<(), Refused> {
+    closes
+        .iter()
+        .try_for_each(|close| verify_close(Some(close), stream))
+}
+
 fn verify_block(
     block: &Block,
     stream: &super::Stream,
@@ -846,81 +615,45 @@ fn verify_block(
 }
 
 fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> Result<(), Refused> {
-    match expr {
-        Expr::Local { .. } | Expr::Session { .. } | Expr::Const(_) => Ok(()),
-        Expr::Operator {
-            args,
-            close,
-            counted,
-            pc,
+    for operand in expr.operands() {
+        verify_expr(operand, stream, calls)?;
+    }
+    verify_closes(expr.closes(), stream)?;
+    match &expr.kind {
+        ExprKind::Operator {
+            invoke: Some(invoke),
             ..
-        } => {
-            for arg in args {
-                verify_expr(arg, stream, calls)?;
+        } if invoke.call => {
+            match stream.ops.get(expr.pc as usize) {
+                Some(Op::Nested { act, .. })
+                    if stream.nested.get(act.ix()).map(|nested| nested.occurrence)
+                        == Some(invoke.occurrence) => {}
+                _ => return Err(Refused::Calls),
             }
-            verify_close(close.as_ref(), stream)?;
-            if let Some(occurrence) = counted {
-                match stream.ops.get(*pc as usize) {
-                    Some(Op::Nested { act, .. })
-                        if stream.nested.get(act.ix()).map(|nested| nested.occurrence)
-                            == Some(*occurrence) => {}
-                    _ => return Err(Refused::Calls),
-                }
-                calls.push(*occurrence);
-            }
-            Ok(())
+            calls.push(invoke.occurrence);
         }
-        Expr::Native { args, close, .. } => {
-            for arg in args {
-                verify_expr(arg, stream, calls)?;
-            }
-            verify_close(close.as_ref(), stream)
-        }
-        Expr::Index { target, index, .. } => {
-            verify_expr(target, stream, calls)?;
-            verify_expr(index, stream, calls)
-        }
-        Expr::Call {
-            callee,
-            args,
-            close,
-            act,
-            occurrence,
-            ..
-        } => {
-            if let Callee::Read(callee) = callee {
-                verify_expr(callee, stream, calls)?;
-            }
-            for arg in args {
-                verify_expr(arg, stream, calls)?;
-            }
-            verify_close(close.as_ref(), stream)?;
-            if stream.nested.get(act.ix()).map(|nested| nested.occurrence) != Some(*occurrence) {
+        ExprKind::Call { invoke, .. } => {
+            if stream
+                .nested
+                .get(invoke.act.ix())
+                .map(|nested| nested.occurrence)
+                != Some(invoke.occurrence)
+            {
                 return Err(Refused::Calls);
             }
-            calls.push(*occurrence);
-            Ok(())
+            calls.push(invoke.occurrence);
         }
-        Expr::Cond {
-            cond,
-            close,
-            then_,
-            else_,
-            ..
+        ExprKind::Cond {
+            then, otherwise, ..
         } => {
-            verify_expr(cond, stream, calls)?;
-            verify_close(close.as_ref(), stream)?;
-            for arm in [then_, else_] {
-                if let Arm::Hot { value, close } = arm {
+            for arm in [then, otherwise] {
+                if let Some(value) = &arm.value {
                     verify_expr(value, stream, calls)?;
-                    verify_close(close.as_ref(), stream)?;
+                    verify_closes(&arm.closes, stream)?;
                 }
             }
-            Ok(())
         }
-        Expr::Let { value, body, .. } => {
-            verify_expr(value, stream, calls)?;
-            verify_expr(body, stream, calls)
-        }
+        _ => {}
     }
+    Ok(())
 }

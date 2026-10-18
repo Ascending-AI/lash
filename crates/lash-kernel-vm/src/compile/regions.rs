@@ -8,11 +8,14 @@
 //! and its body as a tree: each statement's fixed units, its formulas'
 //! maximum, its static charge program, the slots it reads and writes, the
 //! `if` arms it enters, the `continue`s that end an iteration early, and
-//! the statements it leaves to the reference. [`LoopPlan::verify`] checks
-//! the plan against the lowered code, its stream's `RegionTable` events
-//! and the statement units before lowering admits it. Plans belong to the
-//! executable: deterministic, immutable and never saved. Their compiled
-//! form ([`nodes`]) is built on first entry and cached in the plan. A
+//! the statements it leaves to the reference. Formation reads each region
+//! statement as its resolved expression tree ([`super::expr`]) and derives
+//! the summary from it, keeping the tree, from which the compiled form
+//! ([`nodes`]) is built on first entry and cached in the plan.
+//! [`LoopPlan::verify`] checks the plan against the lowered code, its
+//! stream's `RegionTable` events and the statement units, never against the
+//! tree, before lowering admits it. Plans belong to the executable:
+//! deterministic, immutable and never saved. A
 //! layout bit turns formation off ([`super::Layout::regions`]), which is
 //! how the regions law compares the two plans.
 //!
@@ -37,19 +40,23 @@
 use std::sync::OnceLock;
 
 use lash_kernel_doc::FunctionId;
-use lash_kernel_exec::{Op, OpRange, Weight};
+use lash_kernel_doc::arena::ShortText;
+use lash_kernel_exec::{Op, OpRange, Reg, Weight};
 
+mod cx;
 mod nodes;
 mod verify;
 
+pub(crate) use cx::{Cx, measured_formula};
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Meter, Place, Role,
-    SessionSlot, Taken, measured_formula, position, scalar, store,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Meter, Place, Role,
+    SessionSlot, Taken, position, scalar, store,
 };
 
+use super::expr::{self, Expr, Kind};
 use super::{
-    BindingName, Block, BlockId, Code, Constant, Executable, Form, Lib, LibId, LibRun, NestedKind,
-    Stmt, StmtId, Stream,
+    BindingName, Block, BlockId, Code, Constant, Executable, Form, Lib, LibId, LibRun, Stmt,
+    StmtId, Stream,
 };
 use nodes::Libs;
 
@@ -197,6 +204,12 @@ pub(crate) struct Summary {
     calls: Box<[usize]>,
     /// A statement-root invoke keeps its original action and resume form.
     action: Option<StmtId>,
+    /// The values its last op takes, read from its ops' tree, each with
+    /// its role, in the order the statement completes them: none for a
+    /// `continue` or a statement-root invoke's write.
+    roots: Box<[(Role, Expr)]>,
+    /// Where a store writes.
+    place: Option<Place>,
 }
 
 impl Summary {
@@ -595,9 +608,8 @@ impl Formation<'_> {
                 let mut formula_max = Some(0);
                 let mut general = false;
                 if let Some(item) = item {
-                    let mut defined = vec![true, true];
                     general = !scalar_site((self.lowered.lib)(item), 2);
-                    self.site(item, 0, 2, &mut defined, &mut formula_max, &mut gathered)?;
+                    self.site(item, 2, &mut formula_max, &mut gathered)?;
                     program.push(Event::Formula);
                 }
                 let charge = Summary {
@@ -611,6 +623,8 @@ impl Formation<'_> {
                     general,
                     calls: Box::default(),
                     action: None,
+                    roots: Box::default(),
+                    place: None,
                 };
                 let head = Head::For {
                     charge,
@@ -771,9 +785,8 @@ impl Formation<'_> {
             }
             _ => return None,
         };
-        let mut defined = vec![true; args.len()];
         let mut formula_max = Some(0);
-        self.site(lib, 0, args.len(), &mut defined, &mut formula_max, gathered)?;
+        self.site(lib, args.len(), &mut formula_max, gathered)?;
         let mut program = vec![Event::Fixed(Weight::Atomic(1))];
         program.extend(args.iter().map(|_| Event::Fixed(Weight::Atomic(1))));
         program.push(Event::Formula);
@@ -793,6 +806,8 @@ impl Formation<'_> {
             general: !scalar_site((self.lowered.lib)(lib), args.len()),
             calls,
             action: Some(id),
+            roots: Box::default(),
+            place: None,
         };
         Some(if bind {
             Step::Bind(summary)
@@ -802,8 +817,8 @@ impl Formation<'_> {
     }
 
     /// The summary of statement-root invoke `id` whose continuation stores
-    /// its value: the invoke's events, then its ops' after the action, as
-    /// a plain store's, the value in the first register.
+    /// its value: the invoke's events, then its continuation's, as a plain
+    /// store's, the value in the first register.
     fn action_store(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Summary> {
         let statement = (self.lowered.stmt)(id);
         let (action, lib, args) = library_invoke(&statement.form)?;
@@ -814,29 +829,20 @@ impl Formation<'_> {
         if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
             shared.calls.push(action.occurrence);
         }
-        let mut walk = Walk {
-            defined: vec![true; args.len()],
-            fixed: 1 + args.len() as u64,
-            formula_max: Some(0),
-            program: vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()],
-            allocates: !scalar_site((self.lowered.lib)(lib), args.len()),
-        };
-        walk.program.push(Event::Formula);
-        self.site(
-            lib,
-            0,
-            args.len(),
-            &mut walk.defined,
-            &mut walk.formula_max,
-            gathered,
-        )?;
+        let units = 1 + args.len() as u64;
+        let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
+        program.push(Event::Formula);
+        let mut walk = Walk::new(units, program);
+        walk.allocates = !scalar_site((self.lowered.lib)(lib), args.len());
+        self.site(lib, args.len(), &mut walk.formula_max, gathered)?;
+        let tree = expr::statement(self.lowered.stream, statement.ops, true)?;
         let mut summary = self.finish(
             code,
             statement.ops,
-            statement.ops.start + 1,
             End::Store,
             walk,
             shared,
+            tree,
             gathered,
         )?;
         summary.action = Some(id);
@@ -871,118 +877,94 @@ impl Formation<'_> {
         program: Vec<Event>,
         gathered: &mut Gathered,
     ) -> Option<Summary> {
-        let walk = Walk {
-            defined: Vec::new(),
-            fixed,
-            formula_max: Some(0),
-            program,
-            allocates: false,
-        };
-        self.finish(
-            code,
-            range,
-            range.start,
-            end,
-            walk,
-            Shared::default(),
-            gathered,
-        )
+        let tree = expr::statement(self.lowered.stream, range, false)?;
+        let walk = Walk::new(fixed, program);
+        self.finish(code, range, end, walk, Shared::default(), tree, gathered)
     }
 
-    /// The summary of the region statement in `range`, which ends as
-    /// `end`, from its ops `from..` on: `walk` and `shared` hold what its
-    /// ops before `from` did.
+    /// The summary of the region statement in `range`, read as `tree`,
+    /// which ends as `end`: `walk` and `shared` hold what it charges and
+    /// reads before its ops.
     #[expect(
         clippy::too_many_arguments,
-        reason = "a statement's summary continues the walk its start made"
+        reason = "a statement's summary continues what its start charged"
     )]
     fn finish(
         &self,
         code: &Code,
         range: OpRange,
-        from: u32,
         end: End,
         mut walk: Walk,
         mut shared: Shared,
+        mut tree: expr::Statement,
         gathered: &mut Gathered,
     ) -> Option<Summary> {
         let stream = self.lowered.stream;
-        let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
-        let (last, _) = ops.split_last()?;
-        walk.allocates |= general(stream, self.lowered.lib, *last);
-        self.walk(
-            code,
-            from,
-            range.end() - 1,
-            &mut walk,
-            &mut shared,
-            gathered,
-            false,
-        )?;
-        if !shared.lets.is_empty() {
+        walk.allocates |= general(stream, self.lowered.lib, tree.last);
+        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
+        // The values its last op takes, by role, and where a store writes.
+        let (mut roots, place) = match (tree.last, end) {
+            (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch) => {
+                (vec![(Role::Value, tree.take(cond)?)], None)
+            }
+            (Op::WriteLocal { local, src }, End::Write) | (Op::Bind { local, src }, End::Bind)
+                if unshared(local.slot) =>
+            {
+                (vec![(Role::Value, tree.take(src)?)], None)
+            }
+            (Op::WriteSession { src, .. }, End::Write) => {
+                (vec![(Role::Value, tree.take(src)?)], None)
+            }
+            (Op::Continue, End::Continue) => (Vec::new(), None),
+            (Op::SetIndex { target, src }, End::Store) => {
+                let value = tree.take(src)?;
+                let object = tree.take(target)?;
+                let index = tree.take(Reg(target.0 + 1))?;
+                let roots = vec![
+                    (Role::Target, object),
+                    (Role::Index, index),
+                    (Role::Value, value),
+                ];
+                (roots, Some(Place::Index))
+            }
+            (Op::SetField { target, src, field }, End::Store) => {
+                let value = tree.take(src)?;
+                let object = tree.take(target)?;
+                let name = ShortText::new(&stream.fields.get(field.ix())?.name)?;
+                let roots = vec![(Role::Target, object), (Role::Value, value)];
+                (
+                    roots,
+                    Some(Place::Field(lash_kernel_doc::Value::Text(name))),
+                )
+            }
+            // A `do` discards what it computed last, in its first register.
+            (Op::End, End::Discard) => (vec![(Role::Value, tree.take(Reg(0))?)], None),
+            _ => return None,
+        };
+        // Every value the statement computes reaches its end.
+        if !tree.spent() {
             return None;
         }
+        // Its values are computed in the order the statement completes them.
+        roots.sort_by_key(|(_, root)| root.pc);
+        for (_, root) in &roots {
+            self.expr(code, root, &mut walk, &mut shared, gathered, false)?;
+        }
+        walk.close(stream, &tree.closes)?;
+        let write = match tree.last {
+            Op::WriteLocal { local, .. } | Op::Bind { local, .. } => {
+                Some(RegionSlot::Frame(local.at))
+            }
+            Op::WriteSession { name, .. } => Some(gathered.session(stream.names.get(name.ix())?)),
+            _ => None,
+        };
         let Walk {
-            mut defined,
             fixed,
             formula_max,
             program,
             allocates,
         } = walk;
-        let Shared {
-            reads, calls, arms, ..
-        } = shared;
-        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
-        let write = match (*last, end) {
-            (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch)
-                if take(&mut defined, cond.ix()) =>
-            {
-                None
-            }
-            (Op::WriteLocal { local, src }, End::Write) | (Op::Bind { local, src }, End::Bind)
-                if unshared(local.slot) && take(&mut defined, src.ix()) =>
-            {
-                Some(RegionSlot::Frame(local.at))
-            }
-            (Op::WriteSession { name, src }, End::Write) if take(&mut defined, src.ix()) => {
-                Some(gathered.session(stream.names.get(name.ix())?))
-            }
-            (Op::Continue, End::Continue)
-                if reads.is_empty() && !program.contains(&Event::Formula) =>
-            {
-                None
-            }
-            (Op::SetIndex { target, src }, End::Store)
-                if take(&mut defined, src.ix())
-                    && take(&mut defined, target.ix())
-                    && take(&mut defined, target.ix() + 1) =>
-            {
-                None
-            }
-            (Op::SetField { target, src, field }, End::Store)
-                if take(&mut defined, src.ix())
-                    && take(&mut defined, target.ix())
-                    && lash_kernel_doc::arena::ShortText::new(
-                        &stream.fields.get(field.ix())?.name,
-                    )
-                    .is_some() =>
-            {
-                None
-            }
-            (Op::End, End::Discard) => {
-                // A `do` discards what it computed last, in its first
-                // register.
-                if !take(&mut defined, 0) {
-                    return None;
-                }
-                None
-            }
-            _ => return None,
-        };
-        // Every value the statement computes reaches its end.
-        if defined.iter().any(|held| *held) {
-            return None;
-        }
+        let Shared { reads, calls, arms } = shared;
         Some(Summary {
             ops: range,
             fixed,
@@ -994,231 +976,143 @@ impl Formation<'_> {
             general: allocates,
             calls: calls.into(),
             action: None,
+            roots: roots.into(),
+            place,
         })
     }
 
-    /// Walks the ops `start..end` of a region statement into `walk`: an
-    /// arm of a conditional expression when `arm`, whose invokes would be
-    /// counted only on its path, which no static program states.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a statement's walk and its arms share the statement's tables"
-    )]
-    fn walk(
+    /// Derives what `expr` charges, reads and counts into `walk` and
+    /// `shared`, in the order the reference runs its ops: an arm's of a
+    /// conditional expression when `arm`, whose invokes would be counted
+    /// only on its path, which no static program states.
+    fn expr(
         &self,
         code: &Code,
-        start: u32,
-        end: u32,
+        expr: &Expr,
         walk: &mut Walk,
         shared: &mut Shared,
         gathered: &mut Gathered,
         arm: bool,
     ) -> Option<()> {
+        for operand in expr.operands() {
+            self.expr(code, operand, walk, shared, gathered, arm)?;
+        }
         let stream = self.lowered.stream;
-        // Takes the registers `start..start + count` and defines `start`.
-        let gather = |defined: &mut Vec<bool>, start: usize, count: usize| {
-            (start..start + count).all(|at| take(defined, at)) && define(defined, start)
-        };
-        let mut pc = start;
-        while pc < end {
-            let op = *stream.ops.get(pc as usize)?;
-            walk.allocates |= general(stream, self.lowered.lib, op);
-            let defined = &mut walk.defined;
-            match op {
-                Op::Region { region, total } => {
-                    if total == u32::MAX {
-                        return None;
-                    }
-                    walk.fixed = walk.fixed.checked_add(u64::from(total))?;
-                    let events = stream.regions.events(region.0);
-                    walk.program
-                        .extend(events.iter().map(|event| Event::Fixed(event.weight)));
+        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
+        match &expr.kind {
+            // A statement-root invoke's value: its events precede the ops.
+            Kind::Act => {}
+            Kind::Local { local, .. } => {
+                if !unshared(local.slot) {
+                    return None;
                 }
-                Op::Local { dst, local } => {
-                    if code.slots.get(local.slot as usize)?.shared || !define(defined, dst.ix()) {
-                        return None;
-                    }
-                    shared.reads.push(RegionSlot::Frame(local.at));
-                }
-                Op::Session { dst, name } => {
-                    if !define(defined, dst.ix()) {
-                        return None;
-                    }
-                    shared
-                        .reads
-                        .push(gathered.session(stream.names.get(name.ix())?));
-                }
-                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
-                    Constant::Resident(_) if define(defined, dst.ix()) => {}
-                    _ => return None,
-                },
-                Op::Operator { lib, args } => {
-                    let (start, count) = (args.start.ix(), args.len as usize);
-                    self.site(
-                        LibId(lib.0),
-                        start,
-                        count,
-                        defined,
-                        &mut walk.formula_max,
-                        gathered,
-                    )?;
-                    walk.program.push(Event::Formula);
-                }
-                Op::Nested { act, args } => {
-                    let nested = stream.nested.get(act.ix())?;
-                    let lib = nested.kind.operator_lib()?;
-                    if !nested.operator {
-                        return None;
-                    }
-                    let (start, count) = (args.start.ix(), args.len as usize);
-                    self.site(lib, start, count, defined, &mut walk.formula_max, gathered)?;
-                    if matches!(nested.kind, NestedKind::Call(_))
-                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
-                    {
-                        if arm {
-                            return None;
-                        }
-                        shared.calls.push(nested.occurrence);
-                    }
-                    walk.program.push(Event::Formula);
-                }
-                Op::Call { args, .. } => {
-                    if !gather(defined, args.start.ix(), args.len as usize) {
-                        return None;
-                    }
-                    walk.formula_max = None;
-                    walk.program.push(Event::Formula);
-                }
-                Op::MakeTuple { items } | Op::MakeList { items } | Op::MakeSet { items } => {
-                    if !gather(defined, items.start.ix(), items.len as usize) {
-                        return None;
-                    }
-                }
-                Op::MakeMap { entries } => {
-                    if !gather(defined, entries.start.ix(), entries.len as usize) {
-                        return None;
-                    }
-                }
-                Op::MakeRecord { fields, values } => {
-                    // A record's names are short texts the region writes
-                    // as they are.
-                    let short = stream
-                        .field_lists
-                        .get(fields.ix())?
-                        .iter()
-                        .all(|name| lash_kernel_doc::arena::ShortText::new(name).is_some());
-                    if !short || !gather(defined, values.start.ix(), values.len as usize) {
-                        return None;
-                    }
-                }
-                Op::Field { at, .. } => {
-                    if !gather(defined, at.ix(), 1) {
-                        return None;
-                    }
-                }
-                Op::Index { at, .. } => {
-                    if !gather(defined, at.ix(), 2) {
-                        return None;
-                    }
-                }
-                // A pin keeps a value its statement still uses.
-                Op::Pin { src } => {
-                    if !defined.get(src.ix()).copied().unwrap_or(false) {
-                        return None;
-                    }
-                }
-                // An expression's variable, declared for its body: the
-                // value its body computes, in the same register, is the
-                // expression's.
-                Op::LetBind { local, src } => {
-                    if code.slots.get(local.slot as usize)?.shared || !take(defined, src.ix()) {
-                        return None;
-                    }
-                    shared.lets.push((local.at, src.ix()));
-                }
-                Op::LetEnd { local } => {
-                    let (at, reg) = shared.lets.pop()?;
-                    if at != local.at || !defined.get(reg).copied().unwrap_or(false) {
-                        return None;
-                    }
-                }
-                Op::JumpIfFalse { cond, skip } => {
-                    if !take(defined, cond.ix()) {
-                        return None;
-                    }
-                    let (then_end, else_end) = arm_ends(stream, pc, skip)?;
-                    let lets = shared.lets.len();
-                    let mut arms: [Option<Walk>; 2] = [None, None];
-                    for (at, (from, to)) in [(pc + 1, then_end - 1), (then_end, else_end)]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        let mut taken = Walk {
-                            defined: Vec::new(),
-                            fixed: 0,
-                            formula_max: Some(0),
-                            program: Vec::new(),
-                            allocates: false,
-                        };
-                        self.walk(code, from, to, &mut taken, shared, gathered, true)?;
-                        // An arm computes the expression's value alone,
-                        // into the condition's register.
-                        if shared.lets.len() != lets
-                            || !take(&mut taken.defined, cond.ix())
-                            || taken.defined.iter().any(|held| *held)
-                        {
-                            return None;
-                        }
-                        arms[at] = Some(taken);
-                    }
-                    let [Some(then), Some(otherwise)] = arms else {
-                        return None;
-                    };
-                    walk.allocates |= then.allocates || otherwise.allocates;
-                    let most = |arm: &Walk| arm.fixed.checked_add(arm.formula_max?);
-                    walk.formula_max = match (walk.formula_max, most(&then), most(&otherwise)) {
-                        (Some(sum), Some(a), Some(b)) => sum.checked_add(a.max(b)),
-                        _ => None,
-                    };
-                    walk.program
-                        .push(Event::Arm(u32::try_from(shared.arms.len()).ok()?));
-                    shared.arms.push(Arms {
-                        then: lean(then.program),
-                        otherwise: lean(otherwise.program),
-                        then_fixed: then.fixed,
-                        otherwise_fixed: otherwise.fixed,
-                    });
-                    if !define(&mut walk.defined, cond.ix()) {
-                        return None;
-                    }
-                    pc = else_end;
-                    continue;
-                }
-                _ => return None,
+                shared.reads.push(RegionSlot::Frame(local.at));
             }
-            pc += 1;
+            Kind::Session { name, .. } => {
+                let name = stream.names.get(name.ix())?;
+                shared.reads.push(gathered.session(name));
+            }
+            Kind::Const(value) => walk.allocates |= !scalar(value),
+            Kind::Operator {
+                lib,
+                invoke,
+                args,
+                closes,
+            } => {
+                if invoke.is_some_and(|invoke| !invoke.operator) {
+                    return None;
+                }
+                self.site(*lib, args.len(), &mut walk.formula_max, gathered)?;
+                walk.allocates |= !scalar_site((self.lowered.lib)(*lib), args.len());
+                if let Some(occurrence) = invoke.and_then(|invoke| invoke.counted()) {
+                    if arm {
+                        return None;
+                    }
+                    shared.calls.push(occurrence);
+                }
+                walk.close(stream, closes)?;
+                walk.program.push(Event::Formula);
+            }
+            Kind::Native { closes, .. } => {
+                walk.allocates = true;
+                walk.formula_max = None;
+                walk.close(stream, closes)?;
+                walk.program.push(Event::Formula);
+            }
+            Kind::Call { .. } => return None,
+            // A record's names are short texts the region writes as they
+            // are.
+            Kind::Record { fields, .. } => {
+                let names = stream.field_lists.get(fields.ix())?;
+                if !names.iter().all(|name| ShortText::new(name).is_some()) {
+                    return None;
+                }
+                walk.allocates = true;
+            }
+            Kind::Make { .. } | Kind::Field { .. } | Kind::Index { .. } | Kind::Pin(_) => {
+                walk.allocates = true;
+            }
+            // An expression's variable, declared for its body, whose memory
+            // it holds.
+            Kind::Let { local, .. } => {
+                if !unshared(local.slot) {
+                    return None;
+                }
+                walk.allocates = true;
+            }
+            Kind::Cond {
+                closes,
+                then,
+                otherwise,
+                ..
+            } => {
+                walk.close(stream, closes)?;
+                let mut arm = |arm: &expr::Arm| -> Option<Walk> {
+                    let mut taken = Walk::new(0, Vec::new());
+                    self.expr(
+                        code,
+                        arm.value.as_deref()?,
+                        &mut taken,
+                        shared,
+                        gathered,
+                        true,
+                    )?;
+                    taken.close(stream, &arm.closes)?;
+                    Some(taken)
+                };
+                let then = arm(then)?;
+                let otherwise = arm(otherwise)?;
+                walk.allocates |= then.allocates || otherwise.allocates;
+                let most = |arm: &Walk| arm.fixed.checked_add(arm.formula_max?);
+                walk.formula_max = match (walk.formula_max, most(&then), most(&otherwise)) {
+                    (Some(sum), Some(a), Some(b)) => sum.checked_add(a.max(b)),
+                    _ => None,
+                };
+                walk.program
+                    .push(Event::Arm(u32::try_from(shared.arms.len()).ok()?));
+                shared.arms.push(Arms {
+                    then: lean(then.program),
+                    otherwise: lean(otherwise.program),
+                    then_fixed: then.fixed,
+                    otherwise_fixed: otherwise.fixed,
+                });
+            }
         }
         Some(())
     }
 
-    /// Operator `lib` called on the `count` registers from `start`, which a
-    /// region runs when it has a prepared entry and its operands are the
-    /// values the statement computed last: its result replaces them, and
-    /// its scalar table's maximum, if it has one, adds to `formula_max`.
+    /// Operator `lib` called with `count` arguments, which a region runs
+    /// when it has a prepared entry: its scalar table's maximum, if it has
+    /// one, adds to `formula_max`.
     fn site(
         &self,
         lib: LibId,
-        start: usize,
         count: usize,
-        defined: &mut Vec<bool>,
         formula_max: &mut Option<u64>,
         gathered: &mut Gathered,
     ) -> Option<()> {
         let function = (self.lowered.lib)(lib);
         if !operator_site(function, count) {
-            return None;
-        }
-        if !(start..start + count).all(|at| take(defined, at)) || !define(defined, start) {
             return None;
         }
         let (entry, fast) = function.prepared.as_ref()?;
@@ -1241,38 +1135,50 @@ impl Formation<'_> {
     }
 }
 
-/// What a statement's walk, or an arm's, has seen so far: which registers
-/// hold a value not yet used, the fixed units and the formulas' most it
-/// charges on its path, its program and whether it allocates.
+/// What a statement's derivation, or an arm's, has seen so far: the fixed
+/// units and the formulas' most it charges on its path, its program and
+/// whether it allocates.
 struct Walk {
-    defined: Vec<bool>,
     fixed: u64,
     formula_max: Option<u64>,
     program: Vec<Event>,
     allocates: bool,
 }
 
-/// What a statement's walk and its arms share: the slots read, the invoke
-/// occurrences, the arms and the open expression variables.
+impl Walk {
+    fn new(fixed: u64, program: Vec<Event>) -> Self {
+        Self {
+            fixed,
+            formula_max: Some(0),
+            program,
+            allocates: false,
+        }
+    }
+
+    /// The charge regions `closes` of `stream`, charged where an op closes
+    /// them: their totals and their events.
+    fn close(&mut self, stream: &Stream, closes: &[expr::Close]) -> Option<()> {
+        for close in closes {
+            self.fixed = self.fixed.checked_add(u64::from(close.total))?;
+            self.program.extend(
+                stream
+                    .regions
+                    .events(close.region)
+                    .iter()
+                    .map(|event| Event::Fixed(event.weight)),
+            );
+        }
+        Some(())
+    }
+}
+
+/// What a statement's derivation and its arms share: the slots read, the
+/// invoke occurrences and the arms.
 #[derive(Default)]
 struct Shared {
     reads: Vec<RegionSlot>,
     calls: Vec<usize>,
     arms: Vec<Arms>,
-    /// Each open expression variable's frame position and the register
-    /// its body's value goes to.
-    lets: Vec<(u32, usize)>,
-}
-
-/// Where the arms of the conditional whose `JumpIfFalse` at `pc` skips
-/// `skip` ops end: the then-arm runs to its `Jump` before the first, the
-/// else-arm from there to the second.
-pub(crate) fn arm_ends(stream: &Stream, pc: u32, skip: u32) -> Option<(u32, u32)> {
-    let then_end = pc.checked_add(1)?.checked_add(skip)?;
-    let Op::Jump { skip: rest } = *stream.ops.get(then_end.checked_sub(1)? as usize)? else {
-        return None;
-    };
-    Some((then_end, then_end.checked_add(rest)?))
 }
 
 /// `program` without the zero-unit events the reference never records.
@@ -1281,21 +1187,6 @@ fn lean(program: Vec<Event>) -> Box<[Event]> {
         .into_iter()
         .filter(|event| *event != Event::Fixed(Weight::Atomic(0)))
         .collect()
-}
-
-/// Register `at` gets a value; `false` when it holds one still unused.
-fn define(defined: &mut Vec<bool>, at: usize) -> bool {
-    if defined.len() <= at {
-        defined.resize(at + 1, false);
-    }
-    !std::mem::replace(&mut defined[at], true)
-}
-
-/// Register `at`'s value is used; `false` when it holds none.
-fn take(defined: &mut [bool], at: usize) -> bool {
-    defined
-        .get_mut(at)
-        .is_some_and(|held| std::mem::replace(held, false))
 }
 
 impl LoopPlan {
@@ -1329,7 +1220,7 @@ impl LoopPlan {
                 };
                 let head = match &self.head {
                     Head::While(test) => CompiledHead::While {
-                        test: nodes::compile(stream, &libs, test.ops)?.root()?,
+                        test: value(stream, &libs, test)?,
                         commit: test.into(),
                     },
                     Head::For {
@@ -1372,12 +1263,13 @@ fn library_invoke(form: &Form) -> Option<(&super::Action, LibId, &[super::Atom])
 /// The value a write or a declaration stores: its expression's, or a
 /// statement-root invoke's operator call.
 fn value(stream: &Stream, libs: &Libs<'_>, summary: &Summary) -> Option<nodes::Node> {
-    match summary.action {
-        Some(id) => {
+    match (summary.action, &*summary.roots) {
+        (Some(id), []) => {
             let (_, target, args) = library_invoke(&libs.exe.stmt(id).form)?;
             nodes::action(libs, target, args)
         }
-        None => nodes::compile(stream, libs, summary.ops)?.root(),
+        (None, [(Role::Value, root)]) => nodes::compile(stream, libs, root, &mut None),
+        _ => None,
     }
 }
 
@@ -1413,49 +1305,37 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
                     then,
                     otherwise,
                 } => CompiledStep::If {
-                    condition: nodes::compile(stream, libs, test.ops)?.root()?,
+                    condition: value(stream, libs, test)?,
                     commit: test.into(),
                     then: compile_body(stream, libs, then)?,
                     otherwise: compile_body(stream, libs, otherwise)?,
                 },
                 Step::Continue(summary) => CompiledStep::Continue(summary.into()),
                 Step::Store(summary) => {
-                    let act = match summary.action {
+                    // A statement-root invoke's value is its continuation's
+                    // first operand.
+                    let mut act = match summary.action {
                         Some(id) => {
                             let (_, target, args) = library_invoke(&libs.exe.stmt(id).form)?;
                             Some(nodes::action(libs, target, args)?)
                         }
                         None => None,
                     };
-                    let mut compiled = nodes::compile_from(stream, libs, summary.ops, act)?;
-                    let (roles, place) = match compiled.last {
-                        Op::SetIndex { target, src } => (
-                            [
-                                (Role::Target, target.ix()),
-                                (Role::Index, target.ix() + 1),
-                                (Role::Value, src.ix()),
-                            ]
-                            .to_vec(),
-                            Place::Index,
-                        ),
-                        Op::SetField { target, field, src } => (
-                            [(Role::Target, target.ix()), (Role::Value, src.ix())].to_vec(),
-                            Place::Field(lash_kernel_doc::Value::Text(
-                                lash_kernel_doc::arena::ShortText::new(
-                                    &stream.fields.get(field.ix())?.name,
-                                )?,
-                            )),
-                        ),
-                        _ => return None,
-                    };
+                    let operands = summary
+                        .roots
+                        .iter()
+                        .map(|(role, root)| {
+                            Some((*role, nodes::compile(stream, libs, root, &mut act)?))
+                        })
+                        .collect::<Option<_>>()?;
                     CompiledStep::Store {
-                        operands: compiled.ordered(&roles)?,
-                        place,
+                        operands,
+                        place: summary.place.clone()?,
                         commit: summary.into(),
                     }
                 }
                 Step::Discard(summary) => CompiledStep::Discard {
-                    value: nodes::compile(stream, libs, summary.ops)?.take(0)?,
+                    value: value(stream, libs, summary)?,
                     commit: summary.into(),
                 },
                 Step::Leave => CompiledStep::Leave,
