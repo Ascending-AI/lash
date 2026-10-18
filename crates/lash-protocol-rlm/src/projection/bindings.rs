@@ -86,7 +86,7 @@ impl CodeModeProjectedBindings {
     /// Bind `name` to `value`. A session extension records the JSON as its
     /// durable seed, so a binding is JSON (FIG-5134). The encoded name list,
     /// including the built-in `history`, must fit the checkpoint root's
-    /// 3067-byte host-metadata budget (FIG-6499).
+    /// host-metadata budget (FIG-6499).
     pub fn bind_json(
         mut self,
         name: impl Into<String>,
@@ -225,46 +225,79 @@ mod tests {
     /// name and refuses oversized metadata before any session starts.
     #[test]
     fn projected_host_metadata_is_bounded_at_configuration() {
-        let oversized =
-            CodeModeProjectedBindings::new().bind_json("h".repeat(3054), serde_json::Value::Null);
-        assert!(matches!(
-            oversized,
-            Err(ProjectedBindingError::HostMetadataTooLarge {
-                limit: 3067,
-                actual: 3068,
-                ..
-            })
-        ));
+        use lash_kernel_doc::Name;
+        use lash_kernel_doc::graph_tokens::encode_body;
+        use lash_kernel_state::paged::CheckpointRoot;
+
+        let limit = CheckpointRoot::HOST_METADATA_LIMIT;
+        let history = crate::projection::HISTORY_PROJECTION;
+        // Measure the canonical encoding independently of admission's size
+        // estimator. Fixed checkpoint fields can change the available budget.
+        let encoded_size = |names: &[&str]| {
+            encode_body(
+                &names
+                    .iter()
+                    .map(|name| Name::new(*name))
+                    .collect::<Vec<_>>(),
+            )
+            .len()
+        };
+        let largest_name = |other_names: &[&str]| {
+            (0..=limit)
+                .rev()
+                .map(|len| "h".repeat(len))
+                .find(|name| {
+                    let mut names = vec![name.as_str()];
+                    names.extend_from_slice(other_names);
+                    encoded_size(&names) <= limit
+                })
+                .expect("a projected name plus reserved metadata fits")
+        };
+        let fitting_name = largest_name(&[history]);
+        assert_eq!(encoded_size(&[&fitting_name, history]), limit);
         CodeModeProjectedBindings::new()
-            .bind_json("h".repeat(3053), serde_json::Value::Null)
+            .bind_json(&fitting_name, serde_json::Value::Null)
             .expect("the largest name plus history fits");
+
+        let oversized_name = format!("{fitting_name}h");
+        assert_eq!(encoded_size(&[&oversized_name, history]), limit + 1);
+        let oversized_error = ProjectedBindingError::HostMetadataTooLarge {
+            name: oversized_name.clone(),
+            limit,
+            actual: limit + 1,
+        };
+        assert_eq!(
+            CodeModeProjectedBindings::new()
+                .bind_json(&oversized_name, serde_json::Value::Null)
+                .err(),
+            Some(oversized_error.clone()),
+        );
+
+        let merged_name = format!("{}h", largest_name(&[history, "xy"]));
+        assert_eq!(encoded_size(&[&merged_name, history, "xy"]), limit + 1);
         let left = CodeModeProjectedBindings::new()
-            .bind_json("h".repeat(3050), serde_json::Value::Null)
+            .bind_json(&merged_name, serde_json::Value::Null)
             .unwrap();
         let right = CodeModeProjectedBindings::new()
             .bind_json("xy", serde_json::Value::Null)
             .unwrap();
-        assert!(matches!(
-            left.merge(right),
-            Err(ProjectedBindingError::HostMetadataTooLarge {
-                limit: 3067,
-                actual: 3068,
-                ..
-            })
-        ));
+        assert_eq!(
+            left.merge(right).err(),
+            Some(ProjectedBindingError::HostMetadataTooLarge {
+                name: "xy".into(),
+                limit,
+                actual: limit + 1,
+            }),
+        );
         let mut snapshot = lash_rlm_types::CodeModeProjectedSeedSnapshot::new();
         snapshot.push(
-            "h".repeat(3054),
+            oversized_name,
             lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::Value::Null),
         );
-        assert!(matches!(
-            CodeModeProjectedBindings::from_snapshot(&snapshot),
-            Err(ProjectedBindingError::HostMetadataTooLarge {
-                limit: 3067,
-                actual: 3068,
-                ..
-            })
-        ));
+        assert_eq!(
+            CodeModeProjectedBindings::from_snapshot(&snapshot).err(),
+            Some(oversized_error.clone()),
+        );
         let restored_error = CodeModeProjectedBindings::from_snapshot(&snapshot)
             .err()
             .expect("oversized seed")
@@ -272,20 +305,25 @@ mod tests {
         let lash_core::SessionError::ExecutionStateRestore { source } = restored_error else {
             panic!("seed admission must retain the typed refusal for its host");
         };
-        assert!(matches!(
+        assert_eq!(
             source.downcast_ref::<ProjectedBindingError>(),
-            Some(ProjectedBindingError::HostMetadataTooLarge {
-                limit: 3067,
-                actual: 3068,
-                ..
-            })
-        ));
+            Some(&oversized_error),
+        );
         let mut bindings = CodeModeProjectedBindings::new();
-        for ordinal in 0..1000 {
-            match bindings.bind_json(format!("h{ordinal}"), serde_json::Value::Null) {
+        let mut names = vec![Name::new(history)];
+        for ordinal in 0..limit {
+            let name = format!("h{ordinal}");
+            names.push(Name::new(&name));
+            let expected_actual = encode_body(&names).len();
+            match bindings.bind_json(name, serde_json::Value::Null) {
                 Ok(next) => bindings = next,
-                Err(ProjectedBindingError::HostMetadataTooLarge { limit, actual, .. }) => {
-                    assert_eq!(limit, 3067);
+                Err(ProjectedBindingError::HostMetadataTooLarge {
+                    limit: reported_limit,
+                    actual,
+                    ..
+                }) => {
+                    assert_eq!(reported_limit, limit);
+                    assert_eq!(actual, expected_actual);
                     assert!(actual > limit);
                     return;
                 }
