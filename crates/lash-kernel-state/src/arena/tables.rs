@@ -213,25 +213,42 @@ fn invalid_key() -> NativeError {
 pub(super) fn build(
     objects: &Objects,
     facts: &[Facts],
-    entries: Vec<(Value, Value)>,
-) -> Result<Table, NativeError> {
-    let mut seen: HashMap<NormalKey, usize> = HashMap::with_capacity(entries.len());
+    entries: impl ExactSizeIterator<Item = (Value, Value)>,
+) -> Result<(Table, Index), NativeError> {
+    // The deduplication map is the table's final index. Its capacity stays
+    // with its owner, rather than being discarded and rebuilt from tokens.
+    let mut keys = HashMap::with_capacity(entries.len());
     let mut values = Vec::with_capacity(entries.len() * 2);
     for (key, value) in entries {
         let normal = normal_key(objects, facts, &key)?.ok_or_else(invalid_key)?;
-        match seen.get(&normal) {
-            Some(at) => values[at * 2 + 1] = value,
-            None => {
-                seen.insert(normal, values.len() / 2);
+        match keys.entry(normal) {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                values[*entry.get() as usize * 2 + 1] = value;
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert((values.len() / 2) as u64);
                 values.push(key);
                 values.push(value);
             }
         }
     }
-    Ok(Table {
-        len: (values.len() / 2) as u64,
-        chunks: vec![Chunk::Resident(values)],
-    })
+    // Duplicate inputs must not leave a larger retained key buffer than
+    // constructing the index from the final unique rows would have used.
+    keys.shrink_to_fit();
+    let len = (values.len() / 2) as u64;
+    Ok((
+        Table {
+            len,
+            chunks: vec![Chunk::Resident(values)],
+        },
+        Index {
+            keys,
+            absent: HashSet::new(),
+            width: 0,
+            seqs: vec![(0..len).collect()],
+            next: len,
+        },
+    ))
 }
 
 /// The index of a resident one-chunk table whose entries take sequences

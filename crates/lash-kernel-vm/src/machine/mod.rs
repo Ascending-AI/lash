@@ -26,7 +26,7 @@ pub(crate) mod project;
 mod queue;
 mod refine;
 mod regions;
-mod registers;
+pub(crate) mod registers;
 mod segments;
 mod session;
 pub(crate) mod sites;

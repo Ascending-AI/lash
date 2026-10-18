@@ -274,27 +274,37 @@ impl KernelMachine {
         let code = exe.code(code_id);
         if self.bounds.memory_limit != crate::MemoryLimit::Off {
             self.reserve_growth_metered(super::FRAME_BYTES)?;
-            let mut held = Vec::new();
             for (index, param) in code.params.iter().enumerate() {
                 let adopted = site
                     .bound
                     .iter()
                     .find(|slot| plan.locals[**slot as usize].is_some_and(|l| l.at == param.at));
                 match adopted {
-                    Some(slot) if !local(*slot)?.shared => held.push(slots + *slot as usize),
-                    None if !param.shared => held.push(args + index),
+                    Some(slot) if !local(*slot)?.shared => {
+                        self.reserve_growth_metered(
+                            self.cost_of_metered(&self.regs[slots + *slot as usize]),
+                        )?;
+                    }
+                    None if !param.shared => {
+                        self.reserve_growth_metered(
+                            self.cost_of_metered(&self.regs[args + index]),
+                        )?;
+                    }
                     _ => {}
                 }
             }
             for slot in &site.bound {
                 let local = local(*slot)?;
                 if !local.shared && !segment.params.contains(&local.at) {
-                    held.push(slots + *slot as usize);
+                    self.reserve_growth_metered(
+                        self.cost_of_metered(&self.regs[slots + *slot as usize]),
+                    )?;
                 }
             }
-            held.extend(site.roles.iter().map(|(_, reg)| base + *reg as usize));
-            for at in held {
-                self.reserve_growth_metered(self.cost_of_metered(&self.regs[at]))?;
+            for (_, reg) in &site.roles {
+                self.reserve_growth_metered(
+                    self.cost_of_metered(&self.regs[base + *reg as usize]),
+                )?;
             }
         }
         let mut frame = self.fresh_frame(exe, code_id)?;

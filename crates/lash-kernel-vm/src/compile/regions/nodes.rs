@@ -15,6 +15,8 @@
 //! object was built leaves it garbage, held as the reference holds what it
 //! builds, and released by count as the reference's garbage is.
 
+use std::ops::Range;
+
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::{
@@ -29,6 +31,7 @@ use super::super::{
     find_property,
 };
 use crate::machine::SlotState;
+use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
 
 /// What a compiled expression charges as it runs.
@@ -80,6 +83,8 @@ impl Meter {
 /// heap's census and the machine's property caches.
 pub(crate) struct Cx<'a> {
     pub(crate) meter: Meter,
+    pub(crate) args: Arguments,
+    pub(crate) args_reserved: bool,
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
     pub(crate) heap: &'a mut PagedHeap,
@@ -99,6 +104,18 @@ pub(crate) struct Cx<'a> {
 }
 
 impl Cx<'_> {
+    /// Admits the entire retained inline capacity once per statement,
+    /// before exposing a window. Exhaustion exits to the reference path.
+    fn argument_window(&mut self, count: usize) -> Option<Range<usize>> {
+        if !self.args_reserved {
+            if !self.reserve(std::mem::size_of::<Arguments>() as u64) {
+                return None;
+            }
+            self.args_reserved = true;
+        }
+        self.args.window(count)
+    }
+
     /// The room the running statement may still take.
     #[inline]
     fn free(&self) -> u64 {
@@ -177,6 +194,7 @@ impl Cx<'_> {
     /// garbage (its kill set), and the arena is at a statement boundary.
     pub(crate) fn statement_ended(&mut self) {
         self.transient = 0;
+        self.args_reserved = false;
         if self.memory
             && let Err(fault) = self.heap.release_statement_roots()
         {
@@ -259,12 +277,12 @@ impl Cx<'_> {
     /// The general call of native `function` on `args`, one per
     /// parameter, as the reference's call answers it: charged its formula
     /// when it answers, a miss when it raises, declines or asks again.
-    fn native(&mut self, function: &Lib, args: &[Value]) -> Option<Value> {
+    fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let LibRun::Native { native, .. } = &function.run else {
             return None;
         };
         let limit = match &function.limit {
-            Some(limit) => Some(self.formula(limit, args, None)?),
+            Some(limit) => Some(self.formula(limit, &self.args[args.clone()], None)?),
             None => None,
         };
         let mut counter = WorkCounter::new(limit);
@@ -277,7 +295,7 @@ impl Cx<'_> {
                 Nursery::unaccounted(objects)
             };
             let answer = native.call(NativeCall {
-                args: Args::new(args, objects, &semantics),
+                args: Args::new(&self.args[args.clone()], objects, &semantics),
                 new: &mut nursery,
                 counter: &mut counter,
             });
@@ -299,7 +317,7 @@ impl Cx<'_> {
         {
             return None;
         }
-        let units = self.formula(&function.charge, args, Some(&value))?;
+        let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
         self.meter.measured(units);
         Some(value)
     }
@@ -307,9 +325,9 @@ impl Cx<'_> {
     /// Operator `function`'s call on `args`: its prepared entry, charged
     /// as the reference's prepared answer is, or the native's general
     /// call where the entry declines.
-    fn operate(&mut self, function: &Lib, args: &[Value]) -> Option<Value> {
+    fn operate(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
-        let Some(answer) = entry.answer(args, true) else {
+        let Some(answer) = entry.answer(&self.args[args.clone()], true) else {
             return self.native(function, args);
         };
         let value = answer.value;
@@ -318,9 +336,9 @@ impl Cx<'_> {
         }
         let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
             Some(units) => units,
-            None => match fast.charge(&function.charge, args, &value) {
+            None => match fast.charge(&function.charge, &self.args[args.clone()], &value) {
                 Charge::Units(units) => units,
-                Charge::Plan(plan) => self.formula(plan, args, Some(&value))?,
+                Charge::Plan(plan) => self.formula(plan, &self.args[args], Some(&value))?,
             },
         };
         self.meter.measured(units);
@@ -625,6 +643,31 @@ fn values(nodes: &[Node], slots: &[SlotState], cx: &mut Cx<'_>) -> Option<Vec<Va
     nodes.iter().map(|node| node(slots, cx)).collect()
 }
 
+/// Evaluates operands into a disjoint bounded window. A nested call may
+/// reuse only the space after it. Every exit releases the window, so a miss
+/// falls back before the statement without keeping an arena reference.
+fn arguments(
+    nodes: &[Node],
+    arity: usize,
+    slots: &[SlotState],
+    cx: &mut Cx<'_>,
+    call: impl FnOnce(&mut Cx<'_>, Range<usize>) -> Option<Value>,
+) -> Option<Value> {
+    let window = cx.argument_window(arity)?;
+    let answer = (|| {
+        for (index, node) in nodes.iter().enumerate() {
+            let value = node(slots, cx)?;
+            cx.args.put(window.start + index, value);
+        }
+        for index in nodes.len()..arity {
+            cx.args.put(window.start + index, Value::Absent);
+        }
+        call(cx, window.clone())
+    })();
+    cx.args.release(window.start);
+    answer
+}
+
 /// A prepared entry and its scalar charge table: a scalar plan's operator
 /// site's answer.
 struct Answer {
@@ -669,9 +712,10 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
     if libs.general {
         libs.exe.lib(id).prepared.as_ref()?;
         return Some(Box::new(move |slots, cx| {
-            let args = values(&operands, slots, cx)?;
-            let exe = cx.exe;
-            cx.operate(exe.lib(id), &args)
+            arguments(&operands, operands.len(), slots, cx, |cx, args| {
+                let exe = cx.exe;
+                cx.operate(exe.lib(id), args)
+            })
         }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
@@ -709,10 +753,10 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
     }
     let arity = function.arity;
     Some(Box::new(move |slots, cx| {
-        let mut args = values(&operands, slots, cx)?;
-        args.resize(arity, Value::Absent);
-        let exe = cx.exe;
-        cx.native(exe.lib(id), &args)
+        arguments(&operands, arity, slots, cx, |cx, args| {
+            let exe = cx.exe;
+            cx.native(exe.lib(id), args)
+        })
     }))
 }
 
@@ -744,23 +788,27 @@ fn list(items: Vec<Node>, set: bool) -> Node {
 /// The compiled map of the keys and values `entries` holds by turns.
 fn map(entries: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        let values = values(&entries, slots, cx)?;
-        let mut table = Vec::with_capacity(values.len() / 2);
-        for &[key, value] in values.as_chunks::<2>().0 {
-            cx.arena.key(&key).ok()?;
-            table.push((key, value));
-        }
-        cx.build(NewObject::Map(table))
+        arguments(&entries, entries.len(), slots, cx, |cx, window| {
+            let pairs = cx.args[window].as_chunks::<2>().0;
+            let mut table = Vec::with_capacity(pairs.len());
+            for &[key, value] in pairs {
+                cx.arena.key(&key).ok()?;
+                table.push((key, value));
+            }
+            cx.build(NewObject::Map(table))
+        })
     })
 }
 
 /// The compiled record of fields `names`, each with its value's node.
 fn record(names: Box<[Value]>, values_of: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        let values = values(&values_of, slots, cx)?;
-        cx.build(NewObject::Record(
-            names.iter().copied().zip(values).collect(),
-        ))
+        let fields = names
+            .iter()
+            .zip(&values_of)
+            .map(|(name, node)| Some((*name, node(slots, cx)?)))
+            .collect::<Option<Vec<_>>>()?;
+        cx.build(NewObject::Record(fields))
     })
 }
 
@@ -869,8 +917,13 @@ pub(super) fn hook(libs: &Libs<'_>, id: LibId) -> Option<Hook> {
     if libs.general {
         libs.exe.lib(id).prepared.as_ref()?;
         return Some(Box::new(move |walked, raw, cx| {
+            let window = cx.argument_window(2)?;
+            cx.args.put(window.start, walked);
+            cx.args.put(window.start + 1, raw);
             let exe = cx.exe;
-            cx.operate(exe.lib(id), &[walked, raw])
+            let answer = cx.operate(exe.lib(id), window.clone());
+            cx.args.release(window.start);
+            answer
         }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;

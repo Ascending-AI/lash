@@ -4,6 +4,52 @@ use std::slice::SliceIndex;
 
 use lash_kernel_doc::Value;
 
+/// A region's bounded operand stack. Nested calls open disjoint windows;
+/// returning (including a guard miss) releases their references. Capacity
+/// is inline, never grows, and is reused across statements and iterations.
+pub(crate) struct Arguments {
+    values: [Value; Self::CAPACITY],
+    extent: usize,
+}
+
+impl Arguments {
+    pub(crate) const CAPACITY: usize = 64;
+
+    pub(crate) fn new() -> Self {
+        Self {
+            values: [Value::Null; Self::CAPACITY],
+            extent: 0,
+        }
+    }
+
+    pub(crate) fn window(&mut self, count: usize) -> Option<std::ops::Range<usize>> {
+        let end = self.extent.checked_add(count)?;
+        if end > Self::CAPACITY {
+            return None;
+        }
+        let window = self.extent..end;
+        self.extent = end;
+        Some(window)
+    }
+
+    pub(crate) fn put(&mut self, at: usize, value: Value) {
+        self.values[at] = value;
+    }
+
+    pub(crate) fn release(&mut self, extent: usize) {
+        self.values[extent..self.extent].fill(Value::Null);
+        self.extent = extent;
+    }
+}
+
+impl Index<std::ops::Range<usize>> for Arguments {
+    type Output = [Value];
+
+    fn index(&self, range: std::ops::Range<usize>) -> &Self::Output {
+        &self.values[range]
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Registers {
     values: Vec<Value>,
@@ -183,6 +229,44 @@ mod laws {
     use crate::laws::embedder::{Embedder, Setup};
     use crate::{Layout, Machine};
     use lash_kernel_doc::TaskId;
+
+    /// K-BND-003: nested operand windows cannot overwrite their caller or
+    /// grow past admitted capacity, and released holdings cannot survive
+    /// into the next call or a collection.
+    #[test]
+    fn argument_windows_are_bounded_and_release_their_holdings() {
+        use super::Arguments;
+        use lash_kernel_doc::{Value, arena::ArenaHandle};
+
+        let mut args = Arguments::new();
+        let outer = args.window(2).unwrap();
+        let held = Value::List(ArenaHandle::new(7, 3));
+        args.put(outer.start, held);
+        args.put(outer.start + 1, Value::Int(42));
+        let inner = args.window(Arguments::CAPACITY - 2).unwrap();
+        args.put(inner.start, held);
+        assert!(args.window(1).is_none());
+        assert!(args.window(usize::MAX).is_none());
+        assert!(
+            matches!(&args[outer.clone()], [Value::List(handle), Value::Int(42)] if *handle == ArenaHandle::new(7, 3))
+        );
+        args.release(inner.start);
+        assert!(
+            matches!(&args[outer], [Value::List(handle), Value::Int(42)] if *handle == ArenaHandle::new(7, 3))
+        );
+        let reused = args.window(Arguments::CAPACITY - 2).unwrap();
+        assert!(
+            args[reused]
+                .iter()
+                .all(|value| matches!(value, Value::Null))
+        );
+        args.release(0);
+        assert!(args.values.iter().all(|value| value.handle().is_none()));
+        assert_eq!(
+            args.window(Arguments::CAPACITY),
+            Some(0..Arguments::CAPACITY)
+        );
+    }
 
     /// Seam E / K-BND-003: each statement's step relinquishes its
     /// register holdings before the driver observes the step's result.

@@ -67,7 +67,7 @@ use lash_kernel_doc::arena::{
 };
 use lash_kernel_doc::heap::{EntityId, PageValue, TextSummary};
 use lash_kernel_doc::heap_values::text_summary;
-use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value, ValueKind};
+use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value};
 
 /// The summary an immutable composite keeps: what its page form's
 /// descriptor certifies (`TupleSummary`, `ErrorRef`).
@@ -723,11 +723,14 @@ impl Arena {
     /// Installs what a native call built, in reservation order, and gives
     /// the logical cost of its mutable objects. None takes a durable id:
     /// a projection that saves one gives it.
-    pub fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
+    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
         let mut grown = 0u64;
-        let installed: Vec<ArenaHandle> = new.iter().map(|(handle, _)| *handle).collect();
-        for (handle, object) in new {
-            let (body, facts) = match object {
+        for (handle, object) in &mut new {
+            let handle = *handle;
+            // Keep the original handle column for the ownership pass after
+            // every object exists, including forward references in this batch.
+            let object = std::mem::replace(object, NewObject::List(Vec::new()));
+            let (body, index) = match object {
                 NewObject::List(values) => (
                     Body::List(Sequence {
                         len: values.len() as u64,
@@ -735,22 +738,24 @@ impl Arena {
                     }),
                     None,
                 ),
-                NewObject::Map(entries) => (
-                    Body::Map(tables::build(&self.objects, &self.facts, entries)?),
-                    Some(ValueKind::Map),
-                ),
-                NewObject::Set(members) => (
-                    Body::Set(tables::build(
+                NewObject::Map(entries) => {
+                    let (table, index) =
+                        tables::build(&self.objects, &self.facts, entries.into_iter())?;
+                    (Body::Map(table), Some(index))
+                }
+                NewObject::Set(members) => {
+                    let (table, index) = tables::build(
                         &self.objects,
                         &self.facts,
-                        members.into_iter().map(|m| (m, Value::Absent)).collect(),
-                    )?),
-                    Some(ValueKind::Set),
-                ),
-                NewObject::Record(fields) => (
-                    Body::Record(tables::build(&self.objects, &self.facts, fields)?),
-                    Some(ValueKind::Record),
-                ),
+                        members.into_iter().map(|m| (m, Value::Absent)),
+                    )?;
+                    (Body::Set(table), Some(index))
+                }
+                NewObject::Record(fields) => {
+                    let (table, index) =
+                        tables::build(&self.objects, &self.facts, fields.into_iter())?;
+                    (Body::Record(table), Some(index))
+                }
                 NewObject::Tuple(members) => {
                     let summary = self.composite_summary(&members);
                     self.install_one(
@@ -827,12 +832,6 @@ impl Arena {
                     continue;
                 }
             };
-            let index = match &body {
-                Body::Map(table) | Body::Set(table) | Body::Record(table) => facts
-                    .map(|_| tables::index_of(&self.objects, &self.facts, handle, table))
-                    .transpose()?,
-                _ => None,
-            };
             let cost = if self.unaccounted {
                 0
             } else {
@@ -849,14 +848,17 @@ impl Arena {
         }
         // Members are counted once the whole batch is placed: an object
         // may hold one built after it in the same call.
-        let mut members = Vec::new();
-        for handle in installed {
+        for (handle, _) in new {
             if let Some(body) = self.objects.get(handle) {
-                each_member(body, &mut |value| members.extend(value.handle()));
+                let facts = &mut self.facts;
+                each_member(body, &mut |value| {
+                    if let Some(handle) = value.handle()
+                        && let Some(facts) = facts.get_mut(handle.index() as usize)
+                    {
+                        facts.count = facts.count.saturating_add(1);
+                    }
+                });
             }
-        }
-        for member in members {
-            self.hold_handle(member);
         }
         Ok(grown)
     }

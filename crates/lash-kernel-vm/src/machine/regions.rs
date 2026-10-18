@@ -206,6 +206,8 @@ impl KernelMachine {
             counters: (INVOKES && durable).then_some(&mut state.counters),
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
+                args: super::registers::Arguments::new(),
+                args_reserved: false,
                 exe,
                 arena: &mut arena,
                 heap: &mut self.heap,
