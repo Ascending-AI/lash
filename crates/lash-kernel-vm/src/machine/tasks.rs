@@ -4,10 +4,12 @@ use super::project::SharedArena;
 use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_state::kernel_internals::directory::ordinal_key;
-use lash_kernel_state::kernel_internals::tree::{Access, Tree, Version};
-use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
+use lash_kernel_doc::heap::{HeapFault, PageValue};
+use lash_kernel_state::arena::Reached;
+use lash_kernel_state::kernel_internals::directory::{ordinal_key, value_cost};
+use lash_kernel_state::kernel_internals::resident::{frame_values, state_values};
+use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree, Version};
+use lash_kernel_state::paged::{EndedTask, IncomingRecord, TaskRecord, TaskStateRecord};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -676,6 +678,137 @@ impl Tasks {
         Ok(())
     }
 
+    /// What the task rows would cost if a projection wrote them now, and
+    /// what of it the ended tasks' retained results are, giving `out` what
+    /// they hold: an uncached task's row as it is, a cached task's state
+    /// and frames as they stand (seam I, FIG-6748).
+    pub(super) fn price(
+        &self,
+        arena: &mut lash_kernel_state::arena::Arena,
+        pricing: &mut lash_kernel_state::arena::Pricing,
+        out: &mut dyn FnMut(Reached<'_>) -> Result<(), HeapFault>,
+    ) -> Result<(u64, u64), HeapFault> {
+        let cached: Vec<(u64, &Task)> = self
+            .cache
+            .iter()
+            .flatten()
+            .map(|(index, task)| (*index, task.as_ref()))
+            .collect();
+        let mut cost = self.rows.cost();
+        let mut retained = 0_u64;
+        let mut problem = None;
+        self.rows.visit(&self.access, &mut |key, record| {
+            if cached.iter().any(|(index, _)| ordinal_key(*index) == key) {
+                cost -= record.cost();
+                return true;
+            }
+            retained = retained.saturating_add(retained_cost(record));
+            let visited = state_values(&record.state, &mut |value| out(Reached::Page(value)))
+                .and_then(|()| {
+                    let mut problem = None;
+                    record.frames.visit(&self.access, &mut |_, frame| {
+                        let visited = frame_values(frame, &self.access, &mut |value| {
+                            out(Reached::Page(value))
+                        });
+                        problem = visited.err();
+                        problem.is_none()
+                    })?;
+                    problem.map_or(Ok(()), Err)
+                });
+            problem = visited.err();
+            problem.is_none()
+        })?;
+        if let Some(problem) = problem {
+            return Err(problem);
+        }
+        for (_, task) in cached {
+            let state = task.record.cost() - task.record.frames.cost();
+            let frames = task.frames.price(arena, pricing, out)?;
+            cost = cost.saturating_add(state).saturating_add(frames);
+            retained = retained.saturating_add(retained_cost(&task.record));
+            state_values(&task.record.state, &mut |value| out(Reached::Page(value)))?;
+        }
+        Ok((cost, retained))
+    }
+    /// The result `task` retains, if it ended and retains one.
+    pub(super) fn ended_result(&self, task: TaskId) -> Result<Option<PageValue>, HeapFault> {
+        let row;
+        let record = match self.cached_task(task.0) {
+            Some(task) => &task.record,
+            None => match self.rows.get(&ordinal_key(task.0), &self.access)? {
+                Some(found) => {
+                    row = found;
+                    &row
+                }
+                None => return Ok(None),
+            },
+        };
+        Ok(match &record.state {
+            TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value))
+                if record.result_retained =>
+            {
+                Some(value.clone())
+            }
+            _ => None,
+        })
+    }
+    /// Up to `limit` tasks after `after`, ascending, that retain an ended
+    /// result.
+    pub(super) fn ended_after(
+        &self,
+        after: Option<TaskId>,
+        limit: usize,
+    ) -> Result<Vec<TaskId>, HeapFault> {
+        let mut key = after.map(|task| ordinal_key(task.0));
+        let mut tasks = Vec::new();
+        while tasks.len() < limit {
+            let Some((next, row)) = self.rows.after(key.as_deref(), &self.access)? else {
+                break;
+            };
+            let index = u64::from_be_bytes(
+                next.as_slice()
+                    .try_into()
+                    .map_err(|_| HeapFault::Malformed("task key is not an ordinal".into()))?,
+            );
+            let record = self.cached_task(index).map_or(&row, |task| &task.record);
+            if retained_cost(record) > 0 {
+                tasks.push(TaskId(index));
+            }
+            key = Some(next);
+        }
+        Ok(tasks)
+    }
+    /// Retires the results of `tasks`, which nothing reaches: each keeps
+    /// how it ended, with a null.
+    pub(super) fn retire(&mut self, tasks: &[TaskId]) -> Result<(), HeapFault> {
+        for task in tasks {
+            if let Some(cached) = self.cached_task_mut(task.0) {
+                retire(&mut cached.record)?;
+                continue;
+            }
+            let key = ordinal_key(task.0);
+            if let Some(mut record) = self.rows.get(&key, &self.access)? {
+                retire(&mut record)?;
+                self.rows.write(key, record, &self.access)?;
+            }
+        }
+        Ok(())
+    }
+    fn cached_task(&self, index: u64) -> Option<&Task> {
+        self.cache[bucket(index)]
+            .iter()
+            .flatten()
+            .find(|(id, _)| *id == index)
+            .map(|(_, task)| task.as_ref())
+    }
+    fn cached_task_mut(&mut self, index: u64) -> Option<&mut Task> {
+        self.cache[bucket(index)]
+            .iter_mut()
+            .flatten()
+            .find(|(id, _)| *id == index)
+            .map(|(_, task)| task.as_mut())
+    }
+
     /// Called only at park, slice return, end and explicit seal. Frame and
     /// holdings publication during execution deliberately leaves counts alone.
     pub(super) fn project_occurrences(&mut self) -> Result<(), HeapFault> {
@@ -696,6 +829,38 @@ impl Tasks {
         }
         Ok(())
     }
+}
+
+/// The cost of the ended result `record` retains: none when it retains
+/// none.
+fn retained_cost(record: &TaskRecord) -> u64 {
+    match &record.state {
+        TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value))
+            if record.result_retained =>
+        {
+            value_cost(value)
+        }
+        _ => 0,
+    }
+}
+
+/// Retires the result an ended task's `record` retains, as a sweep does.
+fn retire(record: &mut TaskRecord) -> Result<(), HeapFault> {
+    record.state = match record.state {
+        TaskStateRecord::Ended(EndedTask::Returned(_)) => {
+            TaskStateRecord::Ended(EndedTask::Returned(PageValue::Null))
+        }
+        TaskStateRecord::Ended(EndedTask::Raised(_)) => {
+            TaskStateRecord::Ended(EndedTask::Raised(PageValue::Null))
+        }
+        _ => {
+            return Err(HeapFault::Malformed(
+                "a refinement retired a running task's result".into(),
+            ));
+        }
+    };
+    record.result_retained = false;
+    Ok(())
 }
 
 /// Writes `task`'s record to its row unless the row already holds that

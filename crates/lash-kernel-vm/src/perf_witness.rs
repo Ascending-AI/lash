@@ -27,6 +27,8 @@ pub struct Work {
     /// Actual Null writes (growth/reference cleanup) and logical clear extents (FIG-6614).
     pub register_slots_initialized: u64,
     pub register_slots_cleared: u64,
+    /// Arena values given their page form (seam C).
+    pub page_forms: u64,
     pub heap: HeapWork,
 }
 

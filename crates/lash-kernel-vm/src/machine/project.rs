@@ -69,6 +69,8 @@ pub(crate) fn project(
     pages: &Access<'_>,
     value: &Value,
 ) -> Result<PageValue, HeapFault> {
+    #[cfg(any(test, feature = "perf-witness"))]
+    crate::perf_witness::record(|work| work.page_forms += 1);
     Ok(match *value {
         Value::Null => PageValue::Null,
         Value::Absent => PageValue::Absent,

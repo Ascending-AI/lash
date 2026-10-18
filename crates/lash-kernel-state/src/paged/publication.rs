@@ -6,6 +6,7 @@
 use super::directory::execution::TaskRecord;
 use super::directory::value_cost;
 use super::heap_impl::{PagedHeap, census_fault};
+use super::resident::{Priced, ResidentRoots};
 use super::tree::{Cell, SealWork, Tree, checked_sum};
 use super::*;
 use lash_kernel_doc::heap::*;
@@ -52,6 +53,10 @@ pub(super) struct Holdings {
     /// The bytes the last write refused for (FIG-6318): the refusal also
     /// crosses the native face, whose errors cannot name it.
     refused: Option<u64>,
+    /// The control state's holding cost a resident refinement priced
+    /// since the roots were last installed: what the next installation
+    /// grows from (FIG-6748).
+    priced: Option<u64>,
 }
 
 impl Default for Holdings {
@@ -65,6 +70,7 @@ impl Default for Holdings {
             held: 0,
             roots_current: true,
             refused: None,
+            priced: None,
         }
     }
 }
@@ -285,30 +291,141 @@ impl PagedHeap {
         self.holdings.held -= credit;
         credit
     }
-    /// Refines exactly over the roots the machine has just published, with
-    /// `bytes` pending: after it, a hold or write of `bytes` is granted.
+    /// Refines exactly over what the machine holds in memory, with `bytes`
+    /// pending (FIG-6748): nothing is projected, published or given an id.
+    /// The machine prices its holdings ([`ResidentRoots::price`]); the
+    /// running statement's credit pays for what they grew by since the
+    /// roots were installed, as an installation would have taken it; the
+    /// census traces them over the heap's pages, sweeps what it did not
+    /// reach and decides. The objects without an id it reached are then
+    /// held as growth their projection draws on, with what the statement
+    /// made that nothing reached yet.
     ///
     /// # Errors
     ///
     /// [`HeapWriteError::Memory`] when what is live, held and pending does
-    /// not fit the bound; a fault when the roots are not published.
-    pub fn refine(&mut self, bytes: u64) -> Result<(), HeapWriteError> {
-        if !self.holdings.roots_current {
-            return Err(HeapFault::Malformed(
-                "a refinement would trace roots the machine has not published".into(),
-            )
-            .into());
+    /// not fit the bound; a fault of the trace or the census.
+    pub fn refine_resident(
+        &mut self,
+        resident: &mut dyn ResidentRoots,
+        bytes: u64,
+    ) -> Result<(), HeapWriteError> {
+        let priced = match resident.price() {
+            Ok(priced) => priced,
+            Err(fault) => {
+                resident.finish();
+                return Err(fault.into());
+            }
+        };
+        let decided = self.refine_priced(resident, &priced, bytes);
+        let traced = resident.finish();
+        decided?;
+        // What the trace reached without an id, and what the statement
+        // made that nothing reached yet, are live: as projected objects
+        // and pending bytes they would be in the verdict.
+        let unidentified = priced.unidentified.saturating_add(traced.unidentified);
+        let live = unidentified
+            .saturating_add(traced.unreached)
+            .saturating_add(bytes);
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a refinement has no census".into()))?;
+        if !matches!(
+            census.reserve(LogicalBytes(live)),
+            ReservationDecision::Granted(_)
+        ) || !self.admit_priced(unidentified)?
+            || !self.hold_growth(traced.unreached)?
+        {
+            return Err(HeapWriteError::Memory);
         }
+        // The statement's values are released at its end, as installed
+        // statement roots would be.
+        self.holdings.scalar_bytes = priced.statement;
+        self.holdings.priced = Some(priced.control);
+        Ok(())
+    }
+    fn refine_priced(
+        &mut self,
+        resident: &mut dyn ResidentRoots,
+        priced: &Priced,
+        bytes: u64,
+    ) -> Result<(), HeapWriteError> {
+        // What an installation of the current roots would have taken from
+        // the statement's credit for their growth.
+        let installed = match self.holdings.priced {
+            Some(priced) => priced,
+            None => checked_sum([self.tasks.cost(), self.joins.cost()].into_iter())?,
+        };
+        let before = checked_sum(
+            [installed, self.holdings.scalar_bytes]
+                .into_iter()
+                .chain(self.statement_roots().iter().map(value_cost)),
+        )?;
+        let after = checked_sum([priced.control, priced.statement].into_iter())?;
+        let growth = after.saturating_sub(before);
+        let from_held = self.holdings.held.min(growth);
+        self.holdings.reserved -= self.holdings.reserved.min(growth - from_held);
+        self.holdings.temporary.clear();
+        self.holdings.borrowed.clear();
+        self.holdings.scalar_bytes = 0;
         self.settle_growth()?;
         let mut census = self
             .census
             .take()
             .ok_or_else(|| HeapFault::Malformed("a refinement has no census".into()))?;
-        let result = self.refine_installed(census.as_mut(), &[], bytes);
+        let reserved = self.transient_reserved();
+        let decision = reserved.and_then(|reserved| {
+            census
+                .refine(
+                    &mut super::resident::ResidentGraph {
+                        heap: self,
+                        resident,
+                        priced,
+                    },
+                    &TransientRoots {
+                        borrowed: &[],
+                        registers: &[],
+                        pinned: &[],
+                        native_args: &[],
+                        fresh: &[],
+                        reserved,
+                    },
+                    PendingReservation {
+                        bytes: LogicalBytes(bytes.saturating_add(priced.unidentified)),
+                        overflowed: false,
+                    },
+                )
+                .map_err(census_fault)
+        });
+        if decision.is_ok() {
+            self.holdings.held = 0;
+            self.collection_live = Some(census.certificate().upper);
+        }
         self.accounting = census.certificate();
         self.header = None;
         self.census = Some(census);
-        result
+        match decision? {
+            RefinedDecision::Granted(_) => Ok(()),
+            RefinedDecision::Refused { .. } => Err(HeapWriteError::Memory),
+        }
+    }
+    /// Holds `bytes` a refinement priced as live: U grows by them, the
+    /// statement's credit untouched, and their projection draws on them.
+    /// `false` when they do not fit.
+    fn admit_priced(&mut self, bytes: u64) -> Result<bool, HeapFault> {
+        if bytes == 0 {
+            return Ok(true);
+        }
+        if !self.admit_hold(bytes)? {
+            return Ok(false);
+        }
+        self.holdings.held = self
+            .holdings
+            .held
+            .checked_add(bytes)
+            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
+        Ok(true)
     }
     /// The refusal of a write that needs an exact refinement of `bytes`
     /// while the installed roots are not the machine's: `None` when the
@@ -570,6 +687,51 @@ impl PagedHeap {
             },
         )
     }
+    /// Admits a session binding's holding moving from `before` to `after`
+    /// bytes while the machine keeps its value in memory (FIG-6748): the
+    /// census moves as the slot's write would, what the machine and the
+    /// running statement hold paying for growth first, and the slot takes
+    /// its record at the next projection point
+    /// ([`Self::project_session_binding`]). Growth the census cannot grant
+    /// refuses with [`HeapWriteError::NeedsPrecision`] before it changes
+    /// anything: the machine refines over what it holds, never over the
+    /// installed roots, and admits it again.
+    ///
+    /// # Errors
+    ///
+    /// That refusal, and a fault of the census.
+    pub fn hold_session_binding(&mut self, before: u64, after: u64) -> Result<(), HeapWriteError> {
+        if self.unmetered() {
+            return Ok(());
+        }
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a session holding has no census".into()))?;
+        let growth = after.saturating_sub(before);
+        let from_held = self.holdings.held.min(growth);
+        let from_reserved = self.holdings.reserved.min(growth - from_held);
+        let credit = from_held + from_reserved;
+        if let ReservationDecision::NeedsPrecision(pending) =
+            census.reserve(LogicalBytes(growth - credit))
+        {
+            self.holdings.refused = Some(pending.bytes.0);
+            return Err(HeapWriteError::NeedsPrecision {
+                bytes: pending.bytes.0,
+            });
+        }
+        census
+            .changed(LogicalBytes(credit), LogicalBytes(0))
+            .map_err(census_fault)?;
+        census
+            .changed(LogicalBytes(before), LogicalBytes(after))
+            .map_err(census_fault)?;
+        self.holdings.held -= from_held;
+        self.holdings.reserved -= from_reserved;
+        self.accounting = census.certificate();
+        self.header = None;
+        Ok(())
+    }
     /// Installs an authenticated binding tree in place. A precision check sees
     /// the proposed roots, so dropped bindings cannot cause a false refusal.
     pub fn set_session_root(
@@ -660,8 +822,12 @@ impl PagedHeap {
         // The proposed roots are current: a precision check installing them
         // traces them, and what the machine held for them is their credit.
         self.holdings.roots_current = true;
+        let control = match self.holdings.priced.take() {
+            Some(priced) => priced,
+            None => checked_sum([previous.cost, self.joins.cost()].into_iter())?,
+        };
         let before = checked_sum(
-            [previous.cost, self.joins.cost()]
+            [control]
                 .into_iter()
                 .chain(self.statement_roots().iter().map(value_cost))
                 .chain([self.holdings.scalar_bytes]),

@@ -40,6 +40,8 @@ use lash_kernel_state::paged::{
 };
 use std::sync::Arc;
 
+mod resident;
+
 fn malformed(problem: impl Into<String>) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }

@@ -46,46 +46,16 @@ impl CensusGraph for PagedHeap {
         &mut self,
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        let binding =
-            |binding: &BindingRecord,
-             visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>| {
-                match &binding.value {
-                    BoundRecord::Value(v) => visit(v),
-                    BoundRecord::Shared(id) => visit(&PageValue::Ref(Identity::Object(*id))),
-                }
-            };
-        self.visit_session_bindings(&mut |b| binding(b, visit))?;
+        self.visit_session_bindings(&mut |b| binding_values(b, visit))?;
         visit_tree(&self.joins, &self.access, &mut |join| {
             visit_tree(&join.members, &self.access, &mut |member| {
                 visit(&PageValue::Task(*member))
             })
         })?;
         visit_tree(&self.tasks, &self.access, &mut |task| {
-            match &task.state {
-                TaskStateRecord::Resuming {
-                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                    ..
-                } => visit(v)?,
-                TaskStateRecord::Resuming {
-                    incoming: IncomingRecord::Joined(t),
-                    ..
-                }
-                | TaskStateRecord::Joining(t) => visit(&PageValue::Task(*t))?,
-                _ => (),
-            }
+            state_values(&task.state, visit)?;
             visit_tree(&task.frames, &self.access, &mut |frame| {
-                visit_tree(&frame.bindings, &self.access, &mut |b| binding(b, visit))?;
-                visit_tree(&frame.iterated, &self.access, &mut |cursor| {
-                    visit(&cursor.0)
-                })?;
-                visit_tree(&frame.departing, &self.access, visit)?;
-                if let Some(args) = &frame.arguments {
-                    visit_tree(args, &self.access, visit)?;
-                }
-                if let Some(pending) = &frame.pending {
-                    pending.visit_values(&self.access, visit)?;
-                }
-                Ok(())
+                frame_values(frame, &self.access, visit)
             })
         })
     }
@@ -373,7 +343,59 @@ impl Body {
     }
 }
 
-fn visit_tree<T: Cell>(
+/// Visits the value a binding holds: a shared variable as a ref to its
+/// cell.
+pub(crate) fn binding_values(
+    binding: &BindingRecord,
+    visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    match &binding.value {
+        BoundRecord::Value(v) => visit(v),
+        BoundRecord::Shared(id) => visit(&PageValue::Ref(Identity::Object(*id))),
+    }
+}
+
+/// Visits what a task's state holds: a value or raise it resumes with, or
+/// the task it joins.
+pub fn state_values(
+    state: &TaskStateRecord,
+    visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    match state {
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+            ..
+        } => visit(v),
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Joined(t),
+            ..
+        }
+        | TaskStateRecord::Joining(t) => visit(&PageValue::Task(*t)),
+        _ => Ok(()),
+    }
+}
+
+/// Visits what a frame's row holds: its bindings, what its loops walk,
+/// its departing payloads, its call's arguments and its continuation's
+/// roles.
+pub fn frame_values(
+    frame: &FrameRecord,
+    access: &Access<'_>,
+    visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    visit_tree(&frame.bindings, access, &mut |b| binding_values(b, visit))?;
+    visit_tree(&frame.iterated, access, &mut |cursor| visit(&cursor.0))?;
+    visit_tree(&frame.departing, access, visit)?;
+    if let Some(args) = &frame.arguments {
+        visit_tree(args, access, visit)?;
+    }
+    if let Some(pending) = &frame.pending {
+        pending.visit_values(access, visit)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn visit_tree<T: Cell>(
     tree: &Tree<T>,
     access: &Access<'_>,
     visit: &mut dyn FnMut(&T) -> Result<(), HeapFault>,

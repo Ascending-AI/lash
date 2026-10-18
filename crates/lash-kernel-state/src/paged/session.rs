@@ -11,7 +11,7 @@
 //! saved function of the name reads (FIG-5799). The rows cost nothing:
 //! they are host bookkeeping, not guest memory.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 use lash_kernel_doc::Name;
@@ -175,6 +175,41 @@ impl PagedHeap {
         Ok(true)
     }
 
+    /// Gives the slot of `key` the record of the value the machine held in
+    /// memory since [`Self::hold_session_binding`] admitted its holding, at
+    /// a projection point (FIG-6748): the census does not move again, and
+    /// the slot's cost and the task edges the run holds follow the record.
+    ///
+    /// # Errors
+    ///
+    /// The faults of the pages, and a population that does not add up.
+    pub fn project_session_binding(
+        &mut self,
+        key: &[u8],
+        record: BindingRecord,
+    ) -> Result<(), HeapWriteError> {
+        let slot = self.session_slot(key)?;
+        let slots = &mut self.session_slots;
+        let previous = slots.slots[slot].record.take();
+        let (before, old_tasks) = previous
+            .as_ref()
+            .map_or((0, 0), |previous| (previous.cost(), previous.task_edges()));
+        self.population.task_edges = self
+            .population
+            .task_edges
+            .checked_sub(old_tasks)
+            .and_then(|edges| edges.checked_add(record.task_edges()))
+            .ok_or_else(|| HeapFault::Malformed("session task-edge population overflow".into()))?;
+        slots.added = slots.added - before + record.cost();
+        slots.slots[slot].record = Some(record);
+        if !slots.slots[slot].dirty {
+            slots.slots[slot].dirty = true;
+            slots.dirty.push(slot);
+        }
+        self.header = None;
+        Ok(())
+    }
+
     /// Projects dirty slots in canonical key order. Clean slots never edit
     /// the tree. Dropping the lookup cache releases its admitted metadata;
     /// warm and cold continuations therefore start from the same census.
@@ -204,6 +239,49 @@ impl PagedHeap {
         }
         self.session = root;
         self.session_slots = SessionSlots::default();
+        Ok(())
+    }
+
+    /// The holding cost of the session bindings, the bindings of
+    /// `written`'s keys holding the values the machine priced instead of
+    /// what the heap holds for them.
+    pub(super) fn session_cost_over(&self, written: &[(Vec<u8>, u64)]) -> Result<u64, HeapFault> {
+        let mut cost = self.session_cost();
+        for (key, resident) in written {
+            let held = match self.session_slots.get(key) {
+                Some(record) => record.as_ref().map_or(0, Cell::cost),
+                None => self.session.get(key, &self.access)?.map_or(0, |r| r.cost()),
+            };
+            cost = cost
+                .checked_sub(held)
+                .and_then(|cost| cost.checked_add(*resident))
+                .ok_or_else(|| HeapFault::Malformed("session holding cost overflow".into()))?;
+        }
+        Ok(cost)
+    }
+
+    /// [`Self::visit_session_bindings`], but for those of `written`'s keys.
+    pub(super) fn visit_session_bindings_over(
+        &self,
+        written: &[(Vec<u8>, u64)],
+        visit: &mut dyn FnMut(&BindingRecord) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        let replaced: HashSet<&[u8]> = written.iter().map(|(key, _)| &**key).collect();
+        let mut result = Ok(());
+        self.session.visit(&self.access, &mut |key, record| {
+            if !self.session_slots.names.contains_key(key) && !replaced.contains(key) {
+                result = visit(record);
+            }
+            result.is_ok()
+        })?;
+        result?;
+        for slot in &self.session_slots.slots {
+            if let Some(record) = &slot.record
+                && !replaced.contains(&*slot.key)
+            {
+                visit(record)?;
+            }
+        }
         Ok(())
     }
 

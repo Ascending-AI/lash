@@ -23,6 +23,7 @@ mod park_laws;
 mod plans;
 pub(crate) mod project;
 mod queue;
+mod refine;
 mod registers;
 mod segments;
 mod session;
@@ -399,9 +400,10 @@ pub struct KernelMachine {
     /// drops them.
     save: Option<Box<dyn crate::interface::CellSave>>,
     session_cell: bool,
-    /// An ephemeral run's session bindings this cell wrote, by binding key:
-    /// arena values over the carried session's, never given a page form.
-    session: std::collections::HashMap<Arc<[u8]>, (crate::compile::BindingName, Value)>,
+    /// The session bindings this cell read or wrote, by binding key: arena
+    /// values over the heap's slots, given their page forms only at a
+    /// projection point (seam C).
+    session: session::Session,
     /// What the statement being run holds outside any variable.
     pins: Pins,
     /// A seal ran out of budget mid-projection: the run refuses to run
@@ -683,6 +685,7 @@ impl KernelMachine {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.identify(coordinates)?;
+        self.project_session()?;
         self.flush_arena()?;
         self.reconcile_sweep()?;
         let pages = self.heap.pages().clone();
@@ -735,6 +738,7 @@ impl KernelMachine {
     /// registers and pins last.
     fn identify(&mut self, coordinates: bool) -> Result<(), Halt> {
         let mut roots = Vec::new();
+        self.session_roots(&mut roots);
         self.tasks.walk_roots(coordinates, &mut roots);
         let mut arena = self.arena.borrow_mut();
         let walked = arena.walk(&roots).and_then(|()| arena.walk_dirty());
@@ -860,6 +864,7 @@ impl KernelMachine {
     /// back on its pages.
     #[cfg(test)]
     pub(super) fn chill_args(&mut self, args: &[Value]) -> Result<(), Halt> {
+        self.identify_session()?;
         self.identify_values(args)?;
         self.flush_arena()?;
         let mut pending = Vec::new();
@@ -1081,6 +1086,7 @@ impl KernelMachine {
     fn end_task(&mut self, task: TaskId, outcome: Result<Value, Value>) -> Result<(), Halt> {
         let durable = self.durable();
         let result = if durable {
+            self.identify_session()?;
             let pages = self.heap.pages().clone();
             let mut arena = self.arena.borrow_mut();
             match &outcome {

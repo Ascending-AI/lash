@@ -17,6 +17,7 @@ mod observe;
 mod operations;
 mod operators;
 mod paged;
+mod resident;
 mod stream;
 mod tasks;
 mod verdict;

@@ -93,7 +93,7 @@ impl KernelMachine {
         let (tasks, session) = (&self.tasks, &self.session);
         let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
             tasks.each_value(visit);
-            session.values().for_each(|(_, value)| visit(value));
+            session.each_value(visit);
         };
         let mut arena = self.arena.borrow_mut();
         if cycles {
@@ -113,7 +113,7 @@ impl KernelMachine {
     }
 
     /// The one policy decision for arena, native and paged-write pressure.
-    /// Refuse stops before any holdings publication or exact trace.
+    /// Refuse stops before any exact trace.
     pub(super) fn memory_pressure(&mut self, bytes: u64) -> Result<(), Halt> {
         match self.bounds.memory_limit {
             crate::MemoryLimit::Refuse => Err(bound(Bound::Memory, self.bounds.memory)),
@@ -122,26 +122,14 @@ impl KernelMachine {
         }
     }
 
-    /// The collection point: under pressure, publishes what the run holds
-    /// and refines exactly with `bytes` pending, so the verdict is given
-    /// here, over current roots (FIG-6318).
+    /// The collection point: under pressure, refines exactly over what
+    /// the run holds with `bytes` pending, so the verdict is given here
+    /// (`refine::refine_resident`, FIG-6748).
     fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
         if !self.durable() {
             return self.reclaim_for(bytes);
         }
-        self.publish_holdings()?;
-        // What the statement built and no root holds yet, a native's
-        // result on its way to a register, is live: the refinement prices
-        // it as pending and holds it again.
-        let unrooted = self.arena.borrow().unprojected();
-        self.heap
-            .refine(bytes.saturating_add(unrooted))
-            .map_err(|e| self.heap_halt(e))?;
-        self.arena.borrow_mut().rebased();
-        if unrooted > 0 && !self.heap.hold_growth(unrooted)? {
-            return Err(fault("a refinement left no room for what it priced"));
-        }
-        Ok(())
+        self.refine_resident(bytes)
     }
 
     /// An ephemeral run's collection point: it publishes no roots, so no
@@ -158,7 +146,7 @@ impl KernelMachine {
         let (tasks, session, regs, pins) = (&self.tasks, &self.session, &self.regs, &self.pins);
         let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
             tasks.each_value(visit);
-            session.values().for_each(|(_, value)| visit(value));
+            session.each_value(visit);
             regs.projection().iter().for_each(&mut *visit);
             pins.values.iter().for_each(&mut *visit);
             pins.borrowed.iter().for_each(&mut *visit);

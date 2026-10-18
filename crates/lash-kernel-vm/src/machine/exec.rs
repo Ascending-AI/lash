@@ -955,14 +955,18 @@ impl KernelMachine {
             let size = self.deep_size(value)?;
             self.charge(size)?;
         }
-        if !self.durable() {
-            // Data crosses as a copy-out does, and an ephemeral run copies
-            // it from the arena. Only a function crossing reads the heap:
-            // its session bindings go there first.
-            if !self.reaches_function(value)? {
-                return Ok(self.copy_datum(value)?);
-            }
-            self.store_session()?;
+        // Data crosses as a copy-out does, and an ephemeral run copies it
+        // from the arena. Only a function crossing reads the session: the
+        // bindings the cell wrote go to the heap first.
+        let function = self.reaches_function(value)?;
+        if !self.durable() && !function {
+            return Ok(self.copy_datum(value)?);
+        }
+        if self.durable() {
+            self.identify_session()?;
+        }
+        if function {
+            self.project_session()?;
         }
         // The crossing gathers functions from the page form: the heap
         // holds what the arena does first, each new object the argument

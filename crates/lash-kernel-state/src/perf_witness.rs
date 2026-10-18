@@ -25,6 +25,8 @@ pub struct Work {
     pub projection_visits: u64,
     /// Arena objects a collection marked.
     pub arena_marks: u64,
+    /// Mutable objects given a durable id (seam C).
+    pub identified: u64,
 }
 
 thread_local! {

@@ -324,7 +324,11 @@ bytes.
 
 The canonical walk assigns them. From the semantic roots, in order:
 
-1. session bindings by name;
+1. session bindings written since the last projection point, in the order
+   their values were last bound. A write keeps its value in the arena until a
+   projection point (FIG-6748), and a value the run saves first, as a task's
+   result or an effect's argument, walks the bindings written so far in the
+   same order: so where those points fall moves no id;
 2. tasks by number; in each task, its incoming outcome or ended result, then
    its frames by index from the bottom. In each frame, in this order: bindings
    by name, retained arguments by position, roles by site, loop held values by

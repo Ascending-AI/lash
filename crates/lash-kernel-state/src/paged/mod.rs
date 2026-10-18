@@ -55,6 +55,7 @@ mod census_graph;
 mod codec;
 mod equality;
 mod publication;
+pub(crate) mod resident;
 pub(crate) mod stored;
 pub use publication::StatementRoots;
 pub(crate) mod tree;

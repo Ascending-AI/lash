@@ -47,6 +47,7 @@ mod bench;
 mod chunks;
 mod keys;
 mod ops;
+mod pricing;
 mod tables;
 
 pub use crate::paged::stored::CARD;
@@ -55,6 +56,7 @@ pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, text_key};
 pub use ops::invalid_key;
 use ops::{composite, object_cost};
+pub use pricing::{Pricing, Reached};
 pub use tables::{Index, Place};
 
 use std::collections::HashMap;
@@ -364,18 +366,6 @@ impl Arena {
     /// The statement ended: what it created is held by a root or garbage.
     pub fn statement_ended(&mut self) {
         self.statement.clear();
-    }
-
-    /// The cost of what the running statement created and no projection
-    /// saved: live, though no root a refinement traces holds it yet.
-    pub fn unprojected(&self) -> u64 {
-        self.statement
-            .iter()
-            .filter(|handle| self.objects.get(**handle).is_some())
-            .filter_map(|handle| self.facts.get(handle.index() as usize))
-            .filter(|facts| facts.entity.is_none())
-            .map(|facts| facts.summary.cost)
-            .fold(0, u64::saturating_add)
     }
 
     /// The cost of the young mutable objects released since the last call:
@@ -1069,6 +1059,7 @@ impl Arena {
         if !is_mutable(self.body(handle)?) {
             return Err(malformed("an immutable has no durable identity"));
         }
+        crate::perf_witness::record(|work| work.identified += 1);
         let entity = EntityId {
             family: lash_kernel_doc::heap::FamilyId::PRIMARY,
             ordinal: self.next_ordinal,

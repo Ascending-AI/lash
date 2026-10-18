@@ -232,6 +232,64 @@ pub(crate) fn start(
     machine.heap.release_statement_roots()?;
     Ok(machine)
 }
+/// The session bindings a cell read or wrote, by binding key: arena values
+/// over the records the heap's slots hold, given their page forms only at
+/// a projection point (seam C, FIG-6748).
+#[derive(Default)]
+pub(super) struct Session {
+    bindings: std::collections::HashMap<Arc<[u8]>, Resident>,
+    /// How many writes the cell has made: what orders the bindings it
+    /// wrote since the last projection point.
+    writes: u64,
+}
+
+impl Session {
+    /// Visits the value of every binding the cell holds: what an arena
+    /// collection keeps.
+    pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
+        self.bindings.values().for_each(|bound| visit(&bound.value));
+    }
+
+    /// The bindings written since the last projection point, in the order
+    /// their values were bound: the order write-time ids took, so where a
+    /// projection point falls moves no id among them.
+    fn written(&self) -> Vec<(&Arc<[u8]>, &Resident)> {
+        let mut written: Vec<_> = self
+            .bindings
+            .iter()
+            .filter(|(_, bound)| bound.written.is_some())
+            .collect();
+        written.sort_unstable_by_key(|(_, bound)| bound.written);
+        written
+    }
+
+    /// The bindings written since the last projection point, by key, with
+    /// what each one's slot would cost holding its value, giving `out`
+    /// what the values reach (seam I, FIG-6748).
+    pub(super) fn price(
+        &self,
+        arena: &mut lash_kernel_state::arena::Arena,
+        pricing: &mut lash_kernel_state::arena::Pricing,
+        out: &mut dyn FnMut(lash_kernel_state::arena::Reached<'_>) -> Result<(), HeapFault>,
+    ) -> Result<Vec<(Vec<u8>, u64)>, HeapFault> {
+        let mut priced = Vec::new();
+        for (key, bound) in self.written() {
+            priced.push((key.to_vec(), arena.cost_of(&bound.value)));
+            arena.price(pricing, &bound.value, out)?;
+        }
+        Ok(priced)
+    }
+}
+
+/// A session binding the cell read or wrote.
+struct Resident {
+    name: BindingName,
+    value: Value,
+    /// The write that bound the value, when the heap's slot does not hold
+    /// it yet.
+    written: Option<u64>,
+}
+
 /// Why a binding that reaches a closure or a task is not carried, when no
 /// dialect says more (`K-SES-003`).
 const NOT_CARRIED: &str = "it holds a function or a task, which ends with its cell";
@@ -348,8 +406,8 @@ impl KernelMachine {
     }
 
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
-        if let Some((_, value)) = self.session.get(&name.key) {
-            return Ok(Some(*value));
+        if let Some(bound) = self.session.bindings.get(&name.key) {
+            return Ok(Some(bound.value));
         }
         let bound = self.heap_write(|heap| {
             heap.load_session_bound_at(&name.key)
@@ -357,7 +415,20 @@ impl KernelMachine {
         })?;
         Ok(match bound {
             None => None,
-            Some(BoundRecord::Value(value)) => Some(self.admit_page(&value)?),
+            Some(BoundRecord::Value(page)) => {
+                // The value is what the heap's slot holds: it stays with
+                // the cell, clean, until the cell writes the name.
+                let value = self.admit_page(&page)?;
+                self.session.bindings.insert(
+                    Arc::clone(&name.key),
+                    Resident {
+                        name: name.clone(),
+                        value,
+                        written: None,
+                    },
+                );
+                Some(value)
+            }
             Some(BoundRecord::Shared(id)) => {
                 let cell = project::admit_cell(&mut self.arena.borrow_mut(), id);
                 Some(self.in_arena(|arena| arena.cell(cell)).map_err(
@@ -369,76 +440,128 @@ impl KernelMachine {
             }
         })
     }
+
+    /// Binds `name` to `value`, the arena value, until the next projection
+    /// point gives it its page form (seam C): a declaration, or an
+    /// assignment when `existing`, which is refused for a name neither the
+    /// cell nor its session binds. A durable run admits the binding's
+    /// holding here, as the slot's write would; an ephemeral one holds
+    /// none.
     pub(super) fn session_write(
         &mut self,
         name: &BindingName,
         value: Value,
         existing: bool,
     ) -> Result<bool, Halt> {
-        if !self.durable() {
-            return self.session_keep(name, value, existing);
-        }
-        self.session_store(name, value, existing)
-    }
-
-    /// Writes the binding `name` to the heap's session, its value in page
-    /// form.
-    fn session_store(
-        &mut self,
-        name: &BindingName,
-        value: Value,
-        existing: bool,
-    ) -> Result<bool, Halt> {
-        // Declarations prepare their value before touching the binding tree.
-        let value = self.page_form(&value)?;
-        let record = if existing {
-            None
-        } else {
-            Some(self.binding_record(name, value.clone())?)
+        // A durable run holds what its bindings grow by, unless it keeps
+        // no memory accounting.
+        let priced = self.durable() && self.bounds.memory_limit != crate::MemoryLimit::Off;
+        let before = match self.session.bindings.get(&name.key) {
+            Some(bound) => priced.then(|| self.cost_of(&bound.value)),
+            // A first write of a name reads its slot: what it held, and
+            // whether the session binds it at all.
+            None if priced || existing => {
+                let bound = self.heap_write(|heap| {
+                    heap.load_session_bound_at(&name.key)
+                        .map_err(super::write_halt)
+                })?;
+                if existing && bound.is_none() {
+                    return Ok(false);
+                }
+                Some(match bound {
+                    Some(BoundRecord::Value(page)) => {
+                        lash_kernel_state::kernel_internals::directory::value_cost(&page)
+                    }
+                    Some(BoundRecord::Shared(_)) | None => 0,
+                })
+            }
+            None => None,
         };
-        let exe = Arc::clone(&self.exe);
-        self.heap_write(|heap| {
-            heap.write_session_binding(&name.key, |heap, previous| {
-                if existing && previous.is_none() {
-                    return Ok(None);
-                }
-                match &record {
-                    Some(record) => Ok(Some(record.clone())),
-                    None => binding_record(heap, &exe.code(exe.main).site, name, value.clone())
-                        .map(Some),
-                }
-            })
-            .map_err(super::write_halt)
-        })
-    }
-    /// An ephemeral run's session write: the arena value over the carried
-    /// session's binding, given no page form. An assignment to a name
-    /// neither binds is refused.
-    fn session_keep(
-        &mut self,
-        name: &BindingName,
-        value: Value,
-        existing: bool,
-    ) -> Result<bool, Halt> {
-        if existing && !self.session.contains_key(&name.key) {
-            let bound = self.heap_write(|heap| {
-                heap.load_session_bound_at(&name.key)
+        if priced {
+            let (before, after) = (before.unwrap_or(0), self.cost_of(&value));
+            self.heap_write(|heap| {
+                heap.hold_session_binding(before, after)
                     .map_err(super::write_halt)
             })?;
-            if bound.is_none() {
-                return Ok(false);
+        }
+        let written = Some(self.session.writes);
+        self.session.writes += 1;
+        match self.session.bindings.get_mut(&name.key) {
+            Some(bound) => {
+                bound.value = value;
+                bound.written = written;
+            }
+            None => {
+                self.session.bindings.insert(
+                    Arc::clone(&name.key),
+                    Resident {
+                        name: name.clone(),
+                        value,
+                        written,
+                    },
+                );
             }
         }
-        self.session
-            .insert(Arc::clone(&name.key), (name.clone(), value));
         Ok(true)
     }
 
-    /// Writes an ephemeral run's session bindings to the heap's session,
-    /// which a function crossing out of the run reads.
-    pub(super) fn store_session(&mut self) -> Result<(), Halt> {
-        for (_, (name, value)) in std::mem::take(&mut self.session) {
-            self.session_store(&name, value, false)?;
+    /// The handles of the session bindings written since the last
+    /// projection point, in the order their values were bound: where the
+    /// canonical walk starts (seam C).
+    pub(super) fn session_roots(&self, out: &mut Vec<ArenaHandle>) {
+        out.extend(
+            self.session
+                .written()
+                .into_iter()
+                .filter_map(|(_, bound)| bound.value.handle()),
+        );
+    }
+
+    /// Gives the new objects the session bindings written since the last
+    /// projection point reach their ids, in the canonical walk's order:
+    /// what a durable run does first wherever it saves a value before its
+    /// next projection point (a task's result, an effect's argument), as
+    /// the walk there would, so where those points fall moves no id.
+    pub(super) fn identify_session(&mut self) -> Result<(), Halt> {
+        let mut roots = Vec::new();
+        self.session_roots(&mut roots);
+        if roots.is_empty() {
+            return Ok(());
+        }
+        self.arena
+            .borrow_mut()
+            .walk(&roots)
+            .map_err(|error| fault(&error.to_string()))
+    }
+
+    /// Gives the session bindings written since the last projection point
+    /// their page forms in the heap's slots. A durable run admitted each
+    /// one's holding as it wrote it; an ephemeral run, which holds none,
+    /// admits it here, before a function crossing reads its session.
+    pub(super) fn project_session(&mut self) -> Result<(), Halt> {
+        let written: Vec<(Arc<[u8]>, Name, Value)> = self
+            .session
+            .written()
+            .into_iter()
+            .map(|(key, bound)| (Arc::clone(key), bound.name.name.clone(), bound.value))
+            .collect();
+        let durable = self.durable();
+        for (key, name, value) in written {
+            let page = self.page_form(&value)?;
+            let record = self.binding_record(&name, page)?;
+            if durable {
+                self.heap
+                    .project_session_binding(&key, record)
+                    .map_err(|error| self.heap_halt(error))?;
+            } else {
+                self.heap_write(|heap| {
+                    heap.write_session_binding(&key, |_, _| Ok(Some(record.clone())))
+                        .map_err(super::write_halt)
+                })?;
+            }
+            if let Some(bound) = self.session.bindings.get_mut(&key) {
+                bound.written = None;
+            }
         }
         Ok(())
     }
