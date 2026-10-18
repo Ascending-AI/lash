@@ -241,6 +241,8 @@ impl ExpectedEnd {
                     Bound::RequestsPerPark => "requests_per_park".into(),
                     Bound::JoinMembers => "join_members".into(),
                     Bound::Guard { function } => format!("guard:{function}"),
+                    Bound::Effects => "effects".into(),
+                    Bound::CheckpointBytes => "checkpoint_bytes".into(),
                 },
                 limit: error.limit,
             },

@@ -495,14 +495,18 @@ pub struct MemberEntry {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectMembership {
     pub next_park: u64,
+    /// What the run's saves appended over its life, this one's included.
+    pub growth: super::ledger::Growth,
     /// Sorted by effect identity, each once.
     pub entries: Vec<MemberEntry>,
 }
 
 impl TokenCodec for EffectMembership {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(4);
         out.unsigned(self.next_park);
+        out.unsigned(self.growth.effects);
+        out.unsigned(self.growth.checkpoint_bytes);
         out.seq(self.entries.len() as u64);
         for entry in &self.entries {
             out.seq(4);
@@ -520,8 +524,12 @@ impl TokenCodec for EffectMembership {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(4)?;
         let next_park = input.unsigned()?;
+        let growth = super::ledger::Growth {
+            effects: input.unsigned()?,
+            checkpoint_bytes: input.unsigned()?,
+        };
         let count = input.seq()?;
         let mut entries = Vec::new();
         for _ in 0..count {
@@ -545,7 +553,11 @@ impl TokenCodec for EffectMembership {
         }
         let effects: Vec<&EffectId> = entries.iter().map(|entry| &entry.effect).collect();
         check_ascending(&effects)?;
-        Ok(Self { next_park, entries })
+        Ok(Self {
+            next_park,
+            growth,
+            entries,
+        })
     }
 }
 
@@ -555,7 +567,11 @@ impl EffectMembership {
     /// # Errors
     ///
     /// [`GraphRefusal::DuplicateEffect`] for an effect named twice.
-    pub fn new(next_park: u64, mut entries: Vec<MemberEntry>) -> Result<Self, GraphRefusal> {
+    pub fn new(
+        next_park: u64,
+        growth: super::ledger::Growth,
+        mut entries: Vec<MemberEntry>,
+    ) -> Result<Self, GraphRefusal> {
         entries.sort_by(|left, right| left.effect.cmp(&right.effect));
         if let Some(pair) = entries
             .windows(2)
@@ -565,7 +581,11 @@ impl EffectMembership {
                 pair[0].effect.clone(),
             )));
         }
-        Ok(Self { next_park, entries })
+        Ok(Self {
+            next_park,
+            growth,
+            entries,
+        })
     }
 
     /// Stages this membership and returns its node.
@@ -843,7 +863,7 @@ impl AdmissionBook {
                 status: MemberStatus::Released,
             });
         }
-        EffectMembership::new(ledger.next_park(), entries)
+        EffectMembership::new(ledger.next_park(), ledger.growth(), entries)
     }
 
     /// Forgets every admission `membership` no longer names, and returns

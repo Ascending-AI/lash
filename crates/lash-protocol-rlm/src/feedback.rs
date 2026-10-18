@@ -117,6 +117,11 @@ pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFa
             format!("{bound_ms} ms"),
             "Split the work across smaller cells, each of which holds its worker for less time.",
         ),
+        lash_vm_client::WorkerLimit::HostRead { bound_ms } => (
+            "host read deadline exceeded",
+            format!("{bound_ms} ms"),
+            "A read the host answers while the cell runs took too long; call the tool as an awaited effect instead of a read, or ask for less.",
+        ),
         other => {
             return CellFailure::new(CellFailureKind::Program, other.to_string())
                 .with_worker_limit(other);
@@ -370,6 +375,14 @@ impl CellObservation {
                         "work limit exceeded".to_owned(),
                         None,
                     ),
+                    Bound::Effects => (
+                        "the cell started too many tool calls and sleeps over its life".to_owned(),
+                        None,
+                    ),
+                    Bound::CheckpointBytes => (
+                        "the cell saved too much state over its life".to_owned(),
+                        None,
+                    ),
                 };
                 let function = exceeded.function.as_ref()
                     .map(|name| format!(" in library function `{name}`"))
@@ -382,6 +395,8 @@ impl CellObservation {
                     Bound::LiveTasks => "Start fewer tasks at once and await them before starting more.",
                     Bound::RequestsPerPark => "Start fewer tool calls and sleeps at once; await some before starting more.",
                     Bound::JoinMembers => "Await fewer tasks together, in smaller groups.",
+                    Bound::Effects => "Split the work across several cells, each starting fewer tool calls and sleeps.",
+                    Bound::CheckpointBytes => "Split the work across several cells, and keep fewer or smaller values live across tool calls and sleeps.",
                 };
                 let mut failure = CellFailure::new(
                     CellFailureKind::Policy,

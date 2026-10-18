@@ -66,6 +66,16 @@ impl PendingEffect {
     }
 }
 
+/// What a run's parks appended over its whole life, across every
+/// activation and resume (FIG-6788): the effects and sleeps they admitted,
+/// and the page bytes the run sealed into the checkpoints they saved. It
+/// commits with each save, so a resumed run counts on from its last one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Growth {
+    pub effects: u64,
+    pub checkpoint_bytes: u64,
+}
+
 /// The broker's state that commits with a run's saved state.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EffectLedger {
@@ -78,6 +88,8 @@ pub struct EffectLedger {
     released: Vec<AdmittedEffect>,
     /// The number the next park that admits takes.
     next_park: u64,
+    /// What the run's saves appended so far.
+    growth: Growth,
 }
 
 /// A stored ledger that names what no park of its run admitted.
@@ -108,11 +120,13 @@ impl EffectLedger {
         pending: BTreeMap<EffectId, PendingEffect>,
         released: Vec<AdmittedEffect>,
         next_park: u64,
+        growth: Growth,
     ) -> Result<Self, LedgerRefusal> {
         let ledger = Self {
             pending,
             released,
             next_park,
+            growth,
         };
         let mut waits: Vec<WaitId> = ledger.pending.values().map(|entry| entry.wait).collect();
         waits.sort_unstable();
@@ -152,6 +166,7 @@ impl EffectLedger {
             pending,
             released: self.released.clone(),
             next_park: self.next_park,
+            growth: self.growth,
         })
     }
 
@@ -172,6 +187,16 @@ impl EffectLedger {
     /// The number the next park that admits takes.
     pub fn next_park(&self) -> u64 {
         self.next_park
+    }
+
+    /// What the run's saves appended so far.
+    pub fn growth(&self) -> Growth {
+        self.growth
+    }
+
+    /// The run's growth as the save this ledger commits with leaves it.
+    pub(crate) fn grown(&mut self, growth: Growth) {
+        self.growth = growth;
     }
 
     /// Every admitted execution the ledger names, awaited or released.
@@ -373,6 +398,7 @@ mod tests {
             pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
             Vec::new(),
             1,
+            Growth::default(),
         )
         .expect("an issued ledger reads back");
         assert_eq!(read.oldest_reachable(), 0);
@@ -381,6 +407,7 @@ mod tests {
                 pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
                 Vec::new(),
                 0,
+                Growth::default(),
             ),
             Err(LedgerRefusal::UnissuedPark { park: 0, parks: 0 })
         );
@@ -392,6 +419,7 @@ mod tests {
                 ]),
                 Vec::new(),
                 1,
+                Growth::default(),
             ),
             Err(LedgerRefusal::SharedWait {
                 wait: lash_kernel_doc::testkit::wait_id(0)
@@ -402,6 +430,7 @@ mod tests {
                 pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
                 vec![admitted(0, 0)],
                 1,
+                Growth::default(),
             ),
             Err(LedgerRefusal::SharedExecution {
                 operation: OperationId { run: 0, ordinal: 0 }

@@ -28,7 +28,7 @@ pub mod state;
 pub mod store;
 pub mod value;
 
-pub use ledger::{AdmittedEffect, EffectLedger, LedgerRefusal, PendingEffect, Standing};
+pub use ledger::{AdmittedEffect, EffectLedger, Growth, LedgerRefusal, PendingEffect, Standing};
 pub use run::{
     DrivenMachine, KernelBroker, KernelCeilings, KernelEffects, KernelEnd, KernelFailure,
     MachinePark, MachineStep, Machines, PageActivation, PagePlan, end_activation, next_stage_lease,

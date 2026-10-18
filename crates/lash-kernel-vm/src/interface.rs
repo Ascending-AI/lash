@@ -153,6 +153,13 @@ pub enum Bound {
     Guard {
         function: FunctionId,
     },
+    /// The effects and sleeps a run's parks admitted over its whole life,
+    /// which its host's broker counts: the machine never passes it itself.
+    Effects,
+    /// The page bytes a run sealed into its checkpoints over its whole
+    /// life, which its host's broker counts: the machine never passes it
+    /// itself.
+    CheckpointBytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

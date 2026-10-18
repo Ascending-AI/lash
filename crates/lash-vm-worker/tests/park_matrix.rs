@@ -584,6 +584,8 @@ impl Activation for ParkActivation {
             ceilings: KernelCeilings {
                 requests_per_park: 16,
                 join_members: 16,
+                effects: u64::MAX,
+                checkpoint_bytes: u64::MAX,
             },
             slice: u64::MAX,
             pages: &plan,

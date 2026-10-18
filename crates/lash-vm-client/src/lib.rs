@@ -21,7 +21,7 @@ mod testing;
 pub mod wire;
 pub use cgroup::{CpuShare, WorkerCgroup};
 pub use config::{
-    Deadlines, PageBudgets, PoolConfig, WorkerConfinement, WorkerEntry, WorkerTuning,
+    CellLifetime, Deadlines, PageBudgets, PoolConfig, WorkerConfinement, WorkerEntry, WorkerTuning,
 };
 pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes

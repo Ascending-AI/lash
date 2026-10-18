@@ -122,6 +122,15 @@ fn owner() -> VmOwner {
 /// `body` as a document against the registry every worker assembles, with
 /// its identity and its wire payload.
 fn document(body: &str) -> (String, EncodedPayload) {
+    let document = parsed(body);
+    (
+        document.identity().to_string(),
+        EncodedPayload(document.canonical_bytes()),
+    )
+}
+
+/// `body` as a document against the registry every worker assembles.
+fn parsed(body: &str) -> lash_kernel_doc::Document {
     let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard())
         .expect("an embedding of every built dialect");
     let mut text = String::from("numbers by_spelling\nkernel 1\neffect echo(x?: Any) -> Any\n");
@@ -131,11 +140,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
         }
     }
     text.push_str(body);
-    let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-    (
-        document.identity().to_string(),
-        EncodedPayload(document.canonical_bytes()),
-    )
+    parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"))
 }
 
 fn bounds() -> RunBounds {
@@ -1721,6 +1726,137 @@ fn workers_refuse_another_protocol_before_guest_admission() {
                 || refusal.worker_version > WORKER_PROTOCOL_VERSION
         );
     }
+}
+
+/// A host that never answers the time: a run that reads its clock waits
+/// on it with its worker checked out.
+struct Stalled;
+
+#[async_trait::async_trait]
+impl RunHost for Stalled {
+    async fn clock(&self) -> Result<Timestamp, lash_vm_broker::ParentFault> {
+        std::future::pending().await
+    }
+
+    async fn random(&self) -> Result<u64, lash_vm_broker::ParentFault> {
+        Ok(0)
+    }
+
+    async fn read(
+        &self,
+        _: &Handle,
+        _: &Datum,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
+        panic!("the run reads no projection")
+    }
+
+    async fn perform(
+        &self,
+        _: &lash_kernel_doc::EffectName,
+        _: &[Datum],
+        _: &lash_kernel_doc::PositionLabel,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
+        panic!("the run binds no read")
+    }
+
+    fn print(&self, _: Datum) -> Result<(), lash_vm_broker::ParentFault> {
+        Ok(())
+    }
+}
+
+/// FIG-6788: a host read the host has not answered by the pool's
+/// host-read deadline ends the run with the typed host-read limit, well
+/// inside the worker's own parent wait (86,400 s), and the waiting worker
+/// is not kept.
+#[test]
+fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
+    use lash_vm_broker::kernel::{DrivenMachine as _, KernelFailure, Machines as _};
+
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("");
+    config.deadlines.host_read = Duration::from_millis(200);
+    let service = service::Service::new(config);
+    let document: lash_kernel_doc::IdentifiedDocument =
+        parsed("entry go() -> Any\nfn go() {\n  return clock\n}\nmain { }").into();
+    let run = bounds();
+    let machines = RemoteMachines::new(
+        service.clone(),
+        owner(),
+        OwnerEpoch(1),
+        FrameEpoch(1),
+        Arc::new(Stalled),
+        &document,
+        DIALECT,
+        RunStart {
+            target: Target::Entry(Name::new("go")),
+            args: Vec::new(),
+            session: None,
+            modes: lash_kernel_vm::EffectModes::recorded(),
+            host: Vec::new(),
+            save: None,
+        },
+        lash_kernel_vm::Bounds {
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: run.charge_limit,
+            memory: run.memory,
+            call_depth: run.call_depth,
+            live_tasks: run.live_tasks,
+            requests_per_park: run.requests_per_park,
+            join_members: run.join_members,
+        },
+    )
+    .expect("the run's machines");
+    let directory = tempfile::tempdir().expect("spool directory");
+    let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
+    let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
+    let release = releases
+        .manifests
+        .current(DIALECT)
+        .expect("the dialect's helper release");
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(async {
+            let stores = lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("a SQLite memory store set");
+            let store: Arc<dyn lash_durable::domain::pages::PageStore> =
+                Arc::new(stores.durable_store());
+            let pages = ActivationPages::new(
+                store,
+                None,
+                Duration::from_secs(20),
+                CapabilityKey::fresh(),
+                1,
+                Box::new(spools.spool(StageLeaseId(1)).expect("spool")),
+                Arc::new(lash_core_execution::runtime::SystemClock),
+                Duration::from_secs(600),
+                PageLimits::within(service.config().protocol.decode),
+            )
+            .with_references([NodeId(release.0), NodeId(BINDING)]);
+            let mut machine = machines
+                .start(NodeId(BINDING), Arc::new(tokio::sync::Mutex::new(pages)))
+                .await
+                .expect("the run starts");
+            // A guard against a parent that waits out the worker's parent
+            // wait: the law fails here rather than hanging.
+            let ran = tokio::time::timeout(Duration::from_secs(60), machine.run(SLICE, false))
+                .await
+                .expect("the parent stops waiting at the host-read deadline");
+            assert!(
+                matches!(
+                    ran,
+                    Err(KernelFailure::Worker {
+                        outcome: InfrastructureOutcome::WorkerLimitExceeded {
+                            limit: WorkerLimit::HostRead { bound_ms: 200 },
+                        },
+                    })
+                ),
+                "{ran:?}"
+            );
+        });
 }
 
 /// FIG-6008: allocation tracing can put Ready beyond a serving worker's

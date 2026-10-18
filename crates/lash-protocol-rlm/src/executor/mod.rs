@@ -997,6 +997,8 @@ async fn run_linked_cell(
             ceilings: KernelCeilings {
                 requests_per_park: pool.run_bounds.requests_per_park,
                 join_members: pool.run_bounds.join_members,
+                effects: pool.cell_lifetime.effects,
+                checkpoint_bytes: pool.cell_lifetime.checkpoint_bytes,
             },
             slice: pool.tuning.slice,
             pages: &plan,

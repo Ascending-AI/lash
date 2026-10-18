@@ -706,6 +706,116 @@ async fn a_tool_loop_runs_each_call_once_and_records_it() {
     assert_eq!(response.tool_calls.len(), 4);
 }
 
+/// TypeScript cell services whose worker pool holds each cell to the
+/// lifetime `limit` makes of the standard one.
+fn lifetime_services(limit: impl FnOnce(&mut lash_vm_client::CellLifetime)) -> super::CellServices {
+    let mut config = lash_vm_client::service::Service::default().config().clone();
+    limit(&mut config.cell_lifetime);
+    cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::new(config),
+    )
+}
+
+/// Runs `code` to its end, then again on another node after the first
+/// dies: the second reads the end the first recorded.
+async fn run_and_replay(
+    services: &super::CellServices,
+    tools: &Arc<CellTools>,
+    code: &str,
+) -> (lash_core::ExecResponse, lash_core::ExecResponse) {
+    let mut host = open_host().await;
+    let first = run_cell(
+        &mut typescript_state(),
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        services,
+        code,
+    )
+    .await;
+    host.kill_and_resume().await;
+    let again = run_cell(
+        &mut typescript_state(),
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        services,
+        code,
+    )
+    .await;
+    (first, again)
+}
+
+/// FIG-6788: a cell's parks admit at most its pool's lifetime effects. The
+/// park that would pass the bound admits nothing and ends the cell with
+/// the typed bound, recorded over its last root: the cell run again on
+/// another node answers the same end and calls nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_past_its_lifetime_effects_ends_with_the_recorded_typed_bound() {
+    let tools = Arc::new(CellTools::default());
+    let (first, again) = run_and_replay(
+        &lifetime_services(|lifetime| lifetime.effects = 3),
+        &tools,
+        "for (const word of [\"a\", \"b\", \"c\", \"d\", \"e\"]) {\n  await echo.say({ text: word });\n}\nawait control.finish(1);",
+    )
+    .await;
+    let failure = first.error().expect("the cell ends at its lifetime bound");
+    assert!(
+        failure.message.starts_with(crate::CELL_BOUND_EXCEEDED)
+            && failure
+                .message
+                .contains("tool calls and sleeps over its life")
+            && failure.message.contains("(limit 3)"),
+        "{}",
+        failure.message
+    );
+    assert_eq!(
+        tools.answered(),
+        vec!["a", "b", "c"],
+        "the fourth park admitted nothing"
+    );
+    assert_eq!(
+        again.error(),
+        Some(failure),
+        "the recorded end answers the cell again"
+    );
+    assert_eq!(tools.answered(), vec!["a", "b", "c"]);
+}
+
+/// FIG-6788: the pages a cell seals into its checkpoints count over its
+/// whole life. The save that would pass the pool's bound admits nothing
+/// and ends the cell with the typed bound, recorded over its last root.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_past_its_lifetime_checkpoint_bytes_ends_with_the_recorded_typed_bound() {
+    let tools = Arc::new(CellTools::default());
+    let (first, again) = run_and_replay(
+        &lifetime_services(|lifetime| lifetime.checkpoint_bytes = 256 * 1024),
+        &tools,
+        // About 372 KB of text no two chunks of which are alike: identical
+        // pages are sealed once.
+        "const first = await echo.say({ text: \"a\" });\nconst big = Array.from({ length: 6000 }, (_, i) => String(i).repeat(16)).join(\",\");\nconst second = await echo.say({ text: \"b\" });\nawait control.finish(big.length + first.length + second.length);",
+    )
+    .await;
+    let failure = first.error().expect("the cell ends at its lifetime bound");
+    assert!(
+        failure.message.starts_with(crate::CELL_BOUND_EXCEEDED)
+            && failure
+                .message
+                .contains("saved too much state over its life")
+            && failure.message.contains("(limit 262144)"),
+        "{}",
+        failure.message
+    );
+    assert_eq!(
+        tools.answered(),
+        vec!["a"],
+        "the save past the bound admitted nothing"
+    );
+    assert_eq!(
+        again.error(),
+        Some(failure),
+        "the recorded end answers the cell again"
+    );
+    assert_eq!(tools.answered(), vec!["a"]);
+}
+
 /// Runs `code` until the held tool call starts, then kills the node with
 /// the call running and resumes the cell on another node, where the call
 /// may finish.

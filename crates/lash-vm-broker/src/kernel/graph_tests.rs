@@ -201,7 +201,8 @@ fn every_saved_effect_resolves_to_its_one_frozen_admission() {
                 status,
             });
         }
-        let membership = EffectMembership::new(1, entries).unwrap();
+        let membership =
+            EffectMembership::new(1, crate::kernel::ledger::Growth::default(), entries).unwrap();
         (membership.stage(staging).unwrap(), admissions)
     };
     let mut staging = staging();

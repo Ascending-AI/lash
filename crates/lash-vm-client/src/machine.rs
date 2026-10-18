@@ -526,10 +526,32 @@ impl RemoteMachine {
                     let host = Arc::clone(&self.host);
                     let scope = self.checkout.as_ref().and_then(Checkout::phase_scope);
                     let started = scope.as_ref().map(|scope| scope.recorder.now());
-                    let answer = answer(host.as_ref(), kind, &request).await;
+                    let config = self.service.config();
+                    // The worker waits on this answer holding its checkout:
+                    // a host that outlasts its read deadline ends the run,
+                    // and the waiting worker is discarded.
+                    let bound = config.deadlines.host_read;
+                    let answer = tokio::time::timeout(
+                        bound,
+                        answer(
+                            host.as_ref(),
+                            kind,
+                            &request,
+                            config.protocol.max_effect_value_bytes,
+                        ),
+                    )
+                    .await;
                     if let (Some(scope), Some(start)) = (scope, started) {
                         scope.record("host_body", start);
                     }
+                    let Ok(answer) = answer else {
+                        self.checkout = None;
+                        return Err(worker(PoolError::from(
+                            InfrastructureOutcome::WorkerLimitExceeded {
+                                limit: crate::config::host_read_limit(bound),
+                            },
+                        )));
+                    };
                     let answer = answer?;
                     step = self
                         .with(move |checkout| checkout.host_answer(id, answer))
@@ -638,10 +660,13 @@ impl RemoteMachine {
     }
 }
 
+/// The host's answer to one read, encoded within `bound`, the effect value
+/// bound: an answer that passes it is refused while it is encoded.
 async fn answer(
     host: &dyn RunHost,
     kind: HostReadKind,
     request: &EncodedPayload,
+    bound: u64,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
         HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &host.clock().await?),
@@ -649,16 +674,18 @@ async fn answer(
         HostReadKind::Projection => {
             let read: ProjectionRead =
                 wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
-            wire::encode(
+            wire::encode_within(
                 PayloadKind::HostAnswer,
                 &host.read(&read.handle, &read.request).await?,
+                bound,
             )
         }
         HostReadKind::Effect => {
             let read: EffectRead = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
-            wire::encode(
+            wire::encode_within(
                 PayloadKind::HostAnswer,
                 &host.perform(&read.effect, &read.args, &read.site).await?,
+                bound,
             )
         }
         HostReadKind::Bound => {
@@ -706,10 +733,18 @@ impl DrivenMachine for RemoteMachine {
         }
     }
 
+    /// The outcome is encoded within the effect value bound: one that
+    /// passes it is refused while it is encoded, before the parent holds
+    /// its whole encoding. The checkout checks the bound again as it
+    /// queues the delivery.
     async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure> {
         self.candidate = None;
-        let outcome =
-            wire::encode(PayloadKind::Outcome, &OutcomeWire::from(outcome)).map_err(worker)?;
+        let outcome = wire::encode_within(
+            PayloadKind::Outcome,
+            &OutcomeWire::from(outcome),
+            self.service.config().protocol.max_effect_value_bytes,
+        )
+        .map_err(worker)?;
         self.with(move |checkout| checkout.deliver(wait, outcome))
             .await
     }

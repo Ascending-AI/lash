@@ -5787,6 +5787,29 @@
             "attempts"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The host took longer than its configured host-read deadline to\nanswer one read (a clock, random, projection or planned-read answer,\nor a limiter's decision) while the run held its worker. A durable\npark releases its worker and has no such bound.",
+          "properties": {
+            "host_read": {
+              "properties": {
+                "bound_ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound_ms"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "host_read"
+          ],
+          "type": "object"
         }
       ]
     },

@@ -425,7 +425,8 @@ fn ledger_of(
             },
         );
     }
-    EffectLedger::restored(pending, released, membership.next_park).map_err(refused)
+    EffectLedger::restored(pending, released, membership.next_park, membership.growth)
+        .map_err(refused)
 }
 
 /// The save a commit that carried no held response made.

@@ -302,6 +302,8 @@ fn encode_bound(bound: &Bound, out: &mut TokenWriter) {
             out.sum(6, 1);
             function.encode(out);
         }
+        Bound::Effects => out.sum(7, 0),
+        Bound::CheckpointBytes => out.sum(8, 0),
     }
 }
 
@@ -318,6 +320,8 @@ fn decode_bound(input: &mut TokenReader<'_>) -> Result<Bound, TokenError> {
         6 => Bound::Guard {
             function: FunctionId::decode(input)?,
         },
+        7 => Bound::Effects,
+        8 => Bound::CheckpointBytes,
         _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
     })
 }

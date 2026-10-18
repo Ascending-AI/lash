@@ -244,6 +244,10 @@ pub struct ActivationPages<R: ?Sized> {
     /// What the session's activations read, warmed and sealed.
     hints: Option<cache::PageHints>,
     stats: PageStats,
+    /// The envelope bytes of the pages the run sealed since its broker
+    /// last took them: what its next save appends to its checkpoints
+    /// (FIG-6788).
+    sealed_bytes: u64,
 }
 
 impl<R: LeasedReads + ?Sized> ActivationPages<R> {
@@ -286,6 +290,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             cache: None,
             hints: None,
             stats: PageStats::default(),
+            sealed_bytes: 0,
         }
     }
 
@@ -392,6 +397,13 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                 Err(refusal)
             }
         }
+    }
+
+    /// The envelope bytes of the pages the run sealed since the last
+    /// take, counted once for each seal that offered them: what the save
+    /// that takes them appends to the run's checkpoints (FIG-6788).
+    pub fn take_sealed_bytes(&mut self) -> u64 {
+        std::mem::take(&mut self.sealed_bytes)
     }
 
     /// `page`, when this activation staged it and its spool still holds
@@ -927,6 +939,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             hints.extend(sealed.iter().map(|capability| NodeId(capability.page)));
         }
         self.stats.pages_sealed += sealed.len() as u64;
+        self.sealed_bytes = self.sealed_bytes.saturating_add(bytes);
         Ok(PageReply::Sealed { pages: sealed })
     }
 

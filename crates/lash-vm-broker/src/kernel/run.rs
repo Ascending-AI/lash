@@ -40,7 +40,7 @@ use lash_vm_protocol::{CheckpointRefusal, InfrastructureOutcome};
 use tokio_util::sync::CancellationToken;
 
 use super::graph::{FrozenRequest, Projections};
-use super::ledger::{AdmittedEffect, EffectLedger};
+use super::ledger::{AdmittedEffect, EffectLedger, Growth};
 use super::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot, renew_when_due,
 };
@@ -300,11 +300,16 @@ pub fn next_stage_lease() -> StageLeaseId {
 
 /// The most a run's bounds may allow: the broker's own ceilings on what one
 /// park admits and one list `join` holds, enforced here as well as in the
-/// machine (`K-BND-001`).
+/// machine (`K-BND-001`), and on what the run's parks append over its whole
+/// life, which only the broker counts (FIG-6788).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KernelCeilings {
     pub requests_per_park: u32,
     pub join_members: u32,
+    /// The most effects and sleeps the run's parks may admit.
+    pub effects: u64,
+    /// The most page bytes the run may seal into its checkpoints.
+    pub checkpoint_bytes: u64,
 }
 
 impl KernelCeilings {
@@ -331,6 +336,32 @@ impl KernelCeilings {
             }
         }
         Ok(())
+    }
+
+    /// The run's growth once a save appends `effects` admissions and
+    /// `sealed` page bytes to `growth`, or the lifetime bound it passes:
+    /// that save admits nothing, and the run ends there (FIG-6788).
+    ///
+    /// # Errors
+    ///
+    /// [`Bound::Effects`] or [`Bound::CheckpointBytes`], the first passed.
+    pub fn grow(&self, growth: Growth, effects: u64, sealed: u64) -> Result<Growth, BoundExceeded> {
+        let grown = Growth {
+            effects: growth.effects.saturating_add(effects),
+            checkpoint_bytes: growth.checkpoint_bytes.saturating_add(sealed),
+        };
+        let passed = |bound, limit| BoundExceeded {
+            bound,
+            limit,
+            function: None,
+        };
+        if grown.effects > self.effects {
+            return Err(passed(Bound::Effects, self.effects));
+        }
+        if grown.checkpoint_bytes > self.checkpoint_bytes {
+            return Err(passed(Bound::CheckpointBytes, self.checkpoint_bytes));
+        }
+        Ok(grown)
     }
 }
 
@@ -536,6 +567,16 @@ impl KernelBroker<'_> {
             let state = self
                 .sealed(running, &activation, binding, &document)
                 .await?;
+            match self.grown(&ledger, &activation, 0).await {
+                Ok(growth) => ledger.grown(growth),
+                Err(exceeded) => {
+                    if let Some(refused) = machine.take() {
+                        refused.release().await?;
+                    }
+                    let end = End::Error(RunError::Bound(exceeded));
+                    return Ok(self.ended(ledger, end, saved, activation).await);
+                }
+            }
             let save = ParkSave {
                 document,
                 state: state.clone(),
@@ -611,11 +652,27 @@ impl KernelBroker<'_> {
                 return Ok(self.ended(ledger, end, saved, activation).await);
             }
             if !requests.is_empty() {
-                let admit = self
-                    .admissions(&ledger, requests, outstanding, live)
-                    .await?;
+                // The save appends the park's requests and the pages the
+                // run sealed since the last one: past a lifetime bound it
+                // admits nothing, and the run ends there.
                 let state = self
                     .sealed(running, &activation, binding, &document)
+                    .await?;
+                match self
+                    .grown(&ledger, &activation, requests.len() as u64)
+                    .await
+                {
+                    Ok(growth) => ledger.grown(growth),
+                    Err(exceeded) => {
+                        if let Some(refused) = machine.take() {
+                            refused.release().await?;
+                        }
+                        let end = End::Error(RunError::Bound(exceeded));
+                        return Ok(self.ended(ledger, end, saved, activation).await);
+                    }
+                }
+                let admit = self
+                    .admissions(&ledger, requests, outstanding, live)
                     .await?;
                 let save = ParkSave {
                     document,
@@ -830,6 +887,19 @@ impl KernelBroker<'_> {
         document: &DocumentId,
     ) -> Result<SealedPark, KernelFailure> {
         sealed(running, &activation.pages, binding, document).await
+    }
+
+    /// The growth the run's next save leaves it with, appending `effects`
+    /// admissions and the pages the activation sealed since its last save,
+    /// or the lifetime bound that save passes.
+    async fn grown(
+        &self,
+        ledger: &EffectLedger,
+        activation: &PageActivation,
+        effects: u64,
+    ) -> Result<Growth, BoundExceeded> {
+        let sealed = activation.pages.lock().await.take_sealed_bytes();
+        self.ceilings.grow(ledger.growth(), effects, sealed)
     }
 
     /// The state a committed park rests at: its root, under the execution
@@ -1049,6 +1119,8 @@ mod tests {
         let ceilings = KernelCeilings {
             requests_per_park: 4,
             join_members: 8,
+            effects: u64::MAX,
+            checkpoint_bytes: u64::MAX,
         };
         assert!(ceilings.check(&bounds(4, 8)).is_ok());
         assert!(matches!(

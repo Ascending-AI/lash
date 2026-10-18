@@ -49,13 +49,20 @@ pub struct Deadlines {
     /// it ends the run with [`lash_vm_protocol::WorkerLimit::Wall`]
     /// (FIG-6786).
     pub execution_wall: Duration,
+    /// How long the parent waits on its host for one host read (a clock,
+    /// random, projection or planned-read answer, or a limiter's decision)
+    /// while the run holds its worker. Passing it ends the run with
+    /// [`lash_vm_protocol::WorkerLimit::HostRead`] and discards the worker.
+    /// A durable park releases its worker and has no such bound.
+    pub host_read: Duration,
 }
 
 impl Deadlines {
     /// Bounded host defaults, retained after the FIG-4162 integrated matrix.
     /// Checkout 5 s, compute 30 s, serialization 5 s, cancel grace 100 ms,
-    /// cumulative CPU 10 s, three attempts and 600 s of held wall time
-    /// (the wall time has no workload measurement). These are provisional:
+    /// cumulative CPU 10 s, three attempts, 600 s of held wall time and a
+    /// 30 s host read, the compute deadline's length (neither the wall time
+    /// nor the host read has a workload measurement). These are provisional:
     /// synthetic service times do not bound arbitrary guest computation;
     /// hosts should select deadlines for their admitted workload.
     pub const fn standard() -> Self {
@@ -67,6 +74,7 @@ impl Deadlines {
             cumulative_cpu: Duration::from_secs(10),
             max_attempts: 3,
             execution_wall: Duration::from_secs(600),
+            host_read: Duration::from_secs(30),
         }
     }
 
@@ -84,6 +92,13 @@ impl Deadlines {
         lash_vm_protocol::WorkerLimit::Wall {
             bound_ms: millis(self.execution_wall),
         }
+    }
+}
+
+/// What a run meets when its host answers one read later than `bound`.
+pub(crate) fn host_read_limit(bound: Duration) -> lash_vm_protocol::WorkerLimit {
+    lash_vm_protocol::WorkerLimit::HostRead {
+        bound_ms: millis(bound),
     }
 }
 
@@ -207,6 +222,34 @@ impl Default for WorkerConfinement {
     }
 }
 
+/// What one code-mode cell may grow to over its whole life, across every
+/// activation and resume (FIG-6788): the broker checks both where a park
+/// appends its admissions and its sealed pages, and a park that would pass
+/// one admits nothing and ends the cell with the typed bound
+/// ([`lash_kernel_vm::Bound::Effects`],
+/// [`lash_kernel_vm::Bound::CheckpointBytes`]), recorded over the cell's
+/// last committed root. The per-park and live-task bounds limit a batch;
+/// these limit the total.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellLifetime {
+    /// The most effects and sleeps the cell's parks may admit.
+    pub effects: u64,
+    /// The most page bytes the cell may seal into its checkpoints.
+    pub checkpoint_bytes: u64,
+}
+
+impl CellLifetime {
+    /// 50,000 effects and 1 GiB of sealed pages: about Temporal's history
+    /// event limit (51,200), and the standard spool quota. No lash workload
+    /// measured either.
+    pub const fn standard() -> Self {
+        Self {
+            effects: 50_000,
+            checkpoint_bytes: 1 << 30,
+        }
+    }
+}
+
 /// Host policy for worker processes and their parent's temporary page storage.
 ///
 /// # Staging capacity and lifetime
@@ -261,6 +304,8 @@ pub struct PoolConfig {
     pub protocol: ProtocolBounds,
     /// The most any run's bounds may allow.
     pub run_bounds: RunBounds,
+    /// What one code-mode cell may grow to over its life.
+    pub cell_lifetime: CellLifetime,
     pub deadlines: Deadlines,
     pub tuning: WorkerTuning,
     pub confinement: WorkerConfinement,
@@ -301,6 +346,7 @@ impl PoolConfig {
     /// two items and eight MiB. Protocol bounds use `ProtocolBounds::standard`;
     /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,
     /// 1,024 live tasks, 256 requests a park and 1,024 members a join;
+    /// a cell's lifetime uses `CellLifetime::standard`;
     /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
     /// startup uses one protocol silence window, or four with the development
     /// `dhat-heap` feature (20 s at standard bounds). Serving-worker silence
@@ -328,6 +374,7 @@ impl PoolConfig {
                 requests_per_park: 256,
                 join_members: 1024,
             },
+            cell_lifetime: CellLifetime::standard(),
             deadlines: Deadlines::standard(),
             tuning: WorkerTuning::standard(),
             confinement: WorkerConfinement::standard(),
@@ -435,6 +482,9 @@ impl PoolConfig {
             || self.deadlines.cumulative_cpu.is_zero()
             || self.deadlines.max_attempts == 0
             || self.deadlines.execution_wall.is_zero()
+            || self.deadlines.host_read.is_zero()
+            || self.cell_lifetime.effects == 0
+            || self.cell_lifetime.checkpoint_bytes == 0
             || self.protocol.no_response_watchdog.is_zero()
             || largest_parser_stack
                 .is_none_or(|stack| stack >= self.confinement.address_space_bytes)

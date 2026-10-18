@@ -63,6 +63,98 @@ pub fn encode<T: Serialize>(kind: PayloadKind, value: &T) -> Result<EncodedPaylo
     wrap(kind, &json)
 }
 
+/// `value` as a payload of `kind` of at most `bound` bytes, the effect value
+/// bound (FIG-6788): a value whose encoding passes it is refused while it
+/// is encoded, so the encoding never holds more than `bound` bytes of it.
+/// The refusal names the payload's whole size.
+///
+/// # Errors
+///
+/// [`WorkerLimit::EffectValue`](lash_vm_protocol::WorkerLimit::EffectValue)
+/// past the bound, and a payload breach when the value has no JSON
+/// encoding.
+pub fn encode_within<T: Serialize>(
+    kind: PayloadKind,
+    value: &T,
+    bound: u64,
+) -> Result<EncodedPayload, PoolError> {
+    let json = capped_json(kind, value, bound)?;
+    let size = json.written.saturating_add(bin_header_bytes(json.written));
+    if size > bound {
+        return Err(
+            lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded {
+                limit: lash_vm_protocol::WorkerLimit::EffectValue { size, bound },
+            }
+            .into(),
+        );
+    }
+    wrap(kind, &json.bytes)
+}
+
+/// `value`'s JSON encoding, kept up to `bound` bytes and counted whole.
+fn capped_json<T: Serialize>(
+    kind: PayloadKind,
+    value: &T,
+    bound: u64,
+) -> Result<Capped, PoolError> {
+    let mut json = Capped::new(bound);
+    serde_json::to_writer(&mut json, value).map_err(|error| PoolError::payload(kind, error))?;
+    Ok(json)
+}
+
+/// The bytes of the MessagePack binary header [`wrap`] puts before `len`
+/// bytes of JSON.
+fn bin_header_bytes(len: u64) -> u64 {
+    match len {
+        0..256 => 2,
+        256..65_536 => 3,
+        _ => 5,
+    }
+}
+
+/// Keeps what serialization writes up to `limit` bytes, never reserving
+/// past it, and counts the rest without keeping it.
+struct Capped {
+    bytes: Vec<u8>,
+    limit: usize,
+    written: u64,
+}
+
+impl Capped {
+    fn new(limit: u64) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit: usize::try_from(limit).unwrap_or(usize::MAX),
+            written: 0,
+        }
+    }
+}
+
+impl std::io::Write for Capped {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.written = self.written.saturating_add(bytes.len() as u64);
+        if self.written > self.limit as u64 {
+            return Ok(bytes.len());
+        }
+        let needed = self.bytes.len() + bytes.len();
+        if needed > self.bytes.capacity() {
+            let capacity = self
+                .bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(needed)
+                .min(self.limit);
+            self.bytes.reserve_exact(capacity - self.bytes.len());
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// The value a payload of `kind` carries.
 ///
 /// # Errors
@@ -440,6 +532,8 @@ pub enum BoundWire {
     RequestsPerPark,
     JoinMembers,
     Guard { function: FunctionId },
+    Effects,
+    CheckpointBytes,
 }
 
 /// How a run ended ([`End`]). A finished cell's carry crosses as the
@@ -511,6 +605,8 @@ impl EndWire {
                     Bound::RequestsPerPark => BoundWire::RequestsPerPark,
                     Bound::JoinMembers => BoundWire::JoinMembers,
                     Bound::Guard { function } => BoundWire::Guard { function },
+                    Bound::Effects => BoundWire::Effects,
+                    Bound::CheckpointBytes => BoundWire::CheckpointBytes,
                 },
                 limit: exceeded.limit,
                 function: exceeded.function,
@@ -566,6 +662,8 @@ impl EndWire {
                     BoundWire::RequestsPerPark => Bound::RequestsPerPark,
                     BoundWire::JoinMembers => Bound::JoinMembers,
                     BoundWire::Guard { function } => Bound::Guard { function },
+                    BoundWire::Effects => Bound::Effects,
+                    BoundWire::CheckpointBytes => Bound::CheckpointBytes,
                 },
                 limit,
                 function,
@@ -596,6 +694,41 @@ pub type ProjectionAnswer = Result<Datum, ErrorDatum>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6788: an outcome past the effect value bound is refused while it
+    /// is encoded, naming its whole size, and its encoding never holds more
+    /// than the bound; one at the bound is the payload `encode` makes.
+    #[test]
+    fn an_outcome_past_the_effect_bound_is_refused_while_it_is_encoded() {
+        let outcome = OutcomeWire::from(Outcome::Completed(Datum::Text("x".repeat(1 << 20))));
+        let whole = encode(PayloadKind::Outcome, &outcome).unwrap();
+        let size = whole.0.len() as u64;
+        let bound = 4096;
+        let json = capped_json(PayloadKind::Outcome, &outcome, bound).unwrap();
+        assert!(
+            json.bytes.capacity() as u64 <= bound,
+            "the encoding held {} bytes past a {bound}-byte bound",
+            json.bytes.capacity()
+        );
+        for bound in [bound, size - 1] {
+            let refused = encode_within(PayloadKind::Outcome, &outcome, bound);
+            assert!(
+                matches!(
+                    refused,
+                    Err(PoolError::Infrastructure(
+                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded {
+                            limit: lash_vm_protocol::WorkerLimit::EffectValue { size: named, bound: stated },
+                        }
+                    )) if named == size && stated == bound
+                ),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(
+            encode_within(PayloadKind::Outcome, &outcome, size).unwrap(),
+            whole
+        );
+    }
 
     /// V11: decoding refuses normalization and overflow before park conversion.
     #[test]

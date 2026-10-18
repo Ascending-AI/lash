@@ -77,6 +77,13 @@ pub enum WorkerLimit {
     Attempts {
         bound: u32,
     },
+    /// The host took longer than its configured host-read deadline to
+    /// answer one read (a clock, random, projection or planned-read answer,
+    /// or a limiter's decision) while the run held its worker. A durable
+    /// park releases its worker and has no such bound.
+    HostRead {
+        bound_ms: u64,
+    },
 }
 
 impl WorkerLimit {
@@ -89,9 +96,12 @@ impl WorkerLimit {
     /// compute deadline and the wall time are limits lash set on the run's
     /// workers, and the cgroup memory ceiling one its host set on it: the
     /// same run on the same inputs meets them again, so they are the run's
-    /// own end, never a retry (FIG-6523, FIG-6786, FIG-6787). Only the replacement attempts are
-    /// the host's: they count infrastructure losses, which a replay, or
-    /// another host with capacity, answers differently (FIG-4451).
+    /// own end, never a retry (FIG-6523, FIG-6786, FIG-6787). The host-read
+    /// deadline is one its host set on the worker's wait, and it too ends
+    /// the run, recorded, so a replay answers the same end (FIG-6788). Only
+    /// the replacement attempts are the host's: they count infrastructure
+    /// losses, which a replay, or another host with capacity, answers
+    /// differently (FIG-4451).
     pub const fn is_host_verdict(self) -> bool {
         matches!(self, Self::Attempts { .. })
     }
@@ -125,6 +135,9 @@ impl std::fmt::Display for WorkerLimit {
                 )
             }
             Self::Attempts { bound } => write!(f, "the execution spent its {bound} attempts"),
+            Self::HostRead { bound_ms } => {
+                write!(f, "a host read exceeds its {bound_ms} ms deadline")
+            }
             other => write!(f, "{other:?}"),
         }
     }

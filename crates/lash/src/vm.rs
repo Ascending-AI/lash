@@ -58,11 +58,13 @@ pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, Sour
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
-/// Host-selected worker entry, pool bounds, execution deadlines, process
-/// confinement and the cgroup placement of workers.
+/// Host-selected worker entry, pool bounds, a cell's lifetime caps,
+/// execution deadlines, process confinement and the cgroup placement of
+/// workers.
 pub use lash_vm_client::{
-    CpuShare as WorkerCpuShare, Deadlines as WorkerDeadlines, PageBudgets as WorkerPageBudgets,
-    PoolConfig as WorkerPoolConfig, WorkerCgroup, WorkerConfinement, WorkerEntry, WorkerTuning,
+    CellLifetime, CpuShare as WorkerCpuShare, Deadlines as WorkerDeadlines,
+    PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig, WorkerCgroup,
+    WorkerConfinement, WorkerEntry, WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
 pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
