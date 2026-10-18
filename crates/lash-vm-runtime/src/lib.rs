@@ -79,4 +79,4 @@ pub use process::{
 pub use process_plugin::KernelProcessPluginFactory;
 
 /// Statement observation requested by recorded kernel settings.
-pub use lash_kernel_vm::{Bounds as KernelBounds, Durability as KernelDurability, ObservationMode};
+pub use lash_kernel_vm::{Bounds as KernelBounds, ObservationMode};

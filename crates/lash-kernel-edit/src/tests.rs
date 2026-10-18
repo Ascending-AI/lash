@@ -1005,7 +1005,6 @@ fn canvas_atomic() {
         live_tasks: 4,
         requests_per_park: 4,
         join_members: 4,
-        durability: lash_kernel_vm::Durability::Durable,
     };
     let program = Program {
         release: PageId([8; 32]),

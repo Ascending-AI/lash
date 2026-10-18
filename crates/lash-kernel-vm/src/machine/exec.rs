@@ -956,16 +956,10 @@ impl KernelMachine {
             let size = self.deep_size(value)?;
             self.charge(size)?;
         }
-        // Data crosses as a copy-out does, and an ephemeral run copies it
-        // from the arena. Only a function crossing reads the session: the
-        // bindings the cell wrote go to the heap first.
+        // Only a function crossing reads the session: the bindings the
+        // cell wrote go to the heap first.
         let function = self.reaches_function(value)?;
-        if !self.durable() && !function {
-            return Ok(self.copy_datum(value)?);
-        }
-        if self.durable() {
-            self.identify_session()?;
-        }
+        self.identify_session()?;
         if function {
             self.project_session()?;
         }
@@ -1041,13 +1035,6 @@ impl KernelMachine {
         exe: &Executable,
         incoming: Incoming,
     ) -> Eval<Value> {
-        if !self.durable()
-            && let Some(arriving) = self.task(task)?.resident.arriving.take()
-        {
-            // An ephemeral run's list join woke the task with its decision
-            // as it is.
-            return arriving.map_err(Interrupt::raised);
-        }
         match incoming {
             Incoming::Value(value) => Ok(self.admit_page(&value)?),
             Incoming::Raise(value) => Err(Interrupt::raised(self.admit_page(&value)?)),
@@ -1108,18 +1095,7 @@ impl KernelMachine {
     /// gives it: its value, or a raise of its error, which is then
     /// observed (`K-TASK-016`).
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
-        let durable = self.durable();
         let joined = self.task(joined)?;
-        if !durable && matches!(joined.state, TaskState::Ended(_)) {
-            return match joined.resident.outcome {
-                Some(Ok(value)) => Ok(value),
-                Some(Err(value)) => {
-                    joined.observed = true;
-                    Err(Interrupt::raised(value))
-                }
-                None => Err(fault("an ephemeral task ended with no outcome").into()),
-            };
-        }
         match &joined.state {
             TaskState::Ended(super::EndedTask::Returned(value)) => {
                 let value = value.clone();

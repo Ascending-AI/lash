@@ -81,7 +81,7 @@ impl Machine for KernelMachine {
             }
         }
         self.regs.clear();
-        if result.is_ok() && self.durable() {
+        if result.is_ok() {
             self.tasks
                 .project_occurrences()
                 .map_err(MachineError::Heap)?;
@@ -186,9 +186,6 @@ impl Machine for KernelMachine {
         Ok(Delivered::Accepted)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
-        if !self.durable() {
-            return Err(SealError::Ephemeral);
-        }
         let sealed = self.seal_projection(budget)?;
         self.projecting = sealed.is_none();
         if sealed.is_some() {
@@ -272,9 +269,6 @@ impl KernelMachine {
         census: Option<Box<dyn AllocationCensus>>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        if bounds.durability == crate::interface::Durability::Ephemeral {
-            return Err(OpenError::Ephemeral);
-        }
         let bounds = Bounds {
             memory_limit: root.memory_limit,
             ..bounds

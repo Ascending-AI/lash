@@ -92,14 +92,6 @@ pub struct RlmProtocolPluginConfig {
     pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    /// Whether a cell's run can be saved. Durable unless the host states
-    /// otherwise; see [`super::Durability`].
-    #[serde(
-        default,
-        with = "super::config_types::DurabilityWire",
-        skip_serializing_if = "super::config_types::is_durable"
-    )]
-    pub durability: super::Durability,
     pub on_memory_limit: MemoryLimit,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
@@ -133,14 +125,6 @@ pub struct RlmRecordedBehaviour {
     pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    /// Whether the session's cells run durably, which every open, run and
-    /// resume of the session keeps.
-    #[serde(
-        default,
-        with = "super::config_types::DurabilityWire",
-        skip_serializing_if = "super::config_types::is_durable"
-    )]
-    pub durability: super::Durability,
     pub on_memory_limit: MemoryLimit,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
@@ -186,7 +170,6 @@ pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = Un
     memory_limit: M,
     on_memory_limit: MemoryLimit,
     channel: C,
-    durability: super::Durability,
 }
 
 impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
@@ -212,7 +195,6 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             memory_limit: self.memory_limit,
             on_memory_limit: self.on_memory_limit,
             channel,
-            durability: self.durability,
         }
     }
 
@@ -226,7 +208,6 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             memory_limit: self.memory_limit,
             on_memory_limit: self.on_memory_limit,
             channel: self.channel,
-            durability: self.durability,
         }
     }
 
@@ -240,21 +221,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             memory_limit,
             on_memory_limit: self.on_memory_limit,
             channel: self.channel,
-            durability: self.durability,
         }
-    }
-
-    /// Whether a cell's run can be saved; durable when this is not called.
-    /// An ephemeral cell is never saved and does none of the work a save
-    /// needs, so it cannot be checkpointed, moved or recovered, and its
-    /// effects are not exactly once across crashes. Under the engine, whose
-    /// turns are saved at every effect, an ephemeral cell completes only
-    /// when it makes no recorded effect and carries no session; otherwise
-    /// it is refused with [`lash_vm_client::RunRefusal::Ephemeral`].
-    #[must_use]
-    pub fn durability(mut self, durability: super::Durability) -> Self {
-        self.durability = durability;
-        self
     }
 }
 
@@ -271,7 +238,6 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            durability: self.durability,
             on_memory_limit: self.on_memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             max_output_chars: default_max_output_chars(),
@@ -304,14 +270,12 @@ impl RlmProtocolPluginConfig {
             memory_limit: UnsetBound,
             on_memory_limit: MemoryLimit::Recount,
             channel: UnsetChannel,
-            durability: super::Durability::Durable,
         }
     }
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(self.instruction_limit, self.memory_limit)
             .with_charge(self.charge)
-            .with_durability(self.durability)
             .on_memory_limit(self.on_memory_limit)
     }
 
@@ -330,7 +294,6 @@ impl RlmProtocolPluginConfig {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            durability: self.durability,
             on_memory_limit: self.on_memory_limit,
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
@@ -349,7 +312,6 @@ impl RlmProtocolPluginConfig {
         self.charge = behaviour.charge;
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
-        self.durability = behaviour.durability;
         self.on_memory_limit = behaviour.on_memory_limit;
 
         self.prompt_features = behaviour.prompt_features;

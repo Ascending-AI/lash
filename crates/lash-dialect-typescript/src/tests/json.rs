@@ -22,7 +22,6 @@ const BOUNDS: Bounds = Bounds {
     live_tasks: 10,
     requests_per_park: 10,
     join_members: 10,
-    durability: lash_kernel_vm::Durability::Durable,
 };
 
 /// The entries: each builds the input, then makes its one call. `build`

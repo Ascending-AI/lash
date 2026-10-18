@@ -686,7 +686,7 @@ struct Island<'a> {
     charged: u64,
     bound: u64,
     slice_end: u64,
-    counters: Option<&'a mut Occurrences>,
+    counters: &'a mut Occurrences,
     /// An observer is attached: helper calls answer as observed runs do.
     observed: bool,
     /// The run's data limits, which natives answer under.
@@ -819,9 +819,7 @@ impl Island<'_> {
     }
 
     fn count(&mut self, occurrence: usize) -> Result<(), Stop> {
-        if let Some(counters) = self.counters.as_deref_mut()
-            && let Err(halt) = counters.advance(occurrence)
-        {
+        if let Err(halt) = self.counters.advance(occurrence) {
             return Err(self.halt(halt));
         }
         Ok(())

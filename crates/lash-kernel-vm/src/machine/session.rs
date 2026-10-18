@@ -83,14 +83,7 @@ pub(crate) fn start(
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
-        tasks: match bounds.durability {
-            crate::interface::Durability::Durable => {
-                tasks::Tasks::new(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe))
-            }
-            crate::interface::Durability::Ephemeral => {
-                tasks::Tasks::resident(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe))
-            }
-        },
+        tasks: tasks::Tasks::new(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe)),
         ready: queue::Queue::open(Tree::new(true), access.clone()),
         current: Some(TaskId::MAIN),
         joins: Tree::new(false),
@@ -129,12 +122,6 @@ pub(crate) fn start(
         #[cfg(test)]
         boundaries: 0,
     };
-    if !machine.durable() {
-        // An ephemeral run never installs its roots: the heap refuses a
-        // write that needs an exact refinement, and the run reclaims at
-        // its collection point instead (`refine_for`).
-        machine.heap.execution_roots_moved();
-    }
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,
@@ -466,18 +453,17 @@ impl KernelMachine {
     /// Binds `name` to `value`, the arena value, until the next projection
     /// point gives it its page form (seam C): a declaration, or an
     /// assignment when `existing`, which is refused for a name neither the
-    /// cell nor its session binds. A durable run admits the binding's
-    /// holding here, as the slot's write would; an ephemeral one holds
-    /// none.
+    /// cell nor its session binds. The binding's holding is admitted
+    /// here, as the slot's write would.
     pub(super) fn session_write(
         &mut self,
         name: &BindingName,
         value: Value,
         existing: bool,
     ) -> Result<bool, Halt> {
-        // A durable run holds what its bindings grow by, unless it keeps
-        // no memory accounting.
-        let priced = self.durable() && self.bounds.memory_limit != crate::MemoryLimit::Off;
+        // The run holds what its bindings grow by, unless it keeps no
+        // memory accounting.
+        let priced = self.bounds.memory_limit != crate::MemoryLimit::Off;
         let before = match self.session.bindings.get(&name.key) {
             Some(bound) => priced.then(|| self.cost_of(&bound.value)),
             // A first write of a name reads its slot: what it held, and
@@ -541,7 +527,7 @@ impl KernelMachine {
 
     /// Gives the new objects the session bindings written since the last
     /// projection point reach their ids, in the canonical walk's order:
-    /// what a durable run does first wherever it saves a value before its
+    /// what the run does first wherever it saves a value before its
     /// next projection point (a task's result, an effect's argument), as
     /// the walk there would, so where those points fall moves no id.
     pub(super) fn identify_session(&mut self) -> Result<(), Halt> {
@@ -557,9 +543,8 @@ impl KernelMachine {
     }
 
     /// Gives the session bindings written since the last projection point
-    /// their page forms in the heap's slots. A durable run admitted each
-    /// one's holding as it wrote it; an ephemeral run, which holds none,
-    /// admits it here, before a function crossing reads its session.
+    /// their page forms in the heap's slots. The run admitted each one's
+    /// holding as it wrote it.
     pub(super) fn project_session(&mut self) -> Result<(), Halt> {
         let written: Vec<(Arc<[u8]>, Name, Value)> = self
             .session
@@ -567,20 +552,12 @@ impl KernelMachine {
             .into_iter()
             .map(|(key, bound)| (Arc::clone(key), bound.name.name.clone(), bound.value))
             .collect();
-        let durable = self.durable();
         for (key, name, value) in written {
             let page = self.page_form(&value)?;
             let record = self.binding_record(&name, page)?;
-            if durable {
-                self.heap
-                    .project_session_binding(&key, record)
-                    .map_err(|error| self.heap_halt(error))?;
-            } else {
-                self.heap_write(|heap| {
-                    heap.write_session_binding(&key, |_, _| Ok(Some(record.clone())))
-                        .map_err(super::write_halt)
-                })?;
-            }
+            self.heap
+                .project_session_binding(&key, record)
+                .map_err(|error| self.heap_halt(error))?;
             if let Some(bound) = self.session.bindings.get_mut(&key) {
                 bound.written = None;
             }
@@ -588,9 +565,7 @@ impl KernelMachine {
         Ok(())
     }
     pub(super) fn finished(&mut self, result: Datum, finish: bool) -> Result<Finished, Halt> {
-        // An ephemeral cell carries no session: its bindings are never
-        // given a page form.
-        if !self.session_cell || !self.durable() {
+        if !self.session_cell {
             return Ok(Finished {
                 result,
                 finish,

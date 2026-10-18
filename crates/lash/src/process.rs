@@ -3,9 +3,7 @@
 pub use lash_vm_runtime::ObservationMode;
 /// Typed settings for a kernel-engine start.
 #[cfg(feature = "codemode")]
-pub use lash_vm_runtime::{
-    KernelBounds, KernelDurability, KernelRecordedSettings, KernelSettingsError,
-};
+pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_execution_contracts::process::ConsumerHold;

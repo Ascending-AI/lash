@@ -289,10 +289,10 @@ charge and exit mutants on its own.
   top-level loop beside a function's loop over the same names, and a park
   between two top-level loops. The sum shape and the park run on every
   shard. Each program that does not park also runs to its end unsliced and
-  under slices 7 and 50, durable and ephemeral, with memory accounted and
-  off, and its memory counter must equal the reference's at every slice
-  return and at its end: PLAN-INDEP leaves memory out, and this is what
-  sees a session write's admission.
+  under slices 7 and 50, with memory accounted and off, and its memory
+  counter must equal the reference's at every slice return and at its end:
+  PLAN-INDEP leaves memory out, and this is what sees a session write's
+  admission.
 - **The two plans.** Regions on, and regions off through the layout bit, with
   everything else equal.
 - **Equal across the plans:**
@@ -350,7 +350,7 @@ on (`.kiln/FIG-6741/check/`).
   Projection points occur only between steps (`run_slice`), and a region lies
   inside one step: barriers exclude parks, there are no yields, and the
   headroom guard keeps the slice threshold out.
-- **No pressure publication inside.** `refine_for` publishes holdings at a
+- **No pressure refinement inside.** `refine_resident` refines at a
   collection point, and only when an admission refuses. The memory headroom
   guard means no admission inside a region refuses.
 - **Per-step bookkeeping.** Inside a batch, the per-statement
@@ -449,9 +449,9 @@ it as a slot.
   write does: `hold_session_binding(before, after)` with no growth, which
   takes no credit and cannot refuse. An equal write moves nothing. The
   reference's statement hold of the written value's cost is released at
-  the statement's end and nets to zero, as scalar pins do (§3.4). An
-  ephemeral run, or one with memory off (FIG-6731), holds no binding, and
-  the region admits nothing.
+  the statement's end and nets to zero, as scalar pins do (§3.4). A run
+  with memory off (FIG-6731) holds no binding, and the region admits
+  nothing.
 - **Charge.** A session read is an op inside its statement's charge region,
   and a write ends its statement, whose unit is the statement's fixed unit.
   A session atom of an invoke charges its atom unit, as a local's does. So

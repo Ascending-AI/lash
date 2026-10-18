@@ -329,10 +329,7 @@ def main():
     parser.add_argument('--program', action='append', help='exact program; repeat for a partial diagnostic report')
     parser.add_argument('--timeout', type=float, default=1800)
     parser.add_argument('--render', type=Path, help='render an existing complete receipt without running anything')
-    parser.add_argument('--durability', choices=['durable', 'ephemeral'], default='durable',
-                        help="Lash runs' durability (KERNEL_PERF_DURABILITY): ephemeral runs are never saved")
     args = parser.parse_args()
-    os.environ['KERNEL_PERF_DURABILITY'] = args.durability
     os.environ['KERNEL_PERF_MEMORY'] = args.memory
     if args.memory_witness:
         os.environ['KERNEL_PERF_MEMORY_WITNESS'] = '1'
@@ -374,7 +371,6 @@ def main():
     receipt['memory_witness'] = args.memory_witness
     if args.differential_warm:
         receipt['differential_warm'] = True
-    receipt['durability'] = args.durability
     for program, repetitions in (
         (program, repetitions) for program in programs
         for repetitions in repetition_counts(program, args.differential_warm)

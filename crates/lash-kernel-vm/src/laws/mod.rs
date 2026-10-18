@@ -8,7 +8,6 @@ mod chunks;
 mod cold;
 mod continuation;
 pub(crate) mod embedder;
-mod ephemeral;
 mod forms;
 mod frames;
 mod identity;

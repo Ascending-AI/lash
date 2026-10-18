@@ -34,7 +34,7 @@ use lash_kernel_state::arena::Arena;
 
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
-use super::{Eval, FRAME_BYTES, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
+use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
 use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::interface::Bound;
@@ -117,61 +117,8 @@ impl KernelMachine {
     pub(super) fn memory_pressure(&mut self, bytes: u64) -> Result<(), Halt> {
         match self.bounds.memory_limit {
             crate::MemoryLimit::Refuse => Err(bound(Bound::Memory, self.bounds.memory)),
-            crate::MemoryLimit::Recount => self.refine_for(bytes),
+            crate::MemoryLimit::Recount => self.refine_resident(bytes),
             crate::MemoryLimit::Off => Ok(()),
-        }
-    }
-
-    /// The collection point: under pressure, refines exactly over what
-    /// the run holds with `bytes` pending, so the verdict is given here
-    /// (`refine::refine_resident`, FIG-6748).
-    fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
-        if !self.durable() {
-            return self.reclaim_for(bytes);
-        }
-        self.refine_resident(bytes)
-    }
-
-    /// An ephemeral run's collection point: it publishes no roots, so no
-    /// exact refinement can trace them. It frees every object whose count
-    /// fell to zero and that nothing the run holds, nor the running
-    /// statement made, which refunds what they were accounted. It then
-    /// prices what the run holds in memory, as a refinement prices what
-    /// published roots reach: the young objects its values and the running
-    /// statement reach, its frames and the values they hold. The growth
-    /// held past that is refunded, so holds and slot growth released since
-    /// do not accumulate. It refuses when what remains and `bytes` do not
-    /// fit the bound.
-    fn reclaim_for(&mut self, bytes: u64) -> Result<(), Halt> {
-        let (tasks, session, regs, pins) = (&self.tasks, &self.session, &self.regs, &self.pins);
-        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
-            tasks.each_value(visit);
-            session.each_value(visit);
-            regs.projection().iter().for_each(&mut *visit);
-            pins.values.iter().for_each(&mut *visit);
-            pins.borrowed.iter().for_each(&mut *visit);
-        };
-        let mut arena = self.arena.borrow_mut();
-        arena.release_inside_statement(&mut roots);
-        let young = arena.take_released_young();
-        let objects = arena.reachable_young_cost(&mut roots);
-        let mut values = 0_u64;
-        roots(&mut |value| values = values.saturating_add(arena.cost_of(value)));
-        drop(arena);
-        if young > 0 {
-            self.heap.release_young(young)?;
-        }
-        let live = objects
-            .saturating_add(values)
-            .saturating_add(self.tasks.frames().saturating_mul(FRAME_BYTES));
-        let surplus = self.heap.held_growth().saturating_sub(live);
-        if surplus > 0 {
-            self.heap.release_young(surplus)?;
-        }
-        let held = self.heap.certificate().upper.0;
-        match held.checked_add(bytes) {
-            Some(total) if total <= self.bounds.memory => Ok(()),
-            _ => Err(bound(Bound::Memory, self.bounds.memory)),
         }
     }
 
@@ -353,17 +300,7 @@ impl KernelMachine {
         // The objects have grown already: the refinement prices them
         // exactly with the rest of what is live, so nothing more is
         // pending, as a heap allocation refused before it is made.
-        if self.durable() {
-            return self.memory_pressure(0);
-        }
-        // An ephemeral run prices nothing exactly: what its collection
-        // frees must leave room to hold the growth.
-        self.memory_pressure(0)?;
-        if self.heap.hold_growth(bytes)? {
-            Ok(())
-        } else {
-            Err(bound(Bound::Memory, self.bounds.memory))
-        }
+        self.memory_pressure(0)
     }
 
     /// What the bound leaves past what the census holds: the room a native

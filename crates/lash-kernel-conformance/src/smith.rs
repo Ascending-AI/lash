@@ -149,7 +149,6 @@ impl<'a> Arbitrary<'a> for Smith {
                 live_tasks: u.int_in_range(1..=8)?,
                 requests_per_park: u.int_in_range(1..=16)?,
                 join_members: u.int_in_range(1..=8)?,
-                durability: lash_kernel_vm::Durability::Durable,
             },
         };
         Ok(Self { document, schedule })

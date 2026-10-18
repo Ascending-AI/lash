@@ -70,8 +70,8 @@ struct Admit {
 /// One region's run over its frame: what it charges, records and holds.
 struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     frame: &'a mut Frame,
-    /// The task's occurrence counters, which a durable run's invokes
-    /// advance as they commit (`K-EFF-008`).
+    /// The task's occurrence counters, which the region's invokes advance
+    /// as they commit (`K-EFF-008`).
     counters: Option<&'a mut super::tasks::Occurrences>,
     cx: Cx<'c>,
     charged: &'a mut u64,
@@ -91,8 +91,8 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// The last statement the region tried was one it runs, not one it
     /// leaves: where it stopped there, a guard missed.
     missed: bool,
-    /// Whether a session binding's holding is priced: a durable run that
-    /// accounts memory, whose session writes admit it.
+    /// Whether a session binding's holding is priced: a run that accounts
+    /// memory, whose session writes admit it.
     priced: bool,
     /// The session writes the region made.
     writes: u64,
@@ -207,7 +207,6 @@ impl KernelMachine {
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
         let (bound, slice_end) = (self.bounds.charge_limit, self.slice_end);
-        let durable = self.durable();
         let mut arena = self.arena.borrow_mut();
         let state = self
             .tasks
@@ -231,7 +230,7 @@ impl KernelMachine {
         };
         let mut run = Run::<INVOKES, ALLOC> {
             frame,
-            counters: (INVOKES && durable).then_some(&mut state.counters),
+            counters: INVOKES.then_some(&mut state.counters),
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
                 args: super::registers::Arguments::new(),
@@ -257,7 +256,7 @@ impl KernelMachine {
             due: false,
             chain: Vec::new(),
             missed: false,
-            priced: durable && memory,
+            priced: memory,
             writes: 0,
         };
         let (started, stepped, stopped) = run.batch(plan, compiled, walk, bound, slice_end)?;

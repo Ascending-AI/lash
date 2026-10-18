@@ -293,7 +293,6 @@ impl PoolConfig {
                 live_tasks: 1024,
                 requests_per_park: 256,
                 join_members: 1024,
-                durability: lash_vm_protocol::Durability::Durable,
             },
             deadlines: Deadlines::standard(),
             tuning: WorkerTuning::standard(),

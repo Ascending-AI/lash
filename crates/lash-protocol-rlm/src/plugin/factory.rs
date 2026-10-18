@@ -156,7 +156,6 @@ impl RlmProtocolPluginFactory {
             requests_per_park: pool.requests_per_park,
             join_members: pool.join_members,
             // A process is saved at every park and resumed on any worker.
-            durability: lash_vm_client::Durability::Durable,
         }
     }
 

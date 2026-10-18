@@ -643,7 +643,6 @@ fn cell_bounds(services: &CellServices) -> Bounds {
         live_tasks: pool.live_tasks,
         requests_per_park: pool.requests_per_park,
         join_members: pool.join_members,
-        durability: services.execution_bounds.durability,
     }
 }
 

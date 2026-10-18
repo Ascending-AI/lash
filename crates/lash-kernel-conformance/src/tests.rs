@@ -10,7 +10,6 @@ include!("corpus_files.rs");
 mod contract_cases;
 
 mod charge;
-mod ephemeral;
 mod protocol;
 mod regions;
 

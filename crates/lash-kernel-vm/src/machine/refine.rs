@@ -148,10 +148,10 @@ impl ResidentRoots for Holdings<'_> {
 }
 
 impl KernelMachine {
-    /// The collection point of a durable run: under pressure, refines
-    /// exactly over what it holds in memory with `bytes` pending, so the
-    /// verdict is given here, over current holdings, with nothing
-    /// published (FIG-6748).
+    /// The run's collection point: under pressure, refines exactly over
+    /// what it holds in memory with `bytes` pending, so the verdict is
+    /// given here, over current holdings, with nothing published
+    /// (FIG-6748).
     pub(super) fn refine_resident(&mut self, bytes: u64) -> Result<(), Halt> {
         // A changed object's members are read from its body: one partly on
         // its pages is decoded first.

@@ -114,7 +114,6 @@ impl KernelProcessPluginFactory {
             requests_per_park: self.bounds.requests_per_park,
             join_members: self.bounds.join_members,
             // A process is saved at every park and resumed on any worker.
-            durability: lash_kernel_vm::Durability::Durable,
         };
         let engine = match &self.functions {
             Some(functions) => crate::KernelProcessEngine::with_functions(

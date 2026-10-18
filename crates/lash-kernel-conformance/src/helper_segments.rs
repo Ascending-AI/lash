@@ -26,7 +26,6 @@ const BOUNDS: Bounds = Bounds {
     live_tasks: 100,
     requests_per_park: 100,
     join_members: 100,
-    durability: lash_kernel_vm::Durability::Durable,
 };
 
 /// Guest callbacks of several statements through segment helpers: each

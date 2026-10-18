@@ -37,8 +37,6 @@
 //! Means remain descriptive; shared-host timing is advisory.
 //! `KERNEL_PERF_OBSERVE=work` or `=context` times each run with the
 //! machine's work counters or its published guest context on.
-//! `KERNEL_PERF_DURABILITY=ephemeral` runs every timed program ephemerally:
-//! never saved, so the split, which seals, refuses it.
 //!
 //! `kernel_perf work <dir> [program...]` runs each program once with the
 //! machine counting its work and writes `<dir>/kernel-work.json`: per guest
@@ -125,7 +123,6 @@ const BOUNDS: Bounds = Bounds {
     live_tasks: 100,
     requests_per_park: 100,
     join_members: 100,
-    durability: lash_kernel_vm::Durability::Durable,
 };
 
 /// The driver composes independent option flags through the process environment.
@@ -137,14 +134,8 @@ fn benchmark_bounds() -> Bounds {
         Ok("refuse" | "") | Err(_) => lash_kernel_vm::MemoryLimit::Refuse,
         Ok(other) => panic!("unknown benchmark memory policy: {other}"),
     };
-    let durability = match std::env::var("KERNEL_PERF_DURABILITY").as_deref() {
-        Ok("durable") | Ok("") | Err(_) => lash_kernel_vm::Durability::Durable,
-        Ok("ephemeral") => lash_kernel_vm::Durability::Ephemeral,
-        Ok(other) => panic!("KERNEL_PERF_DURABILITY is durable or ephemeral, not {other}"),
-    };
     Bounds {
         memory_limit,
-        durability,
         ..BOUNDS
     }
 }

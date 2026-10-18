@@ -117,7 +117,6 @@ fn run(
         live_tasks: 16,
         requests_per_park: 16,
         join_members: 16,
-        durability: lash_kernel_vm::Durability::Durable,
     };
     let mut machine = KernelMachine::start(
         program.clone(),

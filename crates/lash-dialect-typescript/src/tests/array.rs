@@ -96,7 +96,6 @@ fn drive_document(
         live_tasks: 100,
         requests_per_park: 100,
         join_members: 100,
-        durability: lash_kernel_vm::Durability::Durable,
     };
     let mut machine = super::pages::start(
         program,
@@ -802,7 +801,6 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
             live_tasks: 100,
             requests_per_park: 100,
             join_members: 100,
-            durability: lash_kernel_vm::Durability::Durable,
         },
         CellStart {
             target: Target::Main,

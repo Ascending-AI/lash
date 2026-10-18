@@ -136,7 +136,6 @@ pub(super) fn main() -> Result<(), String> {
             "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
             "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
             "observer": "off",
-            "durability": format!("{:?}", bounds.durability).to_lowercase(),
         })
     );
     Ok(())

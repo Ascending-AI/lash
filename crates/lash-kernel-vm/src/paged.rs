@@ -163,10 +163,6 @@ pub enum OpenError {
     },
     #[error("the document is not admitted: {0}")]
     NotAdmitted(#[from] Invalid),
-    /// The run's bounds make it ephemeral, and an ephemeral run is never
-    /// opened from a root: it cannot be moved or recovered.
-    #[error("an ephemeral run cannot be opened from a checkpoint root")]
-    Ephemeral,
     #[error("the state was parked under document {parked}, not {given}")]
     DocumentMismatch {
         parked: DocumentId,
@@ -192,9 +188,6 @@ pub enum OpenError {
 pub enum SealError {
     #[error("the run has ended; there is nothing to park")]
     Ended,
-    /// The run is ephemeral (`Durability::Ephemeral`): it is never saved.
-    #[error("the run is ephemeral; it cannot be checkpointed")]
-    Ephemeral,
     #[error("the machine is in a state it cannot write: {problem}")]
     Fault { problem: String },
     #[error(transparent)]

@@ -19,7 +19,6 @@ const BOUNDS: Bounds = Bounds {
     live_tasks: 10,
     requests_per_park: 10,
     join_members: 10,
-    durability: lash_kernel_vm::Durability::Durable,
 };
 
 /// The library functions the entries name.

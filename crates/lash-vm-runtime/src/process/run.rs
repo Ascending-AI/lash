@@ -854,7 +854,6 @@ impl KernelRecordedSettings {
             live_tasks: self.live_tasks,
             requests_per_park: self.requests_per_park,
             join_members: self.join_members,
-            durability: lash_kernel_vm::Durability::Durable,
         }
     }
 }

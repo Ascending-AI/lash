@@ -350,10 +350,6 @@ struct Task {
     frames: frames::Frames,
     /// Non-owning comparison with the last row written (FIG-6586).
     published: Option<tasks::Publication>,
-    /// An ephemeral run's arena values of what its record holds in page
-    /// form in a durable run: the task's result or raise once it ended,
-    /// and the value or raise a list join woke it with. Never saved.
-    resident: tasks::Resident,
 }
 
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
@@ -509,11 +505,6 @@ impl Pins {
 }
 
 impl KernelMachine {
-    /// Whether the run can be saved (`Durability`).
-    #[inline(always)]
-    fn durable(&self) -> bool {
-        self.bounds.durability == crate::interface::Durability::Durable
-    }
     #[cfg(test)]
     pub(crate) fn accounting(&self) -> lash_kernel_state::paged::AccountingCertificate {
         self.heap.certificate()
@@ -681,11 +672,6 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
-        // Nothing reads an ephemeral run's heap roots: it never seals, and
-        // its pressure accounting reads the arena (`refine_for`).
-        if !self.durable() {
-            return Ok(());
-        }
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.identify(coordinates)?;
@@ -980,9 +966,10 @@ impl KernelMachine {
                 Some(bytes) => {
                     self.memory_pressure(bytes)?;
                     let again = write(&mut self.heap);
-                    // An ephemeral run's roots are never installed, so the
-                    // write refuses for precision again when the room its
-                    // collection left is not enough.
+                    // The collection point refines over what the run holds
+                    // in memory, not over installed roots, so the write
+                    // refuses for precision again when the room it left is
+                    // not enough.
                     if again.is_err() && self.heap.take_refusal().is_some() {
                         return Err(E::from(bound(Bound::Memory, self.bounds.memory)));
                     }
@@ -1093,29 +1080,18 @@ impl KernelMachine {
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
     fn end_task(&mut self, task: TaskId, outcome: Result<Value, Value>) -> Result<(), Halt> {
-        let durable = self.durable();
-        let result = if durable {
-            self.identify_session()?;
-            let pages = self.heap.pages().clone();
+        self.identify_session()?;
+        let pages = self.heap.pages().clone();
+        let result = {
             let mut arena = self.arena.borrow_mut();
             match &outcome {
                 Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
                 Err(value) => Err(project::project(&mut arena, &pages, value)?),
             }
-        } else {
-            // An ephemeral run keeps the outcome as it is, resident with
-            // the task; its record only says how the task ended.
-            match &outcome {
-                Ok(_) => Ok(PageValue::Null),
-                Err(_) => Err(PageValue::Null),
-            }
         };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();
-        if !durable {
-            ended.resident.outcome = Some(outcome);
-        }
         ended.failed = result.is_err();
         ended.state = TaskState::Ended(match result.clone() {
             Ok(value) => EndedTask::Returned(value),
@@ -1156,11 +1132,6 @@ impl KernelMachine {
                     if let Some(decision) = self.decide(mode, &members, Some(task))? {
                         self.remove_list_join(order)?;
                         self.pass(&members)?;
-                        if !self.durable() {
-                            self.wake(joiner, Incoming::Value(PageValue::Null))?;
-                            self.task(joiner)?.resident.arriving = Some(decision);
-                            continue;
-                        }
                         let incoming = match decision {
                             Ok(value) => Incoming::Value(self.page_form(&value)?),
                             Err(value) => Incoming::Raise(self.page_form(&value)?),
@@ -1194,7 +1165,7 @@ impl KernelMachine {
                         unobserved.push(task.identity)
                     }
                     TaskState::Ended(_) => (),
-                    _ => unfinished.push((id, task.identity, task.frames.clone())),
+                    _ => unfinished.push((task.identity, task.frames.clone())),
                 }
             }
             true
@@ -1203,15 +1174,10 @@ impl KernelMachine {
             let mut sources = Vec::new();
             let unfinished = unfinished
                 .into_iter()
-                .map(|(task, id, frames)| {
+                .map(|(id, frames)| {
                     let identity =
                         lash_kernel_doc::kernel_internals::task_label(id.resolve(&access)?);
-                    let source = if self.durable() {
-                        tasks::source_body(&frames, &self.exe, &access)?
-                    } else {
-                        self.tasks.resident_source(task)?
-                    };
-                    if let Some(site) = source {
+                    if let Some(site) = tasks::source_body(&frames, &self.exe, &access)? {
                         sources.push((identity.clone(), site.position()));
                     }
                     Ok(identity)
@@ -1274,13 +1240,9 @@ impl KernelMachine {
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(lash_kernel_doc::kernel_internals::wait_id(wait));
         }
-        let outstanding = if self.durable() {
-            let tasks = self.task_table().map_err(MachineError::Heap)?;
-            tasks.project_occurrences().map_err(MachineError::Heap)?;
-            tasks.sealed_root().map_err(MachineError::Heap)?.1
-        } else {
-            self.tasks.outstanding()
-        };
+        let tasks = self.task_table().map_err(MachineError::Heap)?;
+        tasks.project_occurrences().map_err(MachineError::Heap)?;
+        let (_, outstanding) = tasks.sealed_root().map_err(MachineError::Heap)?;
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,

@@ -893,7 +893,7 @@ fn regions_on_and_off_agree(shard: usize) {
 
 /// Session regions hold what the reference holds (§6): `case`'s run has
 /// the memory counter where the reference has it at every slice return
-/// and at its end, durable and ephemeral, with memory accounted and off.
+/// and at its end, with memory accounted and off.
 /// PLAN-INDEP leaves memory out, so this is what sees a region skip a
 /// session write's admission.
 fn sessions_hold(
@@ -903,34 +903,29 @@ fn sessions_hold(
     counts: &mut Counts,
     failures: &mut Vec<String>,
 ) {
-    for durability in [
-        lash_kernel_vm::Durability::Durable,
-        lash_kernel_vm::Durability::Ephemeral,
+    for memory_limit in [
+        lash_kernel_vm::MemoryLimit::Recount,
+        lash_kernel_vm::MemoryLimit::Off,
     ] {
-        for memory_limit in [
-            lash_kernel_vm::MemoryLimit::Recount,
-            lash_kernel_vm::MemoryLimit::Off,
-        ] {
-            let mut case = case.clone();
-            case.environment.bounds.memory_limit = memory_limit;
-            let Some(program) = case_program(on, &case) else {
-                failures.push(format!("{}: not admitted", case.name));
-                return;
-            };
-            let reference = Program {
-                library: off.clone(),
-                ..program.clone()
-            };
-            for slice in [7, 50, u64::MAX] {
-                counts.runs += 1;
-                let a = finished::<ON>(&program, &case, slice, durability);
-                let b = finished::<OFF>(&reference, &case, slice, durability);
-                if a != b {
-                    failures.push(format!(
-                        "{}, {durability:?}, memory {memory_limit:?}, slice {slice}: {a:?}, {b:?}",
-                        case.name
-                    ));
-                }
+        let mut case = case.clone();
+        case.environment.bounds.memory_limit = memory_limit;
+        let Some(program) = case_program(on, &case) else {
+            failures.push(format!("{}: not admitted", case.name));
+            return;
+        };
+        let reference = Program {
+            library: off.clone(),
+            ..program.clone()
+        };
+        for slice in [7, 50, u64::MAX] {
+            counts.runs += 1;
+            let a = finished::<ON>(&program, &case, slice);
+            let b = finished::<OFF>(&reference, &case, slice);
+            if a != b {
+                failures.push(format!(
+                    "{}, memory {memory_limit:?}, slice {slice}: {a:?}, {b:?}",
+                    case.name
+                ));
             }
         }
     }
@@ -943,7 +938,6 @@ fn finished<const L: u64>(
     program: &Program,
     case: &Case,
     slice: u64,
-    durability: lash_kernel_vm::Durability,
 ) -> (Vec<u64>, ExpectedEnd, Option<u64>, u64) {
     let start = lash_kernel_vm::CellStart {
         target: lash_kernel_vm::Target::Main,
@@ -953,8 +947,7 @@ fn finished<const L: u64>(
         modes: Default::default(),
         host: Vec::new(),
     };
-    let mut bounds: lash_kernel_vm::Bounds = case.environment.bounds.into();
-    bounds.durability = durability;
+    let bounds: lash_kernel_vm::Bounds = case.environment.bounds.into();
     let mut machine = Plan::<L>::start(
         program.clone(),
         bounds,
@@ -1010,10 +1003,9 @@ fn allocating_regions_hold_what_the_reference_holds() {
                 ..program.clone()
             };
             for slice in [7, 50, u64::MAX] {
-                let durable = lash_kernel_vm::Durability::Durable;
                 assert_eq!(
-                    finished::<ON>(&program, &case, slice, durable),
-                    finished::<OFF>(&reference, &case, slice, durable),
+                    finished::<ON>(&program, &case, slice),
+                    finished::<OFF>(&reference, &case, slice),
                     "{name}, memory {memory_limit:?}, slice {slice}"
                 );
             }

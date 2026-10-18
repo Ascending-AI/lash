@@ -256,11 +256,6 @@ impl PagedHeap {
             .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
-    /// The object and control growth held and not yet projected: the
-    /// young credit an exact count of what is live replaces.
-    pub fn held_growth(&self) -> u64 {
-        self.holdings.held
-    }
     /// Refunds a released young object's accounted cost. The arena calls
     /// this only for allocations since the last seal; objects read from
     /// pages and older objects never refund the baseline. Census membership

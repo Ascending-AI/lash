@@ -979,18 +979,6 @@ impl Frames {
         }
     }
 
-    /// The outermost document body the resident frames run: what
-    /// `tasks::source_body` reads from a durable run's frame rows, for a
-    /// stack that is resident whole.
-    pub(super) fn source_body(&self) -> Result<Option<lash_kernel_doc::Site>, HeapFault> {
-        Ok(self
-            .cache
-            .iter()
-            .map(|(_, frame)| &self.exe.code(frame.code).site)
-            .find(|site| !matches!(site.unit, lash_kernel_doc::Unit::Library(_)))
-            .cloned())
-    }
-
     /// The frames the cache holds, by their index in the stack.
     pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
         self.cache

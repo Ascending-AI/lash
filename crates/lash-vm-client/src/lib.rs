@@ -25,7 +25,7 @@ pub use error::PoolError;
 /// name.
 pub use lash_vm_protocol::{
     BootstrapFault, Charge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit,
-    Durability, Exchange, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
+    Exchange, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
     InfrastructureOutcome, KernelRestoreRefusal, MemoryLimit, OwnerEpoch, PayloadKind, PoolFault,
     ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters,
     RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,

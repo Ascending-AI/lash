@@ -54,7 +54,6 @@ fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (En
             live_tasks: 100,
             requests_per_park: 100,
             join_members: 100,
-            durability: lash_kernel_vm::Durability::Durable,
         },
         CellStart {
             target,

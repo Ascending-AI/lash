@@ -87,7 +87,7 @@ pub use lash_protocol_rlm::tool_presenters::{
 };
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, Charge, CodeRenderer,
-    CodeRendererSlot, Durability, ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit,
+    CodeRendererSlot, ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit,
     RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery, RlmPresentationConfig,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,

@@ -180,7 +180,6 @@ fn the_requests_per_park_bound_ends_the_run() {
 fn the_join_member_bound_ends_the_run() {
     let bounds = Bounds {
         join_members: 2,
-        durability: crate::Durability::Durable,
         ..ROOMY
     };
     assert_eq!(
@@ -354,7 +353,6 @@ main {
         call_depth: 3,
         requests_per_park: 2,
         join_members: 2,
-        durability: crate::Durability::Durable,
         ..ROOMY
     };
     let mut embedder = Embedder::with(

@@ -260,7 +260,6 @@ impl KernelMachine {
             + self.plans as usize
             + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
         let call_depth = u64::from(self.bounds.call_depth);
-        let durable = self.durable();
         let observed = self.observer.is_some();
         let mut scratch = std::mem::take(&mut self.islands);
         scratch.epoch = scratch.epoch.wrapping_add(1);
@@ -268,16 +267,11 @@ impl KernelMachine {
         let arena = Rc::clone(&self.arena);
         let ran = {
             let arena = arena.borrow();
-            let counters = match durable {
-                true => Some(
-                    &mut self
-                        .tasks
-                        .get_mut(task.0 as usize)?
-                        .ok_or_else(|| fault("no task"))?
-                        .counters,
-                ),
-                false => None,
-            };
+            let counters = &mut self
+                .tasks
+                .get_mut(task.0 as usize)?
+                .ok_or_else(|| fault("no task"))?
+                .counters;
             let mut island = Island {
                 exe,
                 stream: exe.document_stream(),

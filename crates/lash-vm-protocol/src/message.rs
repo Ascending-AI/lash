@@ -260,37 +260,6 @@ pub struct RunBounds {
     pub live_tasks: u32,
     pub requests_per_park: u32,
     pub join_members: u32,
-    /// Whether the run can be saved. A durable run is the default and
-    /// states nothing.
-    #[serde(default, skip_serializing_if = "Durability::is_durable")]
-    pub durability: Durability,
-}
-
-/// Whether a run can be saved, chosen when it starts and the same on every
-/// worker that resumes it.
-///
-/// An ephemeral run is never saved: it keeps its whole state in its
-/// worker's memory and does none of the work a save needs. It cannot be
-/// checkpointed, moved or recovered, and exactly once across crashes is not
-/// offered for its effects. A run whose host would have to save it (a park
-/// that requests an effect, or a session cell's end that carries its
-/// session) is refused with [`crate::RunRefusal::Ephemeral`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Durability {
-    /// The run can be saved at every park and resumed from it.
-    #[default]
-    Durable,
-    /// The run is never saved.
-    Ephemeral,
-}
-
-impl Durability {
-    /// Whether this is [`Durability::Durable`].
-    #[must_use]
-    pub const fn is_durable(&self) -> bool {
-        matches!(self, Self::Durable)
-    }
 }
 
 /// What a run starts from.
