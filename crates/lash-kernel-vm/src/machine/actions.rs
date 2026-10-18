@@ -532,8 +532,14 @@ impl KernelMachine {
         site: &Site,
         index: usize,
     ) -> Result<(), Halt> {
+        let observes = host.observes_sites();
+        // Only an identity reads these counts: an ephemeral run, which is
+        // never resumed from them, counts for a host that observes sites.
+        if !observes && !self.durable() {
+            return Ok(());
+        }
         let occurrence = self.task(task)?.counters.advance(index)?;
-        if host.observes_sites() {
+        if observes {
             let identity = self.action_identity(task, site, occurrence)?;
             host.enter_site(&identity);
         }
@@ -1022,18 +1028,14 @@ impl KernelMachine {
         members: &Tree<TaskId>,
         ended: Option<TaskId>,
     ) -> Result<Option<Result<Value, Value>>, Halt> {
-        let immediate = |result: &Result<PageValue, PageValue>| match mode {
+        let immediate = |result: &Ended| match mode {
             JoinMode::Race => true,
             JoinMode::Any => result.is_ok(),
-            JoinMode::All => result.is_err(),
+            JoinMode::All => !result.is_ok(),
             JoinMode::AllSettled => false,
         };
         if let Some(ended) = ended {
-            let result = match &self.task(ended)?.state {
-                TaskState::Ended(super::EndedTask::Returned(value)) => Some(Ok(value.clone())),
-                TaskState::Ended(super::EndedTask::Raised(value)) => Some(Err(value.clone())),
-                _ => None,
-            };
+            let result = self.ended_how(ended)?;
             if let Some(result) = result
                 && immediate(&result)
             {
@@ -1046,11 +1048,7 @@ impl KernelMachine {
             let (_, member) = members
                 .rank_get(at, self.heap.pages())?
                 .ok_or_else(|| fault("a join member is missing"))?;
-            let result = match &self.task(member)?.state {
-                TaskState::Ended(super::EndedTask::Returned(value)) => Some(Ok(value.clone())),
-                TaskState::Ended(super::EndedTask::Raised(value)) => Some(Err(value.clone())),
-                _ => None,
-            };
+            let result = self.ended_how(member)?;
             if (ended.is_none() || matches!(mode, JoinMode::All | JoinMode::Any))
                 && let Some(result) = &result
                 && immediate(result)
@@ -1121,14 +1119,29 @@ impl KernelMachine {
         })
     }
 
+    /// How `task` ended, if it has: its record's page form, or an
+    /// ephemeral run's resident outcome.
+    fn ended_how(&mut self, task: TaskId) -> Result<Option<Ended>, Halt> {
+        let durable = self.durable();
+        let task = self.task(task)?;
+        Ok(match &task.state {
+            TaskState::Ended(_) if !durable => task.resident.outcome.map(Ended::Resident),
+            TaskState::Ended(super::EndedTask::Returned(value)) => {
+                Some(Ended::Page(Ok(value.clone())))
+            }
+            TaskState::Ended(super::EndedTask::Raised(value)) => {
+                Some(Ended::Page(Err(value.clone())))
+            }
+            _ => None,
+        })
+    }
+
     /// A task's ended result, admitted to the arena.
-    fn admit_result(
-        &mut self,
-        result: &Result<PageValue, PageValue>,
-    ) -> Result<Result<Value, Value>, Halt> {
+    fn admit_result(&mut self, result: &Ended) -> Result<Result<Value, Value>, Halt> {
         Ok(match result {
-            Ok(value) => Ok(self.admit_page(value)?),
-            Err(value) => Err(self.admit_page(value)?),
+            Ended::Page(Ok(value)) => Ok(self.admit_page(value)?),
+            Ended::Page(Err(value)) => Err(self.admit_page(value)?),
+            Ended::Resident(result) => *result,
         })
     }
 
@@ -1297,6 +1310,24 @@ fn append<T: Cell>(
         })?,
     };
     tree.write(ordinal_key(index), value, access)
+}
+
+/// How a task ended, as a join reads it.
+#[derive(Clone)]
+enum Ended {
+    /// A durable run's record.
+    Page(Result<PageValue, PageValue>),
+    /// An ephemeral run's resident outcome.
+    Resident(Result<Value, Value>),
+}
+
+impl Ended {
+    fn is_ok(&self) -> bool {
+        match self {
+            Self::Page(result) => result.is_ok(),
+            Self::Resident(result) => result.is_ok(),
+        }
+    }
 }
 
 #[cfg(test)]

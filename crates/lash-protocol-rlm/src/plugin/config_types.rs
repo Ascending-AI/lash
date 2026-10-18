@@ -146,12 +146,14 @@ impl MemoryBound {
 
 nonzero_bound_serde!(MemoryBound);
 
-/// The two independent bounds every code mode execution must choose explicitly.
+/// The two independent bounds every code mode execution must choose
+/// explicitly, and whether its run can be saved (durable unless stated).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBounds {
     pub charge: Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
+    pub durability: lash_vm_client::Durability,
 }
 
 impl ExecutionBounds {
@@ -160,6 +162,7 @@ impl ExecutionBounds {
             charge: Charge::Exact,
             instruction_limit,
             memory_limit,
+            durability: lash_vm_client::Durability::Durable,
         }
     }
 
@@ -170,6 +173,11 @@ impl ExecutionBounds {
 
     pub const fn with_memory_limit(mut self, memory_limit: MemoryBound) -> Self {
         self.memory_limit = memory_limit;
+        self
+    }
+
+    pub const fn with_durability(mut self, durability: lash_vm_client::Durability) -> Self {
+        self.durability = durability;
         self
     }
 

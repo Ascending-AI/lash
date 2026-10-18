@@ -212,6 +212,12 @@ impl RemoteMachines {
                 live_tasks: self.bounds.live_tasks,
                 requests_per_park: self.bounds.requests_per_park,
                 join_members: self.bounds.join_members,
+                durability: match self.bounds.durability {
+                    lash_kernel_vm::Durability::Durable => lash_vm_protocol::Durability::Durable,
+                    lash_kernel_vm::Durability::Ephemeral => {
+                        lash_vm_protocol::Durability::Ephemeral
+                    }
+                },
             },
             binding: binding.0,
             save: self
@@ -771,6 +777,7 @@ mod reservation_tests {
                 live_tasks: u32::MAX,
                 requests_per_park: u32::MAX,
                 join_members: u32::MAX,
+                durability: lash_vm_protocol::Durability::Durable,
             },
             binding: [7; 32],
             save: None,

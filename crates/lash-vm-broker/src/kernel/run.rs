@@ -1037,6 +1037,7 @@ mod tests {
             live_tasks: 8,
             requests_per_park,
             join_members,
+            durability: lash_kernel_vm::Durability::Durable,
         }
     }
 

@@ -81,7 +81,7 @@ impl Machine for KernelMachine {
             }
         }
         self.regs.clear();
-        if result.is_ok() {
+        if result.is_ok() && self.durable() {
             self.tasks
                 .project_occurrences()
                 .map_err(MachineError::Heap)?;
@@ -186,6 +186,9 @@ impl Machine for KernelMachine {
         Ok(Delivered::Accepted)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        if !self.durable() {
+            return Err(SealError::Ephemeral);
+        }
         let sealed = self.seal_projection(budget)?;
         self.projecting = sealed.is_none();
         if sealed.is_some() {
@@ -240,6 +243,9 @@ impl KernelMachine {
         census: Box<dyn AllocationCensus>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
+        if bounds.durability == crate::interface::Durability::Ephemeral {
+            return Err(OpenError::Ephemeral);
+        }
         let limits = lash_kernel_doc::KernelDataLimits::standard();
         // The checkpoint owns its policy, even on a worker configured otherwise.
         let bounds = Bounds {
@@ -319,6 +325,7 @@ impl KernelMachine {
             functions: root.functions,
             host: root.host.clone(),
             heap,
+            session: Default::default(),
             pins: Pins::default(),
             projecting: false,
             charging: true,

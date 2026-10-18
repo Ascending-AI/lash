@@ -24,7 +24,7 @@ pub(super) fn main() -> Result<(), String> {
         Ok("exact") | Err(_) => lash_kernel_vm::Charge::Exact,
         Ok(other) => return Err(format!("unknown charge policy: {other}")),
     };
-    let bounds = Bounds { charge, ..BOUNDS };
+    let bounds = Bounds { charge, ..bounds() };
     let python = file.ends_with(".py");
     let mut source = std::fs::read_to_string(&file).map_err(|error| error.to_string())?;
     // Only the result boundary differs from the CLI engines' print(result).
@@ -139,6 +139,7 @@ pub(super) fn main() -> Result<(), String> {
             "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
             "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
             "observer": "off",
+            "durability": format!("{:?}", bounds.durability).to_lowercase(),
         })
     );
     Ok(())

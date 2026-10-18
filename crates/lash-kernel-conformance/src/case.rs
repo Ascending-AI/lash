@@ -98,6 +98,7 @@ impl From<CaseBounds> for Bounds {
             live_tasks: value.live_tasks,
             requests_per_park: value.requests_per_park,
             join_members: value.join_members,
+            durability: lash_kernel_vm::Durability::Durable,
         }
     }
 }

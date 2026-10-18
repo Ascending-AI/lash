@@ -118,6 +118,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
         live_tasks: 10,
         requests_per_park: 10,
         join_members: 10,
+        durability: lash_kernel_vm::Durability::Durable,
     };
     let observe = |program: &Program, args: Vec<Datum>| {
         let mut machine = super::pages::start(

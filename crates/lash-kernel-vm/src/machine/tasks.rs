@@ -41,6 +41,7 @@ impl Task {
             },
             frames: Frames::new(access, arena, exe),
             published: None,
+            resident: Resident::default(),
         }
     }
     pub(super) fn take_incoming(&mut self) -> Option<IncomingRecord> {
@@ -95,6 +96,7 @@ impl Task {
     /// Makes the task ready to continue with `incoming`, first taking one
     /// more turn of the queue when `requeue` (`K-TASK-005`).
     pub(super) fn wake(&mut self, incoming: IncomingRecord, requeue: bool) {
+        self.resident.arriving = None;
         self.record.state = TaskStateRecord::Resuming { incoming, requeue };
     }
 }
@@ -107,6 +109,26 @@ impl std::ops::Deref for Task {
 impl std::ops::DerefMut for Task {
     fn deref_mut(&mut self) -> &mut TaskRecord {
         &mut self.record
+    }
+}
+
+/// An ephemeral run's arena values of what a task's record holds in page
+/// form in a durable run.
+#[derive(Default)]
+pub(super) struct Resident {
+    /// The task's result, or what it raised, once it ended.
+    pub(super) outcome: Option<Result<lash_kernel_doc::Value, lash_kernel_doc::Value>>,
+    /// The value, or the raise, a list join woke the task with.
+    pub(super) arriving: Option<Result<lash_kernel_doc::Value, lash_kernel_doc::Value>>,
+}
+
+impl Resident {
+    fn each_value(&self, visit: &mut dyn FnMut(&lash_kernel_doc::Value)) {
+        for value in [&self.outcome, &self.arriving].into_iter().flatten() {
+            match value {
+                Ok(value) | Err(value) => visit(value),
+            }
+        }
     }
 }
 
@@ -234,6 +256,12 @@ impl Publication {
 pub(super) struct Tasks {
     rows: Tree<TaskRecord>,
     cache: Vec<Option<(u64, Box<Task>)>>,
+    /// Whether the table is an ephemeral run's, which never writes a
+    /// task's row: a task its cache replaces waits in `spilled`, and the
+    /// table counts its tasks in `started`.
+    resident: bool,
+    spilled: BTreeMap<u64, Box<Task>>,
+    started: u64,
     /// Dirty counters outlive eviction of a task's execution coordinates.
     unprojected: BTreeMap<u64, Occurrences>,
     protected: Option<TaskId>,
@@ -255,6 +283,9 @@ impl Tasks {
     ) -> Self {
         Self {
             rows,
+            resident: false,
+            spilled: BTreeMap::new(),
+            started: 0,
             unprojected: BTreeMap::new(),
             protected: None,
             active: None,
@@ -268,6 +299,18 @@ impl Tasks {
     }
     pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
         Self::open(Tree::new(false), access, arena, exe)
+    }
+    /// The task table of an ephemeral run, which keeps every task it
+    /// starts and writes no row.
+    pub(super) fn resident(
+        access: Access<'static>,
+        arena: SharedArena,
+        exe: Arc<Executable>,
+    ) -> Self {
+        Self {
+            resident: true,
+            ..Self::new(access, arena, exe)
+        }
     }
     /// Visits every arena value the cached tasks' frames hold.
     /// What the canonical walk starts from in the tasks the next
@@ -285,12 +328,49 @@ impl Tasks {
         }
     }
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&lash_kernel_doc::Value)) {
-        for (_, task) in self.cache.iter().flatten() {
+        let spilled = self.spilled.values();
+        for task in self
+            .cache
+            .iter()
+            .flatten()
+            .map(|(_, task)| task)
+            .chain(spilled)
+        {
             task.frames.each_value(visit);
+            task.resident.each_value(visit);
         }
     }
+    /// How many frames the tasks in memory hold.
+    pub(super) fn frames(&self) -> u64 {
+        self.cache
+            .iter()
+            .flatten()
+            .map(|(_, task)| task)
+            .chain(self.spilled.values())
+            .map(|task| task.frames.len() as u64)
+            .sum()
+    }
     pub(super) fn len(&self) -> usize {
+        if self.resident {
+            return self.started as usize;
+        }
         self.rows.len() as usize
+    }
+    /// An ephemeral run's tasks, cached or spilled, by number.
+    fn every_resident(&self) -> Vec<(u64, &Task)> {
+        let mut tasks: Vec<(u64, &Task)> = self
+            .cache
+            .iter()
+            .flatten()
+            .map(|(index, task)| (*index, task.as_ref()))
+            .chain(
+                self.spilled
+                    .iter()
+                    .map(|(index, task)| (*index, task.as_ref())),
+            )
+            .collect();
+        tasks.sort_unstable_by_key(|(index, _)| *index);
+        tasks
     }
     #[inline(always)]
     pub(super) fn get_mut(&mut self, index: usize) -> Result<Option<&mut Task>, HeapFault> {
@@ -415,6 +495,15 @@ impl Tasks {
     /// slot is reused. Two ways leave room beside the running task.
     #[cold]
     fn load(&mut self, index: u64) -> Result<Option<usize>, HeapFault> {
+        if self.resident {
+            let Some(task) = self.spilled.remove(&index) else {
+                return Ok(None);
+            };
+            let slot = self.replacement(index)?;
+            self.evict(slot)?;
+            self.cache[slot] = Some((index, task));
+            return Ok(Some(slot));
+        }
         let Some(mut record) = self.rows.get(&ordinal_key(index), &self.access)? else {
             return Ok(None);
         };
@@ -438,12 +527,21 @@ impl Tasks {
                 record,
                 counters,
                 frames,
+                resident: Resident::default(),
             }),
         ));
         Ok(Some(slot))
     }
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
         self.invalidate_active();
+        if self.resident {
+            let index = self.started;
+            self.started += 1;
+            let slot = self.replacement(index)?;
+            self.evict(slot)?;
+            self.cache[slot] = Some((index, Box::new(task)));
+            return Ok(());
+        }
         let index = self.rows.len();
         let slot = self.replacement(index)?;
         self.evict(slot)?;
@@ -489,6 +587,30 @@ impl Tasks {
         }
         Ok(self.rows.clone())
     }
+    /// How many tasks are outstanding (`K-TASK-018`) in an ephemeral
+    /// run's resident table.
+    pub(super) fn outstanding(&self) -> u64 {
+        self.every_resident()
+            .iter()
+            .filter(|(_, task)| task.record.is_outstanding())
+            .count() as u64
+    }
+    /// The outermost document body still running in each of an ephemeral
+    /// run's resident tasks, by task: what `source_body` reads from a
+    /// durable run's frame rows.
+    pub(super) fn resident_source(
+        &self,
+        task: TaskId,
+    ) -> Result<Option<lash_kernel_doc::Site>, HeapFault> {
+        let Some((_, task)) = self
+            .every_resident()
+            .into_iter()
+            .find(|(index, _)| *index == task.0)
+        else {
+            return Ok(None);
+        };
+        task.frames.source_body()
+    }
     pub(super) fn sealed_root(
         &mut self,
     ) -> Result<(lash_kernel_state::paged::KeyedRoot, u64), HeapFault> {
@@ -509,6 +631,14 @@ impl Tasks {
         &mut self,
         visitor: &mut dyn FnMut(TaskId, &TaskRecord) -> bool,
     ) -> Result<(), HeapFault> {
+        if self.resident {
+            for (index, task) in self.every_resident() {
+                if !visitor(TaskId(index), &task.record) {
+                    break;
+                }
+            }
+            return Ok(());
+        }
         self.roots()?;
         let mut malformed = None;
         self.rows.visit(&self.access, &mut |key, record| {
@@ -535,6 +665,10 @@ impl Tasks {
         let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
+        if self.resident {
+            self.spilled.insert(index, task);
+            return Ok(());
+        }
         put(&mut self.rows, index, &mut task, &self.access, true)?;
         if !task.counters.dirty.is_empty() {
             self.unprojected.insert(index, task.counters);

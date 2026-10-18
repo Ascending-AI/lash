@@ -224,7 +224,17 @@ impl KernelMachine {
         // The objects have grown already: the refinement prices them
         // exactly with the rest of what is live, so nothing more is
         // pending, as a heap allocation refused before it is made.
-        self.refine_for(0)
+        if self.durable() {
+            return self.refine_for(0);
+        }
+        // An ephemeral run prices nothing exactly: what its collection
+        // frees must leave room to hold the growth.
+        self.refine_for(0)?;
+        if self.heap.hold_growth(bytes)? {
+            Ok(())
+        } else {
+            Err(bound(Bound::Memory, self.bounds.memory))
+        }
     }
 
     /// What the bound leaves past what the census holds: the room a native

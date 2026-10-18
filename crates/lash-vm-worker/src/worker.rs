@@ -37,6 +37,9 @@ struct Hosted {
     /// The document's site ordinals, when the parent records the run's
     /// statement path.
     path: Option<std::collections::BTreeMap<lash_kernel_doc::Site, u32>>,
+    /// Whether the run is an ephemeral session cell, whose end its host
+    /// would have to save with the carried session.
+    ephemeral_cell: bool,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -421,6 +424,9 @@ impl<'embedding> Server<'embedding> {
         }
         let root = hosted.machine.checkpoint().map_err(|error| match error {
             lash_kernel_vm::SealError::Heap(fault) => heap_fault(fault),
+            // The parent saves the run here, and an ephemeral run is never
+            // saved.
+            lash_kernel_vm::SealError::Ephemeral => PoolError::refused(RunRefusal::Ephemeral),
             other => machine_breach(other),
         })?;
         hosted.port.checkpointed(root.page).map_err(heap_fault)?;
@@ -505,7 +511,12 @@ impl<'embedding> Server<'embedding> {
             live_tasks: start.bounds.live_tasks,
             requests_per_park: start.bounds.requests_per_park,
             join_members: start.bounds.join_members,
+            durability: match start.bounds.durability {
+                Durability::Durable => lash_kernel_vm::Durability::Durable,
+                Durability::Ephemeral => lash_kernel_vm::Durability::Ephemeral,
+            },
         };
+        let mut ephemeral_cell = false;
         let owner = PageId(start.binding);
         let mut source = WirePageSource::new(self.wire()?, self.bootstrap.tuning.pages.clean_bytes);
         let port = source.port();
@@ -545,6 +556,8 @@ impl<'embedding> Server<'embedding> {
                     ))
                 })?;
                 program.release = PageId(release.0);
+                ephemeral_cell = !start.bounds.durability.is_durable()
+                    && matches!(from.target(), lash_kernel_vm::Target::Main);
                 let session = from
                     .session
                     .as_ref()
@@ -620,6 +633,7 @@ impl<'embedding> Server<'embedding> {
                 KernelMachine::open(program, bounds, &root, admissions, Box::new(source)).map_err(
                     |error| match error {
                         OpenError::Heap(fault) => heap_fault(fault),
+                        OpenError::Ephemeral => PoolError::refused(RunRefusal::Ephemeral),
                         error @ OpenError::Accounting { .. } => machine_breach(error),
                         error => PoolError::refused(RunRefusal::Restore {
                             refusal: restore_refusal(error),
@@ -645,6 +659,7 @@ impl<'embedding> Server<'embedding> {
             port,
             observe_sites: start.observe_sites,
             path,
+            ephemeral_cell,
         })
     }
     /// The content key is the token body itself rather than a claimed
@@ -735,6 +750,11 @@ impl<'embedding> Server<'embedding> {
         let memory = hosted.memory;
         if matches!(step, Step::Ended(_)) {
             hosted.ended = true;
+        }
+        // A cell's end hands its parent the session it carries, which an
+        // ephemeral cell never gives a page form.
+        if hosted.ephemeral_cell && matches!(step, Step::Ended(lash_kernel_vm::End::Finished(_))) {
+            return Err(PoolError::refused(RunRefusal::Ephemeral));
         }
         let meters = RunMeters {
             charged: meters.charged,

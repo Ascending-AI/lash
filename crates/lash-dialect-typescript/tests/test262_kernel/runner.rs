@@ -58,6 +58,7 @@ const BOUNDS: Bounds = Bounds {
     live_tasks: 1_024,
     requests_per_park: 1_024,
     join_members: 1_024,
+    durability: lash_kernel_vm::Durability::Durable,
 };
 
 /// What one test did on the kernel.

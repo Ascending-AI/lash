@@ -82,6 +82,7 @@ fn run_bounded<const L: u64>(
         live_tasks: 100,
         requests_per_park: 100,
         join_members: 100,
+        durability: lash_kernel_vm::Durability::Durable,
     };
     let source = projector
         .imports
@@ -601,6 +602,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                         live_tasks: 100,
                         requests_per_park: 100,
                         join_members: 100,
+                        durability: lash_kernel_vm::Durability::Durable,
                     },
                     CellStart {
                         target: Target::Main,

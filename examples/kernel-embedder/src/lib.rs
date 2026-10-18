@@ -57,6 +57,7 @@ pub fn embed<M: Machine>(
         live_tasks: 32,
         requests_per_park: 32,
         join_members: 32,
+        durability: lash_kernel_vm::Durability::Durable,
     };
     let source = pages::Source::default();
     let mut machine = M::start(

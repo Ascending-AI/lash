@@ -366,6 +366,7 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
                     live_tasks: 100,
                     requests_per_park: 100,
                     join_members: 100,
+                    durability: lash_kernel_vm::Durability::Durable,
                 },
                 lash_kernel_vm::kernel_internals::Layout::default(),
             )

@@ -1184,6 +1184,27 @@ impl Arena {
         self.zero = kept;
     }
 
+    /// [`Self::release`] inside a statement, where what the running
+    /// statement made is live though no root holds it yet: an ephemeral
+    /// run's collection point, which has no published roots to refine.
+    pub fn release_inside_statement(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
+        let mut made = Vec::new();
+        for handle in &self.statement {
+            if self.objects.get(*handle).is_none() {
+                continue;
+            }
+            let facts = &mut self.facts[handle.index() as usize];
+            if !facts.mark {
+                facts.mark = true;
+                made.push(*handle);
+            }
+        }
+        self.release(roots);
+        for handle in made {
+            self.facts[handle.index() as usize].mark = false;
+        }
+    }
+
     /// Marks the objects `roots` visits, each once, and gives them.
     fn mark_roots(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) -> Vec<ArenaHandle> {
         let mut visited = Vec::new();
@@ -1235,6 +1256,39 @@ impl Arena {
     /// and the collection exits at once.
     pub fn cycles_due(&self) -> bool {
         self.resident >= self.collect_at && self.candidates > 0
+    }
+
+    /// The cost of the young objects reachable from what `roots` visits
+    /// or from what the running statement made: what an ephemeral run
+    /// holds in the arena, priced without projecting it. Garbage cycles
+    /// are not reached, as an exact refinement does not trace them.
+    pub fn reachable_young_cost(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) -> u64 {
+        let mut pending: Vec<ArenaHandle> = self.statement.clone();
+        roots(&mut |value| pending.extend(value.handle()));
+        let (mut marked, mut cost) = (Vec::new(), 0_u64);
+        while let Some(handle) = pending.pop() {
+            let Some(body) = self.objects.get(handle) else {
+                continue;
+            };
+            let facts = &mut self.facts[handle.index() as usize];
+            if facts.mark {
+                continue;
+            }
+            facts.mark = true;
+            crate::perf_witness::record(|work| work.arena_marks += 1);
+            marked.push(handle);
+            if facts.born == Some(self.seals) && facts.entity.is_none() {
+                cost = cost.saturating_add(facts.summary.cost);
+            }
+            each_member(body, &mut |value| pending.extend(value.handle()));
+            if let Body::Closure { captures, .. } = body {
+                pending.extend(captures.iter().copied());
+            }
+        }
+        for handle in marked {
+            self.facts[handle.index() as usize].mark = false;
+        }
+        cost
     }
 
     /// Frees every object neither reachable from what `roots` visits nor

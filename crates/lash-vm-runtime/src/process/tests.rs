@@ -487,6 +487,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             live_tasks: 16,
             requests_per_park: 16,
             join_members: 16,
+            durability: lash_kernel_vm::Durability::Durable,
         },
     )
     .observing(lash_kernel_vm::ObservationMode::Counts);

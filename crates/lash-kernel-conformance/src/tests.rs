@@ -10,6 +10,7 @@ include!("corpus_files.rs");
 mod contract_cases;
 
 mod charge;
+mod ephemeral;
 mod protocol;
 
 // These three owning-library shards fill rules this corpus does not own.

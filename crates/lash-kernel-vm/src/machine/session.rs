@@ -65,7 +65,14 @@ pub(crate) fn start(
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
-        tasks: tasks::Tasks::new(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe)),
+        tasks: match bounds.durability {
+            crate::interface::Durability::Durable => {
+                tasks::Tasks::new(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe))
+            }
+            crate::interface::Durability::Ephemeral => {
+                tasks::Tasks::resident(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe))
+            }
+        },
         ready: queue::Queue::open(Tree::new(true), access.clone()),
         current: Some(TaskId::MAIN),
         joins: Tree::new(false),
@@ -80,6 +87,7 @@ pub(crate) fn start(
         host: Vec::new(),
         save: None,
         session_cell: matches!(start.target, Target::Main),
+        session: Default::default(),
         pins: Pins::default(),
         projecting: false,
         charging: false,
@@ -102,6 +110,12 @@ pub(crate) fn start(
         #[cfg(test)]
         boundaries: 0,
     };
+    if !machine.durable() {
+        // An ephemeral run never installs its roots: the heap refuses a
+        // write that needs an exact refinement, and the run reclaims at
+        // its collection point instead (`refine_for`).
+        machine.heap.execution_roots_moved();
+    }
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,
@@ -316,6 +330,9 @@ impl KernelMachine {
     }
 
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
+        if let Some((_, value)) = self.session.get(&name.key) {
+            return Ok(Some(*value));
+        }
         let bound = self.heap_write(|heap| {
             heap.load_session_bound_at(&name.key)
                 .map_err(super::write_halt)
@@ -335,6 +352,20 @@ impl KernelMachine {
         })
     }
     pub(super) fn session_write(
+        &mut self,
+        name: &BindingName,
+        value: Value,
+        existing: bool,
+    ) -> Result<bool, Halt> {
+        if !self.durable() {
+            return self.session_keep(name, value, existing);
+        }
+        self.session_store(name, value, existing)
+    }
+
+    /// Writes the binding `name` to the heap's session, its value in page
+    /// form.
+    fn session_store(
         &mut self,
         name: &BindingName,
         value: Value,
@@ -362,8 +393,41 @@ impl KernelMachine {
             .map_err(super::write_halt)
         })
     }
+    /// An ephemeral run's session write: the arena value over the carried
+    /// session's binding, given no page form. An assignment to a name
+    /// neither binds is refused.
+    fn session_keep(
+        &mut self,
+        name: &BindingName,
+        value: Value,
+        existing: bool,
+    ) -> Result<bool, Halt> {
+        if existing && !self.session.contains_key(&name.key) {
+            let bound = self.heap_write(|heap| {
+                heap.load_session_bound_at(&name.key)
+                    .map_err(super::write_halt)
+            })?;
+            if bound.is_none() {
+                return Ok(false);
+            }
+        }
+        self.session
+            .insert(Arc::clone(&name.key), (name.clone(), value));
+        Ok(true)
+    }
+
+    /// Writes an ephemeral run's session bindings to the heap's session,
+    /// which a function crossing out of the run reads.
+    pub(super) fn store_session(&mut self) -> Result<(), Halt> {
+        for (_, (name, value)) in std::mem::take(&mut self.session) {
+            self.session_store(&name, value, false)?;
+        }
+        Ok(())
+    }
     pub(super) fn finished(&mut self, result: Datum, finish: bool) -> Result<Finished, Halt> {
-        if !self.session_cell {
+        // An ephemeral cell carries no session: its bindings are never
+        // given a page form.
+        if !self.session_cell || !self.durable() {
             return Ok(Finished {
                 result,
                 finish,

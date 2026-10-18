@@ -353,6 +353,11 @@ pub enum RunRefusal {
     /// The parked run is not one this machine resumes.
     #[error("the machine refuses to resume the run: {detail}")]
     Resume { detail: Detail },
+    /// The run is ephemeral ([`crate::Durability::Ephemeral`]) and reached
+    /// a point its host saves: a park that requests an effect or a sleep,
+    /// or a session cell's end that carries its session.
+    #[error("the run is ephemeral; it cannot be saved")]
+    Ephemeral,
 }
 
 /// What a worker may say of its own failure: that the protocol was broken,

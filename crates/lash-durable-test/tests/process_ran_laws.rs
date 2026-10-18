@@ -113,6 +113,7 @@ fn bounds() -> lash_kernel_vm::Bounds {
         live_tasks: pool.live_tasks,
         requests_per_park: pool.requests_per_park,
         join_members: pool.join_members,
+        durability: lash_kernel_vm::Durability::Durable,
     }
 }
 

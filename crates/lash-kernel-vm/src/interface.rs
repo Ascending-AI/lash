@@ -83,6 +83,39 @@ pub struct Bounds {
     pub requests_per_park: u32,
     /// The most members one `join` on a list may have.
     pub join_members: u32,
+    /// Whether the run can be saved, chosen when it starts and the same on
+    /// every machine that resumes it.
+    pub durability: Durability,
+}
+
+/// Whether a run can be saved (`K-MACH-007`).
+///
+/// An ephemeral run is never saved. It executes on the machine's own
+/// memory alone: no value takes a page form or a durable id, nothing is
+/// published to the heap, no coordinate is kept that only resuming at a
+/// saved continuation reads, and a park keeps its continuation in the
+/// machine, which resumes it when its outcomes are delivered. It cannot be
+/// sealed, opened from a root, moved or recovered: [`Machine::seal`]
+/// refuses with [`SealError::Ephemeral`] and [`Machine::open`] with
+/// [`OpenError::Ephemeral`]. Its effects still run in request order and
+/// their outcomes are delivered as a durable run's are; exactly once
+/// across crashes is not offered. A session cell that ends ephemerally
+/// carries no session ([`Finished::carry`] is `None`).
+///
+/// Its results, prints, charge, effects and parks are a durable run's,
+/// with two exceptions. An effect's identity names its site and the task
+/// that requested it as a durable run's does, and is unique within the
+/// run, but call and join occurrences are not counted unless the host
+/// observes sites. Its memory bound is held conservatively: under
+/// pressure the run frees what nothing holds and refuses when the rest
+/// does not fit, without the exact refinement a published heap allows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Durability {
+    /// The run can be sealed at every safe point and resumed from it.
+    #[default]
+    Durable,
+    /// The run is never saved.
+    Ephemeral,
 }
 
 /// Which bound a run passed.

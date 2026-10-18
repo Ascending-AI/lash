@@ -921,6 +921,15 @@ impl KernelMachine {
             let size = self.deep_size(value)?;
             self.charge(size)?;
         }
+        if !self.durable() {
+            // Data crosses as a copy-out does, and an ephemeral run copies
+            // it from the arena. Only a function crossing reads the heap:
+            // its session bindings go there first.
+            if !self.reaches_function(value)? {
+                return Ok(self.copy_datum(value)?);
+            }
+            self.store_session()?;
+        }
         // The crossing gathers functions from the page form: the heap
         // holds what the arena does first, each new object the argument
         // reaches with its id.
@@ -949,6 +958,42 @@ impl KernelMachine {
         Ok(datum)
     }
 
+    /// Whether `value` reaches a closure or a function reference: what an
+    /// effect argument crosses as a function value.
+    fn reaches_function(&mut self, value: &Value) -> Result<bool, Halt> {
+        fn function(value: &Value) -> bool {
+            matches!(
+                value,
+                Value::Closure(_) | Value::Function(_) | Value::LongFunction(_)
+            )
+        }
+        if function(value) {
+            return Ok(true);
+        }
+        self.warm_reachable(value)?;
+        let arena = self.arena.borrow();
+        let mut pending: Vec<lash_kernel_doc::arena::ArenaHandle> =
+            value.handle().into_iter().collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut found = false;
+        while let Some(handle) = pending.pop() {
+            if found {
+                break;
+            }
+            if !seen.insert((handle.index(), handle.generation())) {
+                continue;
+            }
+            let body = arena
+                .body(handle)
+                .map_err(|error| fault(&error.to_string()))?;
+            lash_kernel_state::arena::each_member(body, &mut |member| {
+                found |= function(member);
+                pending.extend(member.handle());
+            });
+        }
+        Ok(found)
+    }
+
     /// What a task's pending statement resumes with (`K-TASK-009`,
     /// `K-EFF-005`, `K-EFF-009`).
     pub(super) fn resume(
@@ -957,6 +1002,13 @@ impl KernelMachine {
         exe: &Executable,
         incoming: Incoming,
     ) -> Eval<Value> {
+        if !self.durable()
+            && let Some(arriving) = self.task(task)?.resident.arriving.take()
+        {
+            // An ephemeral run's list join woke the task with its decision
+            // as it is.
+            return arriving.map_err(Interrupt::raised);
+        }
         match incoming {
             Incoming::Value(value) => Ok(self.admit_page(&value)?),
             Incoming::Raise(value) => Err(Interrupt::raised(self.admit_page(&value)?)),
@@ -1017,7 +1069,18 @@ impl KernelMachine {
     /// gives it: its value, or a raise of its error, which is then
     /// observed (`K-TASK-016`).
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
+        let durable = self.durable();
         let joined = self.task(joined)?;
+        if !durable && matches!(joined.state, TaskState::Ended(_)) {
+            return match joined.resident.outcome {
+                Some(Ok(value)) => Ok(value),
+                Some(Err(value)) => {
+                    joined.observed = true;
+                    Err(Interrupt::raised(value))
+                }
+                None => Err(fault("an ephemeral task ended with no outcome").into()),
+            };
+        }
         match &joined.state {
             TaskState::Ended(super::EndedTask::Returned(value)) => {
                 let value = value.clone();

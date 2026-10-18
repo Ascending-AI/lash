@@ -160,6 +160,7 @@ fn bounds() -> Bounds {
         live_tasks: 8,
         requests_per_park: 8,
         join_members: 8,
+        durability: lash_kernel_vm::Durability::Durable,
     }
 }
 

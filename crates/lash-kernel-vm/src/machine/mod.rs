@@ -343,6 +343,10 @@ struct Task {
     frames: frames::Frames,
     /// Non-owning comparison with the last row written (FIG-6586).
     published: Option<tasks::Publication>,
+    /// An ephemeral run's arena values of what its record holds in page
+    /// form in a durable run: the task's result or raise once it ended,
+    /// and the value or raise a list join woke it with. Never saved.
+    resident: tasks::Resident,
 }
 
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
@@ -390,6 +394,9 @@ pub struct KernelMachine {
     /// drops them.
     save: Option<Box<dyn crate::interface::CellSave>>,
     session_cell: bool,
+    /// An ephemeral run's session bindings this cell wrote, by binding key:
+    /// arena values over the carried session's, never given a page form.
+    session: std::collections::HashMap<Arc<[u8]>, (crate::compile::BindingName, Value)>,
     /// What the statement being run holds outside any variable.
     pins: Pins,
     /// A seal ran out of budget mid-projection: the run refuses to run
@@ -491,6 +498,11 @@ impl Pins {
 }
 
 impl KernelMachine {
+    /// Whether the run can be saved (`Durability`).
+    #[inline(always)]
+    fn durable(&self) -> bool {
+        self.bounds.durability == crate::interface::Durability::Durable
+    }
     #[cfg(test)]
     pub(crate) fn accounting(&self) -> lash_kernel_state::paged::AccountingCertificate {
         self.heap.certificate()
@@ -655,6 +667,11 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
+        // Nothing reads an ephemeral run's heap roots: it never seals, and
+        // its pressure accounting reads the arena (`refine_for`).
+        if !self.durable() {
+            return Ok(());
+        }
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.identify(coordinates)?;
@@ -931,12 +948,16 @@ impl KernelMachine {
         if !release && !cycles {
             return Ok(());
         }
-        let tasks = &self.tasks;
+        let (tasks, session) = (&self.tasks, &self.session);
+        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
+            tasks.each_value(visit);
+            session.values().for_each(|(_, value)| visit(value));
+        };
         let mut arena = self.arena.borrow_mut();
         if cycles {
-            arena.collect_cycles(&mut |visit| tasks.each_value(visit));
+            arena.collect_cycles(&mut roots);
         }
-        arena.release(&mut |visit| tasks.each_value(visit));
+        arena.release(&mut roots);
         let young = arena.take_released_young();
         drop(arena);
         if young > 0 {
@@ -964,6 +985,9 @@ impl KernelMachine {
     /// and refines exactly with `bytes` pending, so the verdict is given
     /// here, over current roots (FIG-6318).
     pub(super) fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
+        if !self.durable() {
+            return self.reclaim_for(bytes);
+        }
         self.publish_holdings()?;
         // What the statement built and no root holds yet, a native's
         // result on its way to a register, is live: the refinement prices
@@ -979,6 +1003,49 @@ impl KernelMachine {
         Ok(())
     }
 
+    /// An ephemeral run's collection point: it publishes no roots, so no
+    /// exact refinement can trace them. It frees every object whose count
+    /// fell to zero and that nothing the run holds, nor the running
+    /// statement made, which refunds what they were accounted. It then
+    /// prices what the run holds in memory, as a refinement prices what
+    /// published roots reach: the young objects its values and the running
+    /// statement reach, its frames and the values they hold. The growth
+    /// held past that is refunded, so holds and slot growth released since
+    /// do not accumulate. It refuses when what remains and `bytes` do not
+    /// fit the bound.
+    fn reclaim_for(&mut self, bytes: u64) -> Result<(), Halt> {
+        let (tasks, session, regs, pins) = (&self.tasks, &self.session, &self.regs, &self.pins);
+        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
+            tasks.each_value(visit);
+            session.values().for_each(|(_, value)| visit(value));
+            regs.projection().iter().for_each(&mut *visit);
+            pins.values.iter().for_each(&mut *visit);
+            pins.borrowed.iter().for_each(&mut *visit);
+        };
+        let mut arena = self.arena.borrow_mut();
+        arena.release_inside_statement(&mut roots);
+        let young = arena.take_released_young();
+        let objects = arena.reachable_young_cost(&mut roots);
+        let mut values = 0_u64;
+        roots(&mut |value| values = values.saturating_add(arena.cost_of(value)));
+        drop(arena);
+        if young > 0 {
+            self.heap.release_young(young)?;
+        }
+        let live = objects
+            .saturating_add(values)
+            .saturating_add(self.tasks.frames().saturating_mul(FRAME_BYTES));
+        let surplus = self.heap.held_growth().saturating_sub(live);
+        if surplus > 0 {
+            self.heap.release_young(surplus)?;
+        }
+        let held = self.heap.certificate().upper.0;
+        match held.checked_add(bytes) {
+            Some(total) if total <= self.bounds.memory => Ok(()),
+            _ => Err(bound(Bound::Memory, self.bounds.memory)),
+        }
+    }
+
     /// Makes a heap write. One that needs an exact refinement while the
     /// run's roots are unpublished refuses before it changes anything; the
     /// run refines at its collection point and makes the write again,
@@ -992,7 +1059,14 @@ impl KernelMachine {
             Err(error) => match self.heap.take_refusal() {
                 Some(bytes) => {
                     self.refine_for(bytes)?;
-                    write(&mut self.heap)
+                    let again = write(&mut self.heap);
+                    // An ephemeral run's roots are never installed, so the
+                    // write refuses for precision again when the room its
+                    // collection left is not enough.
+                    if again.is_err() && self.heap.take_refusal().is_some() {
+                        return Err(E::from(bound(Bound::Memory, self.bounds.memory)));
+                    }
+                    again
                 }
                 None => Err(error),
             },
@@ -1100,17 +1174,28 @@ impl KernelMachine {
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
     fn end_task(&mut self, task: TaskId, outcome: Result<Value, Value>) -> Result<(), Halt> {
-        let pages = self.heap.pages().clone();
-        let result = {
+        let durable = self.durable();
+        let result = if durable {
+            let pages = self.heap.pages().clone();
             let mut arena = self.arena.borrow_mut();
             match &outcome {
                 Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
                 Err(value) => Err(project::project(&mut arena, &pages, value)?),
             }
+        } else {
+            // An ephemeral run keeps the outcome as it is, resident with
+            // the task; its record only says how the task ended.
+            match &outcome {
+                Ok(_) => Ok(PageValue::Null),
+                Err(_) => Err(PageValue::Null),
+            }
         };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();
+        if !durable {
+            ended.resident.outcome = Some(outcome);
+        }
         ended.failed = result.is_err();
         ended.state = TaskState::Ended(match result.clone() {
             Ok(value) => EndedTask::Returned(value),
@@ -1151,6 +1236,11 @@ impl KernelMachine {
                     if let Some(decision) = self.decide(mode, &members, Some(task))? {
                         self.remove_list_join(order)?;
                         self.pass(&members)?;
+                        if !self.durable() {
+                            self.wake(joiner, Incoming::Value(PageValue::Null))?;
+                            self.task(joiner)?.resident.arriving = Some(decision);
+                            continue;
+                        }
                         let incoming = match decision {
                             Ok(value) => Incoming::Value(self.page_form(&value)?),
                             Err(value) => Incoming::Raise(self.page_form(&value)?),
@@ -1184,7 +1274,7 @@ impl KernelMachine {
                         unobserved.push(task.identity)
                     }
                     TaskState::Ended(_) => (),
-                    _ => unfinished.push((task.identity, task.frames.clone())),
+                    _ => unfinished.push((id, task.identity, task.frames.clone())),
                 }
             }
             true
@@ -1193,10 +1283,15 @@ impl KernelMachine {
             let mut sources = Vec::new();
             let unfinished = unfinished
                 .into_iter()
-                .map(|(id, frames)| {
+                .map(|(task, id, frames)| {
                     let identity =
                         lash_kernel_doc::kernel_internals::task_label(id.resolve(&access)?);
-                    if let Some(site) = tasks::source_body(&frames, &self.exe, &access)? {
+                    let source = if self.durable() {
+                        tasks::source_body(&frames, &self.exe, &access)?
+                    } else {
+                        self.tasks.resident_source(task)?
+                    };
+                    if let Some(site) = source {
                         sources.push((identity.clone(), site.position()));
                     }
                     Ok(identity)
@@ -1259,9 +1354,13 @@ impl KernelMachine {
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(lash_kernel_doc::kernel_internals::wait_id(wait));
         }
-        let tasks = self.task_table().map_err(MachineError::Heap)?;
-        tasks.project_occurrences().map_err(MachineError::Heap)?;
-        let (_, outstanding) = tasks.sealed_root().map_err(MachineError::Heap)?;
+        let outstanding = if self.durable() {
+            let tasks = self.task_table().map_err(MachineError::Heap)?;
+            tasks.project_occurrences().map_err(MachineError::Heap)?;
+            tasks.sealed_root().map_err(MachineError::Heap)?.1
+        } else {
+            self.tasks.outstanding()
+        };
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,

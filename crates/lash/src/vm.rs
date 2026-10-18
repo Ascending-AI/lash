@@ -99,7 +99,7 @@ pub use crate::kernel_migration::{
 pub use lash_protocol_types::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
     BootstrapFault, Charge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit,
-    DiskSpool, EffectPhase, EffectPhases, Exchange, ExecutionClass, ExecutionLease,
+    DiskSpool, Durability, EffectPhase, EffectPhases, Exchange, ExecutionClass, ExecutionLease,
     ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal, HeapFault, HostReadKind,
     InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal, OwnerEpoch, PageRefusal, PayloadKind,
     PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach,
