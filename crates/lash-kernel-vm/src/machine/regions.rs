@@ -44,6 +44,9 @@ use crate::observe::ChargeTape;
 /// and grow in.
 const NURSERY: u64 = 1 << 16;
 
+#[cfg(test)]
+mod admission_laws;
+
 /// The session slots a region holds without allocating.
 const SESSIONS_INLINE: usize = 8;
 
@@ -239,7 +242,6 @@ impl KernelMachine {
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
                 args: super::registers::Arguments::new(),
-                args_reserved: false,
                 exe,
                 arena: &mut arena,
                 heap: &mut self.heap,

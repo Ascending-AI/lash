@@ -10,7 +10,7 @@
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
-use lash_kernel_doc::{NewObject, Value};
+use lash_kernel_doc::{NewObject, Value, ValueKind};
 
 use super::{Arena, each_member, has_cold, is_mutable, local_cost};
 
@@ -98,6 +98,28 @@ impl Arena {
             built.push((*handle, local));
         }
         grown
+    }
+
+    /// No more than [`Self::install_bound`] gives for a new list, set,
+    /// map or record of `members` members (a map's or a record's entries),
+    /// nor than a new tuple of `members` members costs: no member is held
+    /// for less than 16 bytes, a holder's rows cost 32 more, a set's
+    /// members and a tuple 16 more each. What a region admits before it
+    /// collects a construction's members, so that one its room cannot hold
+    /// leaves its statement before they are allocated.
+    pub fn construction_floor(&self, kind: ValueKind, members: usize) -> u64 {
+        if self.unaccounted {
+            return 0;
+        }
+        let members = members as u64;
+        match kind {
+            ValueKind::List => 32u64.saturating_add(16u64.saturating_mul(members)),
+            ValueKind::Set | ValueKind::Map | ValueKind::Record => {
+                32u64.saturating_add(32u64.saturating_mul(members))
+            }
+            ValueKind::Tuple => 16u64.saturating_add(16u64.saturating_mul(members)),
+            _ => 0,
+        }
     }
 
     /// Walks what `value` reaches in memory: each object without an id

@@ -21,7 +21,7 @@ use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::plan::TemplateHeap;
 use lash_kernel_doc::{
-    Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, Value, WorkCounter,
+    Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, Value, ValueKind, WorkCounter,
 };
 use lash_kernel_exec::{Op, OpRange, RegRange};
 use lash_kernel_state::arena::Arena;
@@ -119,7 +119,6 @@ pub(crate) struct SessionSlot {
 pub(crate) struct Cx<'a> {
     pub(crate) meter: Meter,
     pub(crate) args: Arguments,
-    pub(crate) args_reserved: bool,
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
     pub(crate) heap: &'a mut PagedHeap,
@@ -135,7 +134,8 @@ pub(crate) struct Cx<'a> {
     pub(crate) room: u64,
     /// What the running statement reserves until it ends, out of the
     /// room: its pins and its native calls' work, as the reference's
-    /// statement credit.
+    /// statement credit; and, while a construction collects its members,
+    /// the least it will hold.
     pub(crate) transient: u64,
     /// The fault a node met, which ends the run: a miss is no fault.
     pub(crate) fault: Option<HeapFault>,
@@ -150,16 +150,36 @@ pub(crate) struct Cx<'a> {
 }
 
 impl Cx<'_> {
-    /// Admits the entire retained inline capacity once per statement,
-    /// before exposing a window. Exhaustion exits to the reference path.
+    /// A window of `count` operands, which takes none of the room: what
+    /// it holds is held already, as the reference's registers are. A
+    /// window past the inline capacity exits to the reference.
     fn argument_window(&mut self, count: usize) -> Option<Range<usize>> {
-        if !self.args_reserved {
-            if !self.reserve(std::mem::size_of::<Arguments>() as u64) {
-                return None;
-            }
-            self.args_reserved = true;
-        }
         self.args.window(count)
+    }
+
+    /// Collects the members of a new `kind` of `members` members with the
+    /// least it will hold set aside of the room, so that what is admitted
+    /// while they are collected leaves room for it; `None` before anything
+    /// is collected where the room does not admit that least, which leaves
+    /// the statement to the reference.
+    fn collecting<T>(
+        &mut self,
+        kind: ValueKind,
+        members: usize,
+        collect: impl FnOnce(&mut Self) -> Option<T>,
+    ) -> Option<T> {
+        let floor = if self.memory {
+            self.arena.construction_floor(kind, members)
+        } else {
+            0
+        };
+        if floor > self.free() {
+            return None;
+        }
+        self.transient += floor;
+        let collected = collect(self);
+        self.transient -= floor;
+        collected
     }
 
     /// The room the running statement may still take.
@@ -240,7 +260,6 @@ impl Cx<'_> {
     /// garbage (its kill set), and the arena is at a statement boundary.
     pub(crate) fn statement_ended(&mut self) {
         self.transient = 0;
-        self.args_reserved = false;
         if self.memory
             && let Err(fault) = self.heap.release_statement_roots()
         {
@@ -1052,22 +1071,27 @@ fn operands(regs: &mut [Option<(Node, u32)>], args: RegRange) -> Option<Vec<Node
         .collect()
 }
 
-/// The values of `nodes`, in order.
+/// The values of `nodes`, in order, into a buffer of exactly their
+/// count, which [`Cx::collecting`] admitted.
 #[inline(always)]
 fn values(nodes: &[Node], slots: &[SlotState], cx: &mut Cx<'_>) -> Option<Vec<Value>> {
-    nodes.iter().map(|node| node(slots, cx)).collect()
+    let mut values = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        values.push(node(slots, cx)?);
+    }
+    Some(values)
 }
 
 /// Evaluates operands into a disjoint bounded window. A nested call may
 /// reuse only the space after it. Every exit releases the window, so a miss
 /// falls back before the statement without keeping an arena reference.
-fn arguments(
+fn arguments<T>(
     nodes: &[Node],
     arity: usize,
     slots: &[SlotState],
     cx: &mut Cx<'_>,
-    call: impl FnOnce(&mut Cx<'_>, Range<usize>) -> Option<Value>,
-) -> Option<Value> {
+    call: impl FnOnce(&mut Cx<'_>, Range<usize>) -> Option<T>,
+) -> Option<T> {
     let window = cx.argument_window(arity)?;
     let answer = (|| {
         for (index, node) in nodes.iter().enumerate() {
@@ -1179,7 +1203,9 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
 /// `too_deep`.
 fn tuple(items: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        let members = values(&items, slots, cx)?;
+        let members = cx.collecting(ValueKind::Tuple, items.len(), |cx| {
+            values(&items, slots, cx)
+        })?;
         let tuple = cx.arena.tuple(members, cx.limits.value_depth()).ok()?;
         cx.pin(&tuple).then_some(tuple)
     })
@@ -1188,8 +1214,9 @@ fn tuple(items: Vec<Node>) -> Node {
 /// The compiled list of `items`, or set when `set`: a set's members are
 /// legal keys.
 fn list(items: Vec<Node>, set: bool) -> Node {
+    let kind = if set { ValueKind::Set } else { ValueKind::List };
     Box::new(move |slots, cx| {
-        let members = values(&items, slots, cx)?;
+        let members = cx.collecting(kind, items.len(), |cx| values(&items, slots, cx))?;
         if set {
             if members.iter().any(|member| cx.arena.key(member).is_err()) {
                 return None;
@@ -1203,26 +1230,31 @@ fn list(items: Vec<Node>, set: bool) -> Node {
 /// The compiled map of the keys and values `entries` holds by turns.
 fn map(entries: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        arguments(&entries, entries.len(), slots, cx, |cx, window| {
-            let pairs = cx.args[window].as_chunks::<2>().0;
-            let mut table = Vec::with_capacity(pairs.len());
-            for &[key, value] in pairs {
-                cx.arena.key(&key).ok()?;
-                table.push((key, value));
-            }
-            cx.build(NewObject::Map(table))
-        })
+        let table = cx.collecting(ValueKind::Map, entries.len() / 2, |cx| {
+            arguments(&entries, entries.len(), slots, cx, |cx, window| {
+                let pairs = cx.args[window].as_chunks::<2>().0;
+                let mut table = Vec::with_capacity(pairs.len());
+                for &[key, value] in pairs {
+                    cx.arena.key(&key).ok()?;
+                    table.push((key, value));
+                }
+                Some(table)
+            })
+        })?;
+        cx.build(NewObject::Map(table))
     })
 }
 
 /// The compiled record of fields `names`, each with its value's node.
 fn record(names: Box<[Value]>, values_of: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        let fields = names
-            .iter()
-            .zip(&values_of)
-            .map(|(name, node)| Some((*name, node(slots, cx)?)))
-            .collect::<Option<Vec<_>>>()?;
+        let fields = cx.collecting(ValueKind::Record, names.len(), |cx| {
+            let mut fields = Vec::with_capacity(names.len());
+            for (name, node) in names.iter().zip(&values_of) {
+                fields.push((*name, node(slots, cx)?));
+            }
+            Some(fields)
+        })?;
         cx.build(NewObject::Record(fields))
     })
 }
