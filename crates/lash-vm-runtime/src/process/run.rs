@@ -846,7 +846,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
 impl KernelRecordedSettings {
     pub(crate) fn bounds(&self) -> Bounds {
         Bounds {
-            memory_limit: self.memory_limit,
+            memory_meter: self.memory_meter,
             charge: self.charge,
             charge_limit: self.charge_limit,
             memory: self.memory,

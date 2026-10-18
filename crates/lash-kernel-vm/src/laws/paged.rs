@@ -518,11 +518,11 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
     use lash_kernel_doc::{Datum, Name};
     let embedder = Embedder::new("main { }");
     for (names, refused_size) in [
-        (vec![Name::new("h".repeat(3059))], None),
-        (vec![Name::new("h".repeat(3060))], Some(3065)),
+        (vec![Name::new("h".repeat(3038))], None),
+        (vec![Name::new("h".repeat(3039))], Some(3044)),
         (vec![Name::new("é".repeat(2048))], Some(4101)),
-        (vec![Name::new(""); 1530], None),
-        (vec![Name::new(""); 1531], Some(3065)),
+        (vec![Name::new(""); 1520], None),
+        (vec![Name::new(""); 1521], Some(3045)),
     ] {
         let (program, _) = embedder.program(false);
         let result = crate::KernelMachine::start_with_census(
@@ -544,7 +544,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
             assert!(
                 matches!(
                     result,
-                    Err(StartError::HostMetadataTooLarge { limit: 3064, actual: size })
+                    Err(StartError::HostMetadataTooLarge { limit: 3043, actual: size })
                         if size == actual
                 ),
                 "oversized host metadata must retain its typed limit and size"

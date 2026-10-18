@@ -560,7 +560,7 @@ mod tests {
             "kernel 1\nnumbers by_spelling\nuse work.spin = @{function}\nmain {{ return work.spin() }}",
         )).expect("document");
             let bounds = Bounds {
-                memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
                 charge: lash_kernel_vm::Charge::Exact,
                 charge_limit: 1000,
                 memory: 1 << 20,

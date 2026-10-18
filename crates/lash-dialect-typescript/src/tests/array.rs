@@ -88,7 +88,7 @@ fn drive_document(
         library: kernel.prepared.clone(),
     };
     let bounds = Bounds {
-        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+        memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: 100_000_000,
         memory: 16 << 20,
@@ -793,7 +793,7 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
             library: kernel().prepared.clone(),
         },
         Bounds {
-            memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
             charge: lash_kernel_vm::Charge::Exact,
             charge_limit: 100_000_000,
             memory: 16 << 20,

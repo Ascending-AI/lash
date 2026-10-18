@@ -23,7 +23,7 @@ use crate::{
 
 /// Bounds no law reaches unless it sets one.
 pub(crate) const ROOMY: Bounds = Bounds {
-    memory_limit: crate::MemoryLimit::Recount,
+    memory_meter: crate::MemoryMeter::On,
     charge: crate::Charge::Exact,
     charge_limit: 10_000_000,
     memory: 64 << 20,
@@ -420,7 +420,7 @@ pub(crate) struct Embedder {
     pub(crate) pending: Vec<Request>,
     pub(crate) withdrawn: Vec<WaitId>,
     slice: u64,
-    bounds: Bounds,
+    pub(crate) bounds: Bounds,
     probes: Option<Probes>,
     pub(crate) source: Source,
 }

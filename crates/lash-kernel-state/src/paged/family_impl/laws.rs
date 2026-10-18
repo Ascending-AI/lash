@@ -307,6 +307,7 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
 struct LawCensus(crate::paged::AccountingCertificate);
 impl crate::paged::AllocationCensus for LawCensus {
     fn rebase(&mut self) {}
+    fn set_bound(&mut self, _: LogicalBytes) {}
     fn restore(
         c: crate::paged::AccountingCertificate,
         _: LogicalBytes,

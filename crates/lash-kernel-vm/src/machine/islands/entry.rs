@@ -232,7 +232,7 @@ impl KernelMachine {
         // The memory headroom guard: the island's transient holdings and
         // its virtual frames with their variables fit, and nothing inside
         // it is admitted.
-        if self.bounds.memory_limit != crate::MemoryLimit::Off
+        if self.bounds.memory_meter != crate::MemoryMeter::Off
             && self
                 .bounds
                 .memory
@@ -286,7 +286,7 @@ impl KernelMachine {
                 counters,
                 observed,
                 limits: self.limits,
-                memory: self.bounds.memory_limit != crate::MemoryLimit::Off,
+                memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
                 base,
                 call_depth,
                 depth: 0,

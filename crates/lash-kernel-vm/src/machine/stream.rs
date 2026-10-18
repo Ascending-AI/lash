@@ -18,11 +18,11 @@ use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx, StepEdge};
 
 use super::ops::Flow;
 use super::{
-    Completion, Control, Eval, Halt, Interrupt, KernelMachine, Refusal, SlotState, TryPhase, bound,
-    fault, raise,
+    Completion, Control, Eval, Halt, Interrupt, KernelMachine, Refusal, SlotState, TryPhase, fault,
+    raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
-use crate::interface::{Bound, Host};
+use crate::interface::Host;
 
 /// How a statement's range ends.
 pub(super) enum Ran {
@@ -131,12 +131,10 @@ pub(super) struct Admitted {
 /// operations are compiled out of the unaccounted stream.
 pub(super) type Runner = fn(&mut KernelMachine, &mut dyn Host, &Running<'_>, usize) -> Eval<Ran>;
 
-pub(super) fn runner(policy: crate::MemoryLimit) -> Runner {
-    match policy {
-        crate::MemoryLimit::Off => KernelMachine::run_memory::<false>,
-        crate::MemoryLimit::Recount | crate::MemoryLimit::Refuse => {
-            KernelMachine::run_memory::<true>
-        }
+pub(super) fn runner(meter: crate::MemoryMeter) -> Runner {
+    match meter {
+        crate::MemoryMeter::Off => KernelMachine::run_memory::<false>,
+        crate::MemoryMeter::On => KernelMachine::run_memory::<true>,
     }
 }
 
@@ -168,7 +166,7 @@ impl KernelMachine {
             pc += 1;
             match op {
                 Op::Region { region, total } => {
-                    self.enter_region::<MEMORY>(running, region, total, pc)?
+                    pc = self.enter_region::<MEMORY>(running, region, total, pc)?;
                 }
                 Op::Const { dst, c } => {
                     let value = inside!(
@@ -347,10 +345,11 @@ impl KernelMachine {
     }
 
     /// Admits charge region `region`, headed at the op before `pc` with
-    /// its `total`, once the one before it is closed. A region that cannot
-    /// pass the bound or reach the slice's end runs whole, charged when it
-    /// closes (`RegionSummary::admit`); one that passes the bound replays
-    /// as the reference charges it ([`Self::replay`]).
+    /// its `total`, once the one before it is closed, and gives the op the
+    /// statement runs on from. A region that cannot pass the bound or reach
+    /// the slice's end runs whole, charged when it closes
+    /// (`RegionSummary::admit`); one that passes the bound replays as the
+    /// reference charges it ([`Self::replay`]).
     #[inline(always)]
     fn enter_region<const MEMORY: bool>(
         &mut self,
@@ -358,7 +357,7 @@ impl KernelMachine {
         region: RegionIx,
         total: u32,
         pc: usize,
-    ) -> Eval<()> {
+    ) -> Eval<usize> {
         self.close_region(running.stream);
         if !self.charging {
             if self.observer.is_some() {
@@ -369,7 +368,7 @@ impl KernelMachine {
                     region,
                 });
             }
-            return Ok(());
+            return Ok(pc);
         }
         let entry = self.charged;
         match entry.checked_add(u64::from(total)) {
@@ -377,7 +376,7 @@ impl KernelMachine {
                 if end <= self.bounds.charge_limit && end < self.slice_end && total < u32::MAX =>
             {
                 self.region = Some(Admitted { entry, end, region });
-                Ok(())
+                Ok(pc)
             }
             _ => self.admit_slowly::<MEMORY>(running, region, entry, pc),
         }
@@ -393,21 +392,24 @@ impl KernelMachine {
         region: RegionIx,
         entry: u64,
         pc: usize,
-    ) -> Eval<()> {
+    ) -> Eval<usize> {
         let table = &running.stream.regions;
         if let Some((event, crossed)) = table.crossing(region.0, entry, self.bounds.charge_limit) {
             return self.replay::<MEMORY>(running, region, entry, event, crossed, pc);
         }
         let end = table.commit(region.0, entry, usize::MAX);
         self.region = Some(Admitted { entry, end, region });
-        Ok(())
+        Ok(pc)
     }
 
     /// Runs region `region`, entered charged `entry`, up to its event
     /// `event`, which passes the bound: the ops before it as the reference
-    /// runs them, an exit among them charged with the events before it;
-    /// then the run ends charged as the reference charges `crossed`, with
-    /// the events before it and nothing after.
+    /// runs them, an exit among them charged with the events before it.
+    /// There the charge limiter decides (FIG-6768). A refusal ends the run
+    /// charged as the reference charges `crossed`, with the events before
+    /// it and nothing after. A growth admits the region again against the
+    /// grown limit, from its entry, and the statement runs on from the
+    /// event's op: whole, or up to the next event that passes the bound.
     #[cold]
     #[inline(never)]
     fn replay<const MEMORY: bool>(
@@ -415,34 +417,49 @@ impl KernelMachine {
         running: &Running<'_>,
         region: RegionIx,
         entry: u64,
-        event: usize,
-        crossed: Crossed,
-        pc: usize,
-    ) -> Eval<()> {
+        mut event: usize,
+        mut crossed: Crossed,
+        mut pc: usize,
+    ) -> Eval<usize> {
         let table = &running.stream.regions;
-        let stop = table.at(region.0)[event] as usize;
-        self.region = Some(Admitted {
-            entry,
-            end: crossed.charged,
-            region,
-        });
-        for op_at in pc..stop {
-            let op = running.stream.ops[op_at];
-            if let Err(exit) = self.in_region::<MEMORY>(running, op) {
-                self.leave_region(running.stream, op_at as u32);
-                return Err(exit);
+        loop {
+            let stop = (table.at(region.0)[event] as usize).max(pc);
+            self.region = Some(Admitted {
+                entry,
+                end: crossed.charged,
+                region,
+            });
+            for op_at in pc..stop {
+                let op = running.stream.ops[op_at];
+                if let Err(exit) = self.in_region::<MEMORY>(running, op) {
+                    self.leave_region(running.stream, op_at as u32);
+                    return Err(exit);
+                }
+            }
+            pc = stop;
+            let mut limit = self.bounds.charge_limit;
+            if let Err(refused) = self.limiters.charge_reached(crossed.charged, &mut limit) {
+                self.region = None;
+                if self.observer.is_some() {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    self.witness_charge_work();
+                    let events = table.events(region.0);
+                    self.observe_region(&events[..event]);
+                    self.observe_crossing(events[event], crossed.unit);
+                }
+                self.charged = crossed.charged;
+                return Err(refused.into());
+            }
+            self.bounds.charge_limit = limit;
+            match table.crossing(region.0, entry, limit) {
+                Some((next, again)) => (event, crossed) = (next, again),
+                None => {
+                    let end = table.commit(region.0, entry, usize::MAX);
+                    self.region = Some(Admitted { entry, end, region });
+                    return Ok(pc);
+                }
             }
         }
-        self.region = None;
-        if self.observer.is_some() {
-            #[cfg(any(test, feature = "perf-witness"))]
-            self.witness_charge_work();
-            let events = table.events(region.0);
-            self.observe_region(&events[..event]);
-            self.observe_crossing(events[event], crossed.unit);
-        }
-        self.charged = crossed.charged;
-        Err(bound(Bound::Charge, self.bounds.charge_limit).into())
     }
 
     /// Closes the region the running statement stands in: it is charged

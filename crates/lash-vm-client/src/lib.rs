@@ -24,15 +24,18 @@ pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.
 pub use lash_vm_protocol::{
-    BootstrapFault, Charge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit,
-    Exchange, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
-    InfrastructureOutcome, KernelRestoreRefusal, MemoryLimit, OwnerEpoch, PayloadKind, PoolFault,
-    ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters,
-    RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit, WorkerWork,
+    BootstrapFault, BoundReached, Charge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail,
+    DetailLimit, Exchange, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
+    InfrastructureOutcome, KernelRestoreRefusal, LimitDecision, LimitedBound, MemoryMeter,
+    OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal,
+    RunBounds, RunInput, RunMeters, RunRefusal, SequenceFault, SupervisorEvidence,
+    TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
     page::{HeapFault, HostResource, PageRefusal},
 };
-pub use machine::{RemoteMachine, RemoteMachines, RunHost, RunStart, kernel_reads};
+pub use machine::{
+    RemoteMachine, RemoteMachines, RunChargeLimiter, RunHost, RunMemoryLimiter, RunStart,
+    kernel_reads,
+};
 pub use measurements::{
     ExecutionClass, ExecutionReceipt, FrameTraffic, IpcTraffic, PoolCounters, PoolMeasurements,
 };

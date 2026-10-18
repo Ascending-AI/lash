@@ -107,7 +107,7 @@ pub(crate) struct Cx<'a> {
     /// index.
     pub(crate) sessions: &'a mut [SessionSlot],
     pub(crate) limits: KernelDataLimits,
-    /// Whether memory is accounted (`MemoryLimit` not off).
+    /// Whether memory is accounted (`MemoryMeter` not off).
     pub(crate) memory: bool,
     /// The room the nursery admitted at the region's entry still has: the
     /// growth the region may hold before it exits (§3.5).

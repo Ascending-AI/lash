@@ -150,9 +150,32 @@ impl TokenCodec for SavedMeters {
         })
     }
 }
-units!(MemoryLimit { Recount = 0, Refuse = 1, Off = 2 });
+// None is an unmetered memory bound, as in [`SavedMeters`].
+impl TokenCodec for SavedLimits {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        match self.memory {
+            Some(memory) => memory.encode(out),
+            None => out.none(),
+        }
+        self.charge.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        let memory = if input.peek_tag()? == lash_kernel_doc::graph_tokens::Tag::None {
+            input.option()?;
+            None
+        } else {
+            Some(u64::decode(input)?)
+        };
+        Ok(Self {
+            memory,
+            charge: u64::decode(input)?,
+        })
+    }
+}
 record!(CheckpointRoot {
-    memory_limit: MemoryLimit,
+    limits: SavedLimits,
     kernel: u32,
     document: DocumentId,
     release: PageId,

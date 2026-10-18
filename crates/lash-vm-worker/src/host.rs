@@ -367,6 +367,53 @@ impl lash_kernel_vm::Host for WireHost {
     }
 }
 
+/// A bound the parent decides at (FIG-6768): the kernel calls this where
+/// the run reaches it, and the worker asks the parent with one host read,
+/// the same exchange a read-bound `perform` makes, and runs on with its
+/// answer. Nothing is saved here: a crash before the next seal resumes
+/// from the last one, which reaches the same point and asks again.
+pub(crate) struct WireLimiter {
+    pub wire: Arc<Wire>,
+    pub bound: LimitedBound,
+}
+
+impl WireLimiter {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "broken worker IPC terminates the worker and cannot become a catchable guest error"
+    )]
+    fn ask(&mut self, used: u64, limit: u64) -> lash_kernel_vm::LimitDecision {
+        let reached = BoundReached {
+            bound: self.bound,
+            used,
+            limit,
+        };
+        let decision = wire::encode(PayloadKind::HostRead, &reached)
+            .and_then(|request| self.wire.read(HostReadKind::Bound, request, None))
+            .and_then(|answer| wire::decode(PayloadKind::HostAnswer, &answer))
+            .unwrap_or_else(|error| {
+                self.wire.refuse(&error);
+                std::process::abort()
+            });
+        match decision {
+            LimitDecision::Grow(by) => lash_kernel_vm::LimitDecision::Grow(by),
+            LimitDecision::Refuse => lash_kernel_vm::LimitDecision::Refuse,
+        }
+    }
+}
+
+impl lash_kernel_vm::MemoryLimiter for WireLimiter {
+    fn limit_reached(&mut self, used: u64, limit: u64) -> lash_kernel_vm::LimitDecision {
+        self.ask(used, limit)
+    }
+}
+
+impl lash_kernel_vm::ChargeLimiter for WireLimiter {
+    fn limit_reached(&mut self, used: u64, limit: u64) -> lash_kernel_vm::LimitDecision {
+        self.ask(used, limit)
+    }
+}
+
 const _: () = assert!(
     PagePortLimits::STANDARD.pages == PAGE_BATCH_PAGES
         && PagePortLimits::STANDARD.bytes == PAGE_BATCH_BYTES

@@ -502,7 +502,7 @@ fn memory_off_preserves_the_corpus_without_census_work() {
             let metered = runner
                 .observe(&case)
                 .unwrap_or_else(|error| panic!("{} {}: {error}", shard.rule, case.name));
-            case.environment.bounds.memory_limit = lash_kernel_vm::MemoryLimit::Off;
+            case.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
             lash_kernel_vm::perf_witness::enable_work();
             let off = runner.observe(&case);
             let work = lash_kernel_vm::perf_witness::take_work().unwrap();

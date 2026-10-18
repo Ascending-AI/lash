@@ -679,15 +679,34 @@ seal reads a staged leaf back and places its rows canonically.
   until a collection refines it. A cold open sets `base` from the root it
   opens. Warm and cold runs therefore hold identical counters from every seal
   onward, and K-MACH-008 holds for bound errors too.
-- **Collection policy (FIG-6731).** The run carries `MemoryLimit` with its
-  bounds and checkpoints. Production hosts default to `Recount`: an admission
-  that would pass the conservative bound collects cycles and refines the census,
-  then admits or ends the run with `Bound::Memory`. `Refuse` ends the run with
-  that same typed bound immediately, before publishing holdings, tracing or
-  sweeping. Seals and explicit checkpoints rebase under both policies. `Off` removes
-  reservations, holds, arena memory pricing and census work; its memory readout
-  is zero and its checkpoint carries an unmetered certificate. Semantic value
-  summaries, persistence and reference ownership remain active.
+- **Limiters at a bound (FIG-6768).** The run carries `MemoryMeter` with its
+  bounds. Under `On`, an admission that would pass the conservative bound
+  first collects cycles and refines the census exactly, freeing what nothing
+  holds; only when the exact count with what the admission asks for still
+  does not fit does the machine ask the host's `MemoryLimiter`. Recounting is
+  not a host choice. The charge bound is decided the same way by the host's
+  `ChargeLimiter`, at the unit the reference charger crosses (§B), the
+  crossing unit charged. Both are shaped as Wasmtime's `ResourceLimiter` and
+  `epoch_deadline_callback` (wasmtime 25.0.0): `limit_reached(used, limit)`
+  answers `Grow(by)`, which raises the limit by `by` and runs on (a limit
+  still reached is asked again), or `Refuse`, the default and a segment
+  without a limiter, which ends the run with the typed bound exactly as
+  before. The ask is at an exact, deterministic point before the
+  statement's effect. An embedded host's limiters are
+  `MachineOptions::{memory_limiter, charge_limiter}`; a worker asks its
+  parent with one `HostReadKind::Bound` read naming the bound, what the run
+  used and its limit, the same exchange a read-bound `perform` makes, when
+  the start says the parent decides (`Start::{memory_limiter,
+  charge_limiter}`). The checkpoint root saves the run's current limits
+  (`SavedLimits`, the memory limit none when unmetered), and an open
+  continues with them whatever bounds its machine was given, so a grown
+  limit survives a resume. A crash before the seal that would save a grown
+  limit resumes from the seal before it, which reaches the same point and
+  asks again, with nothing observable done in between. Seals and explicit
+  checkpoints rebase as before. `Off` removes reservations, holds, arena
+  memory pricing, census work and every limiter call; its memory readout
+  is zero and its checkpoint carries an unmetered certificate. Semantic
+  value summaries, persistence and reference ownership remain active.
   Carry collection is paced by both bytes and entity count (FIG-6750): the
   heap header retains each last-live estimate across cold opens. It collects
   when byte growth reaches `max(last_live_bytes, 128 KiB)` or entity growth

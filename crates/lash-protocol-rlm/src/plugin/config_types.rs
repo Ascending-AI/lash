@@ -1,7 +1,7 @@
 pub use lash_kernel_vm::Charge;
 use std::num::NonZeroU64;
 
-pub use lash_kernel_vm::MemoryLimit;
+pub use lash_kernel_vm::{ChargeLimiter, LimitDecision, MemoryLimiter, MemoryMeter};
 
 /// Serialized shape shared by every execution bound: an explicit finite limit
 /// or an explicit opt-out. Bounds are distinct Rust types so that an
@@ -155,7 +155,7 @@ pub struct ExecutionBounds {
     pub charge: Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub on_memory_limit: MemoryLimit,
+    pub memory_meter: MemoryMeter,
 }
 
 impl ExecutionBounds {
@@ -164,7 +164,7 @@ impl ExecutionBounds {
             charge: Charge::Exact,
             instruction_limit,
             memory_limit,
-            on_memory_limit: MemoryLimit::Recount,
+            memory_meter: MemoryMeter::On,
         }
     }
 
@@ -178,9 +178,11 @@ impl ExecutionBounds {
         self
     }
 
-    /// Choose what happens at the conservative memory bound; Recount is the default.
-    pub const fn on_memory_limit(mut self, policy: MemoryLimit) -> Self {
-        self.on_memory_limit = policy;
+    /// Choose whether memory is metered; On is the default. A metered run
+    /// that still does not fit once it has recounted what it holds exactly
+    /// is refused with its memory bound.
+    pub const fn memory_meter(mut self, meter: MemoryMeter) -> Self {
+        self.memory_meter = meter;
         self
     }
 

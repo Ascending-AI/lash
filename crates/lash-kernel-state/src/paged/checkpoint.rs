@@ -24,7 +24,8 @@ impl Checkpoint {
 /// Control facts only: no running representation, queues or table roots.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointHeader {
-    pub memory_limit: super::MemoryLimit,
+    /// The limits the run continues with.
+    pub limits: super::SavedLimits,
     pub kernel: u32,
     pub document: DocumentId,
     pub release: PageId,
@@ -37,7 +38,7 @@ pub struct CheckpointHeader {
 
 fn header(root: &CheckpointRoot) -> CheckpointHeader {
     CheckpointHeader {
-        memory_limit: root.memory_limit,
+        limits: root.limits,
         kernel: root.kernel,
         document: root.document,
         release: root.release,

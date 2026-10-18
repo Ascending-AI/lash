@@ -8,9 +8,16 @@
 //! worker registers every library function when it starts; a document names
 //! functions by identity and carries none.
 //!
-//! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryLimit}`.
+//! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryMeter}`.
 //! A worker's [`RunBounds`] carries their wire mirrors, [`RunCharge`] and
-//! [`RunMemoryLimit`].
+//! [`RunMemoryMeter`].
+//!
+//! Where a run reaches its memory or charge bound, its host decides: an
+//! embedded kernel host through `lash::rlm::{MemoryLimiter, ChargeLimiter}`,
+//! and a worker's parent through their mirrors [`RunMemoryLimiter`] and
+//! [`RunChargeLimiter`], which the worker asks with one
+//! [`HostReadKind::Bound`] read naming a [`BoundReached`] and answered by a
+//! [`RunLimitDecision`]. Without one, the run refuses there.
 
 /// One shared pool for Code mode cells, process bodies, and pure language work.
 ///
@@ -102,14 +109,15 @@ pub use crate::kernel_migration::{
 };
 pub use lash_protocol_types::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
-    BootstrapFault, Charge as RunCharge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail,
-    DetailLimit, DiskSpool, EffectPhase, EffectPhases, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal, HeapFault, HostReadKind,
-    InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal, MemoryLimit as RunMemoryLimit,
-    OwnerEpoch, PageRefusal, PayloadKind, PoolCounters, PoolError, PoolFault, PoolMeasurements,
-    ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters,
-    RunRefusal, SequenceFault, SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit, WorkerWork,
+    BootstrapFault, BoundReached, Charge as RunCharge, CheckpointRefusal, CodecRefusal,
+    DecodeLimits, Detail, DetailLimit, DiskSpool, EffectPhase, EffectPhases, Exchange,
+    ExecutionClass, ExecutionLease, ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal,
+    HeapFault, HostReadKind, InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal,
+    LimitDecision as RunLimitDecision, LimitedBound, MemoryMeter as RunMemoryMeter, OwnerEpoch,
+    PageRefusal, PayloadKind, PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds,
+    ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunChargeLimiter, RunInput,
+    RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault, SpoolRoot, SupervisorEvidence,
+    TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

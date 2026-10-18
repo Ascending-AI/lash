@@ -42,6 +42,10 @@ impl Machine for KernelMachine {
             observer.path = None;
         }
         self.save = options.cell_save;
+        self.limiters = Limiters {
+            memory: options.memory_limiter,
+            charge: options.charge_limiter,
+        };
     }
     fn take_counts(&mut self) -> crate::SiteCounts {
         self.take_ran()
@@ -225,14 +229,13 @@ impl KernelMachine {
         mut source: Box<dyn PageSource>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        let census = if root.memory_limit == crate::MemoryLimit::Off {
-            None
-        } else {
-            Some(session::restored_census(
+        let census = match root.limits.memory {
+            None => None,
+            Some(memory) => Some(session::restored_census(
                 &mut *source,
                 Some(root.heap),
-                bounds.memory,
-            )?)
+                memory,
+            )?),
         };
         Self::open_with_optional_census(program, bounds, root, admissions, source, census, layout)
     }
@@ -269,14 +272,17 @@ impl KernelMachine {
         census: Option<Box<dyn AllocationCensus>>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        let bounds = Bounds {
-            memory_limit: root.memory_limit,
-            ..bounds
-        };
         let limits = lash_kernel_doc::KernelDataLimits::standard();
-        // The checkpoint owns its policy, even on a worker configured otherwise.
+        // The checkpoint owns its policies and its limits, as its limiters
+        // grew them, even on a worker configured otherwise (FIG-6768).
         let bounds = Bounds {
+            memory_meter: match root.limits.memory {
+                Some(_) => crate::MemoryMeter::On,
+                None => crate::MemoryMeter::Off,
+            },
+            memory: root.limits.memory.unwrap_or(bounds.memory),
             charge: root.meters.charge(),
+            charge_limit: root.limits.charge,
             ..bounds
         };
         let library = program.library.in_charge(bounds.charge).in_layout(layout);
@@ -312,13 +318,14 @@ impl KernelMachine {
         let mut heap =
             PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
         heap.set_data_limits(limits);
-        if bounds.memory_limit == crate::MemoryLimit::Off {
+        if bounds.memory_meter == crate::MemoryMeter::Off {
             heap.without_memory_accounting();
         } else {
             heap.set_census(census.ok_or_else(|| OpenError::Malformed {
                 problem: "metered open has no census".into(),
             })?)
             .map_err(OpenError::Heap)?;
+            heap.set_memory_bound(bounds.memory);
         }
         heap.set_family_base(Box::new(
             lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
@@ -328,7 +335,7 @@ impl KernelMachine {
         let census_refinements = heap.certificate().refinements;
         let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
             let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
-            if bounds.memory_limit == crate::MemoryLimit::Off {
+            if bounds.memory_meter == crate::MemoryMeter::Off {
                 arena.without_memory_accounting()
             } else {
                 arena
@@ -343,7 +350,7 @@ impl KernelMachine {
             program,
             exe: Arc::clone(&exe),
             bounds,
-            memory_stream: super::stream::runner(bounds.memory_limit),
+            memory_stream: super::stream::runner(bounds.memory_meter),
             limits,
             tasks: tasks::Tasks::open(
                 heap.task_root().clone(),
@@ -390,6 +397,7 @@ impl KernelMachine {
             #[cfg(test)]
             boundaries: 0,
             save: None,
+            limiters: Limiters::default(),
         })
     }
 }
@@ -481,7 +489,11 @@ impl KernelMachine {
             }
         };
         let root = CheckpointRoot {
-            memory_limit: self.bounds.memory_limit,
+            limits: lash_kernel_state::paged::SavedLimits {
+                memory: (self.bounds.memory_meter == crate::MemoryMeter::On)
+                    .then_some(self.bounds.memory),
+                charge: self.bounds.charge_limit,
+            },
             kernel: self.program.document.manifest.kernel,
             document,
             release: self.release,

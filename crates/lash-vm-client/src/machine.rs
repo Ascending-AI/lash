@@ -25,8 +25,8 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_protocol::page::{PageReply, SealBatch};
 use lash_vm_protocol::{
-    CheckpointStart, EncodedPayload, FrameEpoch, HostReadKind, InfrastructureOutcome, OwnerEpoch,
-    PayloadKind, RunBounds, StartFrom, VmOwner,
+    BoundReached, CheckpointStart, EncodedPayload, FrameEpoch, HostReadKind, InfrastructureOutcome,
+    LimitDecision, LimitedBound, OwnerEpoch, PayloadKind, RunBounds, StartFrom, VmOwner,
 };
 
 use crate::service::{CallHeld, Service};
@@ -58,9 +58,48 @@ pub struct RunStart {
     pub save: Option<wire::SaveWire>,
 }
 
+/// The parent's decision at a worker run's memory bound (FIG-6768): what
+/// [`lash_kernel_vm::MemoryLimiter`] decides for an embedded run, asked
+/// across the worker boundary with one [`HostReadKind::Bound`] read. The
+/// worker asks only once its exact recount still leaves no room, at an
+/// exact point before the statement's effect; a run resumed from an
+/// earlier seal asks again at the same point. A grown limit is saved
+/// with the run at its next seal.
+pub trait RunMemoryLimiter: Send + Sync {
+    /// The run needs `used` bytes and may hold `limit`.
+    fn limit_reached(&self, used: u64, limit: u64) -> LimitDecision {
+        let _ = (used, limit);
+        LimitDecision::Refuse
+    }
+}
+
+/// The parent's decision at a worker run's charge bound (FIG-6768): what
+/// [`lash_kernel_vm::ChargeLimiter`] decides for an embedded run, asked as
+/// [`RunMemoryLimiter`] is.
+pub trait RunChargeLimiter: Send + Sync {
+    /// The run is charged `used`, the crossing unit included, and may be
+    /// charged `limit`.
+    fn limit_reached(&self, used: u64, limit: u64) -> LimitDecision {
+        let _ = (used, limit);
+        LimitDecision::Refuse
+    }
+}
+
 /// What a run reads from its host, answered in the parent.
 #[async_trait::async_trait]
 pub trait RunHost: Send + Sync {
+    /// What decides at the run's memory bound; none refuses there, with
+    /// no exchange.
+    fn memory_limiter(&self) -> Option<&dyn RunMemoryLimiter> {
+        None
+    }
+
+    /// What decides at the run's charge bound; none refuses there, with
+    /// no exchange.
+    fn charge_limiter(&self) -> Option<&dyn RunChargeLimiter> {
+        None
+    }
+
     /// The run segment's observation option, independent of live delivery.
     fn observe(&self) -> lash_kernel_vm::ObservationMode {
         lash_kernel_vm::ObservationMode::Off
@@ -202,10 +241,9 @@ impl RemoteMachines {
             document: EncodedPayload(self.body.to_vec()),
             from,
             bounds: RunBounds {
-                memory_limit: match self.bounds.memory_limit {
-                    lash_kernel_vm::MemoryLimit::Recount => lash_vm_protocol::MemoryLimit::Recount,
-                    lash_kernel_vm::MemoryLimit::Refuse => lash_vm_protocol::MemoryLimit::Refuse,
-                    lash_kernel_vm::MemoryLimit::Off => lash_vm_protocol::MemoryLimit::Off,
+                memory_meter: match self.bounds.memory_meter {
+                    lash_kernel_vm::MemoryMeter::On => lash_vm_protocol::MemoryMeter::On,
+                    lash_kernel_vm::MemoryMeter::Off => lash_vm_protocol::MemoryMeter::Off,
                 },
                 charge: match self.bounds.charge {
                     lash_kernel_vm::Charge::Exact => lash_vm_protocol::Charge::Exact,
@@ -230,6 +268,8 @@ impl RemoteMachines {
             observe_sites: self.host.observes_sites(),
             observe_counts: self.host.observe() == lash_kernel_vm::ObservationMode::Counts,
             observe_path: self.host.traces_path(),
+            memory_limiter: self.host.memory_limiter().is_some(),
+            charge_limiter: self.host.charge_limiter().is_some(),
         };
         let reservation = start_reservation(
             &start,
@@ -621,6 +661,19 @@ async fn answer(
                 &host.perform(&read.effect, &read.args, &read.site).await?,
             )
         }
+        HostReadKind::Bound => {
+            let read: BoundReached =
+                wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
+            let decision = match read.bound {
+                LimitedBound::Memory => host
+                    .memory_limiter()
+                    .map(|limiter| limiter.limit_reached(read.used, read.limit)),
+                LimitedBound::Charge => host
+                    .charge_limiter()
+                    .map(|limiter| limiter.limit_reached(read.used, read.limit)),
+            };
+            wire::encode(PayloadKind::HostAnswer, &decision.unwrap_or_default())
+        }
     }
     .map_err(worker)
 }
@@ -769,7 +822,7 @@ mod reservation_tests {
             document: EncodedPayload(vec![0; 16]),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {
-                memory_limit: lash_vm_protocol::MemoryLimit::Recount,
+                memory_meter: lash_vm_protocol::MemoryMeter::On,
                 charge: lash_vm_protocol::Charge::Exact,
                 charge_limit: u64::MAX,
                 memory: u64::MAX,
@@ -784,6 +837,8 @@ mod reservation_tests {
             observe_sites: true,
             observe_counts: false,
             observe_path: false,
+            memory_limiter: false,
+            charge_limiter: false,
         };
         let actual = codec
             .encode_parent(&ParentFrame {

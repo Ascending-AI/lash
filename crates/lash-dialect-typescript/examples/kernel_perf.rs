@@ -115,7 +115,7 @@ use gate_six::{answer, effects, programs};
 use gate_six_registry::registry;
 
 const BOUNDS: Bounds = Bounds {
-    memory_limit: lash_kernel_vm::MemoryLimit::Refuse,
+    memory_meter: lash_kernel_vm::MemoryMeter::On,
     charge: lash_kernel_vm::Charge::Exact,
     charge_limit: 1_000_000_000,
     memory: 1 << 30,
@@ -128,14 +128,15 @@ const BOUNDS: Bounds = Bounds {
 /// The driver composes independent option flags through the process environment.
 #[expect(clippy::disallowed_methods, reason = "explicit benchmark option")]
 fn benchmark_bounds() -> Bounds {
-    let memory_limit = match std::env::var("KERNEL_PERF_MEMORY").as_deref() {
-        Ok("off") => lash_kernel_vm::MemoryLimit::Off,
-        Ok("recount") => lash_kernel_vm::MemoryLimit::Recount,
-        Ok("refuse" | "") | Err(_) => lash_kernel_vm::MemoryLimit::Refuse,
-        Ok(other) => panic!("unknown benchmark memory policy: {other}"),
+    // Metered runs hold the default limiter: past the exact recount, a run
+    // that reaches its bound is refused (FIG-6768).
+    let memory_meter = match std::env::var("KERNEL_PERF_MEMORY").as_deref() {
+        Ok("off") => lash_kernel_vm::MemoryMeter::Off,
+        Ok("on" | "") | Err(_) => lash_kernel_vm::MemoryMeter::On,
+        Ok(other) => panic!("KERNEL_PERF_MEMORY is on or off, not {other}"),
     };
     Bounds {
-        memory_limit,
+        memory_meter,
         ..BOUNDS
     }
 }

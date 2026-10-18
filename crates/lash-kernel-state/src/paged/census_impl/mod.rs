@@ -159,6 +159,10 @@ impl AllocationCensus for Census {
         }
     }
 
+    fn set_bound(&mut self, bound: LogicalBytes) {
+        self.bound = bound;
+    }
+
     fn refine(
         &mut self,
         graph: &mut dyn CensusGraph,

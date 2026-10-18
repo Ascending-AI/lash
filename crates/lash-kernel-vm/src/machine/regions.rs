@@ -162,7 +162,7 @@ impl KernelMachine {
         {
             return Ok(None);
         }
-        let memory = self.bounds.memory_limit != crate::MemoryLimit::Off;
+        let memory = self.bounds.memory_meter != crate::MemoryMeter::Off;
         // What the region holds is held as the reference's statements
         // hold it, each in a fresh step, which has no statement credit to
         // draw on.

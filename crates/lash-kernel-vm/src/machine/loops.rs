@@ -452,7 +452,8 @@ impl KernelMachine {
                 if *metered != 0 {
                     super::ops::charge_scheduled(
                         &mut self.charged,
-                        self.bounds.charge_limit,
+                        &mut self.bounds.charge_limit,
+                        &mut self.limiters,
                         *metered,
                         self.observer.as_deref(),
                     )?;
@@ -504,7 +505,8 @@ impl KernelMachine {
                 if *metered != 0 {
                     super::ops::charge_scheduled(
                         &mut self.charged,
-                        self.bounds.charge_limit,
+                        &mut self.bounds.charge_limit,
+                        &mut self.limiters,
                         *metered,
                         self.observer.as_deref(),
                     )?;

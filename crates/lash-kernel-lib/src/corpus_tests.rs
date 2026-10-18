@@ -359,7 +359,7 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
                     )),
                 },
                 lash_kernel_vm::Bounds {
-                    memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+                    memory_meter: lash_kernel_vm::MemoryMeter::On,
                     charge: lash_kernel_vm::Charge::Exact,
                     charge_limit: 10_000_000,
                     memory: 64 << 20,

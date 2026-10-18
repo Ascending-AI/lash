@@ -40,7 +40,7 @@ fn a_tree_root_admits_only_its_occupancy() {
 fn a_checkpoint_root_fits_its_root_bound() {
     // FIG-6499 / S1: reserve the complete envelope as well as the largest
     // scalar encodings, every nonempty tree and a terminal result descriptor.
-    // The admission budget is 4096 - 776 fixed token bytes - 256 framing bytes.
+    // The admission budget is 4096 - 797 fixed token bytes - 256 framing bytes.
     let page = |byte| PageRef {
         id: PageId([byte; 32]),
         grant: PageGrant::NONE,
@@ -55,13 +55,16 @@ fn a_checkpoint_root_fits_its_root_bound() {
         len: u64::MAX,
         cost: LogicalBytes(u64::MAX),
     };
-    for host in [vec![lash_kernel_doc::Name::new("h".repeat(3059))], {
-        let mut names = vec![lash_kernel_doc::Name::new(""); 1530];
-        names[0] = lash_kernel_doc::Name::new("h");
+    for host in [vec![lash_kernel_doc::Name::new("h".repeat(3038))], {
+        let mut names = vec![lash_kernel_doc::Name::new(""); 1519];
+        names[0] = lash_kernel_doc::Name::new("hh");
         names
     }] {
         let root = CheckpointRoot {
-            memory_limit: MemoryLimit::Recount,
+            limits: SavedLimits {
+                memory: Some(u64::MAX),
+                charge: u64::MAX,
+            },
             kernel: u32::MAX,
             document: DocumentId::from_bytes([1; 32]),
             release: PageId([2; 32]),
@@ -95,9 +98,9 @@ fn a_checkpoint_root_fits_its_root_bound() {
         };
         assert_eq!(
             CheckpointRoot::host_metadata_bytes(root.host.iter().map(|name| name.as_str())),
-            3064,
+            3043,
         );
-        assert_eq!(CheckpointRoot::HOST_METADATA_LIMIT, 3064);
+        assert_eq!(CheckpointRoot::HOST_METADATA_LIMIT, 3043);
         let body = encode_body(&root);
         assert!(body.len() + 256 <= 4096, "{} token bytes", body.len());
         assert_eq!(

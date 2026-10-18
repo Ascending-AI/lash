@@ -86,11 +86,11 @@ pub use lash_protocol_rlm::tool_presenters::{
     python as python_tool_presenter, typescript as typescript_tool_presenter,
 };
 pub use lash_protocol_rlm::{
-    BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, Charge, CodeRenderer,
-    CodeRendererSlot, ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit,
-    RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery, RlmPresentationConfig,
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
+    BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, Charge, ChargeLimiter,
+    CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound, LimitDecision, MemoryBound,
+    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery,
+    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmProtocolPluginFactory, RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
 };
 /// The stable codes of the typed observations a cell's failure carries, and
 /// the error kinds a cell's program catches from a tool call.

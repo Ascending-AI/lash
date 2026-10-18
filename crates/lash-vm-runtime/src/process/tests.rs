@@ -480,7 +480,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
     let recorded = KernelRecordedSettings::new(
         "typescript",
         lash_kernel_vm::Bounds {
-            memory_limit: lash_kernel_vm::MemoryLimit::Refuse,
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
             charge: lash_kernel_vm::Charge::Exact,
             charge_limit: 10_000,
             memory: 1024 * 1024,
@@ -497,7 +497,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
         recorded
     );
     let mut missing = engine.value().clone();
-    missing.as_object_mut().unwrap().remove("memory_limit");
+    missing.as_object_mut().unwrap().remove("memory_meter");
     assert!(
         KernelRecordedSettings::from_engine_settings(
             &lash_execution_contracts::process::EngineSettings::new(missing)

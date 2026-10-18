@@ -627,7 +627,7 @@ fn read_candidates(
 fn cell_bounds(services: &CellServices) -> Bounds {
     let pool = services.workers.config().run_bounds;
     Bounds {
-        memory_limit: services.execution_bounds.on_memory_limit,
+        memory_meter: services.execution_bounds.memory_meter,
         charge: services.execution_bounds.charge,
         charge_limit: services
             .execution_bounds

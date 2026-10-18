@@ -141,7 +141,7 @@ impl<'a> Arbitrary<'a> for Smith {
             fail_effects: u.arbitrary()?,
             host_seed: u.arbitrary()?,
             bounds: Bounds {
-                memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
                 charge: lash_kernel_vm::Charge::Exact,
                 charge_limit: u.int_in_range(0..=20_000)?,
                 memory: u.int_in_range(0..=256 * 1024)?,

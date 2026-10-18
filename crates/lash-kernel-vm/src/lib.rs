@@ -51,7 +51,6 @@ pub(crate) use compile::Layout;
 pub use compile::PreparedLibrary;
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use lash_kernel_doc::ExecutionPath;
-pub use lash_kernel_state::paged::MemoryLimit;
 pub use machine::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode, SiteCounts};
 pub use paged::SealedRoot;
@@ -66,8 +65,9 @@ pub use session_editor::{SessionEditor, SessionValue};
 pub mod kernel_internals;
 
 pub use interface::{
-    Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, DeliverError, Delivered, EffectMode,
-    EffectModes, EffectRequest, End, Finished, Host, HostFault, Machine, MachineError,
-    MachineOptions, Meters, OpenError, Outcome, Park, Program, Request, RunError, RunObserver,
-    SaveCell, SavedCell, SealError, SleepRequest, StartError, Step, Target, WaitId,
+    Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
+    Delivered, EffectMode, EffectModes, EffectRequest, End, Finished, Host, HostFault,
+    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
+    OpenError, Outcome, Park, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
+    SealError, SleepRequest, StartError, Step, Target, WaitId,
 };

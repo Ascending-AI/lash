@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::PoolError;
 use crate::embedding::Embedding;
-use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
+use crate::host::{PagePort, Wire, WireHost, WireLimiter, WirePageSource, grant_of, link_grant};
 use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
@@ -495,10 +495,9 @@ impl<'embedding> Server<'embedding> {
         let mut program = self.program(&start.document)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
-            memory_limit: match start.bounds.memory_limit {
-                lash_vm_protocol::MemoryLimit::Recount => lash_kernel_vm::MemoryLimit::Recount,
-                lash_vm_protocol::MemoryLimit::Refuse => lash_kernel_vm::MemoryLimit::Refuse,
-                lash_vm_protocol::MemoryLimit::Off => lash_kernel_vm::MemoryLimit::Off,
+            memory_meter: match start.bounds.memory_meter {
+                lash_vm_protocol::MemoryMeter::On => lash_kernel_vm::MemoryMeter::On,
+                lash_vm_protocol::MemoryMeter::Off => lash_kernel_vm::MemoryMeter::Off,
             },
             charge: match start.bounds.charge {
                 lash_vm_protocol::Charge::Exact => lash_kernel_vm::Charge::Exact,
@@ -641,6 +640,20 @@ impl<'embedding> Server<'embedding> {
             },
             trace_path: path.is_some(),
             cell_save: save.map(|save| Box::new(save) as Box<dyn lash_kernel_vm::CellSave>),
+            memory_limiter: match start.memory_limiter {
+                true => Some(Box::new(WireLimiter {
+                    wire: self.wire()?,
+                    bound: lash_vm_protocol::LimitedBound::Memory,
+                })),
+                false => None,
+            },
+            charge_limiter: match start.charge_limiter {
+                true => Some(Box::new(WireLimiter {
+                    wire: self.wire()?,
+                    bound: lash_vm_protocol::LimitedBound::Charge,
+                })),
+                false => None,
+            },
         });
         Ok(Hosted {
             machine,
@@ -1081,6 +1094,8 @@ mod tests {
             observe_sites: false,
             observe_counts: false,
             observe_path: false,
+            memory_limiter: false,
+            charge_limiter: false,
         };
         (document, start)
     }

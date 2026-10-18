@@ -77,6 +77,8 @@ under_each_embedding!(
     an_observed_run_names_its_last_entered_site_on_its_next_frame,
     a_run_cancel_is_observed_where_a_slice_returns,
     a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
+    a_refusing_parent_limiter_ends_the_run_where_no_limiter_does,
+    a_limit_the_parent_grows_is_saved_and_a_resumed_run_keeps_it,
     worker_crash_mid_run_leaves_the_parent_running,
     a_sigxcpu_lash_did_not_cause_is_a_crash_the_host_retries,
     a_forbidden_syscall_kills_the_worker_with_typed_evidence,
@@ -163,6 +165,8 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         observe_sites: false,
         observe_counts: false,
         observe_path: false,
+        memory_limiter: false,
+        charge_limiter: false,
     }
 }
 
@@ -186,6 +190,8 @@ fn resumed(
         observe_sites: false,
         observe_counts: false,
         observe_path: false,
+        memory_limiter: false,
+        charge_limiter: false,
     }
 }
 
@@ -910,7 +916,9 @@ main { }"#,
                     HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &now),
                     // The top 53 bits, times 2^-53: one half.
                     HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &(1_u64 << 63)),
-                    HostReadKind::Effect => panic!("the run binds no read"),
+                    HostReadKind::Effect | HostReadKind::Bound => {
+                        panic!("the run binds no read and has no limiter")
+                    }
                 }
                 .expect("answer");
                 let answered = worker.host_answer(id, answer);
@@ -997,6 +1005,181 @@ fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
     assert_eq!(exceeded.limit, 500);
     worker.release().expect("reset");
     assert_eq!(checkout(&pool).pid(), Some(pid));
+}
+
+/// `step`, past the bound reads it asks the parent: each is answered from
+/// `answers`, then refused, and kept in `asked`.
+fn limited(
+    parent: &mut Parent,
+    worker: &mut Checkout,
+    mut step: RunStep,
+    answers: &mut std::collections::VecDeque<LimitDecision>,
+    asked: &mut Vec<BoundReached>,
+) -> RunStep {
+    while let RunStep::HostRead {
+        id,
+        kind: HostReadKind::Bound,
+        request,
+    } = step
+    {
+        asked.push(wire::decode(PayloadKind::HostRead, &request).expect("a bound read"));
+        let decision = answers.pop_front().unwrap_or_default();
+        let answer = wire::encode(PayloadKind::HostAnswer, &decision).expect("answer");
+        let answered = worker.host_answer(id, answer);
+        step = parent.answer(worker, answered).expect("answered");
+    }
+    step
+}
+
+/// The meters a run crossed with.
+fn metered(step: &RunStep) -> RunMeters {
+    match step {
+        RunStep::Parked { meters, .. }
+        | RunStep::Slice { meters }
+        | RunStep::Ended { meters, .. } => *meters,
+        other => panic!("the run stops: {other:?}"),
+    }
+}
+
+/// FIG-6768 law 4, worker host: a parent whose limiter refuses ends the run
+/// with the `BoundExceeded` a run whose parent has no limiter ends with, at
+/// the same point and charged the same, for both bounds. The worker asked
+/// once, naming the bound, what the run used and its limit.
+fn a_refusing_parent_limiter_ends_the_run_where_no_limiter_does() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut parent = Parent::new(DIALECT);
+    let charge = document("main { while true { } }");
+    let memory = document(
+        r#"
+main {
+  let big = text.repeat("x", 200000)
+  return 0
+}"#,
+    );
+    for (bound, (identity, document)) in [(Bound::Charge, charge), (Bound::Memory, memory)] {
+        let mut ends = Vec::new();
+        for limiter in [true, false] {
+            let mut worker = checkout(&pool);
+            let mut start = fresh(&document, Target::Main, Vec::new());
+            start.bounds.charge_limit = 500;
+            start.bounds.memory = 64 << 10;
+            start.charge_limiter = limiter;
+            start.memory_limiter = limiter;
+            worker
+                .start(start, &identity, ExecutionClass::Cell)
+                .expect("start");
+            let mut asked = Vec::new();
+            let step = parent.run(&mut worker, SLICE, false).expect("run");
+            let step = limited(
+                &mut parent,
+                &mut worker,
+                step,
+                &mut Default::default(),
+                &mut asked,
+            );
+            let meters = metered(&step);
+            let End::Error(RunError::Bound(exceeded)) = ended(step) else {
+                panic!("{bound:?}: the bound ends the run")
+            };
+            assert_eq!(exceeded.bound, bound);
+            let limit = match bound {
+                Bound::Charge => 500,
+                _ => 64 << 10,
+            };
+            assert_eq!(exceeded.limit, limit);
+            match limiter {
+                true => {
+                    let [reached] = asked[..] else {
+                        panic!("{bound:?}: asked once: {asked:?}")
+                    };
+                    assert_eq!(reached.limit, limit);
+                    assert!(reached.used > limit, "{reached:?}");
+                    assert_eq!(
+                        reached.bound,
+                        match bound {
+                            Bound::Charge => LimitedBound::Charge,
+                            _ => LimitedBound::Memory,
+                        }
+                    );
+                }
+                false => assert_eq!(asked, [], "a parent without a limiter is not asked"),
+            }
+            ends.push((exceeded, meters));
+            worker.release().expect("reset");
+        }
+        assert_eq!(ends[0], ends[1], "{bound:?}");
+    }
+}
+
+/// FIG-6768 law 1, worker host: the parent grows the run's charge limit
+/// where the run reaches it; the park saves the grown limit, the worker is
+/// killed there, and another worker started with the limit the run began
+/// with carries on with the grown one, unasked. The run ends as one
+/// started with the grown limit does, charged the same.
+fn a_limit_the_parent_grows_is_saved_and_a_resumed_run_keeps_it() {
+    const LIMIT: u64 = 300;
+    const GROW: u64 = 100_000;
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut parent = Parent::new(DIALECT);
+    let (identity, document) = document(
+        r#"
+main {
+  let i = 0
+  while num.lt(i, 200) {
+    set i = num.add(i, 1)
+  }
+  let got = perform echo(i) as Any
+  let j = 0
+  while num.lt(j, 200) {
+    set j = num.add(j, 1)
+  }
+  return num.add(got, j)
+}"#,
+    );
+    let mut ran = Vec::new();
+    for (limit, limiter) in [(LIMIT, true), (LIMIT + GROW, false)] {
+        let mut answers = std::collections::VecDeque::from([LimitDecision::Grow(GROW)]);
+        let mut asked = Vec::new();
+        let mut first = checkout(&pool);
+        let mut start = fresh(&document, Target::Main, Vec::new());
+        start.bounds.charge_limit = limit;
+        start.charge_limiter = limiter;
+        first
+            .start(start, &identity, ExecutionClass::Cell)
+            .expect("start");
+        let step = parent.run(&mut first, SLICE, false).expect("run");
+        let step = limited(&mut parent, &mut first, step, &mut answers, &mut asked);
+        let parked = metered(&step);
+        let (wait, argument, admission, root) = admitted(step);
+        let root = parent.granted(root);
+        drop(first);
+        let before = asked.len();
+
+        let mut second = checkout(&pool);
+        let mut start = resumed(DIALECT, &document, root, vec![admission]);
+        start.bounds.charge_limit = limit;
+        start.charge_limiter = limiter;
+        second
+            .start(start, &identity, ExecutionClass::Cell)
+            .expect("resume");
+        second.deliver(wait, completed(argument)).expect("deliver");
+        let step = parent.run(&mut second, SLICE, false).expect("run");
+        let step = limited(&mut parent, &mut second, step, &mut answers, &mut asked);
+        let meters = metered(&step);
+        let End::Finished(finished) = ended(step) else {
+            panic!("the run finishes")
+        };
+        assert_eq!(finished.result, int(400));
+        second.release().expect("reset");
+        if limiter {
+            assert_eq!(before, 1, "asked once before the park: {asked:?}");
+            assert_eq!(asked.len(), 1, "the resumed run kept the grown limit");
+            assert_eq!(asked[0].limit, LIMIT);
+            assert_eq!(asked[0].bound, LimitedBound::Charge);
+        }
+        ran.push((parked, meters));
+    }
+    assert_eq!(ran[0], ran[1]);
 }
 
 /// A worker that dies in the middle of a run fails the exchange typed, is

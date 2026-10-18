@@ -1,4 +1,4 @@
-use super::{ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit};
+use super::{ExecutionBounds, InstructionBound, MemoryBound, MemoryMeter};
 
 /// Prompt presentation of values and calls. These choices are pinned with
 /// protocol behaviour; how tools read is the dialect's tool presenter's.
@@ -92,7 +92,7 @@ pub struct RlmProtocolPluginConfig {
     pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub on_memory_limit: MemoryLimit,
+    pub memory_meter: MemoryMeter,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     #[serde(default = "default_max_output_chars")]
@@ -125,7 +125,7 @@ pub struct RlmRecordedBehaviour {
     pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub on_memory_limit: MemoryLimit,
+    pub memory_meter: MemoryMeter,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
     /// The prompt-token threshold of the soft context-budget warning, or
@@ -168,7 +168,7 @@ pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = Un
     charge: super::Charge,
     instruction_limit: I,
     memory_limit: M,
-    on_memory_limit: MemoryLimit,
+    memory_meter: MemoryMeter,
     channel: C,
 }
 
@@ -179,9 +179,9 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
         self
     }
 
-    /// Choose the response to conservative memory pressure. Defaults to Recount.
-    pub fn on_memory_limit(mut self, policy: MemoryLimit) -> Self {
-        self.on_memory_limit = policy;
+    /// Choose whether memory is metered. Defaults to On.
+    pub fn memory_meter(mut self, meter: MemoryMeter) -> Self {
+        self.memory_meter = meter;
         self
     }
 
@@ -193,7 +193,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            on_memory_limit: self.on_memory_limit,
+            memory_meter: self.memory_meter,
             channel,
         }
     }
@@ -206,7 +206,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit,
             memory_limit: self.memory_limit,
-            on_memory_limit: self.on_memory_limit,
+            memory_meter: self.memory_meter,
             channel: self.channel,
         }
     }
@@ -219,7 +219,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit,
-            on_memory_limit: self.on_memory_limit,
+            memory_meter: self.memory_meter,
             channel: self.channel,
         }
     }
@@ -238,7 +238,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            on_memory_limit: self.on_memory_limit,
+            memory_meter: self.memory_meter,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
@@ -268,7 +268,7 @@ impl RlmProtocolPluginConfig {
             charge: super::Charge::Exact,
             instruction_limit: UnsetBound,
             memory_limit: UnsetBound,
-            on_memory_limit: MemoryLimit::Recount,
+            memory_meter: MemoryMeter::On,
             channel: UnsetChannel,
         }
     }
@@ -276,7 +276,7 @@ impl RlmProtocolPluginConfig {
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(self.instruction_limit, self.memory_limit)
             .with_charge(self.charge)
-            .on_memory_limit(self.on_memory_limit)
+            .memory_meter(self.memory_meter)
     }
 
     /// The behaviour a session created in `dialect` under this
@@ -294,7 +294,7 @@ impl RlmProtocolPluginConfig {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            on_memory_limit: self.on_memory_limit,
+            memory_meter: self.memory_meter,
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
             continue_as_soft_warn_tokens: self.continue_as_soft_warn_tokens,
@@ -312,7 +312,7 @@ impl RlmProtocolPluginConfig {
         self.charge = behaviour.charge;
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
-        self.on_memory_limit = behaviour.on_memory_limit;
+        self.memory_meter = behaviour.memory_meter;
 
         self.prompt_features = behaviour.prompt_features;
         self.max_output_chars = behaviour.max_output_chars;

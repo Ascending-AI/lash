@@ -11,7 +11,7 @@ use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, S
 use super::machine;
 
 const BOUNDS: Bounds = Bounds {
-    memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+    memory_meter: lash_kernel_vm::MemoryMeter::On,
     charge: lash_kernel_vm::Charge::Exact,
     charge_limit: 50_000_000,
     memory: 256 << 20,

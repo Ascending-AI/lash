@@ -15,6 +15,7 @@ mod exec;
 mod frames;
 pub(crate) mod islands;
 mod issued;
+mod limits;
 mod loops;
 mod observing;
 mod operation_entry;
@@ -57,6 +58,7 @@ use lash_kernel_state::paged::{
     IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, SemanticHeap,
     TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
+use limits::Limiters;
 use loops::Cursor;
 use project::SharedArena;
 use session::{keyed, open_tree};
@@ -397,6 +399,8 @@ pub struct KernelMachine {
     /// How the cell's end saves the functions its carry would drop; none
     /// drops them.
     save: Option<Box<dyn crate::interface::CellSave>>,
+    /// What decides at the run's bounds (FIG-6768); none refuses.
+    limiters: Limiters,
     session_cell: bool,
     /// The session bindings this cell read or wrote, by binding key: arena
     /// values over the heap's slots, given their page forms only at a
@@ -640,7 +644,7 @@ impl KernelMachine {
 
     #[inline(always)]
     fn reconcile_sweep(&mut self) -> Result<(), HeapFault> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return Ok(());
         }
         if self.heap.certificate().refinements != self.census_refinements {
@@ -679,7 +683,7 @@ impl KernelMachine {
         self.flush_arena()?;
         self.reconcile_sweep()?;
         let pages = self.heap.pages().clone();
-        let (registers, pinned, borrowed) = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        let (registers, pinned, borrowed) = if self.bounds.memory_meter == crate::MemoryMeter::Off {
             (Vec::new(), Vec::new(), Vec::new())
         } else {
             let mut arena = self.arena.borrow_mut();
@@ -1002,7 +1006,7 @@ impl KernelMachine {
         // The prepared statement owns the kill set, including on park,
         // raise and halt exits. Clean up before the driver sees the result.
         self.regs.kill_statement();
-        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
         }
         self.arena.borrow_mut().statement_ended();
@@ -1031,7 +1035,7 @@ impl KernelMachine {
             let _ = observer;
             self.observe_step(task, exe);
         }
-        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
         }
         if self.task(task)?.take_requeue() {

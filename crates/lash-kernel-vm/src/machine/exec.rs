@@ -882,7 +882,7 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             self.bind_memory::<false>(task, at, shared, value)
         } else {
             self.bind_memory::<true>(task, at, shared, value)

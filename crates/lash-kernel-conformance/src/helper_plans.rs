@@ -80,7 +80,7 @@ fn run_bounded<const L: u64>(
         program,
         projector,
         charge,
-        lash_kernel_vm::MemoryLimit::Recount,
+        lash_kernel_vm::MemoryMeter::On,
     )
 }
 
@@ -97,7 +97,7 @@ fn run_at_depth<const L: u64>(
         projector,
         charge,
         call_depth,
-        lash_kernel_vm::MemoryLimit::Recount,
+        lash_kernel_vm::MemoryMeter::On,
     )
 }
 
@@ -106,9 +106,9 @@ fn run_with_memory<const L: u64>(
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
-    memory_limit: lash_kernel_vm::MemoryLimit,
+    memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
-    run_with_options::<L>(case, program, projector, charge, 200, memory_limit)
+    run_with_options::<L>(case, program, projector, charge, 200, memory_meter)
 }
 
 fn run_with_options<const L: u64>(
@@ -117,10 +117,10 @@ fn run_with_options<const L: u64>(
     projector: &mut Projector<'_>,
     charge: u64,
     call_depth: u32,
-    memory_limit: lash_kernel_vm::MemoryLimit,
+    memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
     let bounds = Bounds {
-        memory_limit,
+        memory_meter,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: charge,
         memory: 64 << 20,
@@ -653,7 +653,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                 let mut machine = crate::pages::start(
                     program,
                     Bounds {
-                        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+                        memory_meter: lash_kernel_vm::MemoryMeter::On,
                         charge: lash_kernel_vm::Charge::Exact,
                         charge_limit: 50_000_000,
                         memory: 64 << 20,
@@ -970,7 +970,7 @@ fn memory_off_helper_plans_keep_the_corpus_without_memory_scopes(shard: usize) {
                 &program,
                 &mut Projector::default(),
                 50_000_000,
-                lash_kernel_vm::MemoryLimit::Off,
+                lash_kernel_vm::MemoryMeter::Off,
             );
             let work = lash_kernel_vm::perf_witness::take_work().unwrap();
             lash_kernel_vm::perf_witness::disable_work();

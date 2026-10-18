@@ -232,16 +232,51 @@ pub enum Charge {
     Off,
 }
 
-/// The run's response to conservative memory pressure, carried to every worker.
+/// Whether a run meters its memory, selected by the host at start.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum MemoryLimit {
+pub enum MemoryMeter {
     #[default]
-    Recount,
-    Refuse,
+    On,
+    /// No meter, no memory bound and no limiter call.
     Off,
+}
+
+/// The bound a [`BoundReached`] request names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitedBound {
+    Memory,
+    Charge,
+}
+
+/// A run reached one of its limits (FIG-6768): the request of a
+/// [`HostReadKind::Bound`] read. The worker asks at the exact point the
+/// kernel reached the bound, before the statement's effect, and runs on
+/// with the parent's [`LimitDecision`]; for memory, only once an exact
+/// recount still leaves no room.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundReached {
+    pub bound: LimitedBound,
+    /// The bytes the run needs, or the charge it reached, the crossing
+    /// unit included.
+    pub used: u64,
+    /// The limit the run is held to.
+    pub limit: u64,
+}
+
+/// The parent's answer to a [`BoundReached`] request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitDecision {
+    /// Raise the limit by this much; the run saves it at its next seal.
+    Grow(u64),
+    /// End the run with its typed bound error.
+    #[default]
+    Refuse,
 }
 
 /// The bounds a run is held to, as the machine counts them. Passing one ends
@@ -251,7 +286,7 @@ pub enum MemoryLimit {
 #[serde(deny_unknown_fields)]
 pub struct RunBounds {
     pub charge: Charge,
-    pub memory_limit: MemoryLimit,
+    pub memory_meter: MemoryMeter,
     /// The most the run may be charged, in the kernel's charge units.
     pub charge_limit: u64,
     /// The most heap the run may hold, in bytes as the machine accounts them.
@@ -333,6 +368,14 @@ pub struct Start {
     /// and Ended frame carries the document statement starts and
     /// empty-block entries since the previous one, by task, in order.
     pub observe_path: bool,
+    /// Whether the parent decides at the run's memory bound: the worker
+    /// asks it with a [`HostReadKind::Bound`] read. Without, the run
+    /// refuses there.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub memory_limiter: bool,
+    /// Whether the parent decides at the run's charge bound, as for memory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub charge_limiter: bool,
 }
 
 /// One committed outcome, for the wait the machine named.
@@ -363,6 +406,9 @@ pub enum HostReadKind {
     /// the effect, its arguments and the site of the `perform`, and the
     /// answer is kernel data or a kernel error.
     Effect,
+    /// The run reached a bound the parent decides at: the payload is a
+    /// [`BoundReached`] and the answer a [`LimitDecision`] (FIG-6768).
+    Bound,
 }
 
 /// What a run has used so far, as its machine meters it.

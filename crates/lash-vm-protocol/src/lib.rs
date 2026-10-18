@@ -40,10 +40,11 @@ pub use codec::{
     ObservationChunker,
 };
 pub use message::{
-    BorrowedParentFrame, BorrowedParentMessage, Charge, CheckpointStart, Delivery, EncodedPayload,
-    ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MemoryLimit, MessageFence,
-    MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters, Start, StartFrom,
-    TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
+    BorrowedParentFrame, BorrowedParentMessage, BoundReached, Charge, CheckpointStart, Delivery,
+    EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
+    LimitDecision, LimitedBound, MemoryMeter, MessageFence, MessageHeader, OwnerEpoch, ParentFrame,
+    ParentMessage, RunBounds, RunMeters, Start, StartFrom, TransportSequence, WorkerFrame,
+    WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{
     BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,

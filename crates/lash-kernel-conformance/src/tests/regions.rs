@@ -722,7 +722,7 @@ fn regions_on_and_off_agree(shard: usize) {
         check(&on, &off, &case, &mut counts, &mut failures);
         let mut unaccounted = case.clone();
         unaccounted.name = format!("{name} (memory off)");
-        unaccounted.environment.bounds.memory_limit = lash_kernel_vm::MemoryLimit::Off;
+        unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
         check(&on, &off, &unaccounted, &mut counts, &mut failures);
         let mut tight = case;
         tight.name = format!("{name} (memory {TIGHT})");
@@ -903,12 +903,12 @@ fn sessions_hold(
     counts: &mut Counts,
     failures: &mut Vec<String>,
 ) {
-    for memory_limit in [
-        lash_kernel_vm::MemoryLimit::Recount,
-        lash_kernel_vm::MemoryLimit::Off,
+    for memory_meter in [
+        lash_kernel_vm::MemoryMeter::On,
+        lash_kernel_vm::MemoryMeter::Off,
     ] {
         let mut case = case.clone();
-        case.environment.bounds.memory_limit = memory_limit;
+        case.environment.bounds.memory_meter = memory_meter;
         let Some(program) = case_program(on, &case) else {
             failures.push(format!("{}: not admitted", case.name));
             return;
@@ -923,7 +923,7 @@ fn sessions_hold(
             let b = finished::<OFF>(&reference, &case, slice);
             if a != b {
                 failures.push(format!(
-                    "{}, memory {memory_limit:?}, slice {slice}: {a:?}, {b:?}",
+                    "{}, memory {memory_meter:?}, slice {slice}: {a:?}, {b:?}",
                     case.name
                 ));
             }
@@ -991,12 +991,12 @@ fn allocating_regions_hold_what_the_reference_holds() {
     let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
     let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
     for (name, text) in ALLOCATING {
-        for memory_limit in [
-            lash_kernel_vm::MemoryLimit::Recount,
-            lash_kernel_vm::MemoryLimit::Off,
+        for memory_meter in [
+            lash_kernel_vm::MemoryMeter::On,
+            lash_kernel_vm::MemoryMeter::Off,
         ] {
             let mut case = program_case(name, text, 16);
-            case.environment.bounds.memory_limit = memory_limit;
+            case.environment.bounds.memory_meter = memory_meter;
             let program = case_program(&on, &case).expect("an allocating program is admitted");
             let reference = Program {
                 library: off.clone(),
@@ -1006,7 +1006,7 @@ fn allocating_regions_hold_what_the_reference_holds() {
                 assert_eq!(
                     finished::<ON>(&program, &case, slice),
                     finished::<OFF>(&reference, &case, slice),
-                    "{name}, memory {memory_limit:?}, slice {slice}"
+                    "{name}, memory {memory_meter:?}, slice {slice}"
                 );
             }
         }

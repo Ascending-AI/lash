@@ -67,7 +67,7 @@ impl Default for Environment {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CaseBounds {
-    pub memory_limit: lash_kernel_vm::MemoryLimit,
+    pub memory_meter: lash_kernel_vm::MemoryMeter,
     pub charge: u64,
     pub memory: u64,
     pub call_depth: u32,
@@ -79,7 +79,7 @@ pub struct CaseBounds {
 impl Default for CaseBounds {
     fn default() -> Self {
         Self {
-            memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
             charge: 1_000_000,
             memory: 16 * 1024 * 1024,
             call_depth: 64,
@@ -93,7 +93,7 @@ impl Default for CaseBounds {
 impl From<CaseBounds> for Bounds {
     fn from(value: CaseBounds) -> Self {
         Self {
-            memory_limit: value.memory_limit,
+            memory_meter: value.memory_meter,
             charge: lash_kernel_vm::Charge::Exact,
             charge_limit: value.charge,
             memory: value.memory,

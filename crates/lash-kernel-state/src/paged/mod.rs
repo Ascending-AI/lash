@@ -46,7 +46,7 @@ pub use root::{
     BindingRecord, BoundRecord, CellTargetKind, Charge, CheckpointRoot, CommittedOutcomeRecord,
     CursorKind, CursorRecord, EndedRecord, EndedTask, EnteredRecord, FinallyRecord, FunctionRecord,
     GuardRecord, HeaderRecord, HeapRoot, IncomingRecord, JoinerRecord, KeyedRoot, ListJoinRecord,
-    LoopRecord, MemoryLimit, RootStatus, SavedMeters, SequenceRoot, TaskStateRecord,
+    LoopRecord, MemoryMeter, RootStatus, SavedLimits, SavedMeters, SequenceRoot, TaskStateRecord,
     WaitKindRecord, WaitPhase, WaitRecord,
 };
 pub use source::{PageAnswer, PageBody, PageKind, PagePortLimits, PageSource};

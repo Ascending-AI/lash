@@ -49,7 +49,7 @@ use lash_kernel_doc::{
     Datum, Document, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Invalid, Name,
     Timestamp, Type,
 };
-pub use lash_kernel_state::paged::Charge;
+pub use lash_kernel_state::paged::{Charge, MemoryMeter};
 
 /// What a machine runs: an admitted document and the library functions the
 /// embedder registered, prepared once for every program that uses them.
@@ -68,14 +68,17 @@ pub struct Program {
 /// the run with [`RunError::Bound`]; no guest code catches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {
-    /// How pressure against the conservative memory bound is resolved.
-    pub memory_limit: crate::MemoryLimit,
-    /// Whether charge is metered. Exact is the default host policy.
+    /// Whether memory is metered. On is the default host policy; Off has
+    /// no meter, no bound and no [`MemoryLimiter`] call.
+    pub memory_meter: MemoryMeter,
+    /// Whether charge is metered. Exact is the default host policy; Off has
+    /// no meter, no bound and no [`ChargeLimiter`] call.
     pub charge: Charge,
-    /// The most the run may be charged under Exact, in charge units.
+    /// The most the run may be charged under Exact, in charge units, until
+    /// its [`ChargeLimiter`] grows it.
     pub charge_limit: u64,
     /// The most heap the run may hold, in bytes as the machine accounts
-    /// them.
+    /// them, until its [`MemoryLimiter`] grows it.
     pub memory: u64,
     /// The deepest any task's active calls may nest.
     pub call_depth: u32,
@@ -85,6 +88,56 @@ pub struct Bounds {
     pub requests_per_park: u32,
     /// The most members one `join` on a list may have.
     pub join_members: u32,
+}
+
+/// What a limiter decides when a run reaches its limit (FIG-6768).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LimitDecision {
+    /// Raise the limit by this much, and run on. A limit still reached
+    /// after it is asked about again.
+    Grow(u64),
+    /// End the run with [`RunError::Bound`], as a run without a limiter
+    /// ends.
+    #[default]
+    Refuse,
+}
+
+/// The host's decision at a run's memory bound (FIG-6768), shaped as
+/// Wasmtime's `ResourceLimiter::memory_growing` (wasmtime 25.0.0,
+/// `crates/wasmtime/src/runtime/limits.rs`): the embedder's callback where
+/// a store's memory would pass its limit, which allows or refuses the growth.
+///
+/// The meter is a conservative bound, so the machine first recounts what
+/// the run holds exactly and frees what nothing holds; it asks only when
+/// the exact count with what the run asks for still does not fit. It asks
+/// at an exact, deterministic point, before the statement's effect. A
+/// grown limit is saved with the run at its next seal, so a resume
+/// continues with it; a run resumed from an earlier seal reaches the same
+/// point and asks again, with nothing observable done in between.
+pub trait MemoryLimiter {
+    /// The run needs `used` bytes and may hold `limit`.
+    fn limit_reached(&mut self, used: u64, limit: u64) -> LimitDecision {
+        let _ = (used, limit);
+        LimitDecision::Refuse
+    }
+}
+
+/// The host's decision at a run's charge bound (FIG-6768), shaped as
+/// Wasmtime's `Store::epoch_deadline_callback` (wasmtime 25.0.0,
+/// `crates/wasmtime/src/runtime/store.rs`), whose `UpdateDeadline::Continue`
+/// extends the deadline by a number of ticks: [`LimitDecision::Grow`]
+/// extends the bound by a number of charge units.
+///
+/// The machine asks where the charge passes the bound, at the unit the
+/// reference charger crosses it, before the statement's effect: the
+/// charge `used` includes the unit that crossed, as the refused run's
+/// charge does. A grown limit is saved as [`MemoryLimiter`]'s is.
+pub trait ChargeLimiter {
+    /// The run is charged `used` and may be charged `limit`.
+    fn limit_reached(&mut self, used: u64, limit: u64) -> LimitDecision {
+        let _ = (used, limit);
+        LimitDecision::Refuse
+    }
 }
 
 /// Which bound a run passed.
@@ -211,6 +264,10 @@ pub struct MachineOptions {
     pub observation: crate::ObservationMode,
     pub trace_path: bool,
     pub cell_save: Option<Box<dyn CellSave>>,
+    /// What decides at the memory bound; none refuses.
+    pub memory_limiter: Option<Box<dyn MemoryLimiter>>,
+    /// What decides at the charge bound; none refuses.
+    pub charge_limiter: Option<Box<dyn ChargeLimiter>>,
 }
 
 /// The synchronous interface a machine reads its host through while it

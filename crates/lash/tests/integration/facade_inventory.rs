@@ -28,9 +28,14 @@
 #![allow(clippy::disallowed_methods)]
 
 #[cfg(feature = "rlm")]
-use lash::rlm::{Charge as _, MemoryLimit as _};
+use lash::rlm::{
+    Charge as _, ChargeLimiter as _, LimitDecision as _, MemoryLimiter as _, MemoryMeter as _,
+};
 #[cfg(feature = "codemode")]
-use lash::vm::{RunCharge as _, RunMemoryLimit as _};
+use lash::vm::{
+    BoundReached as _, LimitedBound as _, RunCharge as _, RunChargeLimiter as _,
+    RunLimitDecision as _, RunMemoryLimiter as _, RunMemoryMeter as _,
+};
 
 use lash::Backend as _;
 use lash::LlmProfileConfig as _;

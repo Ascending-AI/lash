@@ -303,7 +303,7 @@ impl KernelMachine {
             plan.locals[slot as usize].ok_or_else(|| fault("a segment's site binds no variable"))
         };
         let code = exe.code(code_id);
-        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.reserve_growth_metered(super::FRAME_BYTES)?;
             for (index, param) in code.params.iter().enumerate() {
                 let adopted = site
@@ -473,7 +473,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("a standing frame is missing"))?;
         self.refresh_charging(task)?;
         let resumed = match (
-            self.bounds.memory_limit == crate::MemoryLimit::Off,
+            self.bounds.memory_meter == crate::MemoryMeter::Off,
             plan.shared.is_some(),
         ) {
             (true, true) => {

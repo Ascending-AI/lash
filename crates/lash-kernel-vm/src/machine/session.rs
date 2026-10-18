@@ -39,7 +39,7 @@ pub(crate) fn start(
         None => PagedHeap::fresh(source, EditEpoch(0)),
     };
     heap.set_data_limits(limits);
-    if bounds.memory_limit != crate::MemoryLimit::Off {
+    if bounds.memory_meter != crate::MemoryMeter::Off {
         heap.set_census(
             census.ok_or_else(|| HeapFault::Malformed("metered start has no census".into()))?,
         )?;
@@ -52,19 +52,19 @@ pub(crate) fn start(
     });
     if let Some(session) = &start.session {
         heap.adopt(session)?;
-        if bounds.memory_limit != crate::MemoryLimit::Off
+        if bounds.memory_meter != crate::MemoryMeter::Off
             && heap.certificate().metric == lash_kernel_state::paged::AccountingMetric::Unmetered
         {
             heap.collect()?;
         }
     }
-    if bounds.memory_limit == crate::MemoryLimit::Off {
+    if bounds.memory_meter == crate::MemoryMeter::Off {
         heap.without_memory_accounting();
     }
     let access = heap.pages().clone();
     let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
         let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
-        if bounds.memory_limit == crate::MemoryLimit::Off {
+        if bounds.memory_meter == crate::MemoryMeter::Off {
             arena.without_memory_accounting()
         } else {
             arena
@@ -79,7 +79,7 @@ pub(crate) fn start(
         document: None,
         exe: Arc::clone(&exe),
         bounds,
-        memory_stream: super::stream::runner(bounds.memory_limit),
+        memory_stream: super::stream::runner(bounds.memory_meter),
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
@@ -97,6 +97,7 @@ pub(crate) fn start(
         functions,
         host: Vec::new(),
         save: None,
+        limiters: Limiters::default(),
         session_cell: matches!(start.target, Target::Main),
         session: Default::default(),
         pins: Pins::default(),
@@ -463,7 +464,7 @@ impl KernelMachine {
     ) -> Result<bool, Halt> {
         // The run holds what its bindings grow by, unless it keeps no
         // memory accounting.
-        let priced = self.bounds.memory_limit != crate::MemoryLimit::Off;
+        let priced = self.bounds.memory_meter != crate::MemoryMeter::Off;
         let before = match self.session.bindings.get(&name.key) {
             Some(bound) => priced.then(|| self.cost_of(&bound.value)),
             // A first write of a name reads its slot: what it held, and
@@ -641,7 +642,7 @@ impl KernelMachine {
         layout: Layout,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        let census = if bounds.memory_limit == crate::MemoryLimit::Off {
+        let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {
             Some(start_census(&mut *source, &start, bounds.memory)?)
@@ -670,7 +671,7 @@ impl KernelMachine {
         limits: lash_kernel_doc::KernelDataLimits,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        let census = if bounds.memory_limit == crate::MemoryLimit::Off {
+        let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {
             Some(start_census(&mut *source, &start, bounds.memory)?)

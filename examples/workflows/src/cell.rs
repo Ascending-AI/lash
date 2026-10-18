@@ -72,7 +72,7 @@ impl Host for Quiet {
 }
 
 const BOUNDS: Bounds = Bounds {
-    memory_limit: lash_kernel_vm::MemoryLimit::Recount,
+    memory_meter: lash_kernel_vm::MemoryMeter::On,
     charge: lash_kernel_vm::Charge::Exact,
     charge_limit: 10_000_000,
     memory: 64 << 20,

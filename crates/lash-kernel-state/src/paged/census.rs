@@ -217,6 +217,9 @@ pub trait AllocationCensus {
     fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault>;
     /// The first, conservative check: checked `U + bytes <= bound`.
     fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision;
+    /// Holds the census to `bound` from here on: the run's memory limiter
+    /// grew it (FIG-6768). It changes no accounting.
+    fn set_bound(&mut self, bound: LogicalBytes);
     /// Exact refinement: freezes mutation, traces from `graph`'s
     /// persistent roots and `transient`, sweeps the unreached, replaces U
     /// by the exact total and decides `pending` again. It charges no guest

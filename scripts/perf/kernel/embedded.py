@@ -316,8 +316,8 @@ def render_warm(receipt, path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fetch-engines', action='store_true')
-    parser.add_argument('--memory', choices=['recount', 'refuse', 'off'], default='refuse',
-                        help='kernel memory policy; benchmarks refuse by default')
+    parser.add_argument('--memory', choices=['on', 'off'], default='on',
+                        help='kernel memory meter; a metered run past its exact recount is refused')
     parser.add_argument('--memory-witness', action='store_true',
                         help='diagnostic accounting counters; do not use as a timing sample')
     parser.add_argument('--out', type=Path, required=True)
@@ -367,7 +367,7 @@ def main():
                    executable_sha256={name: sha(Path(path).read_bytes()) for name, path in tools.items()},
                    release_archives={name: {'url': data[0], 'sha256': data[1]} for name, data in RELEASES.items()},
                    driver_sha256=sha(Path(__file__).read_bytes()), sources={}, samples=[])
-    receipt['memory_policy'] = args.memory
+    receipt['memory_meter'] = args.memory
     receipt['memory_witness'] = args.memory_witness
     if args.differential_warm:
         receipt['differential_warm'] = True

@@ -177,6 +177,12 @@ impl PagedHeap {
         self.census = Some(census);
         Ok(())
     }
+    /// Holds the installed census to a memory bound its run's limiter grew.
+    pub fn set_memory_bound(&mut self, bytes: u64) {
+        if let Some(census) = self.census.as_mut() {
+            census.set_bound(LogicalBytes(bytes));
+        }
+    }
     /// The page port the machine's own record trees read and edit through:
     /// names, sites, task identities, frames and waits. The heap's
     /// directory, families and installed roots are not reachable through

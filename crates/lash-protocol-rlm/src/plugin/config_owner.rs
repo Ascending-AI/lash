@@ -628,10 +628,10 @@ mod tests {
                 owner.validate(&redialected, Some(&base), facts),
                 Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "dialect"
             ));
-            assert_eq!(base.behaviour.on_memory_limit, crate::MemoryLimit::Recount);
+            assert_eq!(base.behaviour.memory_meter, crate::MemoryMeter::On);
             let repolicied = RlmRecordedConfig {
                 behaviour: RlmRecordedBehaviour {
-                    on_memory_limit: crate::MemoryLimit::Refuse,
+                    memory_meter: crate::MemoryMeter::Off,
                     ..base.behaviour.clone()
                 },
                 ..base.clone()

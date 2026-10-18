@@ -520,7 +520,8 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
         }
         let charged = super::ops::charge_scheduled(
             &mut machine.charged,
-            machine.bounds.charge_limit,
+            &mut machine.bounds.charge_limit,
+            &mut machine.limiters,
             units,
             machine.observer.as_deref(),
         );
@@ -536,7 +537,7 @@ impl KernelMachine {
     /// A value leaving a plan, as one leaving a frame is held
     /// ([`KernelMachine::complete`]): `holds` times, until the step ends.
     fn departing(&mut self, value: Value, holds: usize) -> Result<Value, Halt> {
-        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             for _ in 0..holds {
                 self.pins.borrowed.push(value);
             }
@@ -574,7 +575,7 @@ impl KernelMachine {
         args: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Option<Result<Value, Value>>> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             self.run_plan_memory::<false, SHARED>(task, exe, lib, plan, args, entry)
         } else {
             self.run_plan_memory::<true, SHARED>(task, exe, lib, plan, args, entry)

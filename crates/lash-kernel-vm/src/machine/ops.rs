@@ -100,7 +100,7 @@ impl KernelMachine {
             arena.collect_cycles(&mut roots);
         }
         arena.release(&mut roots);
-        let young = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        let young = if self.bounds.memory_meter == crate::MemoryMeter::Off {
             0
         } else {
             arena.take_released_young()
@@ -110,16 +110,6 @@ impl KernelMachine {
             self.heap.release_young(young)?;
         }
         Ok(())
-    }
-
-    /// The one policy decision for arena, native and paged-write pressure.
-    /// Refuse stops before any exact trace.
-    pub(super) fn memory_pressure(&mut self, bytes: u64) -> Result<(), Halt> {
-        match self.bounds.memory_limit {
-            crate::MemoryLimit::Refuse => Err(bound(Bound::Memory, self.bounds.memory)),
-            crate::MemoryLimit::Recount => self.refine_resident(bytes),
-            crate::MemoryLimit::Off => Ok(()),
-        }
     }
 
     /// Writes `value` to register `out`, growing the registers to it.
@@ -223,7 +213,7 @@ impl KernelMachine {
     /// A transient census root outside the frame that returned it.
     #[inline]
     pub(super) fn borrow_value(&mut self, value: Value) {
-        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.borrowed.push(value);
         }
     }
@@ -233,7 +223,8 @@ impl KernelMachine {
     pub(super) fn charge(&mut self, units: u64) -> Result<(), Halt> {
         charge_scheduled(
             &mut self.charged,
-            self.bounds.charge_limit,
+            &mut self.bounds.charge_limit,
+            &mut self.limiters,
             units,
             self.observer.as_deref(),
         )
@@ -243,7 +234,7 @@ impl KernelMachine {
     /// ends, refining exactly at the collection point when the heap is due
     /// and ending the run when what is live does not leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return Ok(());
         }
         self.hold(bytes)
@@ -253,7 +244,7 @@ impl KernelMachine {
     /// It shares the arena's growth ledger; projection transfers that credit
     /// into saved rows, without repricing frames at each publication.
     pub(super) fn reserve_growth(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return Ok(());
         }
         self.reserve_growth_metered(bytes)
@@ -288,7 +279,7 @@ impl KernelMachine {
     /// The memory anchor of the arena's objects: holds `bytes` they grew
     /// by until the heap receives them, the statement's holds paying first.
     pub(super) fn grow(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return Ok(());
         }
         if bytes == 0 {
@@ -306,7 +297,7 @@ impl KernelMachine {
     /// What the bound leaves past what the census holds: the room a native
     /// call may reserve without a refinement.
     fn headroom(&self) -> u64 {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return u64::MAX;
         }
         self.bounds
@@ -358,7 +349,7 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return Ok(());
         }
         // Immediates own no arena storage and their register slot is
@@ -932,7 +923,7 @@ impl KernelMachine {
                     let (answer, built) = {
                         let arena = self.arena.borrow();
                         let semantics = arena.semantics().with_limits(self.limits);
-                        let mut nursery = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+                        let mut nursery = if self.bounds.memory_meter == crate::MemoryMeter::Off {
                             Nursery::unaccounted(arena.objects())
                         } else {
                             Nursery::new(arena.objects(), LogicalBytes(room))
@@ -1068,7 +1059,8 @@ pub(super) enum Answer {
 #[inline(always)]
 pub(super) fn charge_scheduled(
     charged: &mut u64,
-    limit: u64,
+    limit: &mut u64,
+    limiters: &mut super::Limiters,
     units: u64,
     observer: Option<&crate::observe::Observer>,
 ) -> Result<(), Halt> {
@@ -1079,8 +1071,8 @@ pub(super) fn charge_scheduled(
         return Ok(());
     }
     *charged = charged.saturating_add(units);
-    if *charged > limit {
-        return Err(bound(Bound::Charge, limit));
+    if *charged > *limit {
+        return limiters.charge_reached(*charged, limit);
     }
     Ok(())
 }
