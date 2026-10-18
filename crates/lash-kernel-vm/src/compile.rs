@@ -55,9 +55,13 @@ pub(crate) mod segments;
 pub(crate) use reads::{Field, ReadSite, find as find_property};
 
 pub(crate) use formula::{Charge, Fast, Plan, Source};
+pub(crate) use regions::{
+    Commit, CompiledBody, CompiledHead, CompiledStep, Event, LoopPlan, Meter, NESTING, scalar,
+};
 #[cfg(test)]
-pub(crate) use regions::Refused;
-pub(crate) use regions::{Event, LoopPlan, Meter, Summary};
+pub(crate) use regions::{Head, Step, Summary};
+#[cfg(test)]
+pub(crate) use regions::{Lowered, Refused};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
@@ -68,8 +72,7 @@ pub(crate) use regions::{Event, LoopPlan, Meter, Summary};
 /// kernel body: the body runs every call of such a function. It exists for
 /// tests: every layout runs a document the same way. Even layouts keep
 /// per-site property caches; one leaving 2 modulo 4 makes every cache miss.
-/// Layouts divisible by 4 also fuse the list cursor's item handoff. Every
-/// layout but 0 splits charge regions at its own choice of events. None of
+/// Every layout but 0 splits charge regions at its own choice of events. None of
 /// this cache state is saved. Bit 62 turns region formation off
 /// (`docs/design/kernel-regions.md` §3.3) and changes nothing else: every
 /// other choice reads the layout without it.
@@ -372,8 +375,8 @@ pub(crate) struct Executable {
 /// Immutable document tables, independent of any run or owning document.
 pub(crate) struct DocumentCode {
     tables: Tables,
-    /// The loop regions lowering formed, by the index their `while`
-    /// statements state (`Form::While::region`).
+    /// The loop regions lowering formed, by the index their `while` and
+    /// `for` statements state (`Form::While::region`, `Form::For::region`).
     pub(crate) regions: Vec<LoopPlan>,
     pub(crate) block_ordinals: Vec<u32>,
     pub(crate) site_count: usize,
@@ -899,6 +902,8 @@ pub(crate) enum Form {
         body: BlockId,
         /// What runs when the loop ends but by `break`.
         else_block: Option<BlockId>,
+        /// The loop region it runs as, in the executable's plans.
+        region: Option<u32>,
     },
     While {
         metered: u64,
@@ -923,8 +928,6 @@ pub(crate) enum Form {
 /// A loop protocol's hooks, compiled (`K-ITER-005`).
 #[derive(Clone, Copy)]
 pub(crate) struct Via {
-    /// Fuse the list cursor's item handoff; generic and forced-miss plans use hooks.
-    pub(crate) fuse_list: bool,
     pub(crate) open: LibId,
     pub(crate) next: Option<LibId>,
     pub(crate) item: Option<LibId>,
@@ -1281,46 +1284,50 @@ fn compile_document(
     })
 }
 
-/// Forms and verifies the loop region of every `while` of the document's
-/// own `tables` that has one, against `library`, and has each such `while`
-/// state its plan (`docs/design/kernel-regions.md` §1).
+/// Forms and verifies the loop region of every `while` and `for` of the
+/// document's own `tables` that has one, against `library`, and has each
+/// such loop state its plan (`docs/design/kernel-regions.md` §1).
 fn form_regions(tables: &mut Tables, library: &Prepared, loop_test: u64) -> Vec<LoopPlan> {
     let (blocks, stmts) = (
         library.tables.blocks.len() as u32,
         library.tables.stmts.len() as u32,
     );
-    let formation = regions::Formation {
-        stream: &tables.stream,
-        libs: &library.libs,
-        loop_test,
-    };
     let mut formed = Vec::new();
-    for code in &tables.codes {
-        let mut pending = vec![code.body];
-        while let Some(block) = pending.pop() {
-            for id in &tables.blocks[(block.0 - blocks) as usize].stmts {
-                let statement = &tables.stmts[(id.0 - stmts) as usize];
-                pending.extend(statement.form.blocks());
-                let Form::While { body: block, .. } = &statement.form else {
-                    continue;
-                };
-                let body = &tables.blocks[(block.0 - blocks) as usize];
-                let statements: Vec<&Stmt> = body
-                    .stmts
-                    .iter()
-                    .map(|id| &tables.stmts[(id.0 - stmts) as usize])
-                    .collect();
-                if let Some(plan) =
-                    formation.form(code, *id, statement, (*block, &body.declares, &statements))
-                    && plan.verify(&tables.stream, statement, loop_test).is_ok()
-                {
-                    formed.push(plan);
+    {
+        let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
+        let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
+        let lowered = || regions::Lowered {
+            stream: &tables.stream,
+            block: &block,
+            stmt: &stmt,
+        };
+        let formation = regions::Formation {
+            lowered: lowered(),
+            libs: &library.libs,
+            loop_test,
+        };
+        for code in &tables.codes {
+            let mut pending = vec![code.body];
+            while let Some(id) = pending.pop() {
+                for id in &block(id).stmts {
+                    let statement = stmt(*id);
+                    pending.extend(statement.form.blocks());
+                    if !matches!(statement.form, Form::While { .. } | Form::For { .. }) {
+                        continue;
+                    }
+                    if let Some(plan) = formation.form(code, *id)
+                        && plan.verify(&lowered(), loop_test).is_ok()
+                    {
+                        formed.push(plan);
+                    }
                 }
             }
         }
     }
     for (index, plan) in formed.iter().enumerate() {
-        if let Form::While { region, .. } = &mut tables.stmts[(plan.stmt.0 - stmts) as usize].form {
+        if let Form::While { region, .. } | Form::For { region, .. } =
+            &mut tables.stmts[(plan.stmt.0 - stmts) as usize].form
+        {
             *region = Some(index as u32);
         }
     }

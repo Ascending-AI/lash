@@ -257,7 +257,7 @@ impl KernelMachine {
             header: Header::Open,
             guard: None,
         });
-        match self.hook(task, exe, stmt, via.open, vec![value])? {
+        match self.hook(task, exe, stmt, via.open, &[value])? {
             Some(opened) => self.opened(task, host, exe, opened),
             None => Ok(Flow::Step),
         }
@@ -272,14 +272,14 @@ impl KernelMachine {
         exe: &Executable,
         stmt: StmtId,
         lib: LibId,
-        args: Vec<Value>,
+        args: &[Value],
     ) -> Eval<Option<Value>> {
         // Protocol hooks have at most two arguments. This is the header's
         // static ABI window, also when the header resumes outside a stream.
         self.regs.statement(exe.stmt(stmt).regs.max(2));
         let count = args.len();
-        for (at, arg) in args.into_iter().enumerate() {
-            self.put(at, arg);
+        for (at, arg) in args.iter().enumerate() {
+            self.put(at, *arg);
         }
         match self.call_lib(task, exe, lib, 0, count, Some(stmt))? {
             Flow::Done => Ok(Some(self.take(0))),
@@ -424,8 +424,30 @@ impl KernelMachine {
                 ..
             }) => {
                 let stmt = *stmt;
-                let Form::For { metered, .. } = &exe.stmt(stmt).form else {
+                let Form::For {
+                    metered, region, ..
+                } = &exe.stmt(stmt).form
+                else {
                     return Err(fault("a `for` loop is not at a `for`").into());
+                };
+                let (cursor, header) = match *region {
+                    None => (cursor, header),
+                    Some(region) => {
+                        if let Some(flow) = self.loop_region(task, exe, region)? {
+                            return Ok(flow);
+                        }
+                        // The region may have stepped the cursor.
+                        let frame = self
+                            .tasks
+                            .get_mut(task.0 as usize)?
+                            .ok_or_else(|| fault("a running task is missing"))?
+                            .frames
+                            .last_mut()?;
+                        match frame.and_then(|frame| frame.control.last_mut()) {
+                            Some(Control::For { cursor, header, .. }) => (cursor, header),
+                            _ => return Err(fault("a `for` loop left its control").into()),
+                        }
+                    }
                 };
                 if *metered != 0 {
                     super::ops::charge_scheduled(
@@ -444,7 +466,7 @@ impl KernelMachine {
                         let next = via_of(exe, stmt)
                             .and_then(|via| via.next)
                             .ok_or_else(|| fault("a driver's loop has no `next`"))?;
-                        return match self.hook(task, exe, stmt, next, vec![driver])? {
+                        return match self.hook(task, exe, stmt, next, &[driver])? {
                             Some(stepped) => {
                                 let raw = self.pulled(stepped)?;
                                 self.stepped(task, host, exe, raw)
@@ -551,8 +573,8 @@ impl KernelMachine {
             Some(raw) => Header::Check(Box::new(raw)),
             None => Header::Exhausted,
         };
-        let args = vec![walked, counted(size), counted(remaining), Value::Bool(more)];
-        match self.hook(task, exe, stmt, check, args)? {
+        let args = [walked, counted(size), counted(remaining), Value::Bool(more)];
+        match self.hook(task, exe, stmt, check, &args)? {
             Some(budget) => self.checked(task, host, exe, budget),
             None => Ok(Flow::Step),
         }
@@ -606,30 +628,11 @@ impl KernelMachine {
         let Some(item) = via_of(exe, stmt).and_then(|via| via.item) else {
             return self.bind_pass(task, exe, raw);
         };
-        if let Cursor::List(list, _) = cursor
-            && via_of(exe, stmt).is_some_and(|via| via.fuse_list)
-        {
-            let list = *list;
-            *header = Header::Item(Box::new(raw));
-            self.regs.statement(exe.stmt(stmt).regs.max(2));
-            self.put(0, Value::List(list));
-            self.put(1, raw);
-            // Same held item and argument roots as the general hook. Only
-            // the cursor-to-hook argument vector and repeated cursor dispatch
-            // disappear; decline still enters the exact body at Item.
-            return match self.call_lib(task, exe, item, 0, 2, Some(stmt))? {
-                Flow::Done => {
-                    let element = self.take(0);
-                    self.bind_pass(task, exe, element)
-                }
-                Flow::Step => Ok(Flow::Step),
-            };
-        }
         let walked = cursor
             .walked()
             .ok_or_else(|| fault("an opened loop walks nothing"))?;
         *header = Header::Item(Box::new(raw));
-        match self.hook(task, exe, stmt, item, vec![walked, raw])? {
+        match self.hook(task, exe, stmt, item, &[walked, raw])? {
             Some(element) => self.bind_pass(task, exe, element),
             None => Ok(Flow::Step),
         }

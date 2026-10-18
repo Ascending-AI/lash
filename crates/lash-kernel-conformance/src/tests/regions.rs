@@ -74,6 +74,48 @@ const PROGRAMS: &[(&str, &str, u32)] = &[
         6,
     ),
     (
+        "if and else in the body",
+        "fn branch(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set i = num.add(i, 1) } return s }\n\
+         main { let r = call branch(14) finish r }",
+        16,
+    ),
+    (
+        "continue and break in the body",
+        "fn skip(n) { let i = 0 let s = 0 while true { set i = num.add(i, 1) if num.lt(n, i) { break } if num.lt(num.rem_trunc(i, 4), 1) { continue } set s = num.add(s, i) } return s }\n\
+         main { let r = call skip(13) finish r }",
+        16,
+    ),
+    (
+        "nested arms and a let in an arm",
+        "fn arms(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(i, 6) { let d = num.mul(i, 2) if num.lt(d, 7) { set s = num.add(s, d) } else { set s = num.sub(s, 1) } } else { set s = num.add(s, 1) } set i = num.add(i, 1) } return s }\n\
+         main { let r = call arms(13) finish r }",
+        16,
+    ),
+    (
+        "a return inside the loop",
+        "fn find(n) { let i = 0 while num.lt(i, n) { if num.lt(9, i) { return i } set i = num.add(i, 1) } return 0 }\n\
+         main { let r = call find(20) finish r }",
+        16,
+    ),
+    (
+        "a for over a list, with continue",
+        "fn total(xs) { let s = 0 for x in xs { if num.lt(x, 3) { continue } set s = num.add(s, x) } return s }\n\
+         main { let r = call total([1, 2, 3, 4, 5, 6, 7, 8, 9]) finish r }",
+        16,
+    ),
+    (
+        "a for over a tuple, with a let and a break",
+        "fn first(xs) { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\n\
+         main { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
+        16,
+    ),
+    (
+        "a for over a list whose elements are not all scalars",
+        "fn mixed(xs) { let s = 0 for x in xs { set s = num.add(s, x) } return s }\n\
+         main { try { let r = call mixed([1, 2, 3.5, 4, \"a\", 6]) finish r } catch e { finish e.kind } }",
+        16,
+    ),
+    (
         "loops with barriers between them",
         "fn mixed(n) { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, 2) set i = num.add(i, 1) } print s while num.lt(i, num.add(n, 3)) { print i set i = num.add(i, 1) } let t = 0 while num.lt(t, n) { set t = num.add(t, 1) } return (s, i, t) }\n\
          main { let r = call mixed(10) finish r }",

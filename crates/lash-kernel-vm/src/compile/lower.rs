@@ -330,6 +330,7 @@ impl Compiler<'_> {
                     via: via.and_then(Result::ok),
                     body,
                     else_block,
+                    region: None,
                 }
             }
             doc::Stmt::While {
@@ -440,7 +441,6 @@ impl Compiler<'_> {
         let lib = |function: &FunctionId| self.resolve.lib(function).ok_or(*function);
         let hook = |function: &Option<FunctionId>| function.as_ref().map(lib).transpose();
         Ok(Via {
-            fuse_list: self.layout.0.is_multiple_of(4),
             open: lib(&via.open)?,
             next: hook(&via.next)?,
             item: hook(&via.item)?,

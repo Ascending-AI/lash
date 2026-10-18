@@ -2,30 +2,41 @@
 //! cold side table of the spans of guest code whose fast path holds no
 //! effect, park, task switch, projection point or slice or bound crossing.
 //!
-//! A [`LoopPlan`] states, for a `while` whose test and body are region
-//! statements, each statement's fixed units, its formulas' maximum, its
-//! static charge program, the slots it reads and writes, and the most one
-//! iteration charges. [`LoopPlan::verify`] checks the plan against the
-//! stream's `RegionTable` events and the statement units before lowering
-//! admits it. Plans belong to the executable: deterministic, immutable and
-//! never saved. Their compiled form is built on first entry and cached in
-//! the plan. A layout bit turns formation off ([`super::Layout::regions`]),
-//! which is how the regions law compares the two plans.
+//! A [`LoopPlan`] states, for a `while` or a `for` over a list or a tuple
+//! whose body is region statements, its head (the `while`'s test, or the
+//! `for`'s scheduled units and its protocol's `item` hook) and its body as
+//! a tree: each statement's fixed units, its formulas' maximum, its static
+//! charge program, the slots it reads and writes, the `if` arms it enters,
+//! and the `continue`s that end an iteration early. It also states the most
+//! one iteration charges. [`LoopPlan::verify`] checks the plan against the
+//! lowered code, its stream's `RegionTable` events and the statement units
+//! before lowering admits it. Plans belong to the executable: deterministic,
+//! immutable and never saved. Their compiled form is built on first entry
+//! and cached in the plan. A layout bit turns formation off
+//! ([`super::Layout::regions`]), which is how the regions law compares the
+//! two plans.
 //!
 //! Region ops in this version: reads of unshared slots, resident scalar
 //! constants, prepared operators (`Op::Operator`, or `Op::Nested` of an
-//! operator) with a scalar charge table, and writes of unshared slots.
-//! Everything else is a barrier, which no plan contains.
+//! operator) with a scalar charge table, writes and declarations of
+//! unshared slots, an `if`'s branch, and `continue`. A `break` or a
+//! `return` is a statement the region leaves to the reference: it stops
+//! before it. Everything else is a barrier, which no plan contains.
 
 use std::sync::OnceLock;
 
 use lash_kernel_doc::Value;
 use lash_kernel_exec::{Op, OpRange, RegRange, Weight};
 
+use super::formula::ScalarTable;
 use super::{
-    BlockId, Code, Constant, Executable, Form, Lib, LibId, NestedKind, Source, Stmt, StmtId, Stream,
+    Block, BlockId, Code, Constant, Entry, Executable, Form, Lib, LibId, NestedKind, Source, Stmt,
+    StmtId, Stream,
 };
 use crate::machine::SlotState;
+
+/// The deepest `if` nesting a loop body's plan holds.
+pub(crate) const NESTING: usize = 8;
 
 /// One event of a region statement's static charge program, in the order
 /// the reference charges it (`docs/design/kernel-end-state.md` §B).
@@ -38,11 +49,26 @@ pub(crate) enum Event {
     Formula,
 }
 
-/// A region statement on its one path: a loop's test, or a statement of
-/// its body.
+/// What a region statement does with the value its ops compute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum End {
+    /// A `while`'s test.
+    Test,
+    /// An assignment of an unshared slot.
+    Write,
+    /// A declaration of an unshared slot.
+    Bind,
+    /// An `if`'s branch.
+    Branch,
+    /// A `continue`: no value.
+    Continue,
+}
+
+/// A region statement on its one path: a loop's test, the `for`'s head, a
+/// body statement, or an `if`'s test.
 #[derive(Clone)]
 pub(crate) struct Summary {
-    /// Its ops, up to the `Test` or `WriteLocal` that ends it.
+    /// Its ops, up to the op that ends it.
     ops: OpRange,
     /// The fixed units it charges: its statement or test units and the
     /// totals its charge regions' heads state.
@@ -53,7 +79,7 @@ pub(crate) struct Summary {
     pub(crate) program: Box<[Event]>,
     /// The frame positions it reads.
     pub(crate) reads: Box<[u32]>,
-    /// The frame position it writes; none for a test.
+    /// The frame position it writes or declares.
     pub(crate) write: Option<u32>,
 }
 
@@ -64,19 +90,96 @@ impl Summary {
     }
 }
 
-/// A `while` loop that runs as a batch of whole iterations.
+/// A statement of a loop body's plan.
+#[derive(Clone)]
+pub(crate) enum Step {
+    /// `set` of an unshared slot.
+    Write(Summary),
+    /// `let` of an unshared slot its block declares.
+    Bind(Summary),
+    /// An `if`: its test, which ends in its branch, and its two arms.
+    If {
+        test: Summary,
+        then: Body,
+        otherwise: Body,
+    },
+    /// `continue`: its unit, then the next iteration.
+    Continue(Summary),
+    /// A `break` or a `return`, which the reference runs: the region stops
+    /// before it.
+    Leave,
+}
+
+/// A block of a loop body's plan: the loop's body, or an `if` arm.
+#[derive(Clone)]
+pub(crate) struct Body {
+    pub(crate) block: BlockId,
+    pub(crate) steps: Box<[Step]>,
+    /// The variables it declares, which end with it.
+    pub(crate) declares: Box<[u32]>,
+}
+
+impl Body {
+    /// The most one pass through the block charges: every statement's
+    /// most, and an `if`'s test and its dearer arm.
+    fn max(&self) -> Option<u64> {
+        self.steps.iter().try_fold(0_u64, |sum, step| {
+            let most = match step {
+                Step::Write(summary) | Step::Bind(summary) | Step::Continue(summary) => {
+                    summary.max()?
+                }
+                Step::If {
+                    test,
+                    then,
+                    otherwise,
+                } => test.max()?.checked_add(then.max()?.max(otherwise.max()?))?,
+                Step::Leave => 0,
+            };
+            sum.checked_add(most)
+        })
+    }
+
+    /// Whether a statement of the block or an arm in it declares.
+    fn binds(&self) -> bool {
+        self.steps.iter().any(|step| match step {
+            Step::Bind(_) => true,
+            Step::If {
+                then, otherwise, ..
+            } => then.binds() || otherwise.binds(),
+            _ => false,
+        })
+    }
+}
+
+/// How a loop region starts each iteration.
+#[derive(Clone)]
+pub(crate) enum Head {
+    /// A `while`'s test, which an iteration runs when it holds.
+    While(Summary),
+    /// A `for` over a list or a tuple, stepped by the loop's own cursor:
+    /// its scheduled units and its `item` hook's formula, in `charge`
+    /// (no ops), the variable each element is bound to, and the hook.
+    For {
+        charge: Summary,
+        binding: u32,
+        item: Option<LibId>,
+    },
+}
+
+/// A `while` or a `for` loop that runs as a batch of whole iterations.
 pub(crate) struct LoopPlan {
     pub(crate) stmt: StmtId,
-    pub(crate) body: BlockId,
-    pub(crate) test: Summary,
-    pub(crate) statements: Box<[Summary]>,
+    pub(crate) head: Head,
+    pub(crate) body: Body,
     /// The loop-test unit an iteration charges last, for the next test:
     /// a region is entered from a test whose unit is charged.
     pub(crate) loop_test: u64,
-    /// The most one iteration charges: the test's and every body
-    /// statement's fixed units and formula maxima, and the next test's
-    /// unit.
+    /// The most one iteration charges: the head's, the body's dearest
+    /// path's, and the next test's unit.
     pub(crate) iteration_max: u64,
+    /// Whether an iteration declares a variable: a `for`'s element, or a
+    /// `let` of its body. Its memory is held as the reference holds it.
+    pub(crate) binds: bool,
     /// The call depth its sites need beyond the frame's own, when one
     /// checks it (`K-BND-002`): an operation's admission, or a helper
     /// template's inline depth.
@@ -96,7 +199,8 @@ pub(crate) enum Refused {
     Region { region: u32 },
     /// A program's events are not the stream's, in order.
     Program { statement: usize },
-    /// The iteration maximum is not the statements' sum.
+    /// The iteration maximum is not the head's, the dearest path's and the
+    /// loop-test unit's sum.
     Iteration,
     /// A summary's reads or write are not the slots its ops read and
     /// write.
@@ -105,6 +209,17 @@ pub(crate) enum Refused {
     Calls,
     /// The loop-test unit is not the cost table's.
     LoopTest,
+    /// The plan's statements, arms or declarations are not the lowered
+    /// code's, or its head is not its loop's.
+    Shape { statement: usize },
+}
+
+/// The lowered code a plan is formed and checked against: its stream, and
+/// its blocks and statements by id.
+pub(crate) struct Lowered<'a> {
+    pub(crate) stream: &'a Stream,
+    pub(crate) block: &'a dyn Fn(BlockId) -> &'a Block,
+    pub(crate) stmt: &'a dyn Fn(StmtId) -> &'a Stmt,
 }
 
 /// What a compiled expression charges as it runs.
@@ -144,97 +259,241 @@ impl Meter {
 /// changed nothing a run sees.
 pub(crate) type Node = Box<dyn Fn(&[SlotState], &mut Meter) -> Option<Value> + Send + Sync>;
 
-/// A loop plan's compiled form: its test and each body statement's value.
+/// A compiled `item` hook: what the loop walks and the stepped item to the
+/// value bound, metered, or `None` on a guard miss.
+pub(crate) type Hook = Box<dyn Fn(Value, Value, &mut Meter) -> Option<Value> + Send + Sync>;
+
+/// A loop plan's compiled form: its head and its body as trees that hold
+/// what each statement charges, so that an iteration reads nothing else.
 pub(crate) struct CompiledLoop {
-    pub(crate) test: Node,
-    pub(crate) statements: Box<[Node]>,
+    pub(crate) head: CompiledHead,
+    pub(crate) body: CompiledBody,
+}
+
+/// What a compiled statement commits: its fixed units and its static
+/// charge program (§3.1).
+pub(crate) struct Commit {
+    pub(crate) fixed: u64,
+    pub(crate) program: Box<[Event]>,
+}
+
+impl From<&Summary> for Commit {
+    fn from(summary: &Summary) -> Self {
+        Self {
+            fixed: summary.fixed,
+            program: summary.program.clone(),
+        }
+    }
+}
+
+pub(crate) enum CompiledHead {
+    While {
+        test: Node,
+        commit: Commit,
+    },
+    For {
+        hook: Option<Hook>,
+        commit: Commit,
+        binding: u32,
+    },
+}
+
+/// A block's compiled statements, and the variables that end with it.
+pub(crate) struct CompiledBody {
+    pub(crate) block: BlockId,
+    pub(crate) declares: Box<[u32]>,
+    pub(crate) steps: Box<[CompiledStep]>,
+}
+
+pub(crate) enum CompiledStep {
+    Write {
+        value: Node,
+        at: u32,
+        commit: Commit,
+    },
+    Bind {
+        value: Node,
+        at: u32,
+        commit: Commit,
+    },
+    If {
+        condition: Node,
+        commit: Commit,
+        then: CompiledBody,
+        otherwise: CompiledBody,
+    },
+    Continue(Commit),
+    Leave,
 }
 
 /// The values a region holds in registers and slots.
 #[inline(always)]
-fn scalar(value: &Value) -> bool {
+pub(crate) fn scalar(value: &Value) -> bool {
     matches!(
         value,
         Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent
     )
 }
 
-/// The libraries and the document code a plan is formed against.
+/// The libraries and the lowered code a plan is formed against.
 pub(super) struct Formation<'a> {
-    pub(super) stream: &'a Stream,
+    pub(super) lowered: Lowered<'a>,
     pub(super) libs: &'a [Lib],
     /// The cost table's loop test.
     pub(super) loop_test: u64,
 }
 
 impl Formation<'_> {
-    /// The plan of `while` statement `id`, `statement`, of `code`, whose
-    /// body is `body` with `statements`; `None` when it is no loop region.
-    pub(super) fn form(
-        &self,
-        code: &Code,
-        id: StmtId,
-        statement: &Stmt,
-        body: (BlockId, &[u32], &[&Stmt]),
-    ) -> Option<LoopPlan> {
-        let Form::While {
-            metered,
-            test,
-            else_block: None,
-            ..
-        } = &statement.form
-        else {
-            return None;
-        };
-        let (block, declares, statements) = body;
-        if !code.charging || !declares.is_empty() || statements.is_empty() {
+    /// The plan of loop statement `id` of `code`; `None` when it is no
+    /// loop region.
+    pub(super) fn form(&self, code: &Code, id: StmtId) -> Option<LoopPlan> {
+        if !code.charging {
             return None;
         }
+        let statement = (self.lowered.stmt)(id);
         let mut depth = None;
-        let units = vec![Event::Fixed(Weight::Atomic(*metered))];
-        let test = self.summarize(code, *test, true, *metered, units, &mut depth)?;
-        let statements = statements
-            .iter()
-            .map(|statement| match statement.form {
-                Form::Plain => {
-                    let unit = vec![Event::Fixed(Weight::Atomic(1))];
-                    self.summarize(code, statement.ops, false, 1, unit, &mut depth)
+        let (head, block) = match &statement.form {
+            Form::While {
+                metered,
+                test,
+                body,
+                ..
+            } => {
+                let units = vec![Event::Fixed(Weight::Atomic(*metered))];
+                let test = self.summarize(code, *test, End::Test, *metered, units, &mut depth)?;
+                (Head::While(test), *body)
+            }
+            Form::For {
+                metered,
+                binding,
+                via,
+                body,
+                ..
+            } => {
+                if binding.shared || code.slots.get(binding.slot as usize)?.shared {
+                    return None;
                 }
-                _ => None,
-            })
-            .collect::<Option<Box<[Summary]>>>()?;
-        let first = test.max()?.checked_add(self.loop_test)?;
-        let iteration_max = statements
-            .iter()
-            .try_fold(first, |sum, statement| sum.checked_add(statement.max()?))?;
+                let item = via.and_then(|via| via.item);
+                let mut program = vec![Event::Fixed(Weight::Atomic(*metered))];
+                let mut formula_max = 0;
+                if let Some(item) = item {
+                    let mut defined = vec![true, true];
+                    self.site(item, 0, 2, &mut defined, &mut formula_max, &mut depth)?;
+                    program.push(Event::Formula);
+                }
+                let charge = Summary {
+                    ops: OpRange { start: 0, len: 0 },
+                    fixed: *metered,
+                    formula_max,
+                    program: lean(program),
+                    reads: Box::default(),
+                    write: Some(binding.at),
+                };
+                let head = Head::For {
+                    charge,
+                    binding: binding.at,
+                    item,
+                };
+                (head, *body)
+            }
+            _ => return None,
+        };
+        let body = self.body(code, block, &mut depth, 0)?;
+        if body.steps.is_empty() {
+            return None;
+        }
+        let head_max = match &head {
+            Head::While(test) => test.max()?,
+            Head::For { charge, .. } => charge.max()?,
+        };
+        let iteration_max = head_max
+            .checked_add(body.max()?)?
+            .checked_add(self.loop_test)?;
+        let binds = matches!(head, Head::For { .. }) || body.binds();
         Some(LoopPlan {
             stmt: id,
-            body: block,
-            test,
-            statements,
+            head,
+            body,
             loop_test: self.loop_test,
             iteration_max,
+            binds,
             depth,
             calls: Box::default(),
             compiled: OnceLock::new(),
         })
     }
 
-    /// The summary of the region statement in `range`, a test when `test`,
-    /// charged `fixed` units and `program` before its ops.
+    /// The plan of block `block`, `nesting` `if`s deep in a loop's body.
+    fn body(
+        &self,
+        code: &Code,
+        block: BlockId,
+        depth: &mut Option<u32>,
+        nesting: usize,
+    ) -> Option<Body> {
+        if nesting > NESTING {
+            return None;
+        }
+        let lowered = (self.lowered.block)(block);
+        let steps = lowered
+            .stmts
+            .iter()
+            .map(|id| {
+                let statement = (self.lowered.stmt)(*id);
+                let unit = || vec![Event::Fixed(Weight::Atomic(1))];
+                match &statement.form {
+                    Form::Plain => {
+                        let last = self.stream_op(statement.ops.end().checked_sub(1)?)?;
+                        let end = match last {
+                            Op::WriteLocal { .. } => End::Write,
+                            Op::Bind { .. } => End::Bind,
+                            Op::Continue => End::Continue,
+                            Op::Break | Op::Return { .. } => return Some(Step::Leave),
+                            _ => return None,
+                        };
+                        let summary = self.summarize(code, statement.ops, end, 1, unit(), depth)?;
+                        Some(match end {
+                            End::Write => Step::Write(summary),
+                            End::Bind => Step::Bind(summary),
+                            _ => Step::Continue(summary),
+                        })
+                    }
+                    Form::If {
+                        then_block,
+                        else_block,
+                    } => Some(Step::If {
+                        test: self.summarize(code, statement.ops, End::Branch, 1, unit(), depth)?,
+                        then: self.body(code, *then_block, depth, nesting + 1)?,
+                        otherwise: self.body(code, *else_block, depth, nesting + 1)?,
+                    }),
+                    _ => None,
+                }
+            })
+            .collect::<Option<Box<[Step]>>>()?;
+        Some(Body {
+            block,
+            steps,
+            declares: lowered.declares.clone().into(),
+        })
+    }
+
+    fn stream_op(&self, at: u32) -> Option<Op> {
+        self.lowered.stream.ops.get(at as usize).copied()
+    }
+
+    /// The summary of the region statement in `range`, which ends as
+    /// `end`, charged `fixed` units and `program` before its ops.
     fn summarize(
         &self,
         code: &Code,
         range: OpRange,
-        test: bool,
+        end: End,
         mut fixed: u64,
         mut program: Vec<Event>,
         depth: &mut Option<u32>,
     ) -> Option<Summary> {
-        let ops = self
-            .stream
-            .ops
-            .get(range.start as usize..range.end() as usize)?;
+        let stream = self.lowered.stream;
+        let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
         let (last, body) = ops.split_last()?;
         // Which registers hold a value the statement has not yet used.
         let mut defined: Vec<bool> = Vec::new();
@@ -247,7 +506,7 @@ impl Formation<'_> {
                         return None;
                     }
                     fixed = fixed.checked_add(u64::from(total))?;
-                    let events = self.stream.regions.events(region.0);
+                    let events = stream.regions.events(region.0);
                     program.extend(events.iter().map(|event| Event::Fixed(event.weight)));
                 }
                 Op::Local { dst, local } => {
@@ -258,36 +517,51 @@ impl Formation<'_> {
                     }
                     reads.push(local.at);
                 }
-                Op::Const { dst, c } => match self.stream.consts.get(c.ix())? {
+                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
                     Constant::Resident(value)
                         if scalar(value) && define(&mut defined, dst.ix()) => {}
                     _ => return None,
                 },
                 Op::Operator { lib, args } => {
-                    self.site(LibId(lib.0), args, &mut defined, &mut formula_max, depth)?;
+                    let (start, count) = (args.start.ix(), args.len as usize);
+                    self.site(
+                        LibId(lib.0),
+                        start,
+                        count,
+                        &mut defined,
+                        &mut formula_max,
+                        depth,
+                    )?;
                     program.push(Event::Formula);
                 }
                 Op::Nested { act, args } => {
-                    let nested = self.stream.nested.get(act.ix())?;
+                    let nested = stream.nested.get(act.ix())?;
                     let NestedKind::Body(lib) = nested.kind else {
                         return None;
                     };
                     if !nested.operator {
                         return None;
                     }
-                    self.site(lib, args, &mut defined, &mut formula_max, depth)?;
+                    let (start, count) = (args.start.ix(), args.len as usize);
+                    self.site(lib, start, count, &mut defined, &mut formula_max, depth)?;
                     program.push(Event::Formula);
                 }
                 _ => return None,
             }
         }
-        let write = match (*last, test) {
-            (Op::Test { cond }, true) if take(&mut defined, cond.ix()) => None,
-            (Op::WriteLocal { local, src }, false)
-                if !code.slots.get(local.slot as usize)?.shared && take(&mut defined, src.ix()) =>
+        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
+        let write = match (*last, end) {
+            (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch)
+                if take(&mut defined, cond.ix()) =>
+            {
+                None
+            }
+            (Op::WriteLocal { local, src }, End::Write) | (Op::Bind { local, src }, End::Bind)
+                if unshared(local.slot) && take(&mut defined, src.ix()) =>
             {
                 Some(local.at)
             }
+            (Op::Continue, End::Continue) if reads.is_empty() && formula_max == 0 => None,
             _ => return None,
         };
         // Every value the statement computes reaches its end.
@@ -298,30 +572,27 @@ impl Formation<'_> {
             ops: range,
             fixed,
             formula_max,
-            program: program
-                .into_iter()
-                .filter(|event| *event != Event::Fixed(Weight::Atomic(0)))
-                .collect(),
+            program: lean(program),
             reads: reads.into(),
             write,
         })
     }
 
-    /// Operator `lib` called on `args`, which a region runs when its
-    /// prepared entry has a scalar charge table and its operands are the
-    /// values the statement computed last: its result replaces them, and
-    /// its table's maximum adds to `formula_max`.
+    /// Operator `lib` called on the `count` registers from `start`, which a
+    /// region runs when its prepared entry has a scalar charge table and
+    /// its operands are the values the statement computed last: its result
+    /// replaces them, and its table's maximum adds to `formula_max`.
     fn site(
         &self,
         lib: LibId,
-        args: RegRange,
+        start: usize,
+        count: usize,
         defined: &mut Vec<bool>,
         formula_max: &mut u64,
         depth: &mut Option<u32>,
     ) -> Option<()> {
         let function = self.libs.get(lib.0 as usize)?;
         let (_, fast) = function.prepared.as_ref()?;
-        let count = args.len as usize;
         if function.arity != count || !(1..=2).contains(&count) {
             return None;
         }
@@ -330,7 +601,6 @@ impl Formation<'_> {
         if function.operation() && function.shares_params {
             return None;
         }
-        let start = args.start.ix();
         if !(start..start + count).all(|at| take(defined, at)) || !define(defined, start) {
             return None;
         }
@@ -341,6 +611,14 @@ impl Formation<'_> {
         }
         Some(())
     }
+}
+
+/// `program` without the zero-unit events the reference never records.
+fn lean(program: Vec<Event>) -> Box<[Event]> {
+    program
+        .into_iter()
+        .filter(|event| *event != Event::Fixed(Weight::Atomic(0)))
+        .collect()
 }
 
 /// Register `at` gets a value; `false` when it holds one still unused.
@@ -358,95 +636,247 @@ fn take(defined: &mut [bool], at: usize) -> bool {
         .is_some_and(|held| std::mem::replace(held, false))
 }
 
-impl LoopPlan {
-    /// Checks the plan against `stream`'s charge regions and the statement
-    /// units, `loop_test` and the loop's `metered` units: each summary's
-    /// fixed units are its program's fixed events, every region's head
-    /// states the total its `RegionSummary` gives, the programs are the
-    /// stream's events in order, and the iteration maximum is their sum
-    /// and the loop-test unit.
-    pub(crate) fn verify(
+/// The plan's check against the lowered code: the summaries in the order
+/// [`LoopPlan::verify`] numbers them, and the calls their ops make.
+struct Check<'a, 'l> {
+    lowered: &'a Lowered<'l>,
+    statement: usize,
+    calls: Vec<usize>,
+}
+
+impl Check<'_, '_> {
+    /// Checks `summary`, the next statement, charged `head` before its ops
+    /// and ending as `end`.
+    fn summary(&mut self, summary: &Summary, head: Weight, end: End) -> Result<(), Refused> {
+        let index = self.statement;
+        self.statement += 1;
+        let stream = self.lowered.stream;
+        let mut expected = vec![Event::Fixed(head)];
+        let (mut reads, mut write) = (Vec::new(), None);
+        let ops = stream
+            .ops
+            .get(summary.ops.start as usize..summary.ops.end() as usize)
+            .ok_or(Refused::Program { statement: index })?;
+        let ended = matches!(
+            (ops.last(), end),
+            (Some(Op::Test { .. }), End::Test)
+                | (Some(Op::Branch { .. }), End::Branch)
+                | (Some(Op::WriteLocal { .. }), End::Write)
+                | (Some(Op::Bind { .. }), End::Bind)
+                | (Some(Op::Continue), End::Continue)
+        );
+        if !ended {
+            return Err(Refused::Shape { statement: index });
+        }
+        for op in ops {
+            match *op {
+                Op::Region { region, total } => {
+                    let stated = stream
+                        .regions
+                        .summary(region.0)
+                        .map_err(|_| Refused::Region { region: region.0 })?;
+                    if u64::from(total) != stated.total() {
+                        return Err(Refused::Region { region: region.0 });
+                    }
+                    expected.extend(
+                        stream
+                            .regions
+                            .events(region.0)
+                            .iter()
+                            .map(|event| Event::Fixed(event.weight)),
+                    );
+                }
+                Op::Operator { .. } => expected.push(Event::Formula),
+                Op::Nested { act, .. } => match stream.nested.get(act.ix()) {
+                    Some(nested) if matches!(nested.kind, NestedKind::Call(_)) => {
+                        self.calls.push(nested.occurrence);
+                    }
+                    _ => expected.push(Event::Formula),
+                },
+                Op::Local { local, .. } => reads.push(local.at),
+                Op::WriteLocal { local, .. } | Op::Bind { local, .. } => write = Some(local.at),
+                _ => {}
+            }
+        }
+        if *summary.reads != *reads || summary.write != write {
+            return Err(Refused::Slots { statement: index });
+        }
+        self.program(summary, expected, index)
+    }
+
+    /// Checks that `summary`'s program is `expected` and that its fixed
+    /// units are that program's.
+    fn program(
         &self,
-        stream: &Stream,
-        statement: &Stmt,
-        loop_test: u64,
+        summary: &Summary,
+        expected: Vec<Event>,
+        index: usize,
     ) -> Result<(), Refused> {
+        if *summary.program != *lean(expected) {
+            return Err(Refused::Program { statement: index });
+        }
+        let fixed = summary
+            .program
+            .iter()
+            .map(|event| match event {
+                Event::Fixed(weight) => weight.units(),
+                Event::Formula => 0,
+            })
+            .sum::<u64>();
+        if fixed != summary.fixed {
+            return Err(Refused::Fixed { statement: index });
+        }
+        Ok(())
+    }
+
+    /// Checks `body` against block `block`'s statements and declarations.
+    fn body(&mut self, body: &Body, block: BlockId) -> Result<(), Refused> {
+        let lowered = (self.lowered.block)(block);
+        let shape = Refused::Shape {
+            statement: self.statement,
+        };
+        if body.block != block
+            || *body.declares != *lowered.declares
+            || body.steps.len() != lowered.stmts.len()
+        {
+            return Err(shape);
+        }
+        for (step, id) in body.steps.iter().zip(&lowered.stmts) {
+            let statement = (self.lowered.stmt)(*id);
+            let last = statement
+                .ops
+                .end()
+                .checked_sub(1)
+                .and_then(|at| self.lowered.stream.ops.get(at as usize));
+            // Each statement's summary covers exactly its own ops.
+            let own = match step {
+                Step::Write(summary) | Step::Bind(summary) | Step::Continue(summary) => {
+                    summary.ops == statement.ops
+                }
+                Step::If { test, .. } => test.ops == statement.ops,
+                Step::Leave => true,
+            };
+            if !own {
+                return Err(Refused::Shape {
+                    statement: self.statement,
+                });
+            }
+            let unit = Weight::Atomic(1);
+            match (step, &statement.form) {
+                (Step::Write(summary), Form::Plain) => self.summary(summary, unit, End::Write)?,
+                (Step::Bind(summary), Form::Plain) => self.summary(summary, unit, End::Bind)?,
+                (Step::Continue(summary), Form::Plain) => {
+                    self.summary(summary, unit, End::Continue)?;
+                }
+                (Step::Leave, Form::Plain)
+                    if matches!(last, Some(Op::Break | Op::Return { .. })) => {}
+                (
+                    Step::If {
+                        test,
+                        then,
+                        otherwise,
+                    },
+                    Form::If {
+                        then_block,
+                        else_block,
+                    },
+                ) => {
+                    self.summary(test, unit, End::Branch)?;
+                    self.body(then, *then_block)?;
+                    self.body(otherwise, *else_block)?;
+                }
+                _ => {
+                    return Err(Refused::Shape {
+                        statement: self.statement,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LoopPlan {
+    /// Checks the plan against `lowered` and the cost table's `loop_test`:
+    /// its head is its loop's, its body's statements, arms and
+    /// declarations are the blocks', each summary's fixed units are its
+    /// program's fixed events, every region's head states the total its
+    /// `RegionSummary` gives, the programs are the stream's events in
+    /// order, and the iteration maximum is the head's, the dearest path's
+    /// and the loop-test unit's sum. Summaries are numbered in order: the
+    /// head 0, then the body's statements depth first.
+    pub(crate) fn verify(&self, lowered: &Lowered<'_>, loop_test: u64) -> Result<(), Refused> {
         if self.loop_test != loop_test {
             return Err(Refused::LoopTest);
         }
-        let summaries = std::iter::once(&self.test).chain(self.statements.iter());
-        let mut iteration = Some(loop_test);
-        let mut calls = Vec::new();
-        for (index, summary) in summaries.enumerate() {
-            let mut expected = Vec::new();
-            let (mut reads, mut write) = (Vec::new(), None);
-            let head = if index == 0 {
-                match &statement.form {
-                    Form::While { metered, .. } => vec![Weight::Atomic(*metered)],
-                    _ => return Err(Refused::Program { statement: index }),
+        let mut check = Check {
+            lowered,
+            statement: 0,
+            calls: Vec::new(),
+        };
+        let statement = (lowered.stmt)(self.stmt);
+        let head = Refused::Shape { statement: 0 };
+        let (block, binds) = match (&self.head, &statement.form) {
+            (
+                Head::While(test),
+                Form::While {
+                    metered,
+                    test: ops,
+                    body,
+                    ..
+                },
+            ) => {
+                if test.ops != *ops {
+                    return Err(head);
                 }
-            } else {
-                vec![Weight::Atomic(1)]
-            };
-            expected.extend(head.into_iter().map(Event::Fixed));
-            let ops = stream
-                .ops
-                .get(summary.ops.start as usize..summary.ops.end() as usize)
-                .ok_or(Refused::Program { statement: index })?;
-            for op in ops {
-                match *op {
-                    Op::Region { region, total } => {
-                        let stated = stream
-                            .regions
-                            .summary(region.0)
-                            .map_err(|_| Refused::Region { region: region.0 })?;
-                        if u64::from(total) != stated.total() {
-                            return Err(Refused::Region { region: region.0 });
-                        }
-                        expected.extend(
-                            stream
-                                .regions
-                                .events(region.0)
-                                .iter()
-                                .map(|event| Event::Fixed(event.weight)),
-                        );
-                    }
-                    Op::Operator { .. } => expected.push(Event::Formula),
-                    Op::Nested { act, .. } => match stream.nested.get(act.ix()) {
-                        Some(nested) if matches!(nested.kind, NestedKind::Call(_)) => {
-                            calls.push(nested.occurrence);
-                        }
-                        _ => expected.push(Event::Formula),
-                    },
-                    Op::Local { local, .. } => reads.push(local.at),
-                    Op::WriteLocal { local, .. } => write = Some(local.at),
-                    _ => {}
+                check.summary(test, Weight::Atomic(*metered), End::Test)?;
+                (*body, false)
+            }
+            (
+                Head::For {
+                    charge,
+                    binding,
+                    item,
+                },
+                Form::For {
+                    metered,
+                    binding: bound,
+                    via,
+                    body,
+                    ..
+                },
+            ) => {
+                if *binding != bound.at
+                    || bound.shared
+                    || *item != via.and_then(|via| via.item)
+                    || charge.write != Some(bound.at)
+                    || !charge.reads.is_empty()
+                {
+                    return Err(head);
                 }
+                let mut expected = vec![Event::Fixed(Weight::Atomic(*metered))];
+                expected.extend(item.map(|_| Event::Formula));
+                check.statement += 1;
+                check.program(charge, expected, 0)?;
+                (*body, true)
             }
-            if *summary.reads != *reads || summary.write != write {
-                return Err(Refused::Slots { statement: index });
-            }
-            expected.retain(|event| *event != Event::Fixed(Weight::Atomic(0)));
-            if *summary.program != *expected {
-                return Err(Refused::Program { statement: index });
-            }
-            let fixed = summary
-                .program
-                .iter()
-                .map(|event| match event {
-                    Event::Fixed(weight) => weight.units(),
-                    Event::Formula => 0,
-                })
-                .sum::<u64>();
-            if fixed != summary.fixed {
-                return Err(Refused::Fixed { statement: index });
-            }
-            iteration = iteration.and_then(|sum| sum.checked_add(summary.max()?));
+            _ => return Err(head),
+        };
+        check.body(&self.body, block)?;
+        if self.binds != (binds || self.body.binds()) {
+            return Err(Refused::Shape { statement: 0 });
         }
+        let head_max = match &self.head {
+            Head::While(test) => test.max(),
+            Head::For { charge, .. } => charge.max(),
+        };
+        let iteration = head_max
+            .zip(self.body.max())
+            .and_then(|(head, body)| head.checked_add(body)?.checked_add(loop_test));
         if iteration != Some(self.iteration_max) {
             return Err(Refused::Iteration);
         }
-        if *self.calls != *calls {
+        if *self.calls != *check.calls {
             return Err(Refused::Calls);
         }
         Ok(())
@@ -457,11 +887,11 @@ impl LoopPlan {
     pub(crate) fn copied(&self) -> Self {
         Self {
             stmt: self.stmt,
-            body: self.body,
-            test: self.test.clone(),
-            statements: self.statements.clone(),
+            head: self.head.clone(),
+            body: self.body.clone(),
             loop_test: self.loop_test,
             iteration_max: self.iteration_max,
+            binds: self.binds,
             depth: self.depth,
             calls: self.calls.clone(),
             compiled: OnceLock::new(),
@@ -474,17 +904,74 @@ impl LoopPlan {
             .get_or_init(|| {
                 let (stream, _, _) = exe.statement(self.stmt);
                 let lib = |id: LibId| exe.lib(id);
+                let head = match &self.head {
+                    Head::While(test) => CompiledHead::While {
+                        test: compile(stream, &lib, test.ops)?,
+                        commit: test.into(),
+                    },
+                    Head::For {
+                        charge,
+                        binding,
+                        item,
+                    } => CompiledHead::For {
+                        hook: match item {
+                            Some(item) => Some(hook(lib(*item))?),
+                            None => None,
+                        },
+                        commit: charge.into(),
+                        binding: *binding,
+                    },
+                };
                 Some(CompiledLoop {
-                    test: compile(stream, &lib, self.test.ops)?,
-                    statements: self
-                        .statements
-                        .iter()
-                        .map(|summary| compile(stream, &lib, summary.ops))
-                        .collect::<Option<_>>()?,
+                    head,
+                    body: compile_body(stream, &lib, &self.body)?,
                 })
             })
             .as_ref()
     }
+}
+
+/// `body`'s statements, compiled.
+fn compile_body<'e>(
+    stream: &Stream,
+    lib: &impl Fn(LibId) -> &'e Lib,
+    body: &Body,
+) -> Option<CompiledBody> {
+    let steps = body
+        .steps
+        .iter()
+        .map(|step| {
+            Some(match step {
+                Step::Write(summary) => CompiledStep::Write {
+                    value: compile(stream, lib, summary.ops)?,
+                    at: summary.write?,
+                    commit: summary.into(),
+                },
+                Step::Bind(summary) => CompiledStep::Bind {
+                    value: compile(stream, lib, summary.ops)?,
+                    at: summary.write?,
+                    commit: summary.into(),
+                },
+                Step::If {
+                    test,
+                    then,
+                    otherwise,
+                } => CompiledStep::If {
+                    condition: compile(stream, lib, test.ops)?,
+                    commit: test.into(),
+                    then: compile_body(stream, lib, then)?,
+                    otherwise: compile_body(stream, lib, otherwise)?,
+                },
+                Step::Continue(summary) => CompiledStep::Continue(summary.into()),
+                Step::Leave => CompiledStep::Leave,
+            })
+        })
+        .collect::<Option<_>>()?;
+    Some(CompiledBody {
+        block: body.block,
+        declares: body.declares.clone(),
+        steps,
+    })
 }
 
 /// The value of the region statement in `range` as one expression tree.
@@ -518,9 +1005,7 @@ fn compile<'e>(stream: &Stream, lib: &impl Fn(LibId) -> &'e Lib, range: OpRange)
                 Constant::Deferred(_) => return None,
             },
             Op::Operator { lib: id, args } => {
-                let operands = (args.start.ix()..args.end() as usize)
-                    .map(|at| regs.get_mut(at)?.take())
-                    .collect::<Option<Vec<_>>>()?;
+                let operands = operands(&mut regs, args)?;
                 set(
                     &mut regs,
                     args.start.ix(),
@@ -531,12 +1016,13 @@ fn compile<'e>(stream: &Stream, lib: &impl Fn(LibId) -> &'e Lib, range: OpRange)
                 let NestedKind::Body(id) = stream.nested.get(act.ix())?.kind else {
                     return None;
                 };
-                let operands = (args.start.ix()..args.end() as usize)
-                    .map(|at| regs.get_mut(at)?.take())
-                    .collect::<Option<Vec<_>>>()?;
+                let operands = operands(&mut regs, args)?;
                 set(&mut regs, args.start.ix(), operator(lib(id), operands)?);
             }
-            Op::Test { cond: src } | Op::WriteLocal { src, .. } => {
+            Op::Test { cond: src }
+            | Op::Branch { cond: src, .. }
+            | Op::WriteLocal { src, .. }
+            | Op::Bind { src, .. } => {
                 return regs.get_mut(src.ix())?.take();
             }
             _ => return None,
@@ -545,29 +1031,56 @@ fn compile<'e>(stream: &Stream, lib: &impl Fn(LibId) -> &'e Lib, range: OpRange)
     None
 }
 
-/// The compiled operator `function` over `operands`: its prepared entry on
-/// scalar values, charged its formula from its scalar table at the sizes
-/// its guard certifies or, where it certifies none, the values show.
-fn operator(function: &Lib, operands: Vec<Node>) -> Option<Node> {
-    let (prepared, fast) = function.prepared.as_ref()?;
-    let table = fast.scalar()?.clone();
-    let prepared = prepared.clone();
-    let answer = move |args: &[Value]| -> Option<(Value, u64)> {
-        let answer = prepared.answer(args, true)?;
+/// The nodes of the registers `args`, taken.
+fn operands(regs: &mut [Option<Node>], args: RegRange) -> Option<Vec<Node>> {
+    (args.start.ix()..args.end() as usize)
+        .map(|at| regs.get_mut(at)?.take())
+        .collect()
+}
+
+/// A prepared entry and its scalar charge table: an operator site's
+/// answer.
+struct Answer {
+    prepared: Entry,
+    table: ScalarTable,
+}
+
+impl Answer {
+    /// `function`'s, when it has a prepared entry with a scalar table.
+    fn of(function: &Lib) -> Option<Self> {
+        let (prepared, fast) = function.prepared.as_ref()?;
+        Some(Self {
+            prepared: prepared.clone(),
+            table: fast.scalar()?.clone(),
+        })
+    }
+
+    /// The entry on `args`: its scalar value and its formula from the
+    /// table, at the sizes its guard certifies or, where it certifies none,
+    /// the values show.
+    #[inline(always)]
+    fn call(&self, args: &[Value]) -> Option<(Value, u64)> {
+        let answer = self.prepared.answer(args, true)?;
         let result = answer.value;
         if !scalar(&result) {
             return None;
         }
         let mask = match answer.scalar_sizes {
             Some(mask) => mask,
-            None => table.classify(|source| match *source {
+            None => self.table.classify(|source| match *source {
                 Source::Arg(index) => args.get(index),
                 Source::Result => Some(&result),
                 Source::Nothing => None,
             })?,
         };
-        Some((result, table.units(mask)?))
-    };
+        Some((result, self.table.units(mask)?))
+    }
+}
+
+/// The compiled operator `function` over `operands`, which must be
+/// scalars.
+fn operator(function: &Lib, operands: Vec<Node>) -> Option<Node> {
+    let answer = Answer::of(function)?;
     let mut operands = operands.into_iter();
     let a = operands.next()?;
     Some(match operands.next() {
@@ -576,7 +1089,7 @@ fn operator(function: &Lib, operands: Vec<Node>) -> Option<Node> {
             if !scalar(&x) {
                 return None;
             }
-            let (result, units) = answer(&[x])?;
+            let (result, units) = answer.call(&[x])?;
             meter.formula(units);
             Some(result)
         }),
@@ -586,9 +1099,23 @@ fn operator(function: &Lib, operands: Vec<Node>) -> Option<Node> {
             if !scalar(&x) || !scalar(&y) {
                 return None;
             }
-            let (result, units) = answer(&[x, y])?;
+            let (result, units) = answer.call(&[x, y])?;
             meter.formula(units);
             Some(result)
         }),
     })
+}
+
+/// The compiled `item` hook `function`: what the loop walks and a scalar
+/// item it stepped to, as the reference's handoff passes them.
+fn hook(function: &Lib) -> Option<Hook> {
+    let answer = Answer::of(function)?;
+    Some(Box::new(move |walked, raw, meter| {
+        if !scalar(&raw) {
+            return None;
+        }
+        let (result, units) = answer.call(&[walked, raw])?;
+        meter.formula(units);
+        Some(result)
+    }))
 }
