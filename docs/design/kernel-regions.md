@@ -178,7 +178,11 @@ Python's `n - 1` is `call lib py.sub`. That is a generated helper plan
 (`LibRun::Plan`) with no prepared entry: it dispatches on `kind` and, for
 integer by integer, calls its callee 2, the `sub` native. To be part of a
 region, a helper needs a **template**: a prepared entry for each typed path
-that reduces to one native call, plus that helper's scalar charge table. The
+that reduces to one native call, plus that helper's scalar charge table. A
+helper that answers a text composes up to eight prepared calls over
+immediates in one path, since no single native gives its answer: TS
+`String(n)`'s number-to-text is floor, compare, integer and digits in one
+prepared step, not the heap paths (FIG-6777). The
 table is `Fast::new(definition.charge, params, charge)`, so the charge is the
 helper's formula at completion (hcharge, §B). Its guard declines on every
 other kind.

@@ -122,8 +122,6 @@ macro_rules! entries {
                     Domain::Int => PreparedNative { entry: |args| run::<2, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<2, true, $marker>), operation: concat!(stringify!($expression), " / Int") },
                     Domain::Float => PreparedNative { entry: |args| run::<3, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<3, true, $marker>), operation: concat!(stringify!($expression), " / Float") },
                 }, )*
-                // Integer text reserves its digits before writing them.
-                Operation::IntText => return None,
             })
         }
     };
@@ -166,6 +164,7 @@ entries! {
     ToFloat, Operation::ToFloat => Operation::ToFloat, 1;
     ToInt, Operation::ToInt => Operation::ToInt, 1;
     ToText, Operation::ToText => Operation::ToText, 1;
+    IntText, Operation::IntText => Operation::IntText, 2;
     IntParse, Operation::IntParse => Operation::IntParse, 2;
     FloatParse, Operation::FloatParse => Operation::FloatParse, 1;
     MAcos, Operation::Math(Math::Acos) => Operation::Math(Math::Acos), 1;

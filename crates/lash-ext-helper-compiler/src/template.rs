@@ -25,8 +25,16 @@ use lash_kernel_doc::{
 
 use crate::library::Library;
 
-/// The most calls and arena forms one heap path performs.
-const HEAP_CALLS: usize = 8;
+/// The most native calls and arena forms one path's answer takes.
+const PATH_CALLS: usize = 8;
+
+/// The most native calls a scalar path takes when its helper answers
+/// anything but a text: one, so that an operator's template stays as
+/// small as its native (the hot arithmetic rows lose their inlining to a
+/// larger one). No one native spells a text, so a helper that answers one
+/// composes up to [`PATH_CALLS`] prepared calls, where its conversion
+/// would otherwise go to the heap paths (FIG-6777).
+const SCALAR_CALLS: usize = 1;
 
 /// The most alternatives one combination of operand kinds keeps.
 const ALTERNATIVES: usize = 16;
@@ -1005,7 +1013,11 @@ impl Evaluator<'_> {
                 );
             }
             self.used = 0;
-            let most = if self.heap { HEAP_CALLS } else { 1 };
+            let most = if self.heap || definition.signature.result == lash_kernel_doc::Type::Text {
+                PATH_CALLS
+            } else {
+                SCALAR_CALLS
+            };
             let mut results: Vec<_> = self
                 .block(&body.block, &mut state, 1)
                 .into_iter()

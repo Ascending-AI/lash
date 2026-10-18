@@ -791,6 +791,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 "py.neg",
                 "py.pos",
                 "py.truth",
+                "py.str",
             ][..],
         ),
         (
@@ -810,6 +811,8 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 "ts.le",
                 "ts.gt",
                 "ts.ge",
+                "ts.number.to_string",
+                "ts.to_string",
             ][..],
         ),
     ] {

@@ -643,8 +643,13 @@ fn plain(
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::ToText => match a {
-            // Its digits are reserved before they are written.
-            Value::Int(_) | Value::BigInt(_) => return Ok(None),
+            // Digits a short text holds are written nowhere; longer ones
+            // are reserved before they are written.
+            Value::Int(word) => match short_digits(*word, 10) {
+                Some(digits) => Value::Text(digits),
+                None => return Ok(None),
+            },
+            Value::BigInt(_) => return Ok(None),
             Value::Float(value) => {
                 let text = value.to_string();
                 match &mut arena {
@@ -658,8 +663,14 @@ fn plain(
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::IntText => {
-            // Its digits are reserved before they are written.
-            return Ok(None);
+            // As `ToText`, in the call's radix.
+            let Value::Int(word) = a else {
+                return Ok(None);
+            };
+            match short_digits(*word, radix(&args[1])?) {
+                Some(digits) => Value::Text(digits),
+                None => return Ok(None),
+            }
         }
         Operation::IntParse => {
             let radix = radix(&args[1])?;
@@ -749,6 +760,29 @@ const _: () = {
 /// A kind's name, as `kind` answers it, from the immutable kind table.
 fn kind_name(kind: ValueKind) -> Value {
     crate::short(KIND_NAMES[kind as usize].1)
+}
+
+/// A word's digits in `radix`, lower-case and signed as
+/// [`integer_text`] spells them, when they fit a short text: one held in
+/// the value, which takes no room.
+fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
+    let mut bytes = [0u8; ShortText::MAX];
+    let mut at = bytes.len();
+    let mut rest = word.unsigned_abs();
+    loop {
+        at = at.checked_sub(1)?;
+        let digit = char::from_digit(u32::try_from(rest % u64::from(radix)).ok()?, radix)?;
+        *bytes.get_mut(at)? = u8::try_from(digit).ok()?;
+        rest /= u64::from(radix);
+        if rest == 0 {
+            break;
+        }
+    }
+    if word < 0 {
+        at = at.checked_sub(1)?;
+        *bytes.get_mut(at)? = b'-';
+    }
+    ShortText::new(std::str::from_utf8(bytes.get(at..)?).ok()?)
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the

@@ -1978,7 +1978,7 @@ const TS_NUMBER_PARTS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parts,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), ], heap: Some(p::HeapTemplate { entry: ts_number_parts_heap, depth: 1, callees: &[p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ], heap: Some(p::HeapTemplate { entry: ts_number_parts_heap, depth: 1, callees: &[p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0"), ] }) }),
 };
 
 /// `ts.number.parts`.
@@ -2282,7 +2282,7 @@ const TS_NUMBER_TO_STRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_to_string_template), depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_number_to_string_heap, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("24c955237fca0c662d24fa9d8fd64b8121d36e21bcb5454bf347277b3085e3a4"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("8f5aa21f1c7585faa3a9b1a45103b6cee210627c60bd3b1b08c5b1e3ca1e42dd"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(ts_number_to_string_template), depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_number_to_string_heap, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("24c955237fca0c662d24fa9d8fd64b8121d36e21bcb5454bf347277b3085e3a4"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("8f5aa21f1c7585faa3a9b1a45103b6cee210627c60bd3b1b08c5b1e3ca1e42dd"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }) }),
 };
 
 /// `ts.number.to_string`.
@@ -2389,78 +2389,6 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = natives;
     match args {
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-                if !matches!(v7, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-                if !matches!(v9, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v10;
-                if !matches!(v10, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-            })() { return Some(value); }
-            None
-        },
         [Value::Int(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2468,9 +2396,20 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+                let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
             })() { return Some(value); }
             if let Some(value) = (|| {
@@ -2480,10 +2419,10 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
             })() { return Some(value); }
             if let Some(value) = (|| {
@@ -2493,19 +2432,102 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                 if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-                if !matches!(v7, Value::Bool(true)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+                if !matches!(v11, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+                if !matches!(v12, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+                if !matches!(v12, Value::Bool(false)) { return None; }
+                let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+                let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                 if !matches!(v9, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
             })() { return Some(value); }
@@ -2513,7 +2535,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                 if !matches!(v9, Value::Bool(false)) { return None; }
                 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
                 if !matches!(v10, Value::Bool(true)) { return None; }
@@ -2523,7 +2545,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                 if !matches!(v9, Value::Bool(false)) { return None; }
                 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
                 if !matches!(v10, Value::Bool(false)) { return None; }
@@ -2548,7 +2570,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(true)) { return None; }
                 let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                let v5 = heap.call(2, &[v4, Value::Int(10)])?; let _ = v5;
+                let v5 = match (natives[5].entry)(&[v4, Value::Int(10)]) { Some(value) => value, None => heap.call(2, &[v4, Value::Int(10)])? }; let _ = v5;
                 Some(v5)
             })() { return Some(value); }
             if let Some(value) = (|| {
@@ -2558,7 +2580,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[5].entry)(&[args[0]])?; let _ = v6;
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                 if !matches!(v6, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
             })() { return Some(value); }
@@ -2569,7 +2591,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[5].entry)(&[args[0]])?; let _ = v6;
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                 if !matches!(v6, Value::Bool(false)) { return None; }
                 let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                 if !matches!(v7, Value::Bool(true)) { return None; }
@@ -2582,7 +2604,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
                 let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[5].entry)(&[args[0]])?; let _ = v6;
+                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                 if !matches!(v6, Value::Bool(false)) { return None; }
                 let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                 if !matches!(v7, Value::Bool(false)) { return None; }
@@ -2594,7 +2616,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[5].entry)(&[args[0]])?; let _ = v22;
+                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
                 if !matches!(v22, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
             })() { return Some(value); }
@@ -2602,7 +2624,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[5].entry)(&[args[0]])?; let _ = v22;
+                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
                 if !matches!(v22, Value::Bool(false)) { return None; }
                 let v23 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v23;
                 if !matches!(v23, Value::Bool(true)) { return None; }
@@ -2612,7 +2634,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
                 let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[5].entry)(&[args[0]])?; let _ = v22;
+                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
                 if !matches!(v22, Value::Bool(false)) { return None; }
                 let v23 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v23;
                 if !matches!(v23, Value::Bool(false)) { return None; }
@@ -2733,7 +2755,7 @@ const TS_NUMBER_ROUND_DECIMAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_round_decimal,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ], heap: Some(p::HeapTemplate { entry: ts_number_round_decimal_heap, depth: 2, callees: &[p::function("a943eadffe4f8b3795731cdbbf21c288bdb67898d4de7c154b63e0e697b710b2"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ], heap: Some(p::HeapTemplate { entry: ts_number_round_decimal_heap, depth: 2, callees: &[p::function("a943eadffe4f8b3795731cdbbf21c288bdb67898d4de7c154b63e0e697b710b2"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ] }) }),
 };
 
 /// `ts.number.round_decimal`.
@@ -2829,7 +2851,7 @@ fn ts_number_round_decimal_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
                 let v8 = (natives[2].entry)(&[v7, Value::Int(2)])?; let _ = v8;
                 let v9 = match (natives[1].entry)(&[v2, v8]) { Some(value) => value, None => heap.call(5, &[v2, v8])? }; let _ = v9;
                 if !matches!(v9, Value::Bool(false)) { return None; }
-                let v12 = heap.call(6, &[v6, Value::Int(10)])?; let _ = v12;
+                let v12 = match (natives[6].entry)(&[v6, Value::Int(10)]) { Some(value) => value, None => heap.call(6, &[v6, Value::Int(10)])? }; let _ = v12;
                 Some(v12)
             })() { return Some(value); }
             None
@@ -5566,7 +5588,7 @@ const TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_string_heap, depth: 2, callees: &[p::function("ce386288907700a8135d1a3f7f380692a6b0a7cfe07255797f0da39f7ef2c705"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_string_heap, depth: 2, callees: &[p::function("ce386288907700a8135d1a3f7f380692a6b0a7cfe07255797f0da39f7ef2c705"), ] }) }),
 };
 
 /// `ts.primitive_to_string`.
@@ -5686,7 +5708,18 @@ fn ts_primitive_to_string_template(args: &[Value], natives: &[lash_kernel_doc::P
         },
         [Value::Float(_)] => {
             if let Some(value) = (|| {
-                let v11 = (|| {
+                let v12 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+Some(v5)
+})() { return Some(value); }
 if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
@@ -5694,8 +5727,8 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(true)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
@@ -5705,10 +5738,10 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(true)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
@@ -5718,99 +5751,19 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
 if !matches!(v6, Value::Bool(false)) { return None; }
-let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-if !matches!(v7, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(false)) { return None; }
+let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
 if !matches!(v8, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-if !matches!(v8, Value::Bool(false)) { return None; }
-let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-if !matches!(v9, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-if !matches!(v8, Value::Bool(false)) { return None; }
-let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-if !matches!(v9, Value::Bool(false)) { return None; }
-let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v10;
-if !matches!(v10, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-})() { return Some(value); }
-None
-})()?;
-let _ = v11;
-
-                Some(v11)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v13 = (|| {
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(false)) { return None; }
-let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-if !matches!(v7, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
 })() { return Some(value); }
@@ -5818,7 +5771,7 @@ if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(false)) { return None; }
 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
 if !matches!(v10, Value::Bool(true)) { return None; }
@@ -5828,7 +5781,7 @@ if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(false)) { return None; }
 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
 if !matches!(v10, Value::Bool(false)) { return None; }
@@ -5838,9 +5791,100 @@ Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
 })() { return Some(value); }
 None
 })()?;
-let _ = v13;
+let _ = v12;
 
-                Some(v13)
+                Some(v12)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v16 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+Some(v5)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(false)) { return None; }
+let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+if !matches!(v8, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(false)) { return None; }
+let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+if !matches!(v12, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(false)) { return None; }
+let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+if !matches!(v12, Value::Bool(false)) { return None; }
+let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
+if !matches!(v13, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+None
+})()?;
+let _ = v16;
+
+                Some(v16)
             })() { return Some(value); }
             None
         },
@@ -6211,7 +6255,7 @@ const TS_TO_STRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_to_string_heap, depth: 2, callees: &[p::function("ce386288907700a8135d1a3f7f380692a6b0a7cfe07255797f0da39f7ef2c705"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_to_string_heap, depth: 2, callees: &[p::function("ce386288907700a8135d1a3f7f380692a6b0a7cfe07255797f0da39f7ef2c705"), ] }) }),
 };
 
 /// `ts.to_string`.
@@ -6296,7 +6340,18 @@ fn ts_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNat
         },
         [Value::Float(_)] => {
             if let Some(value) = (|| {
-                let v11 = (|| {
+                let v12 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+Some(v5)
+})() { return Some(value); }
 if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
@@ -6304,8 +6359,8 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(true)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
@@ -6315,10 +6370,10 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(true)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
@@ -6328,99 +6383,19 @@ if !matches!(v1, Value::Bool(true)) { return None; }
 let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
 let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
 if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
 if !matches!(v6, Value::Bool(false)) { return None; }
-let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-if !matches!(v7, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(false)) { return None; }
+let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
 if !matches!(v8, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-if !matches!(v8, Value::Bool(false)) { return None; }
-let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-if !matches!(v9, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(false)) { return None; }
-let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
-if !matches!(v8, Value::Bool(false)) { return None; }
-let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
-if !matches!(v9, Value::Bool(false)) { return None; }
-let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v10;
-if !matches!(v10, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
-})() { return Some(value); }
-None
-})()?;
-let _ = v11;
-
-                Some(v11)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v13 = (|| {
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(true)) { return None; }
-Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-if !matches!(v1, Value::Bool(true)) { return None; }
-let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-if !matches!(v3, Value::Bool(false)) { return None; }
-let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
-if !matches!(v5, Value::Bool(false)) { return None; }
-let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
-if !matches!(v6, Value::Bool(false)) { return None; }
-let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
-if !matches!(v7, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
 })() { return Some(value); }
 if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(true)) { return None; }
 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
 })() { return Some(value); }
@@ -6428,7 +6403,7 @@ if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(false)) { return None; }
 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
 if !matches!(v10, Value::Bool(true)) { return None; }
@@ -6438,7 +6413,7 @@ if let Some(value) = (|| {
 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
 let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
 if !matches!(v1, Value::Bool(false)) { return None; }
-let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
 if !matches!(v9, Value::Bool(false)) { return None; }
 let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
 if !matches!(v10, Value::Bool(false)) { return None; }
@@ -6448,9 +6423,100 @@ Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
 })() { return Some(value); }
 None
 })()?;
-let _ = v13;
+let _ = v12;
 
-                Some(v13)
+                Some(v12)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v16 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+Some(v5)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(false)) { return None; }
+let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+if !matches!(v8, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(false)) { return None; }
+let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+if !matches!(v12, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
+if !matches!(v11, Value::Bool(false)) { return None; }
+let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+if !matches!(v12, Value::Bool(false)) { return None; }
+let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
+if !matches!(v13, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+None
+})()?;
+let _ = v16;
+
+                Some(v16)
             })() { return Some(value); }
             None
         },
@@ -6778,7 +6844,7 @@ const TS_ADD: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_add,
-    template: Some(p::HelperTemplate { entry: Some(ts_add_template), depth: 3, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_add_heap, depth: 1, callees: &[p::function("c423caab531bfa59c25a9283d39a6b7314424699b664f668f322abff2a2225ea"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(ts_add_template), depth: 3, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_add_heap, depth: 1, callees: &[p::function("c423caab531bfa59c25a9283d39a6b7314424699b664f668f322abff2a2225ea"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }) }),
 };
 
 /// `ts.add`.

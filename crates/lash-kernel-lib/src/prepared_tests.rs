@@ -155,6 +155,66 @@ fn charge_invariance() {
     }
 }
 
+/// K-LIB-006: a word's digits that a short text holds are answered by the
+/// prepared entry, charged or not, spelled as the big integer spells them
+/// in every radix; past the short text's bound it declines to the general
+/// call, which reserves them.
+#[test]
+fn short_integer_digits_are_the_integers_own_spelling() {
+    use lash_kernel_doc::Value;
+    use lash_kernel_doc::arena::ShortText;
+    use num_bigint::BigInt;
+
+    let mut registry = FunctionRegistry::new();
+    register_numbers(&mut registry).unwrap();
+    let prepared = |name: &str| {
+        registry
+            .iter()
+            .find(|(_, function)| function.definition().name.as_str() == name)
+            .and_then(|(_, function)| function.native()?.prepare())
+            .unwrap_or_else(|| panic!("`{name}` has a prepared entry"))
+    };
+    let (int_text, num_text) = (prepared("int.to_text"), prepared("num.to_text"));
+    let spelled = |value: Option<Value>| {
+        value.map(|value| match value {
+            Value::Text(text) => text.as_str().to_owned(),
+            other => panic!("digits are a short text, not {other:?}"),
+        })
+    };
+    let short = |digits: String| Some(digits).filter(|digits| digits.len() <= ShortText::MAX);
+    for word in [
+        0,
+        1,
+        -1,
+        35,
+        -36,
+        99_999_999_999_999,
+        -9_999_999_999_999,
+        100_000_000_000_000,
+        -99_999_999_999_999,
+        i64::MAX,
+        i64::MIN,
+    ] {
+        for radix in 2..=36u32 {
+            let args = [Value::Int(word), Value::Int(radix.into())];
+            let expected = short(BigInt::from(word).to_str_radix(radix));
+            for charging in [false, true] {
+                assert_eq!(
+                    spelled(int_text.answer(&args, charging).map(|answer| answer.value)),
+                    expected,
+                    "{word} in radix {radix}"
+                );
+            }
+        }
+        let expected = short(BigInt::from(word).to_string());
+        assert_eq!(
+            spelled((num_text.entry)(&[Value::Int(word)])),
+            expected,
+            "{word}"
+        );
+    }
+}
+
 /// K-MACH-008: preparing native entries preserves execution outcomes,
 /// including a successful scalar, structural fallback and an admitted error.
 #[test]
