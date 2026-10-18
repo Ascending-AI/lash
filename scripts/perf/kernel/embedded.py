@@ -106,7 +106,7 @@ def capped():
     resource.setrlimit(resource.RLIMIT_AS, (8 * 1024**3, 8 * 1024**3))
 
 
-def measure(command, prefix, timeout):
+def measure(command, prefix, timeout, charge="exact"):
     perf = prefix.with_suffix(".perf.tsv")
     resources = prefix.with_suffix(".time.txt")
     invocation = ["perf", "stat", "-x", "\t", "-e", "instructions:u", "-o", str(perf),
@@ -118,7 +118,7 @@ def measure(command, prefix, timeout):
     with prefix.with_suffix(".stderr").open("wb") as err:
         proc = subprocess.Popen(invocation, cwd=ROOT, stdout=subprocess.PIPE,
                                 stderr=err, preexec_fn=capped, start_new_session=True,
-                                env=dict(os.environ, LC_ALL="C", NO_COLOR="1"))
+                                env=dict(os.environ, LC_ALL="C", NO_COLOR="1", KERNEL_PERF_CHARGE=charge))
         output = bytearray()
         first_ns = None
         deadline = time.monotonic() + timeout
@@ -195,6 +195,12 @@ def validate(receipt):
             raise ValueError('missing or nonpositive sample measurement')
 
 
+def charge_readout(rows):
+    if all(row["charged"] is None for row in rows):
+        return "not metered"
+    return f'{statistics.mean(row["charged"] for row in rows):.0f}'
+
+
 def render(receipt, path):
     validate(receipt)
     if receipt.get('differential_warm'):
@@ -247,7 +253,7 @@ def render(receipt, path):
         inner = [row['lash'] for row in rows]
         columns = " | ".join(f"{mean(inner, key) / 1e6:.3f}" for key in [
             'registry_ns', 'lower_ns', 'library_compile_ns', 'document_compile_and_start_ns', 'run_ns'])
-        lines.append(f"| {program} | {engine} | {columns} | {mean(inner, 'run_allocations'):.0f} | {mean(inner, 'charged'):.0f} |")
+        lines.append(f"| {program} | {engine} | {columns} | {mean(inner, 'run_allocations'):.0f} | {charge_readout(inner)} |")
     lines += ["", "The workload geometry and fairness limits are documented in "
               "[the instrument](instruments/kernel-vs-embedded.md). Raw receipts retain every result, "
               "source and executable digest, command, pair, load1, timing split, instruction count "
@@ -309,6 +315,7 @@ def main():
     parser.add_argument('--fetch-engines', action='store_true')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'docs/perf/kernel-vs-embedded.md')
+    parser.add_argument('--charge', choices=['exact', 'off'], default='exact')
     parser.add_argument('--kernel', help='reuse an already optimized Kiln artifact')
     parser.add_argument('--differential-warm', action='store_true',
                         help='estimate prepared run cost from paired N/2N repetitions')
@@ -342,7 +349,7 @@ def main():
     versions['lash'] = 'Kiln optimized; compiler/profile in each Lash receipt'
     cpu = next(line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines()
                if line.startswith('model name'))
-    receipt = dict(host=platform.node(), cpu=cpu, kernel=platform.release(), versions=versions,
+    receipt = dict(charge=args.charge, host=platform.node(), cpu=cpu, kernel=platform.release(), versions=versions,
                    revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                    programs=programs, recorded_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                    executable_sha256={name: sha(Path(path).read_bytes()) for name, path in tools.items()},
@@ -388,7 +395,7 @@ def main():
         ], 1):
             for engine in order:
                 prefix = out / f'{stem}-{pair}-{engine}'
-                sample, output = measure(commands[engine], prefix, args.timeout)
+                sample, output = measure(commands[engine], prefix, args.timeout, args.charge)
                 result, inner = parse_result(engine, output)
                 actual = digest(result)
                 if expected is not None and actual != expected:

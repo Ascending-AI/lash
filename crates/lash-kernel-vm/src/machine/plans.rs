@@ -479,14 +479,14 @@ impl PlanContext for PlanRun<'_> {
 
     fn meter(&mut self, units: u64) -> Result<(), PlanExit> {
         let machine = &mut *self.machine;
+        if machine.bounds.charge == crate::Charge::Off {
+            return Ok(());
+        }
         let charged = super::ops::charge_scheduled(
             &mut machine.charged,
-            machine.bounds.charge,
+            machine.bounds.charge_limit,
             units,
-            machine
-                .observer
-                .as_deref()
-                .and_then(|observer| observer.charges.as_ref()),
+            machine.observer.as_deref(),
         );
         self.held(charged)
     }

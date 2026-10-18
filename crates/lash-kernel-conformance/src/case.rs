@@ -91,7 +91,8 @@ impl Default for CaseBounds {
 impl From<CaseBounds> for Bounds {
     fn from(value: CaseBounds) -> Self {
         Self {
-            charge: value.charge,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: value.charge,
             memory: value.memory,
             call_depth: value.call_depth,
             live_tasks: value.live_tasks,
@@ -264,7 +265,7 @@ pub struct Observations {
     pub prints: Vec<Datum>,
     pub end: ExpectedEnd,
     pub trace: Vec<Trace>,
-    pub charged: u64,
+    pub charged: Option<u64>,
     pub parks: usize,
 }
 
@@ -283,7 +284,9 @@ impl Expected {
         if self.prints != actual.prints
             || self.end != actual.end
             || self.trace != trace
-            || self.charged.is_some_and(|charge| charge != actual.charged)
+            || actual
+                .charged
+                .is_some_and(|actual| self.charged.is_some_and(|charge| charge != actual))
             || self.parks.is_some_and(|parks| parks != actual.parks)
         {
             return Err(HarnessError(format!(

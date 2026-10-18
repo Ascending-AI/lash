@@ -985,7 +985,7 @@ fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
     let mut worker = checkout(&pool);
     let pid = worker.pid().expect("pid");
     let mut start = fresh(&document, Target::Main, Vec::new());
-    start.bounds.charge = 500;
+    start.bounds.charge_limit = 500;
     worker
         .start(start, &identity, ExecutionClass::Cell)
         .expect("start");
@@ -1132,7 +1132,7 @@ fn the_address_space_ceiling_bounds_a_runs_allocation() {
     config.protocol.max_source_bytes = 1024;
     config.tuning.typescript_source_bytes = 1024;
     config.run_bounds.memory = 8 * GIB;
-    config.run_bounds.charge = u64::MAX;
+    config.run_bounds.charge_limit = u64::MAX;
     let pool = WorkerPool::new(config).expect("pool");
     let (identity, document) = document(
         r#"
@@ -1145,7 +1145,7 @@ main {
     let pid = worker.pid().expect("pid");
     let mut start = fresh(&document, Target::Main, Vec::new());
     start.bounds.memory = 8 * GIB;
-    start.bounds.charge = u64::MAX;
+    start.bounds.charge_limit = u64::MAX;
     worker
         .start(start, &identity, ExecutionClass::Cell)
         .expect("start");

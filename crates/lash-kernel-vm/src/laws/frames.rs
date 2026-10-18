@@ -106,7 +106,9 @@ fn observe(
             Step::Parked(_) => embedder.deliver_next(),
         }
     };
-    let charged = crate::Machine::meters(&embedder.machine).charged;
+    let charged = crate::Machine::meters(&embedder.machine)
+        .charged
+        .expect("exact charge");
     let asked = embedder.asked();
     ((end, embedder.world.printed, asked, charged), slices)
 }
@@ -322,7 +324,9 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     };
     assert!(sealed >= 10, "{sealed} sealed");
     let (charged, asked) = (
-        crate::Machine::meters(&embedder.machine).charged,
+        crate::Machine::meters(&embedder.machine)
+            .charged
+            .expect("exact charge"),
         embedder.asked(),
     );
     assert_eq!((end, embedder.world.printed, asked, charged), whole);

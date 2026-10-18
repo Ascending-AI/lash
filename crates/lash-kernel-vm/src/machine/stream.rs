@@ -303,7 +303,9 @@ impl KernelMachine {
         }
         let entry = self.charged;
         match entry.checked_add(u64::from(total)) {
-            Some(end) if end <= self.bounds.charge && end < self.slice_end && total < u32::MAX => {
+            Some(end)
+                if end <= self.bounds.charge_limit && end < self.slice_end && total < u32::MAX =>
+            {
                 self.region = Some(Admitted { entry, end, region });
                 Ok(())
             }
@@ -323,7 +325,7 @@ impl KernelMachine {
         pc: usize,
     ) -> Eval<()> {
         let table = &running.stream.regions;
-        if let Some((event, crossed)) = table.crossing(region.0, entry, self.bounds.charge) {
+        if let Some((event, crossed)) = table.crossing(region.0, entry, self.bounds.charge_limit) {
             return self.replay(running, region, entry, event, crossed, pc);
         }
         let end = table.commit(region.0, entry, usize::MAX);
@@ -363,12 +365,14 @@ impl KernelMachine {
         }
         self.region = None;
         if self.observer.is_some() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            self.witness_charge_work();
             let events = table.events(region.0);
             self.observe_region(&events[..event]);
             self.observe_crossing(events[event], crossed.unit);
         }
         self.charged = crossed.charged;
-        Err(bound(Bound::Charge, self.bounds.charge).into())
+        Err(bound(Bound::Charge, self.bounds.charge_limit).into())
     }
 
     /// Closes the region the running statement stands in: it is charged
@@ -378,6 +382,8 @@ impl KernelMachine {
         if let Some(admitted) = self.region.take() {
             self.charged = admitted.end;
             if self.observer.is_some() {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness_charge_work();
                 self.observe_region(stream.regions.events(admitted.region.0));
             }
         }
@@ -403,6 +409,8 @@ impl KernelMachine {
                 self.charged = table.commit(admitted.region.0, admitted.entry, executed);
             }
             if self.observer.is_some() {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness_charge_work();
                 self.observe_region(&table.events(admitted.region.0)[..executed]);
             }
         }

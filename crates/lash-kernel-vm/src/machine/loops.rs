@@ -390,7 +390,9 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Status {
-        self.charge(self.costs.loop_test)?;
+        if self.charging {
+            self.charge(self.costs.loop_test)?;
+        }
         // What the loop's next step reads is decoded before it steps.
         let arena = std::rc::Rc::clone(&self.arena);
         loop {
@@ -425,14 +427,14 @@ impl KernelMachine {
                 let Form::For { metered, .. } = &exe.stmt(stmt).form else {
                     return Err(fault("a `for` loop is not at a `for`").into());
                 };
-                super::ops::charge_scheduled(
-                    &mut self.charged,
-                    self.bounds.charge,
-                    *metered,
-                    self.observer
-                        .as_deref()
-                        .and_then(|observer| observer.charges.as_ref()),
-                )?;
+                if *metered != 0 {
+                    super::ops::charge_scheduled(
+                        &mut self.charged,
+                        self.bounds.charge_limit,
+                        *metered,
+                        self.observer.as_deref(),
+                    )?;
+                }
                 let mut arena = self.arena.borrow_mut();
                 let raw = match cursor {
                     Cursor::Driver(driver) => {
@@ -469,14 +471,14 @@ impl KernelMachine {
                 let Form::While { test, metered, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
-                super::ops::charge_scheduled(
-                    &mut self.charged,
-                    self.bounds.charge,
-                    *metered,
-                    self.observer
-                        .as_deref()
-                        .and_then(|observer| observer.charges.as_ref()),
-                )?;
+                if *metered != 0 {
+                    super::ops::charge_scheduled(
+                        &mut self.charged,
+                        self.bounds.charge_limit,
+                        *metered,
+                        self.observer.as_deref(),
+                    )?;
+                }
                 match self.run(host, &running, test.start as usize)? {
                     Ran::Tested(value) => self.tested(task, value),
                     // The condition stands at a call made inside it.

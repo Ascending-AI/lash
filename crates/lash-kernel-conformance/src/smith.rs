@@ -139,7 +139,8 @@ impl<'a> Arbitrary<'a> for Smith {
             fail_effects: u.arbitrary()?,
             host_seed: u.arbitrary()?,
             bounds: Bounds {
-                charge: u.int_in_range(0..=20_000)?,
+                charge: lash_kernel_vm::Charge::Exact,
+                charge_limit: u.int_in_range(0..=20_000)?,
                 memory: u.int_in_range(0..=256 * 1024)?,
                 call_depth: u.int_in_range(1..=16)?,
                 live_tasks: u.int_in_range(1..=8)?,

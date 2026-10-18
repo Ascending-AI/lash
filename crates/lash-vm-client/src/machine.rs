@@ -202,7 +202,11 @@ impl RemoteMachines {
             document: EncodedPayload(self.body.to_vec()),
             from,
             bounds: RunBounds {
-                charge: self.bounds.charge,
+                charge: match self.bounds.charge {
+                    lash_kernel_vm::Charge::Exact => lash_vm_protocol::Charge::Exact,
+                    lash_kernel_vm::Charge::Off => lash_vm_protocol::Charge::Off,
+                },
+                charge_limit: self.bounds.charge_limit,
                 memory: self.bounds.memory,
                 call_depth: self.bounds.call_depth,
                 live_tasks: self.bounds.live_tasks,
@@ -760,7 +764,8 @@ mod reservation_tests {
             document: EncodedPayload(vec![0; 16]),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {
-                charge: u64::MAX,
+                charge: lash_vm_protocol::Charge::Exact,
+                charge_limit: u64::MAX,
                 memory: u64::MAX,
                 call_depth: u32::MAX,
                 live_tasks: u32::MAX,

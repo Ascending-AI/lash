@@ -24,7 +24,8 @@ use crate::{
 
 /// Bounds no law reaches unless it sets one.
 pub(crate) const ROOMY: Bounds = Bounds {
-    charge: 10_000_000,
+    charge: crate::Charge::Exact,
+    charge_limit: 10_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,

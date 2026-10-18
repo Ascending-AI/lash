@@ -33,11 +33,11 @@ pub struct CodeCounts {
     /// the body of a library function with a native implementation.
     pub uncharged_operations: u64,
     /// Charge while it was the innermost frame and no native call ran.
-    pub self_charge: u64,
+    pub self_charge: Option<u64>,
     /// Charge from a call's start to its end, callees and the natives it
     /// called included; a recursive call is counted once, by its outermost
     /// frame. Inclusive charges overlap: they never add up to a total.
-    pub inclusive_charge: u64,
+    pub inclusive_charge: Option<u64>,
     /// Objects the heap took while it ran.
     pub heap_insertions: u64,
 }
@@ -49,7 +49,8 @@ pub struct NativeCounts {
     /// Calls its allocation-free fast path answered.
     pub fast_calls: u64,
     /// Calls charged nothing: the call did work the charge does not show.
-    pub zero_charge_calls: u64,
+    /// None when charge metering is Off.
+    pub zero_charge_calls: Option<u64>,
     /// Calls made again after a collection, for room.
     pub retries: u64,
     /// The units its general calls counted on their work counter: a
@@ -57,7 +58,7 @@ pub struct NativeCounts {
     pub guard_work: u64,
     /// Its formulas evaluated: charge formulas and guard limits.
     pub formula_evaluations: u64,
-    pub self_charge: u64,
+    pub self_charge: Option<u64>,
     pub heap_insertions: u64,
 }
 
@@ -87,6 +88,7 @@ struct OpenNative {
 /// The counters of one machine.
 #[derive(Clone, Debug)]
 pub(crate) struct Counting {
+    metered: bool,
     pub(crate) codes: Vec<CodeCounts>,
     pub(crate) natives: Vec<NativeCounts>,
     /// Native calls by the function that made them and the native.
@@ -104,8 +106,15 @@ pub(crate) struct Counting {
 }
 
 impl Counting {
-    pub(crate) fn new(codes: usize, libs: usize, charged: u64, allocated: u64) -> Self {
+    pub(crate) fn new(
+        codes: usize,
+        libs: usize,
+        charged: u64,
+        allocated: u64,
+        metered: bool,
+    ) -> Self {
         Self {
+            metered,
             codes: vec![CodeCounts::default(); codes],
             natives: vec![NativeCounts::default(); libs],
             native_calls: BTreeMap::new(),
@@ -124,25 +133,41 @@ impl Counting {
     /// Gives what the meters moved since the last change of owner to the
     /// owner that ran.
     pub(crate) fn flush(&mut self, charged: u64, allocated: u64) {
-        let charge = charged.saturating_sub(self.charged);
+        if self.metered {
+            self.flush_charge(charged);
+        }
         let insertions = allocated.saturating_sub(self.allocated);
-        self.charged = charged;
         self.allocated = allocated;
         match self.current {
-            Owner::Nobody => {
-                self.unattributed_charge += charge;
-                self.unattributed_insertions += insertions;
-            }
+            Owner::Nobody => self.unattributed_insertions += insertions,
             Owner::Code(code) => {
                 if let Some(counts) = self.codes.get_mut(code as usize) {
-                    counts.self_charge += charge;
                     counts.heap_insertions += insertions;
                 }
             }
             Owner::Lib(lib) => {
                 if let Some(counts) = self.natives.get_mut(lib as usize) {
-                    counts.self_charge += charge;
                     counts.heap_insertions += insertions;
+                }
+            }
+        }
+    }
+
+    fn flush_charge(&mut self, charged: u64) {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.charge_work += 1);
+        let charge = charged.saturating_sub(self.charged);
+        self.charged = charged;
+        match self.current {
+            Owner::Nobody => self.unattributed_charge += charge,
+            Owner::Code(code) => {
+                if let Some(counts) = self.codes.get_mut(code as usize) {
+                    *counts.self_charge.get_or_insert(0) += charge;
+                }
+            }
+            Owner::Lib(lib) => {
+                if let Some(counts) = self.natives.get_mut(lib as usize) {
+                    *counts.self_charge.get_or_insert(0) += charge;
                 }
             }
         }
@@ -210,8 +235,9 @@ impl Counting {
     }
 
     fn open_frame(&mut self, task: usize, code: u32, call: bool) {
+        let metered = self.metered;
         let stack = self.stack(task);
-        let outermost = stack.entries.iter().all(|entry| entry.code != code);
+        let outermost = metered && stack.entries.iter().all(|entry| entry.code != code);
         let at = stack.charged;
         stack.entries.push(Entry {
             code,
@@ -230,7 +256,7 @@ impl Counting {
             && entry.outermost
             && let Some(counts) = self.codes.get_mut(entry.code as usize)
         {
-            counts.inclusive_charge += charged - entry.at;
+            *counts.inclusive_charge.get_or_insert(0) += charged - entry.at;
         }
     }
 
@@ -287,10 +313,11 @@ impl Counting {
         let Some(open) = self.open.pop() else {
             return;
         };
-        if self.charged == open.charged
+        if self.metered
+            && self.charged == open.charged
             && let Some(counts) = self.natives.get_mut(open.lib as usize)
         {
-            counts.zero_charge_calls += 1;
+            *counts.zero_charge_calls.get_or_insert(0) += 1;
         }
         self.task = open.task;
         self.settle_owner();

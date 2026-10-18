@@ -120,12 +120,35 @@ record!(SessionRoot {
     functions: KeyedRoot,
     certificate: DataOnlyCertificate
 });
-record!(SavedMeters {
-    charged: u64,
-    waits_issued: u64,
-    next_join: u64,
-    live_tasks: u32
-});
+// The numeric token denotes Exact; none denotes Off. The token type is
+// already a discriminant, retaining the bounded root's fixed footprint.
+impl TokenCodec for SavedMeters {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(4);
+        match self.charged {
+            Some(charged) => charged.encode(out),
+            None => out.none(),
+        }
+        self.waits_issued.encode(out);
+        self.next_join.encode(out);
+        self.live_tasks.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(4)?;
+        let charged = if input.peek_tag()? == lash_kernel_doc::graph_tokens::Tag::None {
+            input.option()?;
+            None
+        } else {
+            Some(u64::decode(input)?)
+        };
+        Ok(Self {
+            charged,
+            waits_issued: u64::decode(input)?,
+            next_join: u64::decode(input)?,
+            live_tasks: u32::decode(input)?,
+        })
+    }
+}
 record!(CheckpointRoot {
     kernel: u32,
     document: DocumentId,

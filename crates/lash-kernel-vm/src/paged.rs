@@ -228,6 +228,7 @@ pub trait Machine: Sized {
     fn take_counts(&mut self) -> crate::SiteCounts;
     fn take_path(&mut self) -> Result<crate::ExecutionPath, HeapFault>;
 
+    /// Exact slices count charge units; Off slices count machine steps.
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;
 
     fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError>;

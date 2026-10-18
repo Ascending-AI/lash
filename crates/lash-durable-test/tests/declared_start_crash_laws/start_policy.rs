@@ -24,7 +24,7 @@ fn stated_settings(
     defaults: lash_execution_contracts::process::EngineSettings,
 ) -> lash_execution_contracts::process::EngineSettings {
     let mut value = defaults.into_value();
-    value["charge"] = serde_json::json!(STATED_CHARGE);
+    value["charge_limit"] = serde_json::json!(STATED_CHARGE);
     lash_execution_contracts::process::EngineSettings::new(value)
 }
 

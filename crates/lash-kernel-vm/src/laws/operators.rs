@@ -257,7 +257,7 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
         end,
         embedder.world.printed,
         embedder.requests,
-        embedder.machine.meters().charged,
+        embedder.machine.meters().charged.expect("exact charge"),
         continuations,
     )
 }

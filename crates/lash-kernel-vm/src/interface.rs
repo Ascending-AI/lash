@@ -49,6 +49,7 @@ use lash_kernel_doc::{
     Datum, Document, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Invalid, Name,
     Timestamp, Type,
 };
+pub use lash_kernel_state::paged::Charge;
 
 /// What a machine runs: an admitted document and the library functions the
 /// embedder registered, prepared once for every program that uses them.
@@ -63,12 +64,14 @@ pub struct Program {
     pub library: PreparedLibrary,
 }
 
-/// The execution bounds the embedder states (`K-BND-001`). Passing one ends
+/// The execution bounds and charge policy the embedder states (`K-BND-001`). Passing a bound ends
 /// the run with [`RunError::Bound`]; no guest code catches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {
-    /// The most the run may be charged, in charge units.
-    pub charge: u64,
+    /// Whether charge is metered. Exact is the default host policy.
+    pub charge: Charge,
+    /// The most the run may be charged under Exact, in charge units.
+    pub charge_limit: u64,
     /// The most heap the run may hold, in bytes as the machine accounts
     /// them.
     pub memory: u64,
@@ -110,7 +113,8 @@ pub struct BoundExceeded {
 /// What a run has used so far.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Meters {
-    pub charged: u64,
+    /// None when charge metering is Off.
+    pub charged: Option<u64>,
     pub memory: u64,
     pub live_tasks: u32,
 }

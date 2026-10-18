@@ -33,7 +33,7 @@ pub struct Observed {
     /// Helpers named by the admitted document, independent of its execution plan.
     pub helpers: BTreeSet<String>,
     /// What the run was charged.
-    pub charged: u64,
+    pub charged: Option<u64>,
 }
 
 /// A case lowered and admitted, or what refusing to lower it observes.
@@ -45,10 +45,15 @@ pub enum Lowered {
 pub struct Runner {
     library: NamedLibrary,
     prepared: PreparedLibrary,
+    charge: lash_kernel_vm::Charge,
 }
 
 impl Runner {
     pub fn new(dialect: &str) -> Result<Self, String> {
+        Self::new_with_charge(dialect, lash_kernel_vm::Charge::Exact)
+    }
+
+    pub fn new_with_charge(dialect: &str, charge: lash_kernel_vm::Charge) -> Result<Self, String> {
         let mut registry = FunctionRegistry::new();
         lash_kernel_vm::register_machine_functions(&mut registry).map_err(|e| e.to_string())?;
         lash_kernel_lib::register_numbers(&mut registry).map_err(|e| e.to_string())?;
@@ -88,7 +93,8 @@ impl Runner {
         }
         Ok(Self {
             library,
-            prepared: PreparedLibrary::new(Arc::new(registry)),
+            charge,
+            prepared: PreparedLibrary::with_charge(Arc::new(registry), charge),
         })
     }
 
@@ -139,7 +145,7 @@ impl Runner {
                 return Ok(Lowered::Refused(Observed {
                     result: json!({"type":"refusal", "value":message.split(':').next().unwrap_or(&message)}),
                     helpers: BTreeSet::new(),
-                    charged: 0,
+                    charged: None,
                 }));
             }
         };
@@ -156,7 +162,8 @@ impl Runner {
     /// Runs one admitted program through the embedding API.
     pub fn execute(&self, case: &Case, program: &Program) -> Result<Observed, String> {
         let bounds = Bounds {
-            charge: 50_000_000,
+            charge: self.charge,
+            charge_limit: 50_000_000,
             memory: 64 << 20,
             call_depth: 200,
             live_tasks: 100,

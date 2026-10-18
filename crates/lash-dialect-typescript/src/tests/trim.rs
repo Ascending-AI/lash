@@ -111,7 +111,8 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     let fast = make_program("ts.string.trim_value");
     let generic = make_program("ts.law.trim_value");
     let bounds = Bounds {
-        charge: 10_000_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 10_000_000,
         memory: 1 << 20,
         call_depth: 100,
         live_tasks: 10,
@@ -134,9 +135,11 @@ fn native_trim_agrees_with_generic_utf16_scan() {
         .unwrap();
         let mut console = Console::default();
         match machine.run(&mut console, u64::MAX).unwrap() {
-            Step::Ended(End::Finished(finished)) => {
-                (finished.result, console.0, machine.meters().charged)
-            }
+            Step::Ended(End::Finished(finished)) => (
+                finished.result,
+                console.0,
+                machine.meters().charged.expect("exact charge"),
+            ),
             other => panic!("trim must return without parking: {other:?}"),
         }
     };

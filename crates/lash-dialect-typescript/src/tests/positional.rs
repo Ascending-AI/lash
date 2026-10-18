@@ -86,7 +86,8 @@ impl Host for Console {
     }
 }
 const BOUNDS: Bounds = Bounds {
-    charge: 10000000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10000000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,
@@ -303,7 +304,11 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
                 other => panic!("{other:?}"),
             }
         }
-        (console.lines, current.meters().charged, waits)
+        (
+            console.lines,
+            current.meters().charged.expect("exact charge"),
+            waits,
+        )
     };
     let plain = run(false);
     assert_eq!(plain, run(true));

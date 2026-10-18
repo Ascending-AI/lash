@@ -58,8 +58,28 @@ impl Machine for KernelMachine {
         if self.projecting {
             return Err(MachineError::Projecting);
         }
+        #[cfg(any(test, feature = "perf-witness"))]
+        let (witness, observer_added) = {
+            let enabled = crate::perf_witness::enabled();
+            let added = enabled && self.observer.is_none();
+            if enabled {
+                self.observer_mut().work_witness = true;
+            }
+            (enabled, added)
+        };
         self.observe_phase(GuestPhase::Interpret);
-        let result = self.run_slice(host, slice);
+        let result = match self.bounds.charge {
+            crate::Charge::Exact => self.run_slice::<true>(host, slice),
+            crate::Charge::Off => self.run_slice::<false>(host, slice),
+        };
+        #[cfg(any(test, feature = "perf-witness"))]
+        if witness {
+            if observer_added {
+                self.observer = None;
+            } else if let Some(observer) = self.observer.as_deref_mut() {
+                observer.work_witness = false;
+            }
+        }
         self.regs.clear();
         if result.is_ok() {
             self.tasks
@@ -175,7 +195,7 @@ impl Machine for KernelMachine {
     }
     fn meters(&self) -> Meters {
         Meters {
-            charged: self.charged,
+            charged: (self.bounds.charge == crate::Charge::Exact).then_some(self.charged),
             memory: self.heap.certificate().upper.0,
             live_tasks: self.live_tasks,
         }
@@ -221,7 +241,12 @@ impl KernelMachine {
         layout: Layout,
     ) -> Result<Self, OpenError> {
         let limits = lash_kernel_doc::KernelDataLimits::standard();
-        let library = program.library.in_layout(layout);
+        // The checkpoint owns its policy, even on a worker configured otherwise.
+        let bounds = Bounds {
+            charge: root.meters.charge(),
+            ..bounds
+        };
+        let library = program.library.in_charge(bounds.charge).in_layout(layout);
         let admitted = library.admit(&program.document, limits)?;
         let exe = admitted
             .executable(&program.document, &library)
@@ -302,7 +327,7 @@ impl KernelMachine {
             sites: Default::default(),
             plans: 0,
             segments: Default::default(),
-            charged: root.meters.charged,
+            charged: root.meters.charged.unwrap_or(0),
             live_tasks: root.meters.live_tasks,
             census_refinements,
             regs: registers::Registers::default(),
@@ -432,7 +457,7 @@ impl KernelMachine {
             session: keyed(self.heap.session_root()).map_err(SealError::Heap)?,
             host: self.host.clone(),
             meters: SavedMeters {
-                charged: self.charged,
+                charged: (self.bounds.charge == crate::Charge::Exact).then_some(self.charged),
                 waits_issued: self.next_wait,
                 next_join: self.next_join,
                 live_tasks: self.live_tasks,

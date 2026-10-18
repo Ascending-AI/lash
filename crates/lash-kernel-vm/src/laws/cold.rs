@@ -45,7 +45,7 @@ fn observe(layout: Layout, cold: bool) -> (End, Vec<Datum>, u64, u64) {
     (
         end,
         embedder.world.printed,
-        embedder.machine.meters().charged,
+        embedder.machine.meters().charged.expect("exact charge"),
         embedder.machine.cold_reads(),
     )
 }

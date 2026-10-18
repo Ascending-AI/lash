@@ -36,6 +36,7 @@ use super::{
 /// document evaluation order. This interval is independent of instruction
 /// fusion and register write history.
 struct Ops {
+    metered: bool,
     ops: Vec<Op>,
     regs: u32,
     regions: Regions,
@@ -80,6 +81,9 @@ impl Ops {
     /// A fixed charge event before the next op, in the open region or one
     /// headed here; adjacent one-unit events at one op join.
     fn event(&mut self, event: ChargeEvent, weight: Weight) {
+        if !self.metered {
+            return;
+        }
         if self.open
             && let Some(split) = &mut self.split
             && split.next() % 3 == 0
@@ -320,7 +324,7 @@ impl Compiler<'_> {
                 }
                 ops.push(Op::ForIn { iterable: Reg(0) });
                 Form::For {
-                    metered: *metered,
+                    metered: if self.metered { *metered } else { 0 },
                     site: self.site(),
                     binding: Local::unplaced(bound.first().copied().unwrap_or(0)),
                     via: via.and_then(Result::ok),
@@ -340,7 +344,7 @@ impl Compiler<'_> {
                 self.child(0, |c| c.expr(&mut ops, condition, Reg(0)));
                 ops.push(Op::Test { cond: Reg(0) });
                 Form::While {
-                    metered: *metered,
+                    metered: if self.metered { *metered } else { 0 },
                     site: self.site(),
                     test: OpRange { start: 1, len: 0 },
                     body: self.child(1, |c| c.block(body, &[]).0),
@@ -447,6 +451,7 @@ impl Compiler<'_> {
     fn ops(&mut self) -> Ops {
         let layout = self.layout.0;
         Ops {
+            metered: self.metered,
             ops: self.spare.pop().unwrap_or_default(),
             regs: 0,
             regions: self.spare_regions.pop().unwrap_or_default(),

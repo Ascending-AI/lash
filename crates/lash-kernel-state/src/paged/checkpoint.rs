@@ -29,7 +29,7 @@ pub struct CheckpointHeader {
     pub release: PageId,
     pub owner: PageId,
     pub parked: bool,
-    pub charged: u64,
+    pub charged: Option<u64>,
     pub live_tasks: u32,
     pub pending_waits: u64,
 }

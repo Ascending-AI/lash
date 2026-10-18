@@ -109,7 +109,8 @@ fn run(
     let spools = tempfile::tempdir().expect("spool directory");
     let spools = SpoolRoot::open(spools.path(), 1 << 30).expect("spools");
     let bounds = lash_kernel_vm::Bounds {
-        charge: 1_000_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 1_000_000,
         memory: 16 << 20,
         call_depth: 64,
         live_tasks: 16,
@@ -138,7 +139,7 @@ fn run(
                 return Ran {
                     end,
                     prints: host.prints,
-                    charged: machine.meters().charged,
+                    charged: machine.meters().charged.expect("exact charge"),
                     parks,
                 };
             }

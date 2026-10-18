@@ -448,7 +448,7 @@ fn committed(case: &Case) {
         panic!("committed result")
     };
     assert_eq!(result.result, int(7));
-    let charge = restored.meters().charged;
+    let charge = restored.meters().charged.expect("exact charge");
     let mut restored = crate::pages::open::<KernelMachine>(
         written,
         case.environment.bounds.into(),
@@ -462,6 +462,6 @@ fn committed(case: &Case) {
         panic!("delivered result")
     };
     assert_eq!(result.result, int(7));
-    assert_eq!(restored.meters().charged, charge);
+    assert_eq!(restored.meters().charged.expect("exact charge"), charge);
     assert!(world.prints.is_empty());
 }

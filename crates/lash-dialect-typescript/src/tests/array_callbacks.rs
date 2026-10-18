@@ -34,7 +34,8 @@ const HELPERS: [&str; 11] = [
 ];
 
 const BOUNDS: Bounds = Bounds {
-    charge: 100_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 100_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,
@@ -185,7 +186,7 @@ fn observe(program: Program, relay: bool) -> Observed {
                     carry,
                     printed: console.printed,
                     requests,
-                    charged: machine.meters().charged,
+                    charged: machine.meters().charged.expect("exact charge"),
                 };
             }
             Step::Slice => hop(&mut machine),

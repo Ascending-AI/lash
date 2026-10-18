@@ -85,7 +85,7 @@ fn a_checkpoint_root_fits_its_root_bound() {
             session: keyed(14),
             host,
             meters: SavedMeters {
-                charged: u64::MAX,
+                charged: Some(u64::MAX),
                 waits_issued: u64::MAX,
                 next_join: u64::MAX,
                 live_tasks: u32::MAX,
@@ -232,15 +232,23 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
 #[test]
 fn saved_meters_preserve_a_nonzero_next_join_on_decode() {
     let original = SavedMeters {
-        charged: 131,
+        charged: Some(131),
         waits_issued: 5,
         next_join: 8,
         live_tasks: 2,
     };
-    // seq(4), unsigned(131), unsigned(5), unsigned(8), unsigned(2).
+    // seq(4); the unsigned meter itself discriminates Exact.
     let vector = [9, 4, 3, 131, 1, 3, 5, 3, 8, 3, 2];
     assert_eq!(encode_body(&original), vector);
     assert_eq!(decode_body::<SavedMeters>(&vector).unwrap(), original);
+    let off = SavedMeters {
+        charged: None,
+        ..original
+    };
+    let off_vector = [9, 4, 13, 3, 5, 3, 8, 3, 2];
+    assert_eq!(encode_body(&off), off_vector);
+    assert_eq!(decode_body::<SavedMeters>(&off_vector).unwrap(), off);
+    assert_eq!(off.charge(), super::super::Charge::Off);
     assert_eq!(
         decode_body::<SavedMeters>(&encode_body(&original)).unwrap(),
         original

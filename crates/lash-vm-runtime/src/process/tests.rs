@@ -480,7 +480,8 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
     let recorded = KernelRecordedSettings::new(
         "typescript",
         lash_kernel_vm::Bounds {
-            charge: 10_000,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 10_000,
             memory: 1024 * 1024,
             call_depth: 32,
             live_tasks: 16,
@@ -503,7 +504,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
         .is_err()
     );
     for (key, value) in [
-        ("charge", serde_json::json!(-1)),
+        ("charge_limit", serde_json::json!(-1)),
         ("observe", serde_json::json!("invalid")),
     ] {
         let mut invalid = engine.value().clone();

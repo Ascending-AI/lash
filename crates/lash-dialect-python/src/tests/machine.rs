@@ -145,7 +145,8 @@ pub(crate) fn kernel_text(source: &str) -> String {
 }
 
 pub(super) const BOUNDS: Bounds = Bounds {
-    charge: 50_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 50_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,
@@ -353,7 +354,7 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
             release: pages::RELEASE,
         };
         let bounds = Bounds {
-            charge: 20_000,
+            charge_limit: 20_000,
             ..BOUNDS
         };
         let straight = execution_observation(program.clone(), bounds, false);
@@ -701,7 +702,7 @@ pub(super) fn execution_observation(
                 end,
                 lines: host.lines,
                 requests,
-                charged: machine.meters().charged,
+                charged: machine.meters().charged.expect("exact charge"),
                 carry,
             };
         }
@@ -784,7 +785,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             execution_observation(
                 program,
                 Bounds {
-                    charge: straight.charged,
+                    charge_limit: straight.charged,
                     ..BOUNDS
                 },
                 true
@@ -1013,7 +1014,7 @@ print(s)
         execution_observation(
             program,
             Bounds {
-                charge: straight.charged,
+                charge_limit: straight.charged,
                 ..BOUNDS
             },
             true

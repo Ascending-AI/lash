@@ -567,7 +567,7 @@ impl Checkout {
         // The host configuration is the ceiling, never a caller's assertion.
         let ceiling = self.pool.config.run_bounds;
         let bounds = &mut start.bounds;
-        bounds.charge = bounds.charge.min(ceiling.charge);
+        bounds.charge_limit = bounds.charge_limit.min(ceiling.charge_limit);
         bounds.memory = bounds.memory.min(ceiling.memory);
         bounds.call_depth = bounds.call_depth.min(ceiling.call_depth);
         bounds.live_tasks = bounds.live_tasks.min(ceiling.live_tasks);

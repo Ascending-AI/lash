@@ -89,6 +89,7 @@ pub struct RlmProtocolPluginConfig {
     pub discovery: Option<RlmDiscovery>,
     /// Session-pinned transport used for model-authored programs.
     pub channel: super::RlmChannel,
+    pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
     #[serde(default)]
@@ -120,6 +121,7 @@ fn default_continue_as_soft_warn_tokens() -> Option<usize> {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmRecordedBehaviour {
+    pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
@@ -161,17 +163,25 @@ pub struct UnsetChannel;
 /// be omitted or transposed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = UnsetChannel> {
+    charge: super::Charge,
     instruction_limit: I,
     memory_limit: M,
     channel: C,
 }
 
 impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
+    /// Select exact charge metering (the default), or remove it entirely.
+    pub fn charge(mut self, charge: super::Charge) -> Self {
+        self.charge = charge;
+        self
+    }
+
     pub fn channel(
         self,
         channel: super::RlmChannel,
     ) -> RlmProtocolPluginConfigBuilder<I, M, super::RlmChannel> {
         RlmProtocolPluginConfigBuilder {
+            charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             channel,
@@ -183,6 +193,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
         instruction_limit: InstructionBound,
     ) -> RlmProtocolPluginConfigBuilder<InstructionBound, M, C> {
         RlmProtocolPluginConfigBuilder {
+            charge: self.charge,
             instruction_limit,
             memory_limit: self.memory_limit,
             channel: self.channel,
@@ -194,6 +205,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
         memory_limit: MemoryBound,
     ) -> RlmProtocolPluginConfigBuilder<I, MemoryBound, C> {
         RlmProtocolPluginConfigBuilder {
+            charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit,
             channel: self.channel,
@@ -211,6 +223,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             tool_presentation: default_tool_presentation(),
             discovery: None,
             channel: self.channel,
+            charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
@@ -239,6 +252,7 @@ impl RlmProtocolPluginConfig {
     /// Execution budgets and channel are still explicit named inputs.
     pub fn standard() -> RlmProtocolPluginConfigBuilder {
         RlmProtocolPluginConfigBuilder {
+            charge: super::Charge::Exact,
             instruction_limit: UnsetBound,
             memory_limit: UnsetBound,
             channel: UnsetChannel,
@@ -246,7 +260,7 @@ impl RlmProtocolPluginConfig {
     }
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
-        ExecutionBounds::new(self.instruction_limit, self.memory_limit)
+        ExecutionBounds::new(self.instruction_limit, self.memory_limit).with_charge(self.charge)
     }
 
     /// The behaviour a session created in `dialect` under this
@@ -261,6 +275,7 @@ impl RlmProtocolPluginConfig {
         dialect: &crate::CellDialect,
     ) -> Result<RlmRecordedBehaviour, lash_tool_presenter_api::PresentationRefusal> {
         Ok(RlmRecordedBehaviour {
+            charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: self.prompt_features,
@@ -277,6 +292,7 @@ impl RlmProtocolPluginConfig {
     /// This configuration's physical slots under a session's recorded
     /// `behaviour`: what a session's plugin, driver and interpreter run.
     pub(crate) fn under_recorded_behaviour(mut self, behaviour: &RlmRecordedBehaviour) -> Self {
+        self.charge = behaviour.charge;
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
 

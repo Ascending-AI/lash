@@ -223,14 +223,24 @@ impl MessageFence {
 #[serde(transparent)]
 pub struct EncodedPayload(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
+/// Whether a run meters charge, selected by the host at start.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Charge {
+    #[default]
+    Exact,
+    Off,
+}
+
 /// The bounds a run is held to, as the machine counts them. Passing one ends
 /// the run with a typed bound error; it is the run's own end, not a worker
 /// failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunBounds {
+    pub charge: Charge,
     /// The most the run may be charged, in the kernel's charge units.
-    pub charge: u64,
+    pub charge_limit: u64,
     /// The most heap the run may hold, in bytes as the machine accounts them.
     pub memory: u64,
     pub call_depth: u32,
@@ -346,7 +356,7 @@ pub enum HostReadKind {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunMeters {
-    pub charged: u64,
+    pub charged: Option<u64>,
     pub memory: u64,
     pub live_tasks: u32,
 }

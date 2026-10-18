@@ -11,7 +11,8 @@ use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, S
 use super::machine;
 
 const BOUNDS: Bounds = Bounds {
-    charge: 50_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 50_000_000,
     memory: 256 << 20,
     call_depth: 400,
     live_tasks: 10,
@@ -321,7 +322,7 @@ fn run(entry: &str, value: &Datum, mode: u16) -> Ran {
     Ran {
         end,
         printed: console.lines,
-        charged: machine.meters().charged,
+        charged: machine.meters().charged.expect("exact charge"),
     }
 }
 

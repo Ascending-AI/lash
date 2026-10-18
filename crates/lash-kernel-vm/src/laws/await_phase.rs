@@ -153,7 +153,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<usize>) {
     let trace = Trace {
         end,
         printed: embedder.world.printed.clone(),
-        charged: embedder.machine.meters().charged,
+        charged: embedder.machine.meters().charged.expect("exact charge"),
     };
     (trace, delivered)
 }

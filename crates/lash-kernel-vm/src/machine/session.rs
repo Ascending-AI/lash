@@ -23,7 +23,7 @@ pub(crate) fn start(
     limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
-    let library = program.library.in_layout(layout);
+    let library = program.library.in_charge(bounds.charge).in_layout(layout);
     let admitted = library.admit(&program.document, limits)?;
     let exe = admitted
         .executable(&program.document, &library)
@@ -82,7 +82,7 @@ pub(crate) fn start(
         session_cell: matches!(start.target, Target::Main),
         pins: Pins::default(),
         projecting: false,
-        charging: true,
+        charging: false,
         region: None,
         slice_end: u64::MAX,
         sites: Default::default(),
@@ -110,10 +110,8 @@ pub(crate) fn start(
         Arc::clone(&exe),
     ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
-    // What the start decodes charges nothing (the charge is reset below),
-    // so no charge bound can stop it: the run's first statement meets the
-    // bound instead (`K-CHG-002`).
-    let bound = std::mem::replace(&mut machine.bounds.charge, u64::MAX);
+    // Host-supplied start values are not guest work (`K-CHG-002`).
+    // The first statement selects charging from its prepared code.
     let (code, args) = match &start.target {
         Target::Main => {
             if !start.args.is_empty() {
@@ -130,7 +128,6 @@ pub(crate) fn start(
                     .map_err(|error| start_interrupt(name.as_str(), error.into()))?;
                 machine.host.push(name.clone());
             }
-            machine.charged = 0;
             (exe.main, Vec::new())
         }
         Target::Entry(entry) => {
@@ -188,11 +185,9 @@ pub(crate) fn start(
                     .map_err(|error| start_interrupt("arguments", error.into()))?;
                 args = vec![Value::Absent, list];
             }
-            machine.charged = 0;
             (*code, args)
         }
     };
-    machine.bounds.charge = bound;
     let count = args.len();
     machine.regs = args.into();
     machine

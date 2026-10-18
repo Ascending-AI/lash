@@ -43,8 +43,8 @@ pub use heap::{
     SealBudget, SealedHeap, SemanticHeap, TableCursor,
 };
 pub use root::{
-    BindingRecord, BoundRecord, CellTargetKind, CheckpointRoot, CommittedOutcomeRecord, CursorKind,
-    CursorRecord, EndedRecord, EndedTask, EnteredRecord, FinallyRecord, FunctionRecord,
+    BindingRecord, BoundRecord, CellTargetKind, Charge, CheckpointRoot, CommittedOutcomeRecord,
+    CursorKind, CursorRecord, EndedRecord, EndedTask, EnteredRecord, FinallyRecord, FunctionRecord,
     GuardRecord, HeaderRecord, HeapRoot, IncomingRecord, JoinerRecord, KeyedRoot, ListJoinRecord,
     LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskStateRecord, WaitKindRecord, WaitPhase,
     WaitRecord,

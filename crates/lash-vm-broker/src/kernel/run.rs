@@ -1030,7 +1030,8 @@ mod tests {
 
     fn bounds(requests_per_park: u32, join_members: u32) -> Bounds {
         Bounds {
-            charge: u64::MAX,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: u64::MAX,
             memory: u64::MAX,
             call_depth: 64,
             live_tasks: 8,

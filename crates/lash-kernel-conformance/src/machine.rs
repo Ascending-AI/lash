@@ -16,13 +16,22 @@ use crate::{Case, DocumentRunner, ExpectedEnd, HarnessError, HostAnswer, Observa
 
 pub struct MachineRunner<M> {
     library: PreparedLibrary,
+    charge: lash_kernel_vm::Charge,
     machine: PhantomData<fn() -> M>,
 }
 
 impl<M: Machine> MachineRunner<M> {
+    /// Runs the corpus with the selected charge policy. Charge oracles apply only to Exact.
+    pub fn with_charge(mut self, charge: lash_kernel_vm::Charge) -> Self {
+        self.library = PreparedLibrary::with_charge(Arc::clone(self.library.registry()), charge);
+        self.charge = charge;
+        self
+    }
+
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self {
             library: PreparedLibrary::new(registry),
+            charge: lash_kernel_vm::Charge::Exact,
             machine: PhantomData,
         }
     }
@@ -31,24 +40,40 @@ impl<M: Machine> MachineRunner<M> {
 impl<M: Machine> DocumentRunner for MachineRunner<M> {
     fn observe(&mut self, case: &Case) -> Result<Observations, HarnessError> {
         let resume = case.environment.resume;
-        run_case::<M>(&self.library, case, &mut |at: Park<'_, M>| {
-            if !resume {
-                return Ok(at.machine);
-            }
-            let mut machine = at.machine;
-            let sealed = machine
-                .seal(crate::pages::BUDGET)
-                .map_err(|e| HarnessError(e.to_string()))?
-                .ok_or_else(|| HarnessError("unbounded seal incomplete".into()))?;
-            crate::pages::open::<M>(
-                at.program.clone(),
-                at.bounds,
-                lash_kernel_vm::kernel_internals::sealed_root(&sealed),
-                at.source,
-                at.admissions,
-            )
-            .map_err(|e| HarnessError(e.to_string()))
-        })
+        let mut start =
+            |program, mut bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
+                bounds.charge = self.charge;
+                M::start(program, bounds, start, Box::new(source.clone()))
+            };
+        let run = Run {
+            start: &mut start,
+            printed: &mut || {},
+            charge: None,
+        };
+        run_case_in::<M>(
+            &self.library,
+            case,
+            run,
+            &mut |at: Park<'_, M>| {
+                if !resume {
+                    return Ok(at.machine);
+                }
+                let mut machine = at.machine;
+                let sealed = machine
+                    .seal(crate::pages::BUDGET)
+                    .map_err(|e| HarnessError(e.to_string()))?
+                    .ok_or_else(|| HarnessError("unbounded seal incomplete".into()))?;
+                crate::pages::open::<M>(
+                    at.program.clone(),
+                    at.bounds,
+                    lash_kernel_vm::kernel_internals::sealed_root(&sealed),
+                    at.source,
+                    at.admissions,
+                )
+                .map_err(|e| HarnessError(e.to_string()))
+            },
+            None,
+        )
     }
 }
 
@@ -85,8 +110,8 @@ pub(crate) struct Run<'r, M> {
     pub(crate) charge: Option<u64>,
 }
 
-/// Runs `case` under its script. `at_park` is handed the machine at every
-/// park and answers the machine the run goes on with.
+/// Runs a case under its script, visiting every park.
+#[cfg(test)]
 pub(crate) fn run_case<M: Machine>(
     library: &PreparedLibrary,
     case: &Case,
@@ -95,8 +120,8 @@ pub(crate) fn run_case<M: Machine>(
     run_case_projected(library, case, at_park, None)
 }
 
-/// [`run_case`], projected at every slice and at the end when `projection`
-/// is given.
+/// Runs a case under its script, projecting each slice and the final state.
+#[cfg(test)]
 pub(crate) fn run_case_projected<M: Machine>(
     library: &PreparedLibrary,
     case: &Case,
@@ -115,7 +140,7 @@ pub(crate) fn run_case_projected<M: Machine>(
     run_case_in(library, case, run, at_park, projection)
 }
 
-/// [`run_case_projected`], instrumented by `run`.
+/// Runs a case under its script, instrumented by `run`.
 pub(crate) fn run_case_in<M: Machine>(
     library: &PreparedLibrary,
     case: &Case,
@@ -128,7 +153,7 @@ pub(crate) fn run_case_in<M: Machine>(
         prints: Vec::new(),
         end: ExpectedEnd::Refused,
         trace: Vec::new(),
-        charged: 0,
+        charged: None,
         parks: 0,
     };
     let document = match parse_document(&case.document) {
@@ -151,7 +176,7 @@ pub(crate) fn run_case_in<M: Machine>(
     };
     let mut bounds: lash_kernel_vm::Bounds = env.bounds.into();
     if let Some(charge) = run.charge {
-        bounds.charge = charge;
+        bounds.charge_limit = charge;
     }
     let cut = run.charge.is_some();
     let source = projection

@@ -130,7 +130,7 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
     }
     seen.printed = std::mem::take(&mut embedder.world.printed);
     seen.requests = std::mem::take(&mut embedder.requests);
-    seen.charged = embedder.machine.meters().charged;
+    seen.charged = embedder.machine.meters().charged.expect("exact charge");
     (seen, embedder.machine.work())
 }
 

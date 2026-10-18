@@ -440,3 +440,43 @@ fn corpus_cross_resumes_after_every_statement() {
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// FIG-6732: the same corpus retains its results, raises, effect identities,
+/// order and parks when its charge meter is absent. Charge-bound refusals
+/// are the charge oracle's domain and run only under Exact.
+#[test]
+fn charge_off_preserves_the_conformance_corpus() {
+    use crate::DocumentRunner;
+    use lash_kernel_vm::{Charge, KernelMachine};
+    let registry = std::sync::Arc::new(corpus_registry());
+    let mut exact = crate::MachineRunner::<KernelMachine>::new(registry.clone());
+    let mut off = crate::MachineRunner::<KernelMachine>::new(registry).with_charge(Charge::Off);
+    let mut executed = 0;
+    let mut failures = Vec::new();
+    for shard in corpus_shards() {
+        for case in shard.cases {
+            if matches!(&case.expected.end, ExpectedEnd::Bound { name, .. } if name == "charge") {
+                continue;
+            }
+            let result = (|| -> Result<(), crate::HarnessError> {
+                let mut expected = exact.observe(&case)?;
+                let actual = off.observe(&case)?;
+                if actual.charged.is_some() {
+                    return Err(crate::HarnessError("Off returned a charge meter".into()));
+                }
+                expected.charged = None;
+                if actual != expected {
+                    return Err(crate::HarnessError(format!("{expected:?} != {actual:?}")));
+                }
+                Ok(())
+            })();
+            executed += 1;
+            if let Err(error) = result {
+                failures.push(format!("{} {}: {error}", shard.rule, case.name));
+            }
+        }
+    }
+    println!("charge-off corpus: executed={executed}");
+    assert!(executed > 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

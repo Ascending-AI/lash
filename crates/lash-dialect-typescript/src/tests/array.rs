@@ -88,7 +88,8 @@ fn drive_document(
         library: kernel.prepared.clone(),
     };
     let bounds = Bounds {
-        charge: 100_000_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 100_000_000,
         memory: 16 << 20,
         call_depth: 200,
         live_tasks: 100,
@@ -791,7 +792,8 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
             library: kernel().prepared.clone(),
         },
         Bounds {
-            charge: 100_000_000,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 100_000_000,
             memory: 16 << 20,
             call_depth: 200,
             live_tasks: 100,
@@ -817,7 +819,11 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
                     End::Error(error) => format!("error:{error:?}"),
                     other => panic!("{other:?}"),
                 };
-                return (answer, host.events, machine.meters().charged);
+                return (
+                    answer,
+                    host.events,
+                    machine.meters().charged.expect("exact charge"),
+                );
             }
             Step::Parked(park) => {
                 host.events.push("park".into());

@@ -93,7 +93,7 @@ fn observe(setup: Setup) -> Observed {
         end,
         embedder.world.printed,
         embedder.requests,
-        embedder.machine.meters().charged,
+        embedder.machine.meters().charged.expect("exact charge"),
         checkpoints,
     )
 }
@@ -215,7 +215,7 @@ main {
             end,
             embedder.world.printed,
             embedder.requests,
-            embedder.machine.meters().charged,
+            embedder.machine.meters().charged.expect("exact charge"),
             continuations,
         )
     };
@@ -320,7 +320,10 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         }
         images
             .push(crate::conformance::session(&carry, Box::new(embedder.source.clone())).unwrap());
-        (images, embedder.machine.meters().charged)
+        (
+            images,
+            embedder.machine.meters().charged.expect("exact charge"),
+        )
     };
     let reference = observe(0);
     for layout in [1, 42, u64::MAX] {

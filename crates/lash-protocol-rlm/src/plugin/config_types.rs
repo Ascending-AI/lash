@@ -1,3 +1,4 @@
+pub use lash_kernel_vm::Charge;
 use std::num::NonZeroU64;
 
 /// Serialized shape shared by every execution bound: an explicit finite limit
@@ -148,6 +149,7 @@ nonzero_bound_serde!(MemoryBound);
 /// The two independent bounds every code mode execution must choose explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBounds {
+    pub charge: Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
 }
@@ -155,9 +157,15 @@ pub struct ExecutionBounds {
 impl ExecutionBounds {
     pub const fn new(instruction_limit: InstructionBound, memory_limit: MemoryBound) -> Self {
         Self {
+            charge: Charge::Exact,
             instruction_limit,
             memory_limit,
         }
+    }
+
+    pub const fn with_charge(mut self, charge: Charge) -> Self {
+        self.charge = charge;
+        self
     }
 
     pub const fn with_memory_limit(mut self, memory_limit: MemoryBound) -> Self {

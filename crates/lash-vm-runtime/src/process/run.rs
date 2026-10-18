@@ -847,6 +847,7 @@ impl KernelRecordedSettings {
     pub(crate) fn bounds(&self) -> Bounds {
         Bounds {
             charge: self.charge,
+            charge_limit: self.charge_limit,
             memory: self.memory,
             call_depth: self.call_depth,
             live_tasks: self.live_tasks,

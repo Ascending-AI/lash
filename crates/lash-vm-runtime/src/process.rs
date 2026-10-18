@@ -145,7 +145,8 @@ pub(crate) fn failure(
 #[serde(deny_unknown_fields)]
 pub struct KernelRecordedSettings {
     pub dialect: String,
-    pub charge: u64,
+    pub charge: lash_kernel_vm::Charge,
+    pub charge_limit: u64,
     pub memory: u64,
     pub call_depth: u32,
     pub live_tasks: u32,
@@ -180,6 +181,7 @@ impl KernelRecordedSettings {
         Self {
             dialect: dialect.to_owned(),
             charge: bounds.charge,
+            charge_limit: bounds.charge_limit,
             memory: bounds.memory,
             call_depth: bounds.call_depth,
             live_tasks: bounds.live_tasks,

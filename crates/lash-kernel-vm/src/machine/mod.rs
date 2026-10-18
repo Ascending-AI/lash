@@ -1033,15 +1033,19 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Result<(), Halt> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        crate::perf_witness::step();
         // What the run holds is published only where something can read
         // it: the slice's yield, park, end or seal, a native call handed
         // the heap, and a reservation or write under pressure. From here
         // the installed roots are stale, and a write that needs a
         // refinement refuses rather than trace them (FIG-6318).
         self.heap.execution_roots_moved();
-        if self.observer.is_some() {
+        if let Some(observer) = self.observer.as_deref() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if observer.work_witness {
+                crate::perf_witness::step();
+            }
+            #[cfg(not(any(test, feature = "perf-witness")))]
+            let _ = observer;
             self.observe_step(task, exe);
         }
         self.pins.clear();
@@ -1068,11 +1072,12 @@ impl KernelMachine {
     }
 
     fn refresh_charging(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
+        let metered = self.bounds.charge == crate::Charge::Exact;
         self.charging = self
             .task(task)?
             .frames
             .last_mut()?
-            .is_none_or(|frame| exe.code(frame.code).charged);
+            .map_or(metered, |frame| exe.code(frame.code).charging);
         Ok(())
     }
 
@@ -1273,9 +1278,18 @@ impl KernelMachine {
 
     /// Runs tasks until none is ready, the run ends, or `slice` units of
     /// charge have passed (`K-MACH-005`).
-    fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
-        let before = self.charged;
-        self.slice_end = before.saturating_add(slice);
+    fn run_slice<const METERED: bool>(
+        &mut self,
+        host: &mut dyn Host,
+        slice: u64,
+    ) -> Result<Step, MachineError> {
+        let before = if METERED { self.charged } else { 0 };
+        if METERED {
+            self.slice_end = before.saturating_add(slice);
+        }
+        // With no charge meter the scheduling budget counts machine steps.
+        // The entry chooses this specialization once; Exact keeps its charge slices.
+        let mut remaining = slice.max(1);
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {
@@ -1360,7 +1374,13 @@ impl KernelMachine {
                 return Ok(self.finish_with(end));
             }
             let more = self.current.is_some() || !self.ready.is_empty();
-            if more && self.charged.saturating_sub(before) >= slice {
+            let spent = if METERED {
+                self.charged.saturating_sub(before) >= slice
+            } else {
+                remaining -= 1;
+                remaining == 0
+            };
+            if more && spent {
                 // A slice return projects only when the host seals: ids
                 // never depend on where slices fall.
                 if host.cancel_requested() {

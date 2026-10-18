@@ -111,6 +111,7 @@ impl Compiler<'_> {
             captures,
             free,
             charged,
+            charging: charged && self.metered,
         }
     }
 

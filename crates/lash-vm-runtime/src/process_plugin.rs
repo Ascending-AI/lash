@@ -98,7 +98,11 @@ impl KernelProcessPluginFactory {
     ) -> Result<crate::KernelProcessEngine, PluginError> {
         let documents = crate::KernelDocuments::new(store);
         let bounds = lash_kernel_vm::Bounds {
-            charge: self.bounds.charge,
+            charge: match self.bounds.charge {
+                lash_vm_client::Charge::Exact => lash_kernel_vm::Charge::Exact,
+                lash_vm_client::Charge::Off => lash_kernel_vm::Charge::Off,
+            },
+            charge_limit: self.bounds.charge_limit,
             memory: self.bounds.memory,
             call_depth: self.bounds.call_depth,
             live_tasks: self.bounds.live_tasks,

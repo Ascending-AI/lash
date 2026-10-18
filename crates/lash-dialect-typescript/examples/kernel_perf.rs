@@ -115,7 +115,8 @@ use gate_six::{answer, effects, programs};
 use gate_six_registry::registry;
 
 const BOUNDS: Bounds = Bounds {
-    charge: 1_000_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 1_000_000_000,
     memory: 1 << 30,
     call_depth: 200,
     live_tasks: 100,
@@ -208,7 +209,15 @@ fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
                     finished = value;
                 }
             }
-            Step::Ended(End::Finished(_)) => return (machine.meters().charged, finished),
+            Step::Ended(End::Finished(_)) => {
+                return (
+                    machine
+                        .meters()
+                        .charged
+                        .unwrap_or_else(|| panic!("this profiling mode requires Exact charge")),
+                    finished,
+                );
+            }
             Step::Ended(other) => panic!("{name} ended {other:?}"),
             Step::Slice => unreachable!("the slice is unbounded"),
         }
@@ -249,7 +258,10 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         let took = began.elapsed();
         split.run_calls += 1;
-        let now = machine.meters().charged;
+        let now = machine
+            .meters()
+            .charged
+            .unwrap_or_else(|| panic!("this profiling mode requires Exact charge"));
         let spent = now - charged;
         charged = now;
         match unit {
@@ -669,17 +681,23 @@ fn count(name: &str, program: &Program, source: &str, artifact: &str) -> Result<
         panic!("{name}: the machine counted nothing")
     };
     assert_eq!(
-        work.charged, plain.0,
+        work.charged,
+        Some(plain.0),
         "{name}: the counts saw another charge"
     );
-    assert_eq!(work.residual(), 0, "{name}: the self charges do not add up");
+    assert_eq!(
+        work.residual(),
+        Some(0),
+        "{name}: the self charges do not add up"
+    );
     assert_eq!(
         work.insertion_residual(),
         0,
         "{name}: the insertions do not add up"
     );
     assert_eq!(
-        work.unattributed_charge, 0,
+        work.unattributed_charge,
+        Some(0),
         "{name}: charge with no function"
     );
     // Fixed counters get their own pass, without work attribution or path recording.
@@ -740,7 +758,7 @@ fn work_json(name: &str, work: &WorkReport, symbols: &GuestSymbols) -> Json {
     json!({
         "program": name,
         "charged": work.charged,
-        "self_charge_residual": i64::try_from(work.residual()).unwrap_or(i64::MAX),
+        "self_charge_residual": i64::try_from(work.residual().unwrap_or_else(|| panic!("this profiling mode requires Exact charge"))).unwrap_or(i64::MAX),
         "unattributed_charge": work.unattributed_charge,
         "heap_insertions": work.heap_insertions,
         "heap_insertion_residual": i64::try_from(work.insertion_residual()).unwrap_or(i64::MAX),
@@ -1185,7 +1203,7 @@ fn host_json_probe() -> Result<(), String> {
             });
             println!(
                 "{}",
-                json!({"admission_pages":admission_pages,"run_pages":run_pages,"after_print":after_print,"case":name,"iteration":iteration,"admission_ns":admission_ns,"admission_allocs":admission_allocs,"run_ns":run_ns,"run_allocs":run_allocs,"print":output.printed,"charge":machine.meters().charged})
+                json!({"admission_pages":admission_pages,"run_pages":run_pages,"after_print":after_print,"case":name,"iteration":iteration,"admission_ns":admission_ns,"admission_allocs":admission_allocs,"run_ns":run_ns,"run_allocs":run_allocs,"print":output.printed,"charge":machine.meters().charged.unwrap_or_else(|| panic!("this profiling mode requires Exact charge"))})
             );
         }
     }

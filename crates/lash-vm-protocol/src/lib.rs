@@ -40,7 +40,7 @@ pub use codec::{
     ObservationChunker,
 };
 pub use message::{
-    BorrowedParentFrame, BorrowedParentMessage, CheckpointStart, Delivery, EncodedPayload,
+    BorrowedParentFrame, BorrowedParentMessage, Charge, CheckpointStart, Delivery, EncodedPayload,
     ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence,
     MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters, Start, StartFrom,
     TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,

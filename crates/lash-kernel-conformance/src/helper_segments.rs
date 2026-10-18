@@ -18,7 +18,8 @@ use lash_kernel_vm::{
 };
 
 const BOUNDS: Bounds = Bounds {
-    charge: 50_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 50_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,
@@ -209,7 +210,7 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
             end,
             prints: world.prints,
             requests,
-            charged: machine.meters().charged,
+            charged: machine.meters().charged.expect("exact charge"),
         },
     }
 }
@@ -256,7 +257,7 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
             end,
             prints: world.prints,
             requests,
-            charged: machine.meters().charged,
+            charged: machine.meters().charged.expect("exact charge"),
         };
         let expected = Rest {
             end: cut.whole.end.clone(),

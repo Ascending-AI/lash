@@ -98,7 +98,8 @@ fn run(
     let mut machine = super::pages::start(
         program().clone(),
         Bounds {
-            charge: 1_000_000,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 1_000_000,
             memory: 16 << 20,
             call_depth: 200,
             live_tasks: 10,

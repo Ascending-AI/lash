@@ -304,7 +304,10 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
         modes: crate::EffectModes::recorded(),
         host: Vec::new(),
     };
-    let bounds = Bounds { charge, ..ROOMY };
+    let bounds = Bounds {
+        charge_limit: charge,
+        ..ROOMY
+    };
     let mut machine = crate::KernelMachine::start_with_census(
         program.clone(),
         bounds,
@@ -315,7 +318,7 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
     )
     .unwrap_or_else(|error| panic!("{error}"));
     match machine.run(&mut World::default(), u64::MAX) {
-        Ok(Step::Ended(end)) => (end, machine.meters().charged),
+        Ok(Step::Ended(end)) => (end, machine.meters().charged.expect("exact charge")),
         other => panic!("the run waits on nothing: {other:?}"),
     }
 }
@@ -349,7 +352,7 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
             .iter()
             .map(|(layout, native_twice)| (program(&expression, *layout, *native_twice), *layout))
             .collect();
-        let (whole, total) = ends(&programs[0].0, programs[0].1, ROOMY.charge);
+        let (whole, total) = ends(&programs[0].0, programs[0].1, ROOMY.charge_limit);
         match (&whole, completes) {
             (End::Finished(_), true) => {}
             (End::Error(RunError::Uncaught(Datum::Error(error))), false) => {
@@ -446,7 +449,7 @@ main {{ finish null }}
                     Datum::Text("bound".into())
                 ]
             );
-            let charged = embedder.machine.meters().charged;
+            let charged = embedder.machine.meters().charged.expect("exact charge");
             assert_eq!(*charge.get_or_insert(charged), charged);
         }
     }

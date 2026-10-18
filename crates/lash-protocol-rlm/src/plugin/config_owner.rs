@@ -630,6 +630,7 @@ mod tests {
             ));
             let rebounded = RlmRecordedConfig {
                 behaviour: RlmRecordedBehaviour {
+                    charge: crate::Charge::Exact,
                     instruction_limit: crate::InstructionBound::instructions(7),
                     ..base.behaviour.clone()
                 },

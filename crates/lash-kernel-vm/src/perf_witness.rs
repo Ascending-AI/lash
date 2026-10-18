@@ -15,6 +15,8 @@ pub use lash_kernel_state::kernel_internals::perf_witness::Work as HeapWork;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Work {
     pub vm_steps: u64,
+    /// Charge regions committed, charge anchors run, completion paths and charge attribution.
+    pub charge_work: u64,
     /// Publications of the run's execution roots to its heap (FIG-6318).
     pub root_publishes: u64,
     /// Slow resolutions for kp2-frame (FIG-6588), excluding active hits.
@@ -44,6 +46,11 @@ pub fn take_work() -> Option<Work> {
     counts.heap =
         lash_kernel_state::kernel_internals::perf_witness::take_work().unwrap_or_default();
     Some(counts)
+}
+
+#[inline(always)]
+pub(crate) fn enabled() -> bool {
+    WORK.with(|work| work.get().is_some())
 }
 
 pub(crate) fn step() {

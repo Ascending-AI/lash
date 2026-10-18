@@ -435,6 +435,7 @@ impl Fast {
 
     /// How to charge a call with `args` that returned `result`: what
     /// `charge`, the plan this was derived from, computes for them.
+    #[inline(always)]
     pub(crate) fn charge<'p>(
         &'p self,
         charge: &'p Plan,

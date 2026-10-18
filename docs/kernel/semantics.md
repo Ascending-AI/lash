@@ -213,6 +213,12 @@ The statement rule is withdrawn: an action may be nested in an expression, and a
 
 ## Charges (`K-CHG`)
 
+The rules below apply when the host selects `Charge::Exact`, the default.
+`Charge::Off` removes the meter and its bound: preparation emits no charge
+regions, execution evaluates no completion charge formula, and charge readouts
+are `None`. Native guards and the other bounds still apply. The run saves its
+charge policy and every worker resumes that same choice (FIG-6732).
+
 - **K-CHG-001.** A run is charged in charge units, deterministically: the charge of a run is a function of what it executed and of nothing else. It does not depend on the engine's layout, on caches, on whether a native implementation or a kernel body ran, or on parking.
 - **K-CHG-002.** The cost table of kernel version 1: each statement executed costs 1; each expression node evaluated costs 1; a tuple, list, map, set or record construction costs 1 more per member written; each test of a loop's continuation costs 1; an action costs 1 per atom; copying a value out or decoding one in (`K-EFF-002`, `K-EFF-005`) costs its deep size (`K-CHG-005`).
 - **K-CHG-003.** Every call of a library function is charged its definition's charge formula, on the call's arguments and result, when the call returns; if it raises, the formula is taken with a result of size 0. Formula arithmetic is unsigned 64-bit and saturating. An empty sum is 0 and an empty product is 1. `ceil_log2(amount)` is the integer ceiling of the base-two logarithm, with 0 for amounts 0 and 1.

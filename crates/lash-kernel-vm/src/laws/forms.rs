@@ -647,7 +647,7 @@ fn charges_follow_the_cost_table() {
     let charged = |body: &str| {
         let mut embedder = Embedder::new(&format!("main {{ {body} }}"));
         embedder.run_to_end(&[]);
-        embedder.machine.meters().charged
+        embedder.machine.meters().charged.expect("exact charge")
     };
     // An empty `main` executes nothing.
     assert_eq!(charged(""), 0);

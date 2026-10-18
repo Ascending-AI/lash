@@ -42,7 +42,8 @@ impl Host for World {
     }
 }
 const BOUNDS: Bounds = Bounds {
-    charge: 10_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10_000_000,
     memory: 64 << 20,
     call_depth: 100,
     live_tasks: 100,
@@ -394,7 +395,7 @@ fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
             panic!("{shared}")
         };
         assert_eq!(done.result, Datum::Bool(true));
-        machine.meters().charged
+        machine.meters().charged.expect("exact charge")
     };
     // 1 + size(kinds) + 61 lists of sizes 3 and 2 and their one integer.
     let held = charged("collection.holds_none(d, kinds)") - charged("true");
@@ -550,7 +551,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
             let mut machine = crate::testsupport::start(
                 program(&source),
                 Bounds {
-                    charge: 1_000_000_000,
+                    charge_limit: 1_000_000_000,
                     ..BOUNDS
                 },
                 lash_kernel_vm::kernel_internals::Layout::default(),
@@ -582,7 +583,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
             let bound = (n as f64 * (n as f64).log2()).ceil() as usize;
             eprintln!(
                 "sort shape={shape} n={n} comparisons={calls} bound={bound} charge={}",
-                machine.meters().charged
+                machine.meters().charged.expect("exact charge")
             );
             if calls > bound {
                 violations.push((shape, n, calls, bound));
@@ -599,7 +600,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
                 .charge
                 .evaluate(&mut |_, _| (n + 1) as u64);
             assert!(
-                machine.meters().charged <= declared,
+                machine.meters().charged.expect("exact charge") <= declared,
                 "charge exceeds declaration at n={n}"
             );
         }
@@ -815,7 +816,7 @@ fn k_chg_005_same_is_charged_the_immutable_values_nested_in_its_operands() {
             panic!("{compared}")
         };
         assert_eq!(done.result, Datum::Bool(true));
-        let charged = machine.meters().charged;
+        let charged = machine.meters().charged.expect("exact charge");
         assert!(charged >= 2 * BYTES, "charged {charged} for {compared:.40}");
     }
 }

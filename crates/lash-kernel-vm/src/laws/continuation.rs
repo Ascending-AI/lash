@@ -216,7 +216,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             .map(|datum| format!("{datum:?}"))
             .collect(),
         requests: embedder.requests.iter().map(|r| format!("{r:?}")).collect(),
-        charged: embedder.machine.meters().charged,
+        charged: embedder.machine.meters().charged.expect("exact charge"),
     };
     (trace, seen)
 }
@@ -769,7 +769,10 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
         }
     }
     assert_eq!(identities(&cold.requests), expected);
-    assert_eq!(cold.machine.meters().charged, warm.machine.meters().charged);
+    assert_eq!(
+        cold.machine.meters().charged.expect("exact charge"),
+        warm.machine.meters().charged.expect("exact charge")
+    );
     let uninterrupted = drive(SOURCE, &[], Drive::new(u64::MAX, false)).0;
     let reopened = drive(SOURCE, &[], Drive::new(u64::MAX, true)).0;
     assert_eq!(uninterrupted, reopened);
@@ -811,7 +814,10 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
         }
     }
     assert_eq!(identities(&cold.requests), identities(&warm.requests));
-    assert_eq!(cold.machine.meters().charged, warm.machine.meters().charged);
+    assert_eq!(
+        cold.machine.meters().charged.expect("exact charge"),
+        warm.machine.meters().charged.expect("exact charge")
+    );
 }
 
 /// SITE-NESTED, `K-SITE-004`: a wait in a `while` condition is named by

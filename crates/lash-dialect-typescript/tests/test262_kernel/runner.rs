@@ -51,7 +51,8 @@ const EARLY_ERROR_CODES: [DiagnosticCode; 5] = [
 /// tests (K-CHG-003/007); guest callbacks and closures use the ordinary cost
 /// table. The uniform charge budget is 45,000,000 units.
 const BOUNDS: Bounds = Bounds {
-    charge: 45_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 45_000_000,
     memory: 8 << 20,
     call_depth: 1_000,
     live_tasks: 1_024,

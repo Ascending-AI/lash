@@ -190,12 +190,12 @@ pub struct NativeWork {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkReport {
     /// The charge since counting began: the machine's meter, read.
-    pub charged: u64,
+    pub charged: Option<u64>,
     /// The objects the heap took since counting began.
     pub heap_insertions: u64,
     /// Charge no function was running for. Every charge has a function, so
     /// a nonzero value is a counting fault.
-    pub unattributed_charge: u64,
+    pub unattributed_charge: Option<u64>,
     /// Objects the machine made for no running function: a list `join`
     /// decided as its last member ends builds its result between frames.
     pub unattributed_insertions: u64,
@@ -211,6 +211,7 @@ impl WorkReport {
         symbols: &GuestSymbols,
         charged: u64,
         allocated: u64,
+        metered: bool,
     ) -> Self {
         let mut counting = counting.clone();
         counting.flush(charged, allocated);
@@ -230,7 +231,13 @@ impl WorkReport {
             .filter_map(|(token, counts)| {
                 Some(CodeWork {
                     symbol: symbols.code(token as u32)?.clone(),
-                    counts: *counts,
+                    counts: {
+                        let mut counts = *counts;
+                        counts.self_charge = metered.then(|| counts.self_charge.unwrap_or(0));
+                        counts.inclusive_charge =
+                            metered.then(|| counts.inclusive_charge.unwrap_or(0));
+                        counts
+                    },
                     native_calls: calls_by(Owner::Code(token as u32)),
                 })
             })
@@ -243,14 +250,20 @@ impl WorkReport {
             .filter_map(|(token, counts)| {
                 Some(NativeWork {
                     symbol: symbols.lib(token as u32)?.clone(),
-                    counts: *counts,
+                    counts: {
+                        let mut counts = *counts;
+                        counts.self_charge = metered.then(|| counts.self_charge.unwrap_or(0));
+                        counts.zero_charge_calls =
+                            metered.then(|| counts.zero_charge_calls.unwrap_or(0));
+                        counts
+                    },
                 })
             })
             .collect();
         Self {
-            charged: charged.saturating_sub(counting.began.0),
+            charged: metered.then(|| charged.saturating_sub(counting.began.0)),
             heap_insertions: allocated.saturating_sub(counting.began.1),
-            unattributed_charge: counting.unattributed_charge,
+            unattributed_charge: metered.then_some(counting.unattributed_charge),
             unattributed_insertions: counting.unattributed_insertions,
             unattributed_native_calls: calls_by(Owner::Nobody),
             codes,
@@ -260,14 +273,20 @@ impl WorkReport {
 
     /// The run's charge less every self charge and the unattributed one:
     /// zero, when the counters saw every unit once.
-    pub fn residual(&self) -> i128 {
+    pub fn residual(&self) -> Option<i128> {
+        let charged = self.charged?;
+        let unattributed = self.unattributed_charge?;
         let selves: u64 = self
             .codes
             .iter()
-            .map(|code| code.counts.self_charge)
-            .chain(self.natives.iter().map(|native| native.counts.self_charge))
+            .map(|code| code.counts.self_charge.unwrap_or(0))
+            .chain(
+                self.natives
+                    .iter()
+                    .map(|native| native.counts.self_charge.unwrap_or(0)),
+            )
             .sum();
-        i128::from(self.charged) - i128::from(selves) - i128::from(self.unattributed_charge)
+        Some(i128::from(charged) - i128::from(selves) - i128::from(unattributed))
     }
 
     /// The objects the heap took less every function's and the

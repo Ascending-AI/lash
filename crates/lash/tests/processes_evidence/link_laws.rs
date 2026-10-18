@@ -127,7 +127,7 @@ async fn core() -> (lash::Backend, lash::LashCore) {
         .expect("the backend assembles");
     let workers = lash::vm::WorkerService::default();
     let bounds = lash::vm::RunBounds {
-        charge: 1_000_000,
+        charge_limit: 1_000_000,
         memory: 64 * 1024 * 1024,
         ..workers.config().run_bounds
     };

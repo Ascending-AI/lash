@@ -495,7 +495,11 @@ impl<'embedding> Server<'embedding> {
         let mut program = self.program(&start.document)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
-            charge: start.bounds.charge,
+            charge: match start.bounds.charge {
+                lash_vm_protocol::Charge::Exact => lash_kernel_vm::Charge::Exact,
+                lash_vm_protocol::Charge::Off => lash_kernel_vm::Charge::Off,
+            },
+            charge_limit: start.bounds.charge_limit,
             memory: start.bounds.memory,
             call_depth: start.bounds.call_depth,
             live_tasks: start.bounds.live_tasks,

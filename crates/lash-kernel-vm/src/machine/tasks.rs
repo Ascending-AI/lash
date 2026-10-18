@@ -672,7 +672,7 @@ mod laws {
         let mut run = Embedder::new("fn work() { return 1 } main { let a = call work() return a }");
         loop {
             assert!(matches!(
-                run.machine.run_slice(&mut run.world, 1).unwrap(),
+                run.machine.run_slice::<true>(&mut run.world, 1).unwrap(),
                 Step::Slice
             ));
             let task = run

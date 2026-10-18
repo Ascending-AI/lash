@@ -240,7 +240,7 @@ async fn builder_on_workers(
     .await;
     let backend = lash_conformance::backend_over(stores);
     let bounds = lash::vm::RunBounds {
-        charge: 1_000_000,
+        charge_limit: 1_000_000,
         memory: 64 * 1024 * 1024,
         ..workers.config().run_bounds
     };

@@ -106,7 +106,7 @@ impl KernelMachine {
             .frames
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
-        self.charging = exe.code(frame.code).charged;
+        self.charging = exe.code(frame.code).charging;
         let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
@@ -115,7 +115,9 @@ impl KernelMachine {
                     Some(&id) => {
                         *next += 1;
                         let last = self.steps.verify && *next == stmts.len();
-                        self.charge(1)?;
+                        if self.charging {
+                            self.charge(1)?;
+                        }
                         let running = Running::new(task, exe, id);
                         // Counting stays inline and does not enable the work/context
                         // observer. Off pays only this predictable branch.
@@ -432,13 +434,11 @@ impl KernelMachine {
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
         self.refresh_charging(task, exe)?;
-        if let Some(call) = &frame.library {
-            let evaluates = self.charging;
-            if evaluates {
-                let args = call.args.clone();
-                self.warm_values(&exe.lib(call.lib).charge, &args, result.as_ref().ok())?;
-            }
-            let units = self.in_formula(call.lib, evaluates, |machine| {
+        if self.charging
+            && let Some(call) = &frame.library
+        {
+            self.warm_values(&exe.lib(call.lib).charge, &call.args, result.as_ref().ok())?;
+            let units = self.in_formula(call.lib, true, |machine| {
                 machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
             })?;
             self.charge_call(exe, call.lib, units)?;
@@ -517,17 +517,15 @@ impl KernelMachine {
         args: &[Value],
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
-        // Inside a library body, nested calls are covered by the caller's
-        // formula (`K-CHG-007`), so this formula, whose deep sizes
-        // walk whole graphs, is not evaluated.
-        if !self.charging {
-            return Ok(0);
-        }
+        // Callers enter only for charged code: library bodies are covered
+        // by their caller's formula, and Off has no completion formula.
+        debug_assert!(self.charging);
         let function = exe.lib(lib);
         self.formula(&function.charge, args, result)
     }
 
     /// Charges a library call what [`Self::call_units`] gave.
+    #[inline(always)]
     pub(super) fn charge_call(
         &mut self,
         exe: &Executable,
@@ -901,8 +899,10 @@ impl KernelMachine {
     /// Copies a value out of the run, charging its deep size
     /// (`K-EFF-002`, `K-CHG-002`).
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        let size = self.deep_size(value)?;
-        self.charge(size)?;
+        if self.charging {
+            let size = self.deep_size(value)?;
+            self.charge(size)?;
+        }
         Ok(self.copy_datum(value)?)
     }
 
@@ -917,8 +917,10 @@ impl KernelMachine {
     /// ([`crate::crossing`]). The traversal is charged as a copy-out is,
     /// and each byte of a function value's canonical form besides.
     pub(super) fn copy_out_tool_arg(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        let size = self.deep_size(value)?;
-        self.charge(size)?;
+        if self.charging {
+            let size = self.deep_size(value)?;
+            self.charge(size)?;
+        }
         // The crossing gathers functions from the page form: the heap
         // holds what the arena does first, each new object the argument
         // reaches with its id.
@@ -941,7 +943,9 @@ impl KernelMachine {
             tag: None,
         };
         let datum = crate::crossing::copy_out_tool_arg(&mut heap, &mut run, value)?;
-        self.charge(crossed_bytes(&datum))?;
+        if self.charging {
+            self.charge(crossed_bytes(&datum))?;
+        }
         Ok(datum)
     }
 
@@ -985,10 +989,16 @@ impl KernelMachine {
                 true,
             ),
             CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
-                let charge = self.heap.frozen_charge(&frozen)?;
+                let charge = if self.charging {
+                    self.heap.frozen_charge(&frozen)?
+                } else {
+                    0
+                };
                 let value =
                     self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
-                self.charge(charge)?;
+                if self.charging {
+                    self.charge(charge)?;
+                }
                 (value, matches!(outcome, CommittedOutcomeRecord::Failed(_)))
             }
         };
@@ -1068,10 +1078,16 @@ impl KernelMachine {
         };
         let frozen =
             self.heap_write(|heap| heap.freeze_datum(&decoded).map_err(Interrupt::from))?;
-        let charge = self.heap.frozen_charge(&frozen)?;
+        let charge = if self.charging {
+            self.heap.frozen_charge(&frozen)?
+        } else {
+            0
+        };
         let value = self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
         let value = self.admit_page(&value)?;
-        self.charge(charge)?;
+        if self.charging {
+            self.charge(charge)?;
+        }
         Ok(value)
     }
 

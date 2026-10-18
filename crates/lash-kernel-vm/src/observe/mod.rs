@@ -194,6 +194,8 @@ impl ChargeTape {
 
 /// What one machine observes.
 pub(crate) struct Observer {
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) work_witness: bool,
     pub(crate) path: Option<PathRecorder>,
     pub(crate) work: Option<Counting>,
     pub(crate) context: Option<Publisher>,
@@ -203,6 +205,8 @@ pub(crate) struct Observer {
 impl Observer {
     pub(crate) fn new() -> Self {
         Self {
+            #[cfg(any(test, feature = "perf-witness"))]
+            work_witness: false,
             path: None,
             work: None,
             context: None,

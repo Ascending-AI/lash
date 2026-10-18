@@ -252,7 +252,9 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
         checkpoints
             .push(crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap());
     }
-    let charged = crate::Machine::meters(&embedder.machine).charged;
+    let charged = crate::Machine::meters(&embedder.machine)
+        .charged
+        .expect("exact charge");
     (
         ended(end),
         embedder.world.printed,
@@ -453,7 +455,7 @@ fn metered_tests_and_completion_have_plan_independent_bound_events() {
         assert_eq!(full.3 - empty.3, 3 * 7 + 1); // result 3 has one integer word; zero has none
         for limit in 0..=full.3 + 1 {
             let bounds = Bounds {
-                charge: limit,
+                charge_limit: limit,
                 ..ROOMY
             };
             let reference = observe(&program(3), bounds, &plans[0]);
@@ -468,7 +470,7 @@ fn metered_tests_and_completion_have_plan_independent_bound_events() {
         let bounded = observe(
             &program(1000000000),
             Bounds {
-                charge: 40,
+                charge_limit: 40,
                 ..ROOMY
             },
             &plans[0],
@@ -496,7 +498,7 @@ fn spawned_library_roots_keep_their_formula_arguments() {
         assert_eq!(long.3 - short.3, difference, "{helper}");
         for limit in 0..=long.3 + 1 {
             let bounds = Bounds {
-                charge: limit,
+                charge_limit: limit,
                 ..ROOMY
             };
             let reference = observe(&program("abcd"), bounds, &plans[0]);

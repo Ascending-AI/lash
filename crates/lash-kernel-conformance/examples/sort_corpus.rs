@@ -110,7 +110,7 @@ fn charges(
             let pinned = case.expected.charged.take();
             if pinned.is_some() {
                 let actual = lash_kernel_conformance::check_case(&mut runner, case)?;
-                case.expected.charged = Some(actual.charged);
+                case.expected.charged = actual.charged;
                 if pinned != case.expected.charged {
                     // Replace within this case only: other charge pins may
                     // have the same old number.

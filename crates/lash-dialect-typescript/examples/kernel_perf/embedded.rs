@@ -19,6 +19,12 @@ pub(super) fn main() -> Result<(), String> {
     if cfg!(debug_assertions) {
         return Err("embedded comparisons require an optimized build".into());
     }
+    let charge = match std::env::var("KERNEL_PERF_CHARGE").as_deref() {
+        Ok("off") => lash_kernel_vm::Charge::Off,
+        Ok("exact") | Err(_) => lash_kernel_vm::Charge::Exact,
+        Ok(other) => return Err(format!("unknown charge policy: {other}")),
+    };
+    let bounds = Bounds { charge, ..BOUNDS };
     let python = file.ends_with(".py");
     let mut source = std::fs::read_to_string(&file).map_err(|error| error.to_string())?;
     // Only the result boundary differs from the CLI engines' print(result).
@@ -71,16 +77,46 @@ pub(super) fn main() -> Result<(), String> {
     let program = Program {
         release: pages::RELEASE,
         document: Arc::clone(document.shared()),
-        library: PreparedLibrary::new(registry),
+        library: PreparedLibrary::with_charge(registry, charge),
     };
     let library_compile_ns = compile.elapsed().as_nanos();
     // Document compilation is lazy inside start, together with cell setup.
     let start_time = Instant::now();
-    let mut machine = start(&program);
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        bounds,
+        CellStart {
+            owner: pages::OWNER,
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            modes: lash_kernel_vm::EffectModes::recorded(),
+            host: Vec::new(),
+        },
+        Box::new(pages::Source::default()),
+    )
+    .map_err(|error| error.to_string())?;
     let document_compile_and_start_ns = start_time.elapsed().as_nanos();
     let run_allocations = stats_alloc::Region::new(ALLOCATOR);
     let run = Instant::now();
-    let (charged, result) = to_end(&mut machine, &file);
+    let mut console = Console::default();
+    let mut result = Datum::Null;
+    loop {
+        match machine
+            .run(&mut console, u64::MAX)
+            .map_err(|error| error.to_string())?
+        {
+            Step::Slice => {}
+            Step::Parked(park) => {
+                if let Some(value) = deliver_all(&mut machine, park.requests) {
+                    result = value;
+                }
+            }
+            Step::Ended(End::Finished(_)) => break,
+            Step::Ended(end) => return Err(format!("{file}: {end:?}")),
+        }
+    }
+    let charged = machine.meters().charged;
     let run_ns = run.elapsed().as_nanos();
     let run_allocations = run_allocations.change();
     let cold_ns = began.elapsed().as_nanos();

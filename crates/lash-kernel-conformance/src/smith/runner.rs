@@ -395,7 +395,7 @@ struct ScheduleReturn {
     end: Option<lash_kernel_vm::End>,
     carry: Option<Checkpoint>,
     park: Option<lash_kernel_vm::Park>,
-    charged: u64,
+    charged: Option<u64>,
     live_tasks: u32,
     parked: Option<Checkpoint>,
     after_deliveries: Option<Checkpoint>,

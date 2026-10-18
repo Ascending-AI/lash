@@ -17,7 +17,8 @@ use lash_kernel_vm::{
 use crate::{register_collections, register_numbers};
 
 const BOUNDS: Bounds = Bounds {
-    charge: 10_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10_000_000,
     memory: 64 << 20,
     call_depth: 100,
     live_tasks: 100,
@@ -202,7 +203,7 @@ main {{
         };
         let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
         ends.push(machine.run(&mut World, u64::MAX).unwrap());
-        charges.push(machine.meters().charged);
+        charges.push(machine.meters().charged.expect("exact charge"));
     }
     assert_eq!(ends[0], ends[1]);
     assert_eq!(charges[0], charges[1]);

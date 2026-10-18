@@ -67,7 +67,8 @@ pub(crate) fn effects() -> BTreeMap<EffectName, Signature> {
 }
 
 const BOUNDS: Bounds = Bounds {
-    charge: 10_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,
@@ -492,7 +493,7 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
                 }
             }
             Step::Ended(End::Finished(_)) => {
-                let charged = machine.meters().charged;
+                let charged = machine.meters().charged.expect("exact charge");
                 return (result.expect("finish result"), charged, imports);
             }
             other => panic!("{other:?}"),
@@ -614,7 +615,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
         eprintln!(
             "typescript rank={rank} n=1000 comparisons={} charge={}",
             console.lines[1],
-            machine.meters().charged
+            machine.meters().charged.expect("exact charge")
         );
         assert_eq!(console.lines[0], "true");
     }

@@ -72,7 +72,8 @@ impl Host for Quiet {
 }
 
 const BOUNDS: Bounds = Bounds {
-    charge: 10_000_000,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10_000_000,
     memory: 64 << 20,
     call_depth: 200,
     live_tasks: 100,

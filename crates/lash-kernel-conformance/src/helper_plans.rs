@@ -75,7 +75,8 @@ fn run_bounded<const L: u64>(
     charge: u64,
 ) -> Observed {
     let bounds = Bounds {
-        charge,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: charge,
         memory: 64 << 20,
         call_depth: 200,
         live_tasks: 100,
@@ -150,7 +151,7 @@ fn run_bounded<const L: u64>(
         bound_in,
         prints: world.prints,
         requests,
-        charged: machine.meters().charged,
+        charged: machine.meters().charged.expect("exact charge"),
     }
 }
 
@@ -390,7 +391,7 @@ fn empty_python_sequence_repetition_charges_its_declared_tests() {
             stride: 0,
             nanoseconds: 0,
         };
-        runner.run(&case).unwrap().charged
+        runner.run(&case).unwrap().charged.expect("exact charge")
     };
     assert_eq!(charge(9) - charge(5), 2 * (9 - 5));
 }
@@ -593,7 +594,8 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                 let mut machine = crate::pages::start(
                     program,
                     Bounds {
-                        charge: 50_000_000,
+                        charge: lash_kernel_vm::Charge::Exact,
+                        charge_limit: 50_000_000,
                         memory: 64 << 20,
                         call_depth: 200,
                         live_tasks: 100,
@@ -643,7 +645,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     .natives
                     .iter()
                     .filter(|native| native.symbol.function == function)
-                    .map(|native| native.counts.self_charge)
+                    .map(|native| native.counts.self_charge.expect("exact charge"))
                     .chain(
                         work.codes
                             .iter()
@@ -651,7 +653,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                                 code.symbol.function == Some(function)
                                     && code.symbol.site.path.is_empty()
                             })
-                            .map(|code| code.counts.self_charge),
+                            .map(|code| code.counts.self_charge.expect("exact charge")),
                     )
                     .sum();
                 let calls: u64 = work.natives.iter().map(|native| native.counts.calls).sum();
@@ -664,4 +666,29 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
             }
         }
     }
+}
+
+/// FIG-6732: compiled helper plans retain results and errors under Off, in
+/// both dialects, using the differential corpus rather than a second set of cases.
+#[test]
+fn charge_off_preserves_the_helper_corpus() {
+    let cases: Vec<runner::Case> = serde_json::from_str(include_str!(
+        "../../lash-dialect-typescript/tests/helper_differential/cases.json"
+    ))
+    .unwrap();
+    let mut executed = 0;
+    for dialect in ["typescript", "python"] {
+        let exact = runner::Runner::new(dialect).unwrap();
+        let off = runner::Runner::new_with_charge(dialect, lash_kernel_vm::Charge::Off).unwrap();
+        for case in cases.iter().filter(|case| case.dialect == dialect) {
+            let expected = exact.run(case).unwrap();
+            let actual = off.run(case).unwrap();
+            assert_eq!(actual.result, expected.result, "{}", case.id);
+            assert_eq!(actual.helpers, expected.helpers, "{}", case.id);
+            assert_eq!(actual.charged, None, "{}", case.id);
+            executed += 1;
+        }
+    }
+    println!("charge-off helper corpus: executed={executed}");
+    assert!(executed > 0);
 }

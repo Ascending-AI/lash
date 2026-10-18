@@ -65,7 +65,7 @@ pub use session_editor::{SessionEditor, SessionValue};
 pub mod kernel_internals;
 
 pub use interface::{
-    Bound, BoundExceeded, Bounds, CellSave, CellStart, DeliverError, Delivered, EffectMode,
+    Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, DeliverError, Delivered, EffectMode,
     EffectModes, EffectRequest, End, Finished, Host, HostFault, Machine, MachineError,
     MachineOptions, Meters, OpenError, Outcome, Park, Program, Request, RunError, RunObserver,
     SaveCell, SavedCell, SealError, SleepRequest, StartError, Step, Target, WaitId,

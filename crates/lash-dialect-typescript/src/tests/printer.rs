@@ -46,7 +46,8 @@ fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (En
             library: library.clone(),
         },
         Bounds {
-            charge: 10_000_000,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 10_000_000,
             memory: 16 * 1024 * 1024,
             call_depth: 100,
             live_tasks: 100,

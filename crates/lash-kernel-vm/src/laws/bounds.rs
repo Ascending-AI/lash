@@ -55,7 +55,7 @@ fn exceeded(bound: Bound, limit: u64) -> BoundExceeded {
 #[test]
 fn the_charge_bound_ends_the_run() {
     let bounds = Bounds {
-        charge: 1_000,
+        charge_limit: 1_000,
         ..ROOMY
     };
     assert_eq!(
@@ -268,7 +268,7 @@ fn a_shared_object_is_charged_once_in_a_wide_graph() {
     let charged = |body: &str| {
         let mut embedder = Embedder::new(&format!("main {{ {body} }}"));
         embedder.run_to_end(&[]);
-        embedder.machine.meters().charged
+        embedder.machine.meters().charged.expect("exact charge")
     };
     // `return x`: 1 statement, 1 variable node, and `x` copied out: the
     // list of 20 members (21) and each of its ten lists once, `[n]` (2)
@@ -318,7 +318,7 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         host: Vec::new(),
     };
     let bounds = Bounds {
-        charge: 10_000,
+        charge_limit: 10_000,
         ..ROOMY
     };
     let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
@@ -408,4 +408,89 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
         format!("{step:?}").contains("configured 1-level"),
         "{step:?}"
     );
+}
+
+/// FIG-6732: opting out removes charge work, including completion formulas,
+/// rather than merely making the bound unbounded.
+#[test]
+fn charge_off_performs_no_charge_work() {
+    crate::perf_witness::enable_work();
+    let source = "main { let n = 0 for x in [1, 2, 3] metered 13 { set n = num.add(n, x) } while num.lt(n, 7) metered 17 { set n = num.add(n, 1) } print [n] return n }";
+    let mut run = Embedder::with(
+        source,
+        Setup {
+            bounds: Bounds {
+                charge: crate::Charge::Off,
+                charge_limit: 0,
+                ..ROOMY
+            },
+            slice: 1,
+            ..Setup::default()
+        },
+    );
+    run.machine.count_work();
+    assert_eq!(run.run(), Step::Slice, "Off must still yield slices");
+    assert_eq!(result(run.run_to_end(&[])), int(7));
+    assert_eq!(run.machine.meters().charged, None);
+    let report = run.machine.work().unwrap();
+    assert_eq!(report.charged, None);
+    assert_eq!(report.residual(), None);
+    assert!(report.codes.iter().all(|code| code.counts.self_charge.is_none() && code.counts.inclusive_charge.is_none()));
+    assert!(
+        report
+            .natives
+            .iter()
+            .all(|native| native.counts.self_charge.is_none()
+                && native.counts.zero_charge_calls.is_none())
+    );
+    let work = crate::perf_witness::take_work().unwrap();
+    assert_eq!(work.charge_work, 0, "Off must remove charge work");
+    assert!(
+        work.vm_steps > 0,
+        "the witness must still count Off execution"
+    );
+    let mut exact = Embedder::with(source, Setup::default());
+    assert_eq!(result(exact.run_to_end(&[])), int(7));
+    let work = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    assert!(
+        work.charge_work > 0,
+        "the witness must detect Exact charge work"
+    );
+}
+
+/// FIG-6732: a fresh worker restores the run's choice, rather than its own.
+#[test]
+fn charge_off_survives_a_resume_on_a_fresh_worker() {
+    let mut run = Embedder::with(
+        "main { let first = num.add(1, 2) let answer = perform echo(first) as Any return num.add(answer, 4) }",
+        Setup {
+            bounds: Bounds {
+                charge: crate::Charge::Off,
+                charge_limit: 0,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    assert!(matches!(run.run(), Step::Parked(_)));
+    let (root, _) = run.checkpoint();
+    assert_eq!(root.meters.charge(), crate::Charge::Off);
+    // New preparation, another layout and deliberately opposite worker defaults.
+    let (program, _) = run.program(false);
+    let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root);
+    run.machine = KernelMachine::open(
+        program,
+        Bounds {
+            charge_limit: 0,
+            ..ROOMY
+        },
+        &checkpoint,
+        Vec::new(),
+        Box::new(run.source.clone()),
+    )
+    .unwrap();
+    assert_eq!(run.machine.meters().charged, None);
+    assert_eq!(result(run.run_to_end(&[])), int(7));
+    assert_eq!(run.machine.meters().charged, None);
 }

@@ -580,7 +580,9 @@ impl KernelMachine {
     }
 
     fn atom(&mut self, task: TaskId, exe: &Executable, atom: &Atom) -> Eval<Value> {
-        self.charge(1)?;
+        if self.charging {
+            self.charge(1)?;
+        }
         self.observe_expression();
         match atom {
             Atom::Var(var) => self.read_var(task, exe, var),

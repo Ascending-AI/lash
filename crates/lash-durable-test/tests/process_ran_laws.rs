@@ -106,7 +106,8 @@ fn source() -> String {
 fn bounds() -> lash_kernel_vm::Bounds {
     let pool = sim::untimed_workers().config().run_bounds;
     lash_kernel_vm::Bounds {
-        charge: 1_000_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 1_000_000,
         memory: 64 * 1024 * 1024,
         call_depth: pool.call_depth,
         live_tasks: pool.live_tasks,

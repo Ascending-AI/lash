@@ -86,7 +86,7 @@ pub use lash_protocol_rlm::tool_presenters::{
     python as python_tool_presenter, typescript as typescript_tool_presenter,
 };
 pub use lash_protocol_rlm::{
-    BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, CodeRenderer,
+    BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, Charge, CodeRenderer,
     CodeRendererSlot, ExecutionBounds, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
     RlmChannel, RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,

@@ -368,7 +368,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .expect("the start records engine settings")
         .value();
     assert_eq!(
-        recorded["charge"],
+        recorded["charge_limit"],
         serde_json::json!(1_000_000),
         "the row records the creating deployment's bound"
     );

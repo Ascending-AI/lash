@@ -16,6 +16,20 @@ use crate::{ObservationMode, SiteCounts};
 use lash_kernel_exec::{RegionEvent, Weight};
 
 impl KernelMachine {
+    /// Charge diagnostics use the already optional observer. Ordinary runs
+    /// never read the thread-local witness at a charge event.
+    #[cfg(any(test, feature = "perf-witness"))]
+    #[inline(always)]
+    pub(super) fn witness_charge_work(&self) {
+        if self
+            .observer
+            .as_deref()
+            .is_some_and(|observer| observer.work_witness)
+        {
+            crate::perf_witness::record(|work| work.charge_work += 1);
+        }
+    }
+
     /// Selects observation for this machine. A resumed machine starts Off
     /// with zero counts; the caller chooses the new run segment's option.
     pub(crate) fn set_observe(&mut self, observe: ObservationMode) {
@@ -124,6 +138,7 @@ impl KernelMachine {
             self.exe.lib_count(),
             self.charged,
             self.arena.borrow().allocations(),
+            self.bounds.charge == crate::Charge::Exact,
         );
         self.observer_mut().work = Some(counting);
     }
@@ -137,6 +152,7 @@ impl KernelMachine {
             &GuestSymbols::of(&self.exe),
             self.charged,
             self.arena.borrow().allocations(),
+            self.bounds.charge == crate::Charge::Exact,
         ))
     }
 
@@ -160,7 +176,7 @@ impl KernelMachine {
         GuestSymbols::of(&self.exe)
     }
 
-    fn observer_mut(&mut self) -> &mut Observer {
+    pub(super) fn observer_mut(&mut self) -> &mut Observer {
         self.observer
             .get_or_insert_with(|| Box::new(Observer::new()))
     }
@@ -176,6 +192,10 @@ impl KernelMachine {
     #[cold]
     #[inline(never)]
     fn observe_unlikely(&mut self, event: Event) {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.charging && matches!(event, Event::NativeFast) {
+            self.witness_charge_work();
+        }
         if let Some(observer) = self.observer.as_deref_mut() {
             if let Event::Statement { task, .. } = event
                 && observer.path.is_some()
@@ -276,18 +296,24 @@ impl KernelMachine {
         }
     }
 
-    /// Evaluates a formula of `lib`, observed as a phase of its own when
-    /// `evaluates` says the closure evaluates one.
+    /// Evaluates a formula of `lib`, observed as a phase of its own.
+    /// `charge` distinguishes completion formulas from required guard limits.
     #[inline(always)]
     pub(super) fn in_formula<T>(
         &mut self,
         lib: LibId,
-        evaluates: bool,
+        charge: bool,
         evaluate: impl FnOnce(&Self) -> T,
     ) -> T {
-        if !evaluates || self.observer.is_none() {
+        if self.observer.is_none() {
             return evaluate(self);
         }
+        #[cfg(any(test, feature = "perf-witness"))]
+        if charge {
+            self.witness_charge_work();
+        }
+        #[cfg(not(any(test, feature = "perf-witness")))]
+        let _ = charge;
         self.observe(Event::FormulaEnter(lib));
         let value = evaluate(self);
         self.observe(Event::FormulaExit);

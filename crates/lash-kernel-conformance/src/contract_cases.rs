@@ -506,7 +506,7 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
             .unwrap();
             let mut host = ProbeHost;
             let end = machine.run(&mut host, u64::MAX).unwrap();
-            observations.push((end, machine.meters().charged));
+            observations.push((end, machine.meters().charged.expect("exact charge")));
         }
     }
     assert!(observations.iter().all(|item| item == &observations[0]));
@@ -527,7 +527,10 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
     let second_end = second.run(&mut host, u64::MAX).unwrap();
     let first_end = first.run(&mut host, u64::MAX).unwrap();
     assert_eq!(first_end, second_end);
-    assert_eq!(first.meters().charged, second.meters().charged);
+    assert_eq!(
+        first.meters().charged.expect("exact charge"),
+        second.meters().charged.expect("exact charge")
+    );
     assert_eq!(first.meters().memory, second.meters().memory);
 }
 

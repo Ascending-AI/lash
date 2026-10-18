@@ -295,7 +295,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
             let Request::Effect(request) = &park.requests[0] else {
                 panic!("must perform");
             };
-            let before = embedder.machine.meters().charged;
+            let before = embedder.machine.meters().charged.expect("exact charge");
             let outcome = if rejected {
                 Outcome::Completed(Datum::Text("not an integer".into()))
             } else {
@@ -307,7 +307,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
             };
             embedder.machine.deliver(request.wait, outcome).unwrap();
             assert_eq!(
-                embedder.machine.meters().charged,
+                embedder.machine.meters().charged.expect("exact charge"),
                 before,
                 "delivery is not a semantic step"
             );
@@ -319,7 +319,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
             // Failed error: size 1 + kind bytes 4 + message bytes 3 + null 1.
             let expected = 4 + if rejected { 0 } else { 9 };
             assert_eq!(
-                embedder.machine.meters().charged - before,
+                embedder.machine.meters().charged.expect("exact charge") - before,
                 expected,
                 "cold={cold}, rejected={rejected}"
             );

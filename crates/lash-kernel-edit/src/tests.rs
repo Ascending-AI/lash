@@ -997,7 +997,8 @@ fn canvas_atomic() {
     );
     assert_eq!(error.diagnostics[0].edit, Some(1));
     let bounds = Bounds {
-        charge: 1_000_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 1_000_000,
         memory: 1 << 20,
         call_depth: 16,
         live_tasks: 4,

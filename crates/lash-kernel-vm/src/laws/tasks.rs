@@ -1070,7 +1070,7 @@ main {{
                 end,
                 embedder.world.printed,
                 embedder.requests,
-                embedder.machine.meters().charged,
+                embedder.machine.meters().charged.expect("exact charge"),
             ),
             slices,
         )

@@ -201,7 +201,7 @@ fn every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends() {
                                     },
                                     trace: whole.observations.trace[..parks.iter().sum::<usize>()]
                                         .to_vec(),
-                                    charged,
+                                    charged: Some(charged),
                                     parks: parks.len(),
                                 },
                                 program: program[..=event].to_vec(),

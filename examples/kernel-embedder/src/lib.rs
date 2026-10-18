@@ -50,7 +50,8 @@ pub fn embed<M: Machine>(
         library: PreparedLibrary::new(registry),
     };
     let bounds = Bounds {
-        charge: 100_000,
+        charge: lash_kernel_vm::Charge::Exact,
+        charge_limit: 100_000,
         memory: 1024 * 1024,
         call_depth: 64,
         live_tasks: 32,

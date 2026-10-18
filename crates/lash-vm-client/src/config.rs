@@ -285,7 +285,8 @@ impl PoolConfig {
             graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             protocol: ProtocolBounds::standard(),
             run_bounds: RunBounds {
-                charge: 50_000_000,
+                charge: lash_vm_protocol::Charge::Exact,
+                charge_limit: 50_000_000,
                 memory: 64 * 1024 * 1024,
                 call_depth: 1024,
                 live_tasks: 1024,
@@ -338,7 +339,8 @@ impl PoolConfig {
             || self.protocol.decode.max_nodes == 0
             || self.protocol.decode.max_allocation_bytes == 0
             || self.tuning.slice == 0
-            || self.run_bounds.charge == 0
+            || (self.run_bounds.charge == lash_vm_protocol::Charge::Exact
+                && self.run_bounds.charge_limit == 0)
             || self.run_bounds.memory == 0
             || self.run_bounds.call_depth == 0
             || self.run_bounds.live_tasks == 0

@@ -166,13 +166,46 @@ pub enum EndedRecord {
     Stopped,
 }
 
+/// Whether a run meters its charge. Chosen at start and retained across resume.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Charge {
+    /// Exact accounting and the configured charge bound.
+    #[default]
+    Exact,
+    /// No charge accounting or charge bound.
+    Off,
+}
+
 /// The meters a root saves exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SavedMeters {
-    pub charged: u64,
+    /// None is Off; a present meter is Exact, including a meter of zero.
+    pub charged: Option<u64>,
     pub waits_issued: u64,
     pub next_join: u64,
     pub live_tasks: u32,
+}
+
+impl SavedMeters {
+    /// The run's saved charge policy, retained even before its first charge.
+    pub const fn charge(&self) -> Charge {
+        if self.charged.is_some() {
+            Charge::Exact
+        } else {
+            Charge::Off
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

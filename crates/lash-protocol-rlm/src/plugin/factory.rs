@@ -134,7 +134,11 @@ impl RlmProtocolPluginFactory {
         let pool = self.workers.config().run_bounds;
         let bounds = self.config.execution_bounds();
         lash_vm_client::RunBounds {
-            charge: bounds
+            charge: match bounds.charge {
+                crate::Charge::Exact => lash_vm_client::Charge::Exact,
+                crate::Charge::Off => lash_vm_client::Charge::Off,
+            },
+            charge_limit: bounds
                 .instruction_limit
                 .limit()
                 .map_or(u64::MAX, std::num::NonZeroU64::get),

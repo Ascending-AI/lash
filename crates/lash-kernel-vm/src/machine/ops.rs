@@ -170,17 +170,12 @@ impl KernelMachine {
     /// The charge anchor (`K-CHG-002`): `units` more, unless the running
     /// code is not charged (`K-CHG-007`), ending the run past its bound.
     pub(super) fn charge(&mut self, units: u64) -> Result<(), Halt> {
-        if self.charging {
-            charge_scheduled(
-                &mut self.charged,
-                self.bounds.charge,
-                units,
-                self.observer
-                    .as_deref()
-                    .and_then(|observer| observer.charges.as_ref()),
-            )?;
-        }
-        Ok(())
+        charge_scheduled(
+            &mut self.charged,
+            self.bounds.charge_limit,
+            units,
+            self.observer.as_deref(),
+        )
     }
 
     /// The memory anchor: holds `bytes` more memory until the statement
@@ -727,22 +722,23 @@ impl KernelMachine {
         self.observe(Event::NativeFast);
         let value = answer.value;
         self.pin_value(&value)?;
-        let units = if !self.charging {
-            0
-        } else if let Some(units) = answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
-            units
-        } else {
-            match fast.charge(&function.charge, &self.regs[args..end], &value) {
-                Charge::Units(units) => units,
-                Charge::Plan(plan) => {
-                    self.warm_formula(plan, args, Some(&value))?;
-                    self.in_formula(lib, true, |machine| {
-                        machine.formula(plan, &machine.regs[args..end], Some(&value))
-                    })?
-                }
-            }
-        };
-        self.charge_call(exe, lib, units)?;
+        if self.charging {
+            let units =
+                if let Some(units) = answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
+                    units
+                } else {
+                    match fast.charge(&function.charge, &self.regs[args..end], &value) {
+                        Charge::Units(units) => units,
+                        Charge::Plan(plan) => {
+                            self.warm_formula(plan, args, Some(&value))?;
+                            self.in_formula(lib, true, |machine| {
+                                machine.formula(plan, &machine.regs[args..end], Some(&value))
+                            })?
+                        }
+                    }
+                };
+            self.charge_call(exe, lib, units)?;
+        }
         self.observe(Event::NativeExit);
         self.put(out, value);
         Ok(())
@@ -813,7 +809,7 @@ impl KernelMachine {
                 let limit = match &function.limit {
                     Some(limit) => {
                         self.warm_formula(limit, args, None)?;
-                        Some(self.in_formula(lib, true, |machine| {
+                        Some(self.in_formula(lib, false, |machine| {
                             machine.formula(limit, &machine.regs[args..end], None)
                         })?)
                     }
@@ -930,14 +926,13 @@ impl KernelMachine {
                 }
             }
         };
-        let evaluates = self.charging;
-        if evaluates {
+        if self.charging {
             self.warm_formula(&function.charge, args, result.as_ref().ok())?;
+            let units = self.in_formula(lib, true, |machine| {
+                machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
+            })?;
+            self.charge_call(exe, lib, units)?;
         }
-        let units = self.in_formula(lib, evaluates, |machine| {
-            machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
-        })?;
-        self.charge_call(exe, lib, units)?;
         self.observe(Event::NativeExit);
         match result {
             Ok(value) => {
@@ -962,21 +957,37 @@ pub(super) enum Answer {
 }
 
 /// A declared schedule event is independent of ordinary body-form charging.
+#[inline(always)]
 pub(super) fn charge_scheduled(
     charged: &mut u64,
     limit: u64,
     units: u64,
-    tape: Option<&crate::observe::ChargeTape>,
+    observer: Option<&crate::observe::Observer>,
 ) -> Result<(), Halt> {
+    if let Some(observer) = observer {
+        observe_scheduled(observer, units);
+    }
     if units == 0 {
         return Ok(());
-    }
-    if let Some(tape) = tape {
-        tape.push(lash_kernel_exec::Weight::Atomic(units));
     }
     *charged = charged.saturating_add(units);
     if *charged > limit {
         return Err(bound(Bound::Charge, limit));
     }
     Ok(())
+}
+
+/// Charge diagnostics are entirely cold for an unobserved run.
+#[cold]
+#[inline(never)]
+fn observe_scheduled(observer: &crate::observe::Observer, units: u64) {
+    #[cfg(any(test, feature = "perf-witness"))]
+    if observer.work_witness {
+        crate::perf_witness::record(|work| work.charge_work += 1);
+    }
+    if units != 0
+        && let Some(tape) = observer.charges.as_ref()
+    {
+        tape.push(lash_kernel_exec::Weight::Atomic(units));
+    }
 }

@@ -739,7 +739,7 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
                 .clone()
                 .expect("the kernel states settings")
                 .into_value();
-            settings["charge"] = serde_json::json!(4_000_000);
+            settings["charge_limit"] = serde_json::json!(4_000_000);
             settings
         })),
     );

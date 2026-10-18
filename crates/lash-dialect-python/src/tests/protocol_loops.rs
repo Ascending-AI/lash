@@ -23,7 +23,7 @@ fn run(source: &str) -> (String, Vec<String>) {
         release: pages::RELEASE,
     };
     let bounds = Bounds {
-        charge: 200_000,
+        charge_limit: 200_000,
         ..BOUNDS
     };
     let straight = execution_observation(program.clone(), bounds, false);
