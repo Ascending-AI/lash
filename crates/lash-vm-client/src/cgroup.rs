@@ -202,9 +202,13 @@ pub(crate) fn enter(procs: RawFd) -> std::io::Result<()> {
 }
 
 /// The refusal a spawn error is, when it is the worker's failed move into
-/// its cgroup.
+/// its cgroup. Any other spawn error, a missing executable among them, is
+/// below the offset and is not one.
 pub(crate) fn move_refusal(error: &std::io::Error) -> Option<CgroupRefusal> {
-    let code = error.raw_os_error()?.checked_sub(MOVE_REFUSED)?;
+    let code = error
+        .raw_os_error()?
+        .checked_sub(MOVE_REFUSED)
+        .filter(|code| *code >= 0)?;
     Some(CgroupRefusal::Refused {
         code: (code > 0).then_some(code),
     })
