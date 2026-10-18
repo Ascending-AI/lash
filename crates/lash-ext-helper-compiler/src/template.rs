@@ -75,30 +75,226 @@ impl Symbol {
     }
 }
 
-impl State {
-    /// `step` as the path's next, exposing what the path built when the
-    /// step may decline.
-    fn step(&mut self, step: String) {
-        self.exposed |= self.builds && (step.contains('?') || step.contains("return None"));
-        self.steps.push(step);
+/// What a step may do. Alternatives are checked over these, never over
+/// the Rust a step renders as.
+#[derive(Clone, Copy, Default)]
+struct Effects {
+    /// The step may decline, ending its path.
+    declines: bool,
+    /// It builds an object, or makes a call that may.
+    builds: bool,
+    /// It grows a plan variable.
+    binds: bool,
+    /// It writes an arena object: only the path's return may follow.
+    writes: bool,
+    /// It reads, builds or writes an arena object, or calls for what may
+    /// be one: what only a heap path answers.
+    arena: bool,
+}
+
+impl Effects {
+    const DECLINES: Self = Self {
+        declines: true,
+        builds: false,
+        binds: false,
+        writes: false,
+        arena: false,
+    };
+
+    fn or(self, other: Self) -> Self {
+        Self {
+            declines: self.declines || other.declines,
+            builds: self.builds || other.builds,
+            binds: self.binds || other.binds,
+            writes: self.writes || other.writes,
+            arena: self.arena || other.arena,
+        }
+    }
+}
+
+/// An arena form or general call a heap path names the value of.
+#[derive(Clone)]
+enum Form {
+    /// A tuple of the operands.
+    Tuple(String),
+    /// A field of the target.
+    Field { target: String, field: String },
+    /// An element of the target.
+    Index { target: String, index: String },
+    /// The general call of a native, with what it answers: an object it
+    /// may build, and one only the arena holds.
+    Call {
+        callee: usize,
+        args: String,
+        builds: bool,
+        arena: bool,
+    },
+}
+
+/// One step of a path, its operands already rendered.
+#[derive(Clone)]
+enum Step {
+    /// `form`'s value, named.
+    Heap { name: String, form: Form },
+    /// A prepared entry's value on immediates, named.
+    Entry {
+        name: String,
+        native: usize,
+        args: String,
+    },
+    /// A prepared entry's value, the general call answering where the
+    /// entry declines; what it answers may be built.
+    Fallback {
+        name: String,
+        native: usize,
+        general: usize,
+        args: String,
+        builds: bool,
+    },
+    /// The test that selects an `if`'s branch.
+    Guard { test: String, holds: bool },
+    /// The plan variable `value` is bound to, grown past what an
+    /// assignment replaces.
+    Bind {
+        value: String,
+        previous: Option<String>,
+    },
+    /// An element write.
+    SetIndex {
+        target: String,
+        index: String,
+        value: String,
+    },
+    /// A helper's guarded alternatives in source order, each its steps
+    /// and value: the first to answer is the value, named.
+    Alternatives {
+        name: String,
+        alternatives: Vec<(Vec<Step>, String)>,
+    },
+}
+
+impl Step {
+    fn effects(&self) -> Effects {
+        match self {
+            Self::Heap { form, .. } => {
+                let (builds, arena) = match form {
+                    Form::Tuple(_) => (true, true),
+                    Form::Field { .. } | Form::Index { .. } => (false, true),
+                    Form::Call { builds, arena, .. } => (*builds, *arena),
+                };
+                Effects {
+                    builds,
+                    arena,
+                    ..Effects::DECLINES
+                }
+            }
+            Self::Entry { .. } | Self::Guard { .. } => Effects::DECLINES,
+            Self::Fallback { builds, .. } => Effects {
+                builds: *builds,
+                arena: true,
+                ..Effects::DECLINES
+            },
+            Self::Bind { .. } => Effects {
+                binds: true,
+                ..Effects::DECLINES
+            },
+            Self::SetIndex { .. } => Effects {
+                writes: true,
+                arena: true,
+                ..Effects::DECLINES
+            },
+            Self::Alternatives { alternatives, .. } => alternatives
+                .iter()
+                .flat_map(|(steps, _)| steps)
+                .fold(Effects::DECLINES, |effects, step| {
+                    effects.or(step.effects())
+                }),
+        }
+    }
+}
+
+impl std::fmt::Display for Form {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tuple(items) => write!(f, "heap.tuple(&[{items}])"),
+            Self::Field { target, field } => write!(f, "heap.field({target}, {field:?})"),
+            Self::Index { target, index } => write!(f, "heap.index({target}, {index})"),
+            Self::Call { callee, args, .. } => write!(f, "heap.call({callee}, &[{args}])"),
+        }
+    }
+}
+
+impl std::fmt::Display for Step {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Heap { name, form } => write!(f, "let {name} = {form}?; let _ = {name};"),
+            Self::Entry { name, native, args } => write!(
+                f,
+                "let {name} = (natives[{native}].entry)(&[{args}])?; let _ = {name};"
+            ),
+            Self::Fallback {
+                name,
+                native,
+                general,
+                args,
+                ..
+            } => write!(
+                f,
+                "let {name} = match (natives[{native}].entry)(&[{args}]) {{ Some(value) => value, None => heap.call({general}, &[{args}])? }}; let _ = {name};"
+            ),
+            Self::Guard { test, holds } => {
+                write!(
+                    f,
+                    "if !matches!({test}, Value::Bool({holds})) {{ return None; }}"
+                )
+            }
+            Self::Bind { value, previous } => match previous {
+                Some(previous) => write!(f, "heap.bind({value}, Some({previous}))?;"),
+                None => write!(f, "heap.bind({value}, None)?;"),
+            },
+            Self::SetIndex {
+                target,
+                index,
+                value,
+            } => write!(f, "heap.set_index({target}, {index}, {value})?;"),
+            Self::Alternatives { name, alternatives } => {
+                writeln!(f, "let {name} = (|| {{")?;
+                for (steps, value) in alternatives {
+                    writeln!(f, "if let Some(value) = (|| {{")?;
+                    for step in steps {
+                        writeln!(f, "{step}")?;
+                    }
+                    writeln!(f, "Some({value})\n}})() {{ return Some(value); }}")?;
+                }
+                writeln!(f, "None\n}})()?;\nlet _ = {name};")
+            }
+        }
     }
 }
 
 #[derive(Clone, Default)]
 struct State {
     vars: BTreeMap<Name, Symbol>,
-    steps: Vec<String>,
+    steps: Vec<Step>,
     depth: u32,
-    /// The path reads, builds or writes an arena object, or calls for what
-    /// may be one: what only a heap path answers.
-    heap: bool,
-    /// The path builds an object, or makes a call that may.
-    builds: bool,
-    /// A fallible step follows the path's first build: declining there
-    /// leaves what it built.
-    exposed: bool,
-    /// The path wrote: only its return may follow.
-    written: bool,
+}
+
+impl State {
+    fn effects(&self) -> Effects {
+        self.steps.iter().fold(Effects::default(), |effects, step| {
+            effects.or(step.effects())
+        })
+    }
+
+    /// Whether a step that may decline follows the path's first build:
+    /// declining there leaves what it built.
+    fn exposed(&self) -> bool {
+        self.steps
+            .iter()
+            .skip_while(|step| !step.effects().builds)
+            .skip(1)
+            .any(|step| step.effects().declines)
+    }
 }
 
 struct Evaluator<'a> {
@@ -219,21 +415,19 @@ impl Evaluator<'_> {
     }
 
     /// The heap form `form` as the next step of a heap path, its value
-    /// named: one that may build, and one that `arena`, reaching what only
-    /// the arena holds.
+    /// named.
     fn heap_step(
         &mut self,
         state: &mut State,
-        form: String,
+        form: Form,
         (kind, calls): (Option<ValueKind>, usize),
-        builds: bool,
-        arena: bool,
     ) -> Symbol {
-        let code = self.fresh();
-        state.step(format!("let {code} = {form}?; let _ = {code};"));
-        state.heap |= arena;
-        state.builds |= builds;
-        Symbol::computed(code, kind, calls + 1)
+        let name = self.fresh();
+        state.steps.push(Step::Heap {
+            name: name.clone(),
+            form,
+        });
+        Symbol::computed(name, kind, calls + 1)
     }
 
     fn expr(&mut self, expr: &Expr, state: &mut State, depth: u32) -> Option<Symbol> {
@@ -286,22 +480,29 @@ impl Evaluator<'_> {
                     .map(|item| self.expr(item, state, depth))
                     .collect::<Option<Vec<_>>>()?;
                 let calls = items.iter().map(|item| item.calls).sum();
-                let form = format!("heap.tuple(&[{}])", codes(&items));
+                let form = Form::Tuple(codes(&items));
                 let kind = Some(ValueKind::Tuple);
-                Some(self.heap_step(state, form, (kind, calls), true, true))
+                Some(self.heap_step(state, form, (kind, calls)))
             }
             Expr::Member(member) if self.heap => match &**member {
                 Member::Field { target, field } => {
                     let target = self.expr(target, state, depth)?;
-                    let form = format!("heap.field({}, {field:?})", target.code);
-                    Some(self.heap_step(state, form, (None, target.calls), false, true))
+                    let calls = target.calls;
+                    let form = Form::Field {
+                        target: target.code,
+                        field: field.clone(),
+                    };
+                    Some(self.heap_step(state, form, (None, calls)))
                 }
                 Member::Index { target, index } => {
                     let target = self.expr(target, state, depth)?;
                     let index = self.expr(index, state, depth)?;
-                    let form = format!("heap.index({}, {})", target.code, index.code);
                     let calls = target.calls + index.calls;
-                    Some(self.heap_step(state, form, (None, calls), false, true))
+                    let form = Form::Index {
+                        target: target.code,
+                        index: index.code,
+                    };
+                    Some(self.heap_step(state, form, (None, calls)))
                 }
             },
             _ => None,
@@ -366,10 +567,14 @@ impl Evaluator<'_> {
                     | lash_kernel_doc::Type::Number
                     | lash_kernel_doc::Type::Null
             );
-        let index = self.heap_callee(function);
+        let form = Form::Call {
+            callee: self.heap_callee(function),
+            args: codes(args),
+            builds,
+            arena,
+        };
         let calls = args.iter().map(|arg| arg.calls).sum();
-        let form = format!("heap.call({index}, &[{}])", codes(args));
-        self.heap_step(state, form, (kind, calls), builds, arena)
+        self.heap_step(state, form, (kind, calls))
     }
 
     fn call(
@@ -443,33 +648,36 @@ impl Evaluator<'_> {
         // or truth test remains the one value-producing native.
         let calls = usize::from(definition.name.as_str() != "bool.not")
             + args.iter().map(|arg| arg.calls).sum::<usize>();
-        let code = self.fresh();
+        let name = self.fresh();
         let result = &definition.signature.result;
         let reserved = matches!(result, lash_kernel_doc::Type::Text);
-        if self.heap && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
-            // An operand the entry may decline, or a text whose room only
-            // the general call reserves: the general call answers.
-            let general = self.heap_callee(function);
-            state.heap = true;
-            state.step(format!(
-                "let {code} = match (natives[{index}].entry)(&[{0}]) {{ Some(value) => value, None => heap.call({general}, &[{0}])? }}; let _ = {code};",
-                codes(&args)
-            ));
-            state.builds |= !matches!(
-                result,
-                lash_kernel_doc::Type::Bool
-                    | lash_kernel_doc::Type::Int
-                    | lash_kernel_doc::Type::Float
-                    | lash_kernel_doc::Type::Number
-                    | lash_kernel_doc::Type::Null
-            );
-        } else {
-            state.step(format!(
-                "let {code} = (natives[{index}].entry)(&[{}])?; let _ = {code};",
-                codes(&args)
-            ));
-        }
-        Some(Symbol::computed(code, kind, calls))
+        state.steps.push(
+            if self.heap && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
+                // An operand the entry may decline, or a text whose room
+                // only the general call reserves: the general call answers.
+                Step::Fallback {
+                    name: name.clone(),
+                    native: index,
+                    general: self.heap_callee(function),
+                    args: codes(&args),
+                    builds: !matches!(
+                        result,
+                        lash_kernel_doc::Type::Bool
+                            | lash_kernel_doc::Type::Int
+                            | lash_kernel_doc::Type::Float
+                            | lash_kernel_doc::Type::Number
+                            | lash_kernel_doc::Type::Null
+                    ),
+                }
+            } else {
+                Step::Entry {
+                    name: name.clone(),
+                    native: index,
+                    args: codes(&args),
+                }
+            },
+        );
+        Some(Symbol::computed(name, kind, calls))
     }
 
     /// A call of helper `definition` on `args`, its body followed: a
@@ -492,7 +700,6 @@ impl Evaluator<'_> {
                 .map(|(param, arg)| (param.name.clone(), arg))
                 .collect(),
             depth: depth + 1,
-            ..State::default()
         };
         let mut results = self.block(&body.block, &mut nested, depth + 1);
         if results.is_empty() {
@@ -509,8 +716,8 @@ impl Evaluator<'_> {
         // A helper used as an operand can itself branch on a scalar
         // value (ToBoolean on NaN, for example). Keep those guarded
         // alternatives in its expression, in source evaluation order.
-        let result = self.fresh();
-        let mut code = format!("let {result} = (|| {{\n");
+        let name = self.fresh();
+        let mut alternatives = Vec::new();
         let mut kind = None;
         let mut calls = 0;
         for (index, (nested, value)) in results.into_iter().enumerate() {
@@ -521,19 +728,13 @@ impl Evaluator<'_> {
             } else {
                 kind.filter(|kind| Some(*kind) == value.kind)
             };
-            code.push_str("if let Some(value) = (|| {\n");
-            for step in nested.steps {
-                let _ = writeln!(code, "{step}");
-            }
-            let _ = writeln!(
-                code,
-                "Some({})\n}})() {{ return Some(value); }}",
-                value.code
-            );
+            alternatives.push((nested.steps, value.code));
         }
-        let _ = writeln!(code, "None\n}})()?;\nlet _ = {result};");
-        state.steps.push(code);
-        Some(Symbol::computed(result, kind, calls))
+        state.steps.push(Step::Alternatives {
+            name: name.clone(),
+            alternatives,
+        });
+        Some(Symbol::computed(name, kind, calls))
     }
 
     /// The outcomes of running `branch` from `state`, then `rest`: a
@@ -553,7 +754,7 @@ impl Evaluator<'_> {
                 outcomes.push((next, returned));
                 continue;
             }
-            if next.written {
+            if next.effects().writes {
                 continue;
             }
             for stmt in branch {
@@ -583,7 +784,7 @@ impl Evaluator<'_> {
         };
         // A write is a path's last fallible step: only a return of what
         // the path already holds may follow it.
-        if state.written {
+        if state.effects().writes {
             let Stmt::Return { value } = stmt else {
                 return Vec::new();
             };
@@ -611,16 +812,16 @@ impl Evaluator<'_> {
                     // The plan's variable grows by the value, past what an
                     // assignment replaces; a captured one is a cell.
                     let previous = match stmt {
-                        Stmt::Let { .. } => Some("None".to_owned()),
-                        _ => state
-                            .vars
-                            .get(name)
-                            .map(|old| format!("Some({})", old.code)),
+                        Stmt::Let { .. } => Some(None),
+                        _ => state.vars.get(name).map(|old| Some(old.code.clone())),
                     };
                     let Some(previous) = previous.filter(|_| !self.captured.contains(name)) else {
                         return Vec::new();
                     };
-                    state.step(format!("heap.bind({}, {previous})?;", value.code));
+                    state.steps.push(Step::Bind {
+                        value: value.code.clone(),
+                        previous,
+                    });
                 }
                 state.vars.insert(name.clone(), value);
                 self.block(rest, state, depth)
@@ -641,12 +842,11 @@ impl Evaluator<'_> {
                 let Some((target, index, value)) = parts else {
                     return Vec::new();
                 };
-                state.step(format!(
-                    "heap.set_index({}, {}, {})?;",
-                    target.code, index.code, value.code
-                ));
-                state.heap = true;
-                state.written = true;
+                state.steps.push(Step::SetIndex {
+                    target: target.code,
+                    index: index.code,
+                    value: value.code,
+                });
                 self.block(rest, state, depth)
             }
             Stmt::If {
@@ -667,10 +867,10 @@ impl Evaluator<'_> {
                 for (branch, guard) in branches {
                     let mut next = state.clone();
                     if let Some(guard) = guard {
-                        next.step(format!(
-                            "if !matches!({}, Value::Bool({guard})) {{ return None; }}",
-                            test.code
-                        ));
+                        next.steps.push(Step::Guard {
+                            test: test.code.clone(),
+                            holds: guard,
+                        });
                     }
                     self.enter(branch, next, state, rest, depth, &mut outcomes);
                 }
@@ -819,20 +1019,18 @@ impl Evaluator<'_> {
                 // that part alternatives let at most one's tests hold, so
                 // the one that may decline after building runs last, where
                 // an earlier one declining has built nothing.
-                if !objects && results.iter().all(|(state, _)| !state.heap) {
+                if !objects && results.iter().all(|(state, _)| !state.effects().arena) {
                     continue;
                 }
-                results.sort_by_key(|(state, _)| state.exposed);
+                results.sort_by_key(|(state, _)| state.exposed());
                 let last = results.len() - 1;
-                if results[..last].iter().any(|(state, _)| state.exposed) {
+                if results[..last].iter().any(|(state, _)| state.exposed()) {
                     continue;
                 }
             }
             let mut code = String::new();
             // What an earlier alternative declared is not a later one's.
-            let binds = results
-                .iter()
-                .any(|(state, _)| state.steps.iter().any(|step| step.contains("heap.bind(")));
+            let binds = results.iter().any(|(state, _)| state.effects().binds);
             for (state, value) in results {
                 let value = value.or_else(|| Symbol::constant(Value::Null))?;
                 pass.depth = pass.depth.max(state.depth);
