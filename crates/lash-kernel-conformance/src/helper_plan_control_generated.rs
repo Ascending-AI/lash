@@ -519,7 +519,7 @@ const LAW_DECLINING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
 };
 
 /// `law.declining`.
@@ -535,6 +535,20 @@ fn law_declining(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
+}
+fn law_declining_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.set_index(args[0], v0, Value::Int(1))?;
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const LAW_DECLINE_CALLER: p::HelperPlan = p::HelperPlan {

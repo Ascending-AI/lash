@@ -717,8 +717,13 @@ impl Former<'_> {
     /// call when `helper`.
     fn operator(&self, lib: LibId, given: usize, helper: bool) -> Option<()> {
         let function = self.libs.get(lib.0 as usize)?;
-        let (_, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.prepared.as_ref()?;
         fast.scalar()?;
+        // An island holds immediates alone: an entry with no immediate
+        // paths never answers it.
+        if !entry.immediate() {
+            return None;
+        }
         if function.arity != given || !(1..=3).contains(&given) {
             return None;
         }

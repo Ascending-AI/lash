@@ -37,13 +37,15 @@
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU32;
 
+use lash_kernel_doc::FunctionId;
 use lash_kernel_exec::{Op, OpRange, Weight};
 
 mod nodes;
+mod verify;
 
 pub(crate) use nodes::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Meter, Place, Role,
-    SessionSlot, measured_formula, position, scalar, store,
+    SessionSlot, Taken, measured_formula, position, scalar, store,
 };
 
 use super::{
@@ -52,8 +54,14 @@ use super::{
 };
 use nodes::Libs;
 
-/// The consecutive unproductive entries that retire a loop plan.
-pub(crate) const UNPRODUCTIVE: u32 = 16;
+/// The weight of consecutive unproductive entries that retires a loop
+/// plan: sixteen that missed before their iteration's first body
+/// statement, or 128 that missed after one committed.
+pub(crate) const UNPRODUCTIVE: u32 = 128;
+
+/// What an entry that missed before its iteration's first body statement
+/// weighs; one that missed after one committed weighs 1.
+pub(crate) const BARREN: u32 = 8;
 
 /// The deepest `if` nesting a loop body's plan holds.
 pub(crate) const NESTING: usize = 8;
@@ -68,6 +76,31 @@ pub(crate) enum Event {
     /// The next operator's or native's formula, charged whole at its
     /// completion.
     Formula,
+    /// The arm a conditional expression takes: the program of its arm of
+    /// the statement's [`Arms`] at this index.
+    Arm(u32),
+}
+
+/// A conditional expression's arms (`JumpIfFalse`, then `Jump`): each
+/// arm's own charge program and the fixed units it states, which the
+/// statement charges only when it takes that arm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Arms {
+    pub(crate) then: Box<[Event]>,
+    pub(crate) otherwise: Box<[Event]>,
+    pub(crate) then_fixed: u64,
+    pub(crate) otherwise_fixed: u64,
+}
+
+impl Arms {
+    /// The program and fixed units of the arm `taken` selects.
+    pub(crate) fn arm(&self, taken: bool) -> (&[Event], u64) {
+        if taken {
+            (&self.then, self.then_fixed)
+        } else {
+            (&self.otherwise, self.otherwise_fixed)
+        }
+    }
 }
 
 /// What a region statement does with the value its ops compute.
@@ -137,14 +170,19 @@ pub(crate) enum RegionSlot {
 pub(crate) struct Summary {
     /// Its ops, up to the op that ends it.
     ops: OpRange,
-    /// The fixed units it charges: its statement or test units and the
-    /// totals its charge regions' heads state.
+    /// The fixed units it charges on every path: its statement or test
+    /// units and the totals its charge regions' heads state, outside its
+    /// conditional expressions' arms.
     pub(crate) fixed: u64,
-    /// The most its formulas charge: each operator site's table maximum.
-    /// `None` when a formula has no scalar table.
+    /// The most its formulas and its arms charge: each operator site's
+    /// table maximum, and each conditional's dearer arm. `None` when a
+    /// formula has no scalar table.
     pub(crate) formula_max: Option<u64>,
     /// What it charges, in order.
     pub(crate) program: Box<[Event]>,
+    /// Its conditional expressions' arms, which its program's
+    /// [`Event::Arm`]s name.
+    pub(crate) arms: Box<[Arms]>,
     /// The slots it reads.
     pub(crate) reads: Box<[RegionSlot]>,
     /// The slot it writes or declares: a declaration's is a frame's.
@@ -329,8 +367,8 @@ pub(crate) struct LoopPlan {
     /// they first use them: the region's session slots (§3.6).
     pub(crate) sessions: Box<[BindingName]>,
     compiled: OnceLock<Option<CompiledLoop>>,
-    /// The consecutive entries that missed a guard before an iteration
-    /// ended, which [`UNPRODUCTIVE`] of retire the plan: a site whose
+    /// The weight of consecutive entries that missed a guard before an
+    /// iteration ended, which at [`UNPRODUCTIVE`] retires the plan: a site whose
     /// prepared entry declines what this run gives it costs the region's
     /// work and the reference's. It changes which code runs a statement,
     /// never what the statement does.
@@ -372,6 +410,8 @@ pub(crate) struct Lowered<'a> {
     pub(crate) block: &'a dyn Fn(BlockId) -> &'a Block,
     pub(crate) stmt: &'a dyn Fn(StmtId) -> &'a Stmt,
     pub(crate) lib: &'a dyn Fn(LibId) -> &'a Lib,
+    /// The library function a template's heap path calls.
+    pub(crate) lib_of: &'a dyn Fn(&FunctionId) -> Option<LibId>,
 }
 
 /// Whether library `function` is an operator a region calls with `count`
@@ -425,6 +465,10 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
         | Op::Continue
         | Op::SetField { .. }
         | Op::SetIndex { .. }
+        | Op::LetBind { .. }
+        | Op::LetEnd { .. }
+        | Op::JumpIfFalse { .. }
+        | Op::Jump { .. }
         | Op::End => false,
         Op::Const { c, .. } => !matches!(stream.consts.get(c.ix()), Some(Constant::Resident(_))),
         Op::Operator { lib, args } => {
@@ -442,8 +486,9 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
     })
 }
 
-/// Whether `op` allocates, calls a native, reads a member or holds a value
-/// other than a scalar: what makes its statement's plan allocate.
+/// Whether `op` allocates, calls a native, reads a member, holds a value
+/// other than a scalar or declares an expression's variable, whose memory
+/// it holds: what makes its statement's plan allocate.
 fn general<'a>(stream: &Stream, lib: &dyn Fn(LibId) -> &'a Lib, op: Op) -> bool {
     match op {
         Op::Call { .. }
@@ -457,6 +502,7 @@ fn general<'a>(stream: &Stream, lib: &dyn Fn(LibId) -> &'a Lib, op: Op) -> bool 
         | Op::Pin { .. }
         | Op::SetField { .. }
         | Op::SetIndex { .. }
+        | Op::LetBind { .. }
         | Op::End => true,
         Op::Const { c, .. } => !matches!(
             stream.consts.get(c.ix()),
@@ -476,13 +522,15 @@ fn general<'a>(stream: &Stream, lib: &dyn Fn(LibId) -> &'a Lib, op: Op) -> bool 
 }
 
 /// Whether operator `function` with `count` arguments has the scalar table
-/// a scalar plan charges it, over one or two operands.
+/// a scalar plan charges it, over one or two operands, and an entry that
+/// answers immediates: a template with heap paths alone is an allocating
+/// plan's. A scalar plan's operator takes no heap path.
 fn scalar_site(function: &Lib, count: usize) -> bool {
     (1..=2).contains(&count)
         && function
             .prepared
             .as_ref()
-            .is_some_and(|(_, fast)| fast.scalar().is_some())
+            .is_some_and(|(entry, fast)| fast.scalar().is_some() && entry.immediate())
 }
 
 /// What forming a plan gathers across its statements: the call depth its
@@ -560,6 +608,7 @@ impl Formation<'_> {
                     fixed: *metered,
                     formula_max,
                     program: lean(program),
+                    arms: Box::default(),
                     reads: Box::default(),
                     write: Some(RegionSlot::Frame(binding.at)),
                     general,
@@ -692,7 +741,9 @@ impl Formation<'_> {
     }
 
     /// A root invoke has atom charge events rather than expression ops.
-    /// Keep its action form so a decline resumes the original continuation.
+    /// Keep its action form so a decline resumes the original continuation:
+    /// a write or a declaration of its value, or a store whose ops take it
+    /// from the first register.
     fn action_summary(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Step> {
         let statement = (self.lowered.stmt)(id);
         let (action, lib, args) = library_invoke(&statement.form)?;
@@ -700,19 +751,16 @@ impl Formation<'_> {
         let ops = stream
             .ops
             .get(statement.ops.start as usize..statement.ops.end() as usize)?;
-        let [Op::Act, end] = ops else {
-            return None;
+        let end = match ops {
+            [Op::Act, end] => end,
+            [Op::Act, .., Op::SetIndex { .. } | Op::SetField { .. }] => {
+                return self.action_store(code, id, gathered).map(Step::Store);
+            }
+            _ => return None,
         };
         let mut reads = Vec::new();
         for arg in args {
-            match arg {
-                super::Atom::Var(super::Var::Local(local)) if !local.shared => {
-                    reads.push(RegionSlot::Frame(local.at));
-                }
-                super::Atom::Var(super::Var::Session(name)) => reads.push(gathered.session(name)),
-                super::Atom::Literal(Constant::Resident(value)) if scalar(value) => {}
-                _ => return None,
-            }
+            reads.extend(Self::atom(arg, gathered)?);
         }
         let (write, bind) = match end {
             Op::WriteLocal { local, .. } | Op::Bind { local, .. }
@@ -743,6 +791,7 @@ impl Formation<'_> {
             fixed: 1 + args.len() as u64,
             formula_max,
             program: program.into(),
+            arms: Box::default(),
             reads: reads.into(),
             write: Some(write),
             general: !scalar_site((self.lowered.lib)(lib), args.len()),
@@ -756,6 +805,61 @@ impl Formation<'_> {
         })
     }
 
+    /// The summary of statement-root invoke `id` whose continuation stores
+    /// its value: the invoke's events, then its ops' after the action, as
+    /// a plain store's, the value in the first register.
+    fn action_store(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Summary> {
+        let statement = (self.lowered.stmt)(id);
+        let (action, lib, args) = library_invoke(&statement.form)?;
+        let mut shared = Shared::default();
+        for arg in args {
+            shared.reads.extend(Self::atom(arg, gathered)?);
+        }
+        if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
+            shared.calls.push(action.occurrence);
+        }
+        let mut walk = Walk {
+            defined: vec![true; args.len()],
+            fixed: 1 + args.len() as u64,
+            formula_max: Some(0),
+            program: vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()],
+            allocates: !scalar_site((self.lowered.lib)(lib), args.len()),
+        };
+        walk.program.push(Event::Formula);
+        self.site(
+            lib,
+            0,
+            args.len(),
+            &mut walk.defined,
+            &mut walk.formula_max,
+            gathered,
+        )?;
+        let mut summary = self.finish(
+            code,
+            statement.ops,
+            statement.ops.start + 1,
+            End::Store,
+            walk,
+            shared,
+            gathered,
+        )?;
+        summary.action = Some(id);
+        Some(summary)
+    }
+
+    /// The slot a statement-root invoke's argument `atom` reads, if any:
+    /// an unshared slot, a session binding or a resident scalar.
+    fn atom(atom: &super::Atom, gathered: &mut Gathered) -> Option<Option<RegionSlot>> {
+        match atom {
+            super::Atom::Var(super::Var::Local(local)) if !local.shared => {
+                Some(Some(RegionSlot::Frame(local.at)))
+            }
+            super::Atom::Var(super::Var::Session(name)) => Some(Some(gathered.session(name))),
+            super::Atom::Literal(Constant::Resident(value)) if scalar(value) => Some(None),
+            _ => None,
+        }
+    }
+
     fn stream_op(&self, at: u32) -> Option<Op> {
         self.lowered.stream.ops.get(at as usize).copied()
     }
@@ -767,127 +871,71 @@ impl Formation<'_> {
         code: &Code,
         range: OpRange,
         end: End,
-        mut fixed: u64,
-        mut program: Vec<Event>,
+        fixed: u64,
+        program: Vec<Event>,
+        gathered: &mut Gathered,
+    ) -> Option<Summary> {
+        let walk = Walk {
+            defined: Vec::new(),
+            fixed,
+            formula_max: Some(0),
+            program,
+            allocates: false,
+        };
+        self.finish(
+            code,
+            range,
+            range.start,
+            end,
+            walk,
+            Shared::default(),
+            gathered,
+        )
+    }
+
+    /// The summary of the region statement in `range`, which ends as
+    /// `end`, from its ops `from..` on: `walk` and `shared` hold what its
+    /// ops before `from` did.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a statement's summary continues the walk its start made"
+    )]
+    fn finish(
+        &self,
+        code: &Code,
+        range: OpRange,
+        from: u32,
+        end: End,
+        mut walk: Walk,
+        mut shared: Shared,
         gathered: &mut Gathered,
     ) -> Option<Summary> {
         let stream = self.lowered.stream;
         let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
-        let (last, body) = ops.split_last()?;
-        // Which registers hold a value the statement has not yet used.
-        let mut defined: Vec<bool> = Vec::new();
-        let mut formula_max = Some(0_u64);
-        let mut reads = Vec::new();
-        let mut calls = Vec::new();
-        let mut allocates = general(stream, self.lowered.lib, *last);
-        // Takes the registers `start..start + count` and defines `start`.
-        let gather = |defined: &mut Vec<bool>, start: usize, count: usize| {
-            (start..start + count).all(|at| take(defined, at)) && define(defined, start)
-        };
-        for op in body {
-            allocates |= general(stream, self.lowered.lib, *op);
-            match *op {
-                Op::Region { region, total } => {
-                    if total == u32::MAX {
-                        return None;
-                    }
-                    fixed = fixed.checked_add(u64::from(total))?;
-                    let events = stream.regions.events(region.0);
-                    program.extend(events.iter().map(|event| Event::Fixed(event.weight)));
-                }
-                Op::Local { dst, local } => {
-                    if code.slots.get(local.slot as usize)?.shared
-                        || !define(&mut defined, dst.ix())
-                    {
-                        return None;
-                    }
-                    reads.push(RegionSlot::Frame(local.at));
-                }
-                Op::Session { dst, name } => {
-                    if !define(&mut defined, dst.ix()) {
-                        return None;
-                    }
-                    reads.push(gathered.session(stream.names.get(name.ix())?));
-                }
-                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
-                    Constant::Resident(_) if define(&mut defined, dst.ix()) => {}
-                    _ => return None,
-                },
-                Op::Operator { lib, args } => {
-                    let (start, count) = (args.start.ix(), args.len as usize);
-                    self.site(
-                        LibId(lib.0),
-                        start,
-                        count,
-                        &mut defined,
-                        &mut formula_max,
-                        gathered,
-                    )?;
-                    program.push(Event::Formula);
-                }
-                Op::Nested { act, args } => {
-                    let nested = stream.nested.get(act.ix())?;
-                    let lib = nested.kind.operator_lib()?;
-                    if !nested.operator {
-                        return None;
-                    }
-                    let (start, count) = (args.start.ix(), args.len as usize);
-                    self.site(lib, start, count, &mut defined, &mut formula_max, gathered)?;
-                    if matches!(nested.kind, NestedKind::Call(_))
-                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
-                    {
-                        calls.push(nested.occurrence);
-                    }
-                    program.push(Event::Formula);
-                }
-                Op::Call { args, .. } => {
-                    if !gather(&mut defined, args.start.ix(), args.len as usize) {
-                        return None;
-                    }
-                    formula_max = None;
-                    program.push(Event::Formula);
-                }
-                Op::MakeTuple { items } | Op::MakeList { items } | Op::MakeSet { items } => {
-                    if !gather(&mut defined, items.start.ix(), items.len as usize) {
-                        return None;
-                    }
-                }
-                Op::MakeMap { entries } => {
-                    if !gather(&mut defined, entries.start.ix(), entries.len as usize) {
-                        return None;
-                    }
-                }
-                Op::MakeRecord { fields, values } => {
-                    // A record's names are short texts the region writes
-                    // as they are.
-                    let short = stream
-                        .field_lists
-                        .get(fields.ix())?
-                        .iter()
-                        .all(|name| lash_kernel_doc::arena::ShortText::new(name).is_some());
-                    if !short || !gather(&mut defined, values.start.ix(), values.len as usize) {
-                        return None;
-                    }
-                }
-                Op::Field { at, .. } => {
-                    if !gather(&mut defined, at.ix(), 1) {
-                        return None;
-                    }
-                }
-                Op::Index { at, .. } => {
-                    if !gather(&mut defined, at.ix(), 2) {
-                        return None;
-                    }
-                }
-                // A pin keeps a value its statement still uses.
-                Op::Pin { src } => {
-                    if !defined.get(src.ix()).copied().unwrap_or(false) {
-                        return None;
-                    }
-                }
-                _ => return None,
-            }
+        let (last, _) = ops.split_last()?;
+        walk.allocates |= general(stream, self.lowered.lib, *last);
+        self.walk(
+            code,
+            from,
+            range.end() - 1,
+            &mut walk,
+            &mut shared,
+            gathered,
+            false,
+        )?;
+        if !shared.lets.is_empty() {
+            return None;
         }
+        let Walk {
+            mut defined,
+            fixed,
+            formula_max,
+            program,
+            allocates,
+        } = walk;
+        let Shared {
+            reads, calls, arms, ..
+        } = shared;
         let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
         let write = match (*last, end) {
             (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch)
@@ -944,12 +992,217 @@ impl Formation<'_> {
             fixed,
             formula_max,
             program: lean(program),
+            arms: arms.into(),
             reads: reads.into(),
             write,
             general: allocates,
             calls: calls.into(),
             action: None,
         })
+    }
+
+    /// Walks the ops `start..end` of a region statement into `walk`: an
+    /// arm of a conditional expression when `arm`, whose invokes would be
+    /// counted only on its path, which no static program states.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a statement's walk and its arms share the statement's tables"
+    )]
+    fn walk(
+        &self,
+        code: &Code,
+        start: u32,
+        end: u32,
+        walk: &mut Walk,
+        shared: &mut Shared,
+        gathered: &mut Gathered,
+        arm: bool,
+    ) -> Option<()> {
+        let stream = self.lowered.stream;
+        // Takes the registers `start..start + count` and defines `start`.
+        let gather = |defined: &mut Vec<bool>, start: usize, count: usize| {
+            (start..start + count).all(|at| take(defined, at)) && define(defined, start)
+        };
+        let mut pc = start;
+        while pc < end {
+            let op = *stream.ops.get(pc as usize)?;
+            walk.allocates |= general(stream, self.lowered.lib, op);
+            let defined = &mut walk.defined;
+            match op {
+                Op::Region { region, total } => {
+                    if total == u32::MAX {
+                        return None;
+                    }
+                    walk.fixed = walk.fixed.checked_add(u64::from(total))?;
+                    let events = stream.regions.events(region.0);
+                    walk.program
+                        .extend(events.iter().map(|event| Event::Fixed(event.weight)));
+                }
+                Op::Local { dst, local } => {
+                    if code.slots.get(local.slot as usize)?.shared || !define(defined, dst.ix()) {
+                        return None;
+                    }
+                    shared.reads.push(RegionSlot::Frame(local.at));
+                }
+                Op::Session { dst, name } => {
+                    if !define(defined, dst.ix()) {
+                        return None;
+                    }
+                    shared
+                        .reads
+                        .push(gathered.session(stream.names.get(name.ix())?));
+                }
+                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
+                    Constant::Resident(_) if define(defined, dst.ix()) => {}
+                    _ => return None,
+                },
+                Op::Operator { lib, args } => {
+                    let (start, count) = (args.start.ix(), args.len as usize);
+                    self.site(
+                        LibId(lib.0),
+                        start,
+                        count,
+                        defined,
+                        &mut walk.formula_max,
+                        gathered,
+                    )?;
+                    walk.program.push(Event::Formula);
+                }
+                Op::Nested { act, args } => {
+                    let nested = stream.nested.get(act.ix())?;
+                    let lib = nested.kind.operator_lib()?;
+                    if !nested.operator {
+                        return None;
+                    }
+                    let (start, count) = (args.start.ix(), args.len as usize);
+                    self.site(lib, start, count, defined, &mut walk.formula_max, gathered)?;
+                    if matches!(nested.kind, NestedKind::Call(_))
+                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
+                    {
+                        if arm {
+                            return None;
+                        }
+                        shared.calls.push(nested.occurrence);
+                    }
+                    walk.program.push(Event::Formula);
+                }
+                Op::Call { args, .. } => {
+                    if !gather(defined, args.start.ix(), args.len as usize) {
+                        return None;
+                    }
+                    walk.formula_max = None;
+                    walk.program.push(Event::Formula);
+                }
+                Op::MakeTuple { items } | Op::MakeList { items } | Op::MakeSet { items } => {
+                    if !gather(defined, items.start.ix(), items.len as usize) {
+                        return None;
+                    }
+                }
+                Op::MakeMap { entries } => {
+                    if !gather(defined, entries.start.ix(), entries.len as usize) {
+                        return None;
+                    }
+                }
+                Op::MakeRecord { fields, values } => {
+                    // A record's names are short texts the region writes
+                    // as they are.
+                    let short = stream
+                        .field_lists
+                        .get(fields.ix())?
+                        .iter()
+                        .all(|name| lash_kernel_doc::arena::ShortText::new(name).is_some());
+                    if !short || !gather(defined, values.start.ix(), values.len as usize) {
+                        return None;
+                    }
+                }
+                Op::Field { at, .. } => {
+                    if !gather(defined, at.ix(), 1) {
+                        return None;
+                    }
+                }
+                Op::Index { at, .. } => {
+                    if !gather(defined, at.ix(), 2) {
+                        return None;
+                    }
+                }
+                // A pin keeps a value its statement still uses.
+                Op::Pin { src } => {
+                    if !defined.get(src.ix()).copied().unwrap_or(false) {
+                        return None;
+                    }
+                }
+                // An expression's variable, declared for its body: the
+                // value its body computes, in the same register, is the
+                // expression's.
+                Op::LetBind { local, src } => {
+                    if code.slots.get(local.slot as usize)?.shared || !take(defined, src.ix()) {
+                        return None;
+                    }
+                    shared.lets.push((local.at, src.ix()));
+                }
+                Op::LetEnd { local } => {
+                    let (at, reg) = shared.lets.pop()?;
+                    if at != local.at || !defined.get(reg).copied().unwrap_or(false) {
+                        return None;
+                    }
+                }
+                Op::JumpIfFalse { cond, skip } => {
+                    if !take(defined, cond.ix()) {
+                        return None;
+                    }
+                    let (then_end, else_end) = arm_ends(stream, pc, skip)?;
+                    let lets = shared.lets.len();
+                    let mut arms: [Option<Walk>; 2] = [None, None];
+                    for (at, (from, to)) in [(pc + 1, then_end - 1), (then_end, else_end)]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let mut taken = Walk {
+                            defined: Vec::new(),
+                            fixed: 0,
+                            formula_max: Some(0),
+                            program: Vec::new(),
+                            allocates: false,
+                        };
+                        self.walk(code, from, to, &mut taken, shared, gathered, true)?;
+                        // An arm computes the expression's value alone,
+                        // into the condition's register.
+                        if shared.lets.len() != lets
+                            || !take(&mut taken.defined, cond.ix())
+                            || taken.defined.iter().any(|held| *held)
+                        {
+                            return None;
+                        }
+                        arms[at] = Some(taken);
+                    }
+                    let [Some(then), Some(otherwise)] = arms else {
+                        return None;
+                    };
+                    walk.allocates |= then.allocates || otherwise.allocates;
+                    let most = |arm: &Walk| arm.fixed.checked_add(arm.formula_max?);
+                    walk.formula_max = match (walk.formula_max, most(&then), most(&otherwise)) {
+                        (Some(sum), Some(a), Some(b)) => sum.checked_add(a.max(b)),
+                        _ => None,
+                    };
+                    walk.program
+                        .push(Event::Arm(u32::try_from(shared.arms.len()).ok()?));
+                    shared.arms.push(Arms {
+                        then: lean(then.program),
+                        otherwise: lean(otherwise.program),
+                        then_fixed: then.fixed,
+                        otherwise_fixed: otherwise.fixed,
+                    });
+                    if !define(&mut walk.defined, cond.ix()) {
+                        return None;
+                    }
+                    pc = else_end;
+                    continue;
+                }
+                _ => return None,
+            }
+            pc += 1;
+        }
+        Some(())
     }
 
     /// Operator `lib` called on the `count` registers from `start`, which a
@@ -979,11 +1232,51 @@ impl Formation<'_> {
             }
             _ => None,
         };
-        if function.operation() || entry.depth() > 0 {
-            gathered.depth = Some(gathered.depth.unwrap_or(0).max(entry.depth()));
+        // An installed native answers where the entry declines: its heap
+        // paths never run.
+        let deepest = match function.run {
+            LibRun::Native { .. } => entry.depth(),
+            _ => entry.deepest(self.lowered.lib, self.lowered.lib_of),
+        };
+        if function.operation() || deepest > 0 {
+            gathered.depth = Some(gathered.depth.unwrap_or(0).max(deepest));
         }
         Some(())
     }
+}
+
+/// What a statement's walk, or an arm's, has seen so far: which registers
+/// hold a value not yet used, the fixed units and the formulas' most it
+/// charges on its path, its program and whether it allocates.
+struct Walk {
+    defined: Vec<bool>,
+    fixed: u64,
+    formula_max: Option<u64>,
+    program: Vec<Event>,
+    allocates: bool,
+}
+
+/// What a statement's walk and its arms share: the slots read, the invoke
+/// occurrences, the arms and the open expression variables.
+#[derive(Default)]
+struct Shared {
+    reads: Vec<RegionSlot>,
+    calls: Vec<usize>,
+    arms: Vec<Arms>,
+    /// Each open expression variable's frame position and the register
+    /// its body's value goes to.
+    lets: Vec<(u32, usize)>,
+}
+
+/// Where the arms of the conditional whose `JumpIfFalse` at `pc` skips
+/// `skip` ops end: the then-arm runs to its `Jump` before the first, the
+/// else-arm from there to the second.
+pub(crate) fn arm_ends(stream: &Stream, pc: u32, skip: u32) -> Option<(u32, u32)> {
+    let then_end = pc.checked_add(1)?.checked_add(skip)?;
+    let Op::Jump { skip: rest } = *stream.ops.get(then_end.checked_sub(1)? as usize)? else {
+        return None;
+    };
+    Some((then_end, then_end.checked_add(rest)?))
 }
 
 /// `program` without the zero-unit events the reference never records.
@@ -1009,356 +1302,7 @@ fn take(defined: &mut [bool], at: usize) -> bool {
         .is_some_and(|held| std::mem::replace(held, false))
 }
 
-/// The plan's check against the lowered code: the summaries in the order
-/// [`LoopPlan::verify`] numbers them, and the calls their ops make.
-struct Check<'a, 'l> {
-    lowered: &'a Lowered<'l>,
-    statement: usize,
-    calls: Vec<usize>,
-    /// The session bindings the ops use, in the order they first use them.
-    sessions: Gathered,
-}
-
-impl Check<'_, '_> {
-    /// Checks `summary`, the next statement, charged `head` before its ops
-    /// and ending as `end`.
-    fn summary(&mut self, summary: &Summary, head: Weight, end: End) -> Result<(), Refused> {
-        let index = self.statement;
-        self.statement += 1;
-        let stream = self.lowered.stream;
-        let mut expected = vec![Event::Fixed(head)];
-        let mut calls = Vec::new();
-        let (mut reads, mut write) = (Vec::new(), None);
-        let ops = stream
-            .ops
-            .get(summary.ops.start as usize..summary.ops.end() as usize)
-            .ok_or(Refused::Program { statement: index })?;
-        if !end.ends(ops.last()) {
-            return Err(Refused::Shape { statement: index });
-        }
-        let mut allocates = false;
-        let mut bounded = true;
-        for op in ops {
-            allocates |= general(stream, self.lowered.lib, *op);
-            match *op {
-                Op::Region { region, total } => {
-                    let stated = stream
-                        .regions
-                        .summary(region.0)
-                        .map_err(|_| Refused::Region { region: region.0 })?;
-                    if u64::from(total) != stated.total() {
-                        return Err(Refused::Region { region: region.0 });
-                    }
-                    expected.extend(
-                        stream
-                            .regions
-                            .events(region.0)
-                            .iter()
-                            .map(|event| Event::Fixed(event.weight)),
-                    );
-                }
-                Op::Operator { lib, args } => {
-                    bounded &= scalar_site((self.lowered.lib)(LibId(lib.0)), args.len as usize);
-                    expected.push(Event::Formula);
-                }
-                Op::Call { .. } => {
-                    bounded = false;
-                    expected.push(Event::Formula);
-                }
-                Op::Act => {
-                    let id = summary.action.ok_or(Refused::Shape { statement: index })?;
-                    let (action, lib, args) = library_invoke(&(self.lowered.stmt)(id).form)
-                        .ok_or(Refused::Shape { statement: index })?;
-                    for arg in args {
-                        match arg {
-                            super::Atom::Var(super::Var::Local(local)) => {
-                                reads.push(RegionSlot::Frame(local.at));
-                            }
-                            super::Atom::Var(super::Var::Session(name)) => {
-                                reads.push(self.sessions.session(name));
-                            }
-                            _ => {}
-                        }
-                        expected.push(Event::Fixed(Weight::Atomic(1)));
-                    }
-                    if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
-                        calls.push(action.occurrence);
-                    }
-                    let scalar = scalar_site((self.lowered.lib)(lib), args.len());
-                    bounded &= scalar;
-                    allocates |= !scalar;
-                    expected.push(Event::Formula);
-                }
-                Op::Nested { act, args } => {
-                    if let Some(nested) = stream.nested.get(act.ix()) {
-                        if matches!(nested.kind, NestedKind::Call(_))
-                            && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
-                        {
-                            calls.push(nested.occurrence);
-                        }
-                        if let Some(lib) = nested.kind.operator_lib() {
-                            bounded &= scalar_site((self.lowered.lib)(lib), args.len as usize);
-                        }
-                    }
-                    expected.push(Event::Formula);
-                }
-                Op::Local { local, .. } => reads.push(RegionSlot::Frame(local.at)),
-                Op::Session { name, .. } => {
-                    let name = stream
-                        .names
-                        .get(name.ix())
-                        .ok_or(Refused::Slots { statement: index })?;
-                    reads.push(self.sessions.session(name));
-                }
-                Op::WriteLocal { local, .. } | Op::Bind { local, .. } => {
-                    write = Some(RegionSlot::Frame(local.at));
-                }
-                Op::WriteSession { name, .. } => {
-                    let name = stream
-                        .names
-                        .get(name.ix())
-                        .ok_or(Refused::Slots { statement: index })?;
-                    write = Some(self.sessions.session(name));
-                }
-                _ => {}
-            }
-        }
-        if *summary.reads != *reads || summary.write != write {
-            return Err(Refused::Slots { statement: index });
-        }
-        if summary.general != allocates || summary.formula_max.is_some() != bounded {
-            return Err(Refused::Allocates { statement: index });
-        }
-        if *summary.calls != *calls {
-            return Err(Refused::Calls);
-        }
-        self.calls.extend(calls);
-        self.program(summary, expected, index)
-    }
-
-    /// Checks that `summary`'s program is `expected` and that its fixed
-    /// units are that program's.
-    fn program(
-        &self,
-        summary: &Summary,
-        expected: Vec<Event>,
-        index: usize,
-    ) -> Result<(), Refused> {
-        if *summary.program != *lean(expected) {
-            return Err(Refused::Program { statement: index });
-        }
-        let fixed = summary
-            .program
-            .iter()
-            .map(|event| match event {
-                Event::Fixed(weight) => weight.units(),
-                Event::Formula => 0,
-            })
-            .sum::<u64>();
-        if fixed != summary.fixed {
-            return Err(Refused::Fixed { statement: index });
-        }
-        Ok(())
-    }
-
-    /// Checks `body` against block `block`'s statements and declarations.
-    fn body(&mut self, body: &Body, block: BlockId) -> Result<(), Refused> {
-        let lowered = (self.lowered.block)(block);
-        let shape = Refused::Shape {
-            statement: self.statement,
-        };
-        if body.block != block
-            || *body.declares != *lowered.declares
-            || body.steps.len() != lowered.stmts.len()
-        {
-            return Err(shape);
-        }
-        // Past the block's first statement the region leaves, it leaves
-        // every statement.
-        let mut left = false;
-        for (step, id) in body.steps.iter().zip(&lowered.stmts) {
-            let statement = (self.lowered.stmt)(*id);
-            if left && !matches!(step, Step::Leave) {
-                return Err(Refused::Shape {
-                    statement: self.statement,
-                });
-            }
-            // Each statement's summary covers exactly its own ops.
-            let own = match step {
-                Step::Write(summary)
-                | Step::Bind(summary)
-                | Step::Continue(summary)
-                | Step::Store(summary)
-                | Step::Discard(summary) => {
-                    summary.ops == statement.ops
-                        && summary.action
-                            == matches!(statement.form, Form::Action(_)).then_some(*id)
-                }
-                Step::If { test, .. } => test.ops == statement.ops,
-                Step::Leave => true,
-            };
-            if !own {
-                return Err(Refused::Shape {
-                    statement: self.statement,
-                });
-            }
-            let unit = Weight::Atomic(1);
-            match (step, &statement.form) {
-                (Step::Write(summary), Form::Plain | Form::Action(_)) => {
-                    self.summary(summary, unit, End::Write)?;
-                }
-                (Step::Bind(summary), Form::Plain | Form::Action(_)) => {
-                    self.summary(summary, unit, End::Bind)?;
-                }
-                (Step::Continue(summary), Form::Plain) => {
-                    self.summary(summary, unit, End::Continue)?;
-                }
-                (Step::Store(summary), Form::Plain) => self.summary(summary, unit, End::Store)?,
-                (Step::Discard(summary), Form::Plain) => {
-                    self.summary(summary, unit, End::Discard)?;
-                }
-                // A region leaves to the reference only a barrier, and what
-                // follows one.
-                (Step::Leave, _) if left || barrier(self.lowered, statement) => {
-                    left = true;
-                }
-                (
-                    Step::If {
-                        test,
-                        then,
-                        otherwise,
-                    },
-                    Form::If {
-                        then_block,
-                        else_block,
-                    },
-                ) => {
-                    self.summary(test, unit, End::Branch)?;
-                    self.body(then, *then_block)?;
-                    self.body(otherwise, *else_block)?;
-                }
-                _ => {
-                    return Err(Refused::Shape {
-                        statement: self.statement,
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
 impl LoopPlan {
-    /// Checks the plan against `lowered` and the cost table's `loop_test`:
-    /// its head is its loop's, its body's statements, arms and
-    /// declarations are the blocks', it leaves only barriers to the
-    /// reference, each summary's fixed units are its program's fixed
-    /// events, every region's head states the total its `RegionSummary`
-    /// gives, the programs are the stream's events in order, each summary
-    /// allocates where its ops do, and the iteration maximum is the
-    /// head's, the dearest path's and the loop-test unit's sum, or 0 for
-    /// an allocating plan. Summaries are numbered in order: the head 0,
-    /// then the body's statements depth first.
-    pub(crate) fn verify(&self, lowered: &Lowered<'_>, loop_test: u64) -> Result<(), Refused> {
-        if self.loop_test != loop_test {
-            return Err(Refused::LoopTest);
-        }
-        let mut check = Check {
-            lowered,
-            statement: 0,
-            calls: Vec::new(),
-            sessions: Gathered::default(),
-        };
-        let statement = (lowered.stmt)(self.stmt);
-        let head = Refused::Shape { statement: 0 };
-        let (block, binds) = match (&self.head, &statement.form) {
-            (
-                Head::While(test),
-                Form::While {
-                    metered,
-                    test: ops,
-                    body,
-                    ..
-                },
-            ) => {
-                if test.ops != *ops {
-                    return Err(head);
-                }
-                check.summary(test, Weight::Atomic(*metered), End::Test)?;
-                (*body, false)
-            }
-            (
-                Head::For {
-                    charge,
-                    binding,
-                    item,
-                },
-                Form::For {
-                    metered,
-                    binding: bound,
-                    via,
-                    body,
-                    ..
-                },
-            ) => {
-                if *binding != bound.at
-                    || bound.shared
-                    || *item != via.and_then(|via| via.item)
-                    || charge.write != Some(RegionSlot::Frame(bound.at))
-                    || !charge.reads.is_empty()
-                {
-                    return Err(head);
-                }
-                let scalar = item.is_none_or(|item| scalar_site((lowered.lib)(item), 2));
-                if charge.general != !scalar || charge.formula_max.is_none() == scalar {
-                    return Err(Refused::Allocates { statement: 0 });
-                }
-                let mut expected = vec![Event::Fixed(Weight::Atomic(*metered))];
-                expected.extend(item.map(|_| Event::Formula));
-                check.statement += 1;
-                check.program(charge, expected, 0)?;
-                (*body, true)
-            }
-            _ => return Err(head),
-        };
-        check.body(&self.body, block)?;
-        if self.binds != (binds || self.body.binds()) {
-            return Err(Refused::Shape { statement: 0 });
-        }
-        if matches!(self.body.steps.first(), None | Some(Step::Leave)) {
-            return Err(Refused::Shape { statement: 1 });
-        }
-        let allocates = self.head.summary().allocates() || self.body.allocates();
-        if self.allocates != allocates {
-            return Err(Refused::Allocates { statement: 0 });
-        }
-        let iteration = if allocates {
-            Some(0)
-        } else {
-            self.head
-                .summary()
-                .max()
-                .zip(self.body.max())
-                .and_then(|(head, body)| head.checked_add(body)?.checked_add(loop_test))
-        };
-        if iteration != Some(self.iteration_max) {
-            return Err(Refused::Iteration);
-        }
-        if *self.calls != *check.calls {
-            return Err(Refused::Calls);
-        }
-        let named = |sessions: &[BindingName]| {
-            sessions
-                .iter()
-                .map(|session| session.name.clone())
-                .collect::<Vec<_>>()
-        };
-        if named(&self.sessions) != named(&check.sessions.sessions) {
-            return Err(Refused::Slots { statement: 0 });
-        }
-        Ok(())
-    }
-
     /// The plan as stated, uncompiled: what a law misstates.
     #[cfg(test)]
     pub(crate) fn copied(&self) -> Self {
@@ -1481,7 +1425,14 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
                 },
                 Step::Continue(summary) => CompiledStep::Continue(summary.into()),
                 Step::Store(summary) => {
-                    let mut compiled = nodes::compile(stream, libs, summary.ops)?;
+                    let act = match summary.action {
+                        Some(id) => {
+                            let (_, target, args) = library_invoke(&libs.exe.stmt(id).form)?;
+                            Some(nodes::action(libs, target, args)?)
+                        }
+                        None => None,
+                    };
+                    let mut compiled = nodes::compile_from(stream, libs, summary.ops, act)?;
                     let (roles, place) = match compiled.last {
                         Op::SetIndex { target, src } => (
                             [

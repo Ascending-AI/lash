@@ -33,8 +33,8 @@ use super::loops::{Cursor, Header};
 use super::ops::Flow;
 use super::{Control, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, Executable,
-    LoopPlan, Meter, NESTING, Role, SessionSlot, UNPRODUCTIVE, scalar, store,
+    Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event,
+    Executable, LoopPlan, Meter, NESTING, Role, SessionSlot, Taken, UNPRODUCTIVE, scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -96,6 +96,11 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     priced: bool,
     /// The session writes the region made.
     writes: u64,
+    /// Where it stopped, an operator left its operand kind to the
+    /// reference ([`Cx::declined`]).
+    declined: bool,
+    /// Where it stopped, the iteration had committed a body statement.
+    progressed: bool,
 }
 
 impl KernelMachine {
@@ -245,6 +250,8 @@ impl KernelMachine {
                 room: NURSERY,
                 transient: 0,
                 fault: None,
+                lets: Vec::new(),
+                declined: false,
             },
             charged: &mut self.charged,
             tape,
@@ -258,6 +265,8 @@ impl KernelMachine {
             missed: false,
             priced: memory,
             writes: 0,
+            declined: false,
+            progressed: false,
         };
         let (started, stepped, stopped) = run.batch(plan, compiled, walk, bound, slice_end)?;
         let Run {
@@ -266,12 +275,19 @@ impl KernelMachine {
             cx,
             missed,
             writes,
+            declined,
+            progressed,
             ..
         } = run;
         // An entry that missed a guard before an iteration ended was
-        // unproductive; one that ended an iteration was not.
-        if stopped && missed && started <= 1 {
-            plan.unproductive.fetch_add(1, Relaxed);
+        // unproductive; one that ended an iteration was not. One that
+        // committed a body statement first, before a key the loop has not
+        // yet written, for one, weighs less. A kind an operator leaves to
+        // the reference stops the entry as a barrier does: unproductive
+        // only where nothing ran before it.
+        if stopped && started <= 1 && (missed || declined && !progressed) {
+            let weight = if progressed { 1 } else { BARREN };
+            plan.unproductive.fetch_add(weight, Relaxed);
         } else if started > 1 {
             plan.unproductive.store(0, Relaxed);
         }
@@ -550,7 +566,12 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 }
             };
             if !ran {
-                self.missed = tried && !matches!(step, CompiledStep::Leave);
+                // A statement before it, or the `if` whose arm it stands
+                // in, committed; a decline ends the run, so it is this
+                // statement's.
+                self.progressed = depth > 0 || index > 0;
+                self.declined = self.cx.declined;
+                self.missed = tried && !matches!(step, CompiledStep::Leave) && !self.declined;
                 if self.cx.fault.is_some() {
                     return Err(fault("a region's fault ended its iteration"));
                 }
@@ -573,7 +594,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         };
         if !ALLOC {
             // A scalar plan's write never grows its slot.
-            if self.cx.arena.cost_of(&value) > self.cx.arena.cost_of(old) {
+            if self.cx.arena.grows(&value, old) {
                 return Ok(false);
             }
         } else if let (new, old) = (
@@ -754,7 +775,12 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         }
         *self.charged += commit.fixed + self.cx.meter.units;
         if let Some(tape) = self.tape {
-            record(tape, &commit.program, &self.cx.meter.formulas);
+            record(
+                tape,
+                &commit.program,
+                &commit.arms,
+                &mut self.cx.meter.taken.iter(),
+            );
         }
         if ALLOC {
             self.due |= *self.charged >= self.admit.slice_end;
@@ -784,16 +810,32 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     }
 }
 
-/// Records `program` with its formulas' units `formulas`, in order: what
-/// the reference's anchors record for the same statement.
+/// Records `program` with what the statement's run took, in order: each
+/// formula's units and each conditional's arm, whose own program `arms`
+/// holds. This is what the reference's anchors record for the statement.
 #[cold]
 #[inline(never)]
-fn record(tape: &ChargeTape, program: &[Event], formulas: &[u64]) {
-    let mut formulas = formulas.iter();
+fn record(
+    tape: &ChargeTape,
+    program: &[Event],
+    arms: &[Arms],
+    taken: &mut std::slice::Iter<'_, Taken>,
+) {
     for event in program {
         let weight = match event {
             Event::Fixed(weight) => *weight,
-            Event::Formula => Weight::Atomic(formulas.next().copied().unwrap_or(0)),
+            Event::Formula => match taken.next() {
+                Some(Taken::Formula(units)) => Weight::Atomic(*units),
+                _ => Weight::Atomic(0),
+            },
+            Event::Arm(index) => {
+                if let (Some(Taken::Arm(arm)), Some(conditional)) =
+                    (taken.next(), arms.get(*index as usize))
+                {
+                    record(tape, conditional.arm(*arm).0, arms, taken);
+                }
+                continue;
+            }
         };
         if weight != Weight::Atomic(0) {
             tape.push(weight);

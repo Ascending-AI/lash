@@ -602,6 +602,19 @@ impl Arena {
         }
     }
 
+    /// Whether `new` written where `old` is held costs more than `old`:
+    /// [`Arena::cost_of`] of each, with the scalar kinds priced in place.
+    #[inline]
+    pub fn grows(&self, new: &Value, old: &Value) -> bool {
+        match (new, old) {
+            (Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent, _) => false,
+            (Value::Int(new), Value::Int(old)) => {
+                !self.unaccounted && word_bytes(*new) > word_bytes(*old)
+            }
+            _ => self.cost_of(new) > self.cost_of(old),
+        }
+    }
+
     /// Logical pricing for a caller already dispatched to the accounted stream.
     #[inline]
     pub fn cost_of_metered(&self, value: &Value) -> u64 {

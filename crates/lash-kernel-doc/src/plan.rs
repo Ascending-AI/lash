@@ -73,16 +73,66 @@ pub struct HelperPlan {
     pub template: Option<HelperTemplate>,
 }
 
-/// A helper's scalar paths specialized from its body at build time.
+/// A helper's paths over immediates: its arguments and the template's
+/// resolved prepared natives, answering where a path applies.
+pub type ImmediateEntry = fn(&[Value], &[crate::PreparedNative]) -> Option<Value>;
+
+/// A helper's typed paths specialized from its body at build time.
 /// Callees are resolved once when the library is prepared; a missing or
 /// guarded native leaves the helper on its ordinary plan or body.
 #[derive(Debug)]
 pub struct HelperTemplate {
-    pub entry: fn(&[Value], &[crate::PreparedNative]) -> Option<Value>,
+    /// The paths over immediates alone, when any reduce to certified
+    /// native entries.
+    pub entry: Option<ImmediateEntry>,
     pub callees: &'static [FunctionId],
     /// Conservative extra call-depth headroom, including the helper.
     /// Near the bound the body preserves the exact refusal and its name.
     pub depth: u32,
+    /// The paths that read, build or write arena objects, when any do.
+    pub heap: Option<HeapTemplate>,
+}
+
+/// A helper's paths that reach the arena: each reads, builds and writes
+/// through a [`TemplateHeap`] the body's own forms in the body's order,
+/// and declines where the body would raise, park, reach guest code or do
+/// what the template does not. A path's last fallible step precedes its
+/// one write, if it writes: a path that declines has written nothing. Its
+/// immediate calls use the template's resolved prepared natives
+/// ([`HelperTemplate::callees`]), its other calls the general call of
+/// `callees`.
+#[derive(Debug)]
+pub struct HeapTemplate {
+    pub entry: fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>,
+    /// The natives its paths call through [`TemplateHeap::call`], by index.
+    pub callees: &'static [FunctionId],
+    /// Conservative extra call-depth headroom, including the helper.
+    pub depth: u32,
+}
+
+/// What a heap path reads, builds and writes with: the forms a helper body
+/// performs on the arena, as the machine performs them for the body. Each
+/// answers `None`, having changed nothing a run sees, where the body's form
+/// would raise or the arena must decode first; the path then declines.
+pub trait TemplateHeap {
+    /// The general call of [`HeapTemplate::callees`]`[callee]` on `args`,
+    /// uncharged, as a body's own call of a native or invoke of a helper is.
+    fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value>;
+    /// The body's variable declared with `value`, or assigned it over
+    /// `previous`: the memory the plan's variable grows by, held as the
+    /// plan holds it once the path answers.
+    fn bind(&mut self, value: Value, previous: Option<Value>) -> Option<()>;
+    /// An alternative path begins: what an earlier one declared is not its.
+    fn path(&mut self);
+    /// `target[index]`.
+    fn index(&mut self, target: Value, index: Value) -> Option<Value>;
+    /// `target.field`.
+    fn field(&mut self, target: Value, field: &str) -> Option<Value>;
+    /// The tuple of `items`.
+    fn tuple(&mut self, items: &[Value]) -> Option<Value>;
+    /// `set target[index] = value`: its growth held and what it changes
+    /// marked dirty, or nothing written.
+    fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()>;
 }
 
 /// A callback site: an action of the body where the plan may yield, and

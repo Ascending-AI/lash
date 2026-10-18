@@ -35,11 +35,13 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
     let block = |id| exe.block(id);
     let stmt = |id| exe.stmt(id);
     let lib = |id| exe.lib(id);
+    let lib_of = |function: &_| exe.library_lib(function);
     let lowered = Lowered {
         stream,
         block: &block,
         stmt: &stmt,
         lib: &lib,
+        lib_of: &lib_of,
     };
     assert_eq!(plan.verify(&lowered, loop_test), Ok(()));
     // Another cost table's loop test is not this plan's.

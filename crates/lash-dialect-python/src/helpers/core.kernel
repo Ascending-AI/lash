@@ -289,6 +289,10 @@ body {
   if same(k, "text") {
     return value
   }
+  # An integer's text is its repr, spelled without the repr's closure.
+  if same(k, "integer") {
+    return num.to_text(value)
+  }
   if same(k, "error") {
     return value.message
   }
@@ -958,8 +962,9 @@ body {
 }
 
 # A subscript as a position in a sequence of `length`: an integer, counted
-# from the end when negative.
-function py.index(index: Any, length: Int, what: Text, problem: Text) -> Int
+# from the end when negative. `verb` names the access in the IndexError,
+# " assignment" for a store.
+function py.index(index: Any, length: Int, what: Text, verb: Text) -> Int
 kernel 1
 charge 6
 body {
@@ -977,6 +982,7 @@ body {
     set inside = lt(position, length)
   }
   if bool.not(inside) {
+    let problem = text.join([what, verb, " index out of range"], "")
     do invoke py.fail("IndexError", problem)
   }
   return position
@@ -1006,17 +1012,17 @@ body {
   }
   if same(k, "list") {
     let hoisted10 = list.len(target)
-    let position = invoke py.index(index, hoisted10, "list", "list index out of range")
+    let position = invoke py.index(index, hoisted10, "list", "")
     return target[position]
   }
   if same(k, "tuple") {
     let hoisted11 = tuple.len(target)
-    let position = invoke py.index(index, hoisted11, "tuple", "tuple index out of range")
+    let position = invoke py.index(index, hoisted11, "tuple", "")
     return target[position]
   }
   if same(k, "text") {
     let hoisted12 = text.len(target)
-    let position = invoke py.index(index, hoisted12, "string", "string index out of range")
+    let position = invoke py.index(index, hoisted12, "string", "")
     return text.get(target, position)
   }
   let name = invoke py.type(target)
@@ -1036,7 +1042,7 @@ body {
   }
   if same(k, "list") {
     let hoisted14 = list.len(target)
-    let position = invoke py.index(index, hoisted14, "list", "list assignment index out of range")
+    let position = invoke py.index(index, hoisted14, "list", " assignment")
     set target[position] = value
     return null
   }
@@ -1061,7 +1067,7 @@ body {
   }
   if same(k, "list") {
     let hoisted16 = list.len(target)
-    let position = invoke py.index(index, hoisted16, "list", "list assignment index out of range")
+    let position = invoke py.index(index, hoisted16, "list", " assignment")
     remove target[position]
     return null
   }

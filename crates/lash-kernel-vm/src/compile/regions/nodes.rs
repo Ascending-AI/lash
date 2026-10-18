@@ -19,6 +19,7 @@ use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
+use lash_kernel_doc::plan::TemplateHeap;
 use lash_kernel_doc::{
     Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, Value, WorkCounter,
 };
@@ -27,8 +28,8 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::PagedHeap;
 
 use super::super::{
-    BindingName, BlockId, Charge, Constant, Executable, Lib, LibId, LibRun, Plan, ReadSite, Source,
-    Stream, find_property,
+    BindingName, BlockId, Charge, Constant, Executable, INNER, Lib, LibId, LibRun, Plan, ReadSite,
+    Source, Stream, find_property, inner_entry as inner,
 };
 use crate::machine::SlotState;
 use crate::machine::registers::Arguments;
@@ -36,25 +37,35 @@ use crate::machine::sites::SiteCaches;
 
 /// What a compiled expression charges as it runs.
 pub(crate) struct Meter {
-    /// Its formulas' units.
+    /// Its formulas' units, and the fixed units of the conditional arms
+    /// it took.
     pub(crate) units: u64,
-    /// Each formula's units, in order, when a charge tape records them.
-    pub(crate) formulas: Vec<u64>,
+    /// Each formula's units and each arm taken, in order, when a charge
+    /// tape records them.
+    pub(crate) taken: Vec<Taken>,
     record: bool,
+}
+
+/// What a statement's run chose of its static program: a formula's units,
+/// or the arm a conditional took.
+#[derive(Clone, Copy)]
+pub(crate) enum Taken {
+    Formula(u64),
+    Arm(bool),
 }
 
 impl Meter {
     pub(crate) fn new(record: bool) -> Self {
         Self {
             units: 0,
-            formulas: Vec::new(),
+            taken: Vec::new(),
             record,
         }
     }
 
     pub(crate) fn reset(&mut self) {
         self.units = 0;
-        self.formulas.clear();
+        self.taken.clear();
     }
 
     /// A scalar table's formula: its units are bounded, and the plan's
@@ -63,7 +74,7 @@ impl Meter {
     fn formula(&mut self, units: u64) {
         self.units += units;
         if self.record {
-            self.formulas.push(units);
+            self.taken.push(Taken::Formula(units));
         }
     }
 
@@ -73,7 +84,17 @@ impl Meter {
     fn measured(&mut self, units: u64) {
         self.units = self.units.saturating_add(units);
         if self.record {
-            self.formulas.push(units);
+            self.taken.push(Taken::Formula(units));
+        }
+    }
+
+    /// A conditional took its arm `taken`, whose fixed units are `fixed`:
+    /// its summary's most bounds them with the dearer arm's.
+    #[inline(always)]
+    fn arm(&mut self, taken: bool, fixed: u64) {
+        self.units = self.units.saturating_add(fixed);
+        if self.record {
+            self.taken.push(Taken::Arm(taken));
         }
     }
 }
@@ -118,6 +139,14 @@ pub(crate) struct Cx<'a> {
     pub(crate) transient: u64,
     /// The fault a node met, which ends the run: a miss is no fault.
     pub(crate) fault: Option<HeapFault>,
+    /// The running statement's expression variables, innermost last: each
+    /// frame position and its value, which the reference's frame holds
+    /// from its declaration to its end, inside the statement.
+    pub(crate) lets: Vec<(u32, Value)>,
+    /// The running statement met an operand kind its operator's heap
+    /// paths leave to the general call, before they built anything: the
+    /// reference's own, as a barrier is.
+    pub(crate) declined: bool,
 }
 
 impl Cx<'_> {
@@ -270,6 +299,17 @@ impl Cx<'_> {
     /// parameter, as the reference's call answers it: charged its formula
     /// when it answers, a miss when it raises, declines or asks again.
     fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
+        let value = self.answered(function, args.clone())?;
+        let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
+        self.meter.measured(units);
+        Some(value)
+    }
+
+    /// The general call of native `function` on `args`, one per
+    /// parameter, uncharged, as a helper body's own call is: what it built
+    /// installed, its work and its value reserved until the statement
+    /// ends; a miss when it raises, declines or asks again.
+    fn answered(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let LibRun::Native { native, .. } = &function.run else {
             return None;
         };
@@ -309,18 +349,49 @@ impl Cx<'_> {
         {
             return None;
         }
-        let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
-        self.meter.measured(units);
         Some(value)
     }
 
     /// Operator `function`'s call on `args`: its prepared entry, charged
-    /// as the reference's prepared answer is, or the native's general
-    /// call where the entry declines.
+    /// as the reference's prepared answer is; where the entry declines,
+    /// its native's general call, or the heap paths of a template whose
+    /// body runs.
     fn operate(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
-        let Some(answer) = entry.answer(&self.args[args.clone()], true) else {
-            return self.native(function, args);
+        let answer = match entry.answer(&self.args[args.clone()], true) {
+            Some(answer) => answer,
+            // An installed native answers first, as the reference's call.
+            None if matches!(function.run, LibRun::Native { .. }) => {
+                return self.native(function, args);
+            }
+            None => match entry.heap(&|function| self.exe.library_lib(function)) {
+                // A heap path that declines has written nothing; what it
+                // built is a miss's garbage, so the statement misses. One
+                // that built nothing leaves its kind to the reference.
+                Some((heap, callees, natives)) => {
+                    // The paths hold the context, so they read a copy of
+                    // the operands.
+                    let mut operands = [Value::Absent; HEAP_ARITY];
+                    let operands = operands.get_mut(..args.len())?;
+                    operands.copy_from_slice(&self.args[args.clone()]);
+                    let mut paths = HeapCx::new(self, callees, 0);
+                    let value = (heap.entry)(&mut paths, operands, natives);
+                    if paths.spoiled || value.is_none() {
+                        let declined = !paths.built;
+                        paths.release();
+                        self.declined = declined;
+                        return None;
+                    }
+                    // What the path's plan variables grew by is held, its
+                    // reservation the credit the growth spends.
+                    let bound = paths.bound;
+                    if !self.hold(bound) {
+                        return None;
+                    }
+                    value?.into()
+                }
+                None => return self.native(function, args),
+            },
         };
         let value = answer.value;
         if !self.pin(&value) {
@@ -372,6 +443,169 @@ pub(crate) fn measured_formula(
     (!failed).then_some(units)
 }
 
+/// The most parameters a heap path's callee takes.
+const HEAP_ARITY: usize = 8;
+
+/// A template's heap paths over a region's context: their general calls
+/// by the template's resolved callees, a body-run helper's answered by its
+/// entry, `level` helpers below the operator's. A form that declines
+/// after the arena grew spoils the paths: what it built would outlive a
+/// later alternative, so the statement misses. `bound` is what the running
+/// path's plan variables grew by, reserved until the statement ends; what a
+/// declined path reserved is released to `mark`, the statement's credit and
+/// the region's reservations where the paths began. `built` is whether a
+/// call answered an object, or a tuple or a store was made.
+struct HeapCx<'c, 'a> {
+    cx: &'c mut Cx<'a>,
+    callees: &'c [LibId],
+    level: u32,
+    spoiled: bool,
+    built: bool,
+    bound: u64,
+    mark: (u64, u64),
+}
+
+impl<'c, 'a> HeapCx<'c, 'a> {
+    fn new(cx: &'c mut Cx<'a>, callees: &'c [LibId], level: u32) -> Self {
+        let mark = (cx.heap.statement_reserved(), cx.transient);
+        Self {
+            cx,
+            callees,
+            level,
+            spoiled: false,
+            built: false,
+            bound: 0,
+            mark,
+        }
+    }
+
+    /// What the paths reserved is released: a declined path changed
+    /// nothing a run sees.
+    fn release(&mut self) {
+        if !self.cx.memory {
+            return;
+        }
+        if let Err(fault) = self.cx.heap.release_reserved_to(self.mark.0) {
+            self.cx.fault = Some(fault);
+        }
+        self.cx.transient = self.mark.1;
+    }
+
+    /// `form`'s value, the paths spoiled where it declines after growth.
+    fn grown<T>(&mut self, form: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        let room = self.cx.room;
+        let value = form(self);
+        self.spoiled |= value.is_none() && self.cx.room != room;
+        value
+    }
+
+    /// Body-run helper `function`'s answer on `args` by its entry: its
+    /// immediate paths, then, above [`INNER`], its heap paths.
+    fn inner(&mut self, function: &Lib, args: &[Value]) -> Option<Value> {
+        let entry = inner(function)?;
+        let value = match entry.call(args) {
+            Some(value) => value,
+            None if self.level < INNER => {
+                let exe = self.cx.exe;
+                let (heap, callees, natives) = entry.heap(&|function| exe.library_lib(function))?;
+                let mut paths = HeapCx::new(self.cx, callees, self.level + 1);
+                let value = (heap.entry)(&mut paths, args, natives);
+                self.spoiled |= paths.spoiled;
+                let Some(value) = value else {
+                    paths.release();
+                    return None;
+                };
+                self.bound += paths.bound;
+                value
+            }
+            None => return None,
+        };
+        self.cx.pin(&value).then_some(value)
+    }
+}
+
+impl TemplateHeap for HeapCx<'_, '_> {
+    fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {
+        let exe = self.cx.exe;
+        let function = exe.lib(*self.callees.get(callee)?);
+        // One argument per parameter, absent past those given; a callee
+        // with more parameters than a heap path passes is the reference's.
+        let mut given = [Value::Absent; HEAP_ARITY];
+        let given = given.get_mut(..function.arity)?;
+        given.get_mut(..args.len())?.copy_from_slice(args);
+        let given = &*given;
+        let value = self.grown(|paths| match inner(function) {
+            Some(_) => paths.inner(function, given),
+            None => {
+                let cx = &mut *paths.cx;
+                let window = cx.argument_window(given.len())?;
+                for (index, value) in given.iter().enumerate() {
+                    cx.args.put(window.start + index, *value);
+                }
+                let value = cx.answered(function, window.clone());
+                cx.args.release(window.start);
+                value
+            }
+        });
+        self.built |= value.as_ref().and_then(Value::handle).is_some();
+        value
+    }
+
+    fn bind(&mut self, value: Value, previous: Option<Value>) -> Option<()> {
+        if !self.cx.memory {
+            return Some(());
+        }
+        let arena = &*self.cx.arena;
+        let grows = arena
+            .cost_of_metered(&value)
+            .saturating_sub(previous.map_or(0, |previous| arena.cost_of_metered(&previous)));
+        if !self.cx.reserve(grows) {
+            return None;
+        }
+        self.bound += grows;
+        Some(())
+    }
+
+    fn path(&mut self) {
+        self.release();
+        self.bound = 0;
+    }
+
+    fn index(&mut self, target: Value, index: Value) -> Option<Value> {
+        read_index(self.cx, None, target, index)
+    }
+
+    fn field(&mut self, target: Value, field: &str) -> Option<Value> {
+        match target {
+            Value::Record(_) => read_index(
+                self.cx,
+                None,
+                target,
+                Value::Text(lash_kernel_doc::arena::ShortText::new(field)?),
+            ),
+            Value::Error(error) => error_field(self.cx, error, field),
+            _ => None,
+        }
+    }
+
+    fn tuple(&mut self, items: &[Value]) -> Option<Value> {
+        self.grown(|paths| {
+            let cx = &mut *paths.cx;
+            let tuple = cx
+                .arena
+                .tuple(items.to_vec(), cx.limits.value_depth())
+                .ok()?;
+            cx.pin(&tuple).then_some(tuple)
+        })
+        .inspect(|_| self.built = true)
+    }
+
+    fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()> {
+        self.grown(|paths| store(paths.cx, &Place::Index, target, index, value))
+            .inspect(|_| self.built = true)
+    }
+}
+
 /// A compiled region expression: it reads the frame's slots and answers
 /// its value, or `None` on a guard miss.
 pub(crate) type Node = Box<dyn Fn(&[SlotState], &mut Cx<'_>) -> Option<Value> + Send + Sync>;
@@ -390,10 +624,13 @@ pub(crate) struct CompiledLoop {
 /// What a compiled statement commits: its fixed units and its static
 /// charge program (§3.1).
 pub(crate) struct Commit {
+    /// The fixed units it charges on every path.
     pub(crate) fixed: u64,
     /// The most the statement charges, when its formulas are bounded.
     pub(crate) max: Option<u64>,
     pub(crate) program: Box<[super::Event]>,
+    /// Its conditionals' arms, which its program names.
+    pub(crate) arms: Box<[super::Arms]>,
     /// The invoke occurrences it advances when it commits.
     pub(crate) calls: Box<[usize]>,
 }
@@ -404,6 +641,7 @@ impl From<&super::Summary> for Commit {
             fixed: summary.fixed,
             max: summary.max(),
             program: summary.program.clone(),
+            arms: summary.arms.clone(),
             calls: summary.calls.clone(),
         }
     }
@@ -561,19 +799,69 @@ impl Compiled {
 /// The ops in `range` of `stream`, up to the op that ends them, as one
 /// node per register.
 pub(super) fn compile(stream: &Stream, libs: &Libs<'_>, range: OpRange) -> Option<Compiled> {
-    let mut regs: Vec<Option<(Node, u32)>> = Vec::new();
-    let set = |regs: &mut Vec<Option<(Node, u32)>>, at: usize, node: Node, done: u32| {
+    compile_from(stream, libs, range, None)
+}
+
+/// The statement in `range`, compiled; a statement-root invoke's `act`,
+/// when given, is its first op's value, in the first register.
+pub(super) fn compile_from(
+    stream: &Stream,
+    libs: &Libs<'_>,
+    range: OpRange,
+    act: Option<Node>,
+) -> Option<Compiled> {
+    let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
+    let last = *ops.last()?;
+    let mut lets = Vec::new();
+    let (from, seeded) = match act {
+        Some(act) if matches!(ops.first(), Some(Op::Act)) => {
+            (range.start + 1, vec![Some((act, 0))])
+        }
+        Some(_) => return None,
+        None => (range.start, Vec::new()),
+    };
+    let span = (range.start, from..range.end() - 1);
+    let (regs, _) = compile_ops(stream, libs, seeded, span, &mut lets)?;
+    if !lets.is_empty() {
+        return None;
+    }
+    Some(Compiled { last, regs })
+}
+
+/// A register's node and where it was completed.
+type Regs = Vec<Option<(Node, u32)>>;
+
+/// The ops `from..end` of `stream`, of a run that starts at `start`, as
+/// one node per register over `regs`, what the run's earlier ops left, and
+/// the fixed units of the charge regions they head outside their own
+/// conditionals' arms. `lets` holds the expression variables open around
+/// them: each frame position, the register its body's value goes to and
+/// the node of its value.
+fn compile_ops(
+    stream: &Stream,
+    libs: &Libs<'_>,
+    mut regs: Regs,
+    (start, ops): (u32, std::ops::Range<u32>),
+    lets: &mut Vec<(u32, usize, Option<Node>)>,
+) -> Option<(Regs, u64)> {
+    let std::ops::Range { start: from, end } = ops;
+    let mut fixed = 0_u64;
+    let set = |regs: &mut Regs, at: usize, node: Node, done: u32| {
         if regs.len() <= at {
             regs.resize_with(at + 1, || None);
         }
         regs[at] = Some((node, done));
     };
-    let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
-    let (last, body) = ops.split_last()?;
-    for (done, op) in body.iter().enumerate() {
-        let done = done as u32;
-        let node = match *op {
-            Op::Region { .. } => continue,
+    let mut pc = from;
+    while pc < end {
+        let done = pc - start;
+        let op = *stream.ops.get(pc as usize)?;
+        pc += 1;
+        let node = match op {
+            Op::Region { total, .. } => {
+                fixed = fixed.checked_add(u64::from(total))?;
+                continue;
+            }
             // A scalar plan's values need no pin.
             Op::Pin { .. } if !libs.general => continue,
             // The reference's pin anchor on the value the statement made.
@@ -585,6 +873,19 @@ pub(super) fn compile(stream: &Stream, libs: &Libs<'_>, range: OpRange) -> Optio
                 });
                 set(&mut regs, src.ix(), node, done);
                 continue;
+            }
+            // A read of an open expression variable is of the value its
+            // declaration holds.
+            Op::Local { dst, local } if lets.iter().any(|(at, _, _)| *at == local.at) => {
+                let at = local.at;
+                let node: Node = Box::new(move |_, cx| {
+                    cx.lets
+                        .iter()
+                        .rev()
+                        .find(|(open, _)| *open == at)
+                        .map(|(_, value)| *value)
+                });
+                (dst.ix(), node)
             }
             Op::Local { dst, local } => {
                 let at = local.at as usize;
@@ -646,11 +947,76 @@ pub(super) fn compile(stream: &Stream, libs: &Libs<'_>, range: OpRange) -> Optio
                 let site = ReadSite::new(site.0, stream.layout);
                 (at.ix(), self::index(site, target, index))
             }
+            Op::LetBind { local, src } => {
+                let value = regs.get_mut(src.ix())?.take()?.0;
+                lets.push((local.at, src.ix(), Some(value)));
+                continue;
+            }
+            Op::LetEnd { local } => {
+                let (at, reg, value) = lets.pop()?;
+                if at != local.at {
+                    return None;
+                }
+                let (body, done) = regs.get_mut(reg)?.take()?;
+                set(&mut regs, reg, declared(at, value?, body), done);
+                continue;
+            }
+            Op::JumpIfFalse { cond, skip } => {
+                let at = pc - 1;
+                let condition = regs.get_mut(cond.ix())?.take()?.0;
+                let (then_end, else_end) = super::arm_ends(stream, at, skip)?;
+                let mut arm = |from: u32, to: u32| -> Option<(Node, u64)> {
+                    let (mut regs, fixed) =
+                        compile_ops(stream, libs, Vec::new(), (from, from..to), lets)?;
+                    let value = regs.get_mut(cond.ix())?.take()?.0;
+                    regs.iter().all(Option::is_none).then_some((value, fixed))
+                };
+                let then = arm(at + 1, then_end - 1)?;
+                let otherwise = arm(then_end, else_end)?;
+                pc = else_end;
+                (cond.ix(), conditional(condition, then, otherwise))
+            }
             _ => return None,
         };
         set(&mut regs, node.0, node.1, done);
     }
-    Some(Compiled { last: *last, regs })
+    Some((regs, fixed))
+}
+
+/// The compiled expression variable at frame position `at`, declared with
+/// `value` for `body`: its memory held as the reference's declaration
+/// holds it, its value what `body`'s reads of it give.
+fn declared(at: u32, value: Node, body: Node) -> Node {
+    Box::new(move |slots, cx| {
+        let value = value(slots, cx)?;
+        if cx.memory {
+            let bytes = cx.arena.cost_of_metered(&value);
+            if !cx.fits(bytes) || !cx.hold(bytes) {
+                return None;
+            }
+        }
+        cx.lets.push((at, value));
+        let result = body(slots, cx);
+        cx.lets.pop();
+        result
+    })
+}
+
+/// The compiled conditional of `condition` over its arms, each its value's
+/// node and the fixed units it charges when taken.
+fn conditional(condition: Node, then: (Node, u64), otherwise: (Node, u64)) -> Node {
+    let ((then, then_fixed), (otherwise, otherwise_fixed)) = (then, otherwise);
+    Box::new(move |slots, cx| match condition(slots, cx)? {
+        Value::Bool(true) => {
+            cx.meter.arm(true, then_fixed);
+            then(slots, cx)
+        }
+        Value::Bool(false) => {
+            cx.meter.arm(false, otherwise_fixed);
+            otherwise(slots, cx)
+        }
+        _ => None,
+    })
 }
 
 /// The compiled statement-root invoke of operator `id` on `args`, each a
@@ -881,17 +1247,22 @@ fn field(field: &super::super::Field, target: Node) -> Node {
             }
             Some(value.unwrap_or(Value::Absent))
         }
-        Value::Error(error) => match cx.arena.body(error).ok()? {
-            Body::Error(parts) => Some(match name.as_str() {
-                "kind" => parts.kind,
-                "message" => parts.message,
-                "data" => parts.data,
-                _ => Value::Absent,
-            }),
-            _ => None,
-        },
+        Value::Error(error) => error_field(cx, error, &name),
         _ => None,
     })
+}
+
+/// Field `name` of error `error`, as the reference reads it.
+fn error_field(cx: &Cx<'_>, error: ArenaHandle, name: &str) -> Option<Value> {
+    match cx.arena.body(error).ok()? {
+        Body::Error(parts) => Some(match name {
+            "kind" => parts.kind,
+            "message" => parts.message,
+            "data" => parts.data,
+            _ => Value::Absent,
+        }),
+        _ => None,
+    }
 }
 
 /// The list position `index` is, as the reference reads it; `None` where
@@ -914,52 +1285,62 @@ fn index(site: Option<ReadSite>, target: Node, index: Node) -> Node {
     Box::new(move |slots, cx| {
         let target = target(slots, cx)?;
         let index = index(slots, cx)?;
-        let arena = &*cx.arena;
-        match target {
-            Value::Tuple(object) | Value::List(object) => {
-                arena.item(object, position(&index)?).ok()?
-            }
-            Value::Record(record) => {
-                if !matches!(index, Value::Text(_) | Value::LongText(_))
-                    || arena.unresolved(record, &index).ok()?.is_some()
-                {
-                    return None;
-                }
-                let Some(site) = site else {
-                    return Some(
-                        arena
-                            .table_get(record, &index)
-                            .ok()?
-                            .unwrap_or(Value::Absent),
-                    );
-                };
-                let slot = cx.sites.slot(site);
-                let name = match &index {
-                    Value::Text(short) => short.as_bytes(),
-                    _ => arena.semantics().text(&index).ok()?.as_bytes(),
-                };
-                let (found, at) =
-                    find_property(arena, record, slot, name, || arena.key(&index)).ok()?;
-                if at != slot {
-                    cx.sites.keep(site, at);
-                }
-                Some(found.unwrap_or(Value::Absent))
-            }
-            Value::Map(map) => {
-                if arena.unresolved(map, &index).ok()?.is_some() {
-                    return None;
-                }
-                arena.table_get(map, &index).ok()?
-            }
-            Value::Set(set) => {
-                if arena.unresolved(set, &index).ok()?.is_some() {
-                    return None;
-                }
-                Some(Value::Bool(arena.table_get(set, &index).ok()?.is_some()))
-            }
-            _ => None,
-        }
+        read_index(cx, site, target, index)
     })
+}
+
+/// What `target` holds at `index`, as the reference reads it: a record's
+/// through `site`'s property cache, if it has one; `None` where the
+/// reference raises or must decode first.
+fn read_index(
+    cx: &mut Cx<'_>,
+    site: Option<ReadSite>,
+    target: Value,
+    index: Value,
+) -> Option<Value> {
+    let arena = &*cx.arena;
+    match target {
+        Value::Tuple(object) | Value::List(object) => arena.item(object, position(&index)?).ok()?,
+        Value::Record(record) => {
+            if !matches!(index, Value::Text(_) | Value::LongText(_))
+                || arena.unresolved(record, &index).ok()?.is_some()
+            {
+                return None;
+            }
+            let Some(site) = site else {
+                return Some(
+                    arena
+                        .table_get(record, &index)
+                        .ok()?
+                        .unwrap_or(Value::Absent),
+                );
+            };
+            let slot = cx.sites.slot(site);
+            let name = match &index {
+                Value::Text(short) => short.as_bytes(),
+                _ => arena.semantics().text(&index).ok()?.as_bytes(),
+            };
+            let (found, at) =
+                find_property(arena, record, slot, name, || arena.key(&index)).ok()?;
+            if at != slot {
+                cx.sites.keep(site, at);
+            }
+            Some(found.unwrap_or(Value::Absent))
+        }
+        Value::Map(map) => {
+            if arena.unresolved(map, &index).ok()?.is_some() {
+                return None;
+            }
+            arena.table_get(map, &index).ok()?
+        }
+        Value::Set(set) => {
+            if arena.unresolved(set, &index).ok()?.is_some() {
+                return None;
+            }
+            Some(Value::Bool(arena.table_get(set, &index).ok()?.is_some()))
+        }
+        _ => None,
+    }
 }
 
 /// The compiled `item` hook `function`: what the loop walks and an item

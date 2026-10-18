@@ -487,6 +487,15 @@ charge sum(8, deep(value), size(result))
 native
 body {
   if same(kind(value), "text") { return value }
+  # ToPrimitive leaves a number as it is: its text needs no closure.
+  if same(kind(value), "float") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
+  if same(kind(value), "integer") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
   let dynamic = fn(value) {
     let k = kind(value)
     # ToPrimitive leaves a number as it is.
@@ -1124,6 +1133,15 @@ kernel 1
 charge 4
 native
 body {
+  # A float's position needs no closure.
+  if same(kind(key), "float") {
+    if num.le(0, key) {
+      if num.lt(key, length) {
+        if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
+      }
+    }
+    return -1.0
+  }
   let dynamic = fn(key, length) {
     let k = kind(key)
     if same(k, "float") {} else {
@@ -1333,7 +1351,9 @@ body {
     if num.lt(position, 0) {
       throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
     }
-    while num.lt(list.len(target), position) metered 2 { set target[list.len(target)] = () }
+    if num.lt(list.len(target), position) {
+      while num.lt(list.len(target), position) metered 2 { set target[list.len(target)] = () }
+    }
     set target[position] = value
     return value
   }

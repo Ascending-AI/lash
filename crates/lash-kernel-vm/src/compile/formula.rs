@@ -449,7 +449,14 @@ pub(crate) enum Charge<'p> {
 }
 
 impl Fast {
-    pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param], charge: &Plan) -> Self {
+    /// What charges an entry's answers; `scalar`, whether it answers
+    /// immediates, which a scalar charge table serves.
+    pub(crate) fn new(
+        formula: &doc::Formula,
+        params: &[doc::Param],
+        charge: &Plan,
+        scalar: bool,
+    ) -> Self {
         let shallow = Plan::prepare(formula, params, true);
         let measured = |kind: doc::Measure| -> Box<[Source]> {
             charge
@@ -460,7 +467,11 @@ impl Fast {
                 .collect()
         };
         Self {
-            scalar: ScalarTable::of(charge, params),
+            scalar: if scalar {
+                ScalarTable::of(charge, params)
+            } else {
+                None
+            },
             deep: measured(doc::Measure::DeepSize),
             nested: measured(doc::Measure::NestedSize),
             shallow,

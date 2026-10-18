@@ -857,7 +857,9 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 vec![Value::Float(Float::new(1.0)); arity]
             };
             assert!(
-                (template.entry)(&args, &natives).is_some(),
+                template
+                    .entry
+                    .is_some_and(|entry| entry(&args, &natives).is_some()),
                 "{name}'s numeric path must be exercised"
             );
             // Every depth near the elided helper frames uses the same
@@ -1091,22 +1093,103 @@ fn memory_off_15_helper_plans_keep_the_corpus_without_memory_scopes() {
     memory_off_helper_plans_keep_the_corpus_without_memory_scopes(15);
 }
 
-/// FIG-6754's actual dialect path, including nested and statement-root invokes.
-pub(crate) fn python_region_programs() -> Vec<(runner::Case, Program)> {
-    let runner = runner::Runner::new("python").unwrap();
-    let sources = [
-        ("branch", "def branch():\n    result = 0\n    i = 0\n    while i < 14:\n        if i % 2 == 0:\n            result = result + i\n        else:\n            result = result - i\n        i = i + 1\n    return result\nresult = branch()\n".to_owned()),
-        ("modulo signs and zero", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        right = right + 1\n        i = i + 1\n    return left\nresult = modulo(-7, -2)\n".to_owned()),
-        ("float modulo", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7.5, -2.0)\n".to_owned()),
-        ("kind decline", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7, \"x\")\n".to_owned()),
+/// FIG-6754's actual dialect path, including nested and statement-root
+/// invokes, and FIG-6758's heap paths: integer text, list appends, plain
+/// record and map reads and writes, expression variables, conditional
+/// arms and a comprehension's stored invoke, with each kind they decline.
+pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
+    let python = [
+        (
+            "branch",
+            "def branch():\n    result = 0\n    i = 0\n    while i < 14:\n        if i % 2 == 0:\n            result = result + i\n        else:\n            result = result - i\n        i = i + 1\n    return result\nresult = branch()\n",
+        ),
+        (
+            "modulo signs and zero",
+            "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        right = right + 1\n        i = i + 1\n    return left\nresult = modulo(-7, -2)\n",
+        ),
+        (
+            "float modulo",
+            "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7.5, -2.0)\n",
+        ),
+        (
+            "kind decline",
+            "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7, \"x\")\n",
+        ),
+        (
+            "dict record",
+            "def build():\n    counts = {}\n    for i in range(7):\n        key = \"k\" + str(i % 3)\n        counts[key] = counts.get(key, 0) + i\n    return counts\nresult = build()\n",
+        ),
+        (
+            "long text keys",
+            "def build():\n    counts = {}\n    for i in range(5):\n        key = \"a-long-row-label-\" + str(i % 2)\n        counts[key] = counts.get(key, 0) + i\n    return counts\nresult = build()\n",
+        ),
+        (
+            "append and comprehension",
+            "def build():\n    source = []\n    for i in range(6):\n        source.append(i)\n    doubled = [item * 2 for item in source]\n    return doubled\nresult = build()\n",
+        ),
+        (
+            "conditional arms",
+            "def build():\n    total = 0\n    for i in range(7):\n        step = i if i % 3 == 0 else 0 - i\n        total = total + step\n    return total\nresult = build()\n",
+        ),
+        (
+            "text of other kinds",
+            "def build(values):\n    parts = []\n    for value in values:\n        parts.append(str(value))\n    return parts\nresult = build([1, 2.5, True, None, \"x\", 12345678901234567, -3])\n",
+        ),
+        (
+            "get on a list",
+            "def build():\n    rows = [1, 2]\n    total = 0\n    for i in range(3):\n        total = total + rows.get(i, 0)\n    return total\nresult = build()\n",
+        ),
+        (
+            "append to a map",
+            "def build():\n    rows = {}\n    for i in range(3):\n        rows.append(i)\n    return rows\nresult = build()\n",
+        ),
+        (
+            "store past a list's end",
+            "def build():\n    rows = [0]\n    for i in range(3):\n        rows[i] = i\n    return rows\nresult = build()\n",
+        ),
+        (
+            "store in a list",
+            "def build():\n    rows = [[0], [1], [2]]\n    for n in range(9):\n        rows[n % 3] = [n]\n        rows[-1] = n\n    return rows\nresult = build()\n",
+        ),
     ];
-    sources
-        .into_iter()
-        .map(|(name, source)| {
+    let typescript = [
+        (
+            "dict record",
+            "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key_\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\n",
+        ),
+        (
+            "push and text",
+            "function build(n) {\n  const rows = [];\n  for (let i = 0; i < n; i++) {\n    rows.push(\"row-\" + String(i));\n  }\n  return rows.join(\",\");\n}\nconst result = build(6);\n",
+        ),
+        (
+            "conditional arms",
+            "function build(n) {\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const step = i % 3 === 0 ? i : -i;\n    total = total + step;\n  }\n  return total;\n}\nconst result = build(7);\n",
+        ),
+        (
+            "text of other kinds",
+            "function build(values) {\n  const parts = [];\n  for (let i = 0; i < values.length; i++) {\n    parts.push(String(values[i]));\n  }\n  return parts;\n}\nconst result = build([1, 2.5, true, null, \"x\", 1e21, -0, NaN, 123456789012345]);\n",
+        ),
+        (
+            "branded record",
+            "function build(n) {\n  const row = new Map();\n  for (let i = 0; i < n; i++) {\n    row[\"total\"] = (row[\"total\"] || 0) + i;\n  }\n  return row[\"total\"];\n}\nconst result = build(5);\n",
+        ),
+        (
+            "inherited name",
+            "function build(n) {\n  const counts = {};\n  let found = 0;\n  for (let i = 0; i < n; i++) {\n    if (counts[\"toString\"]) { found = found + 1; }\n    counts[\"k\" + String(i % 2)] = i;\n  }\n  return found;\n}\nconst result = build(4);\n",
+        ),
+        (
+            "store in a list",
+            "function build(n) {\n  const rows = [[0], [1], [2]];\n  for (let i = 0; i < n; i++) {\n    rows[i % 3] = [i];\n  }\n  return rows;\n}\nconst result = build(9);\n",
+        ),
+    ];
+    let mut programs = Vec::new();
+    for (dialect, sources) in [("python", &python[..]), ("typescript", &typescript[..])] {
+        let runner = runner::Runner::new(dialect).unwrap();
+        for (name, source) in sources {
             let case = runner::Case {
-                id: format!("Python invoke region: {name}"),
-                dialect: "python".into(),
-                source,
+                id: format!("{dialect} region: {name}"),
+                dialect: dialect.into(),
+                source: (*source).into(),
                 bits: 0,
                 stride: 0,
                 nanoseconds: 0,
@@ -1114,9 +1197,10 @@ pub(crate) fn python_region_programs() -> Vec<(runner::Case, Program)> {
             let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
                 panic!("{} lowers", case.id)
             };
-            (case, program)
-        })
-        .collect()
+            programs.push((case, program));
+        }
+    }
+    programs
 }
 
 /// FIG-6755: the cold `sum1m` and `branch1m` shapes of
@@ -1211,11 +1295,12 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
 }
 
 /// FIG-6754: lowered Python branch and modulo loops reach the generated
-/// templates and form regions over unshared frame slots.
+/// templates and form regions over unshared frame slots, as FIG-6758's
+/// dialect heap loops do.
 #[test]
 fn lowered_python_modulo_branch_loops_form_regions() {
     use lash_kernel_vm::kernel_internals::loop_regions;
-    for (case, program) in python_region_programs() {
+    for (case, program) in dialect_region_programs() {
         assert!(loop_regions(&program).unwrap() > 0, "{}", case.source);
         let expected = run::<0>(&case, &program, &mut Projector::default());
         let mut reference = program.clone();

@@ -118,7 +118,7 @@ pub fn prepared_scalar_charge(
 ) -> Option<u64> {
     let params = &definition.signature.params;
     let plan = crate::compile::Plan::new(&definition.charge, params);
-    crate::compile::Fast::new(&definition.charge, params, &plan).scalar_units(mask)
+    crate::compile::Fast::new(&definition.charge, params, &plan, true).scalar_units(mask)
 }
 
 /// How many loop regions lowering forms for `program`'s document under its

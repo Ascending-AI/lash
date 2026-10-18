@@ -1,6 +1,9 @@
 //! Generated immediate helper paths, resolved once beside native entries.
 
-use lash_kernel_doc::{FunctionRegistry, PreparedNative, Value, plan::HelperTemplate};
+use std::sync::OnceLock;
+
+use lash_kernel_doc::plan::{HeapTemplate, HelperTemplate};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, PreparedNative, Value};
 
 impl super::NestedKind {
     /// A statically named library call, whether written as a native
@@ -21,6 +24,10 @@ pub(crate) enum Entry {
     Template {
         template: &'static HelperTemplate,
         natives: Box<[PreparedNative]>,
+        /// The heap paths' general callees, resolved where a region first
+        /// takes them; `None` when the template has no heap paths or a
+        /// callee is missing.
+        heap: OnceLock<Option<Box<[super::LibId]>>>,
     },
 }
 
@@ -40,14 +47,23 @@ impl Entry {
                 registered.native()?.prepare()
             })
             .collect::<Option<Box<[_]>>>()?;
-        Some(Self::Template { template, natives })
+        if template.entry.is_none() && template.heap.is_none() {
+            return None;
+        }
+        Some(Self::Template {
+            template,
+            natives,
+            heap: OnceLock::new(),
+        })
     }
 
     #[inline]
     pub(crate) fn call(&self, args: &[Value]) -> Option<Value> {
         match self {
             Self::Native(entry) => (entry.entry)(args),
-            Self::Template { template, natives } => (template.entry)(args, natives),
+            Self::Template {
+                template, natives, ..
+            } => (template.entry?)(args, natives),
         }
     }
 
@@ -73,6 +89,39 @@ impl Entry {
         }
     }
 
+    /// Whether the entry answers immediates: a native's, or a template
+    /// with scalar paths.
+    #[inline]
+    pub(crate) fn immediate(&self) -> bool {
+        match self {
+            Self::Native(_) => true,
+            Self::Template { template, .. } => template.entry.is_some(),
+        }
+    }
+
+    /// The template's heap paths, their general callees resolved by
+    /// `lib_of` and its resolved prepared natives, when it has heap paths
+    /// and every callee resolves.
+    #[inline]
+    pub(crate) fn heap(
+        &self,
+        lib_of: &dyn Fn(&FunctionId) -> Option<super::LibId>,
+    ) -> Option<(&'static HeapTemplate, &[super::LibId], &[PreparedNative])> {
+        match self {
+            Self::Template {
+                template,
+                natives,
+                heap,
+            } => {
+                let paths = template.heap.as_ref()?;
+                let callees = heap.get_or_init(|| paths.callees.iter().map(lib_of).collect());
+                Some((paths, callees.as_deref()?, natives))
+            }
+            Self::Native(_) => None,
+        }
+    }
+
+    /// The call depth its immediate paths need beyond the caller's.
     #[inline]
     pub(crate) fn depth(&self) -> u32 {
         match self {
@@ -80,6 +129,50 @@ impl Entry {
             Self::Template { template, .. } => template.depth,
         }
     }
+
+    /// The call depth any of its paths needs beyond the caller's, heap
+    /// paths included: a heap path's call that a callee's entry answers
+    /// ([`inner`]) needs that entry's depth below the call's.
+    pub(crate) fn deepest<'l>(
+        &self,
+        lib: &dyn Fn(super::LibId) -> &'l super::Lib,
+        lib_of: &dyn Fn(&FunctionId) -> Option<super::LibId>,
+    ) -> u32 {
+        self.deepest_at(lib, lib_of, 0)
+    }
+
+    fn deepest_at<'l>(
+        &self,
+        lib: &dyn Fn(super::LibId) -> &'l super::Lib,
+        lib_of: &dyn Fn(&FunctionId) -> Option<super::LibId>,
+        level: u32,
+    ) -> u32 {
+        let heap = self.heap(lib_of).map_or(0, |(heap, callees, _)| {
+            let below = callees
+                .iter()
+                .filter(|_| level < INNER)
+                .filter_map(|&callee| inner(lib(callee)))
+                .map(|entry| entry.deepest_at(lib, lib_of, level + 1))
+                .max();
+            heap.depth + below.unwrap_or(0)
+        });
+        heap.max(self.depth())
+    }
+}
+
+/// How many helpers below an operator's heap paths a callee's entry
+/// answers a call: below that, only natives answer.
+pub(crate) const INNER: u32 = 2;
+
+/// The entry that answers a heap path's call of `function` where no native
+/// does: a body-run helper's, which agrees with its body, as the body runs
+/// uncharged inside the caller's. An operation's admission makes no cell
+/// for a shared parameter; its depth unit is the call's.
+pub(crate) fn inner(function: &super::Lib) -> Option<&Entry> {
+    if function.shares_params || matches!(function.run, super::LibRun::Native { .. }) {
+        return None;
+    }
+    function.prepared.as_ref().map(|(entry, _)| entry)
 }
 
 /// Classify only immediate scalars; all other answers keep formula evaluation.

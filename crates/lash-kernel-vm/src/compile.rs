@@ -51,14 +51,15 @@ mod reads;
 mod regions;
 mod scopes;
 mod templates;
-pub(crate) use templates::Entry;
+pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 pub(crate) mod segments;
 pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, LoopPlan, Meter,
-    NESTING, Role, SessionSlot, UNPRODUCTIVE, measured_formula, position, scalar, store,
+    Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event,
+    LoopPlan, Meter, NESTING, Role, SessionSlot, Taken, UNPRODUCTIVE, measured_formula, position,
+    scalar, store,
 };
 #[cfg(test)]
 pub(crate) use regions::{Head, RegionSlot, Step, Summary};
@@ -563,6 +564,12 @@ impl Executable {
             doc::StartConvention::PyDirect { cleanup } => self.lib_of(cleanup),
             _ => None,
         }
+    }
+
+    /// The library function `function`, reached or not: a template's
+    /// heap path's callee.
+    pub(crate) fn library_lib(&self, function: &FunctionId) -> Option<LibId> {
+        self.library.0.lib_of.get(function).copied()
     }
 
     /// The library function `function`, when the document reaches it.
@@ -1320,11 +1327,13 @@ fn form_regions(tables: &mut Tables, library: &Prepared, loop_test: u64) -> Vec<
         let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
         let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
         let lib = |id: LibId| &library.libs[id.0 as usize];
+        let lib_of = |function: &FunctionId| library.lib_of.get(function).copied();
         let lowered = || regions::Lowered {
             stream: &tables.stream,
             block: &block,
             stmt: &stmt,
             lib: &lib,
+            lib_of: &lib_of,
         };
         let formation = regions::Formation {
             lowered: lowered(),

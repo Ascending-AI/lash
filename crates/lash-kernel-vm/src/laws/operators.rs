@@ -479,10 +479,11 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         template: Some(HelperTemplate {
             depth: 1,
             callees: &[],
-            entry: |args, _| {
+            entry: Some(|args, _| {
                 ANSWERED.fetch_add(1, Ordering::Relaxed);
                 args.first().copied()
-            },
+            }),
+            heap: None,
         }),
     }));
     registry.install_plans(&[plan]).unwrap();

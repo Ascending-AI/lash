@@ -796,9 +796,10 @@ fn regions_on_and_off_agree(shard: usize) {
     }
     counts.report(shard, "island-programs", began);
     // FIG-6754: actual Python invokes preserve their atom/action charge,
-    // occurrences and continuations, including declines and zero division.
+    // occurrences and continuations, including declines and zero division;
+    // FIG-6758: both dialects' heap paths and the kinds they decline.
     // Assign each extra program once, like the existing program families.
-    for (index, (lowered, program)) in crate::helper_plans::python_region_programs()
+    for (index, (lowered, program)) in crate::helper_plans::dialect_region_programs()
         .into_iter()
         .enumerate()
     {
@@ -817,7 +818,7 @@ fn regions_on_and_off_agree(shard: usize) {
             check(&on, &off, &case, &mut counts, &mut failures);
         }
     }
-    counts.report(shard, "python-invokes", began);
+    counts.report(shard, "dialect-invokes", began);
     // FIG-6759: lowered guest calls, root call actions and the callbacks a
     // helper's plan applies run as islands, under both depths around them.
     for (index, (lowered, program)) in crate::helper_plans::island_programs()
@@ -1011,10 +1012,41 @@ fn allocating_regions_hold_what_the_reference_holds() {
             }
         }
     }
+    // FIG-6758: the dialects' heap paths hold what their bodies hold.
+    let dialect = crate::helper_plans::dialect_region_programs();
+    for (lowered, program) in &dialect {
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        for memory_meter in [
+            lash_kernel_vm::MemoryMeter::On,
+            lash_kernel_vm::MemoryMeter::Off,
+        ] {
+            let mut case = program_case(&lowered.id, "main { return null }", 16);
+            case.document = print_document(&program.document);
+            case.environment.bounds.memory_meter = memory_meter;
+            let program = Program {
+                library: on.clone(),
+                ..program.clone()
+            };
+            let reference = Program {
+                library: off.clone(),
+                ..program.clone()
+            };
+            for slice in [7, 50, u64::MAX] {
+                assert_eq!(
+                    finished::<ON>(&program, &case, slice),
+                    finished::<OFF>(&reference, &case, slice),
+                    "{}, memory {memory_meter:?}, slice {slice}",
+                    lowered.id
+                );
+            }
+        }
+    }
     println!(
         "allocating regions hold what the reference holds: programs={} paired runs={}",
-        ALLOCATING.len(),
-        ALLOCATING.len() * 6
+        ALLOCATING.len() + dialect.len(),
+        (ALLOCATING.len() + dialect.len()) * 6
     );
 }
 

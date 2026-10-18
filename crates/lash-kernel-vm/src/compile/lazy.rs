@@ -387,7 +387,10 @@ impl Prepared {
             .guard
             .as_ref()
             .map(|guard| Plan::new(&guard.limit, params));
-        let prepared = entry.map(|entry| (entry, Fast::new(&definition.charge, params, &charge)));
+        let prepared = entry.map(|entry| {
+            let fast = Fast::new(&definition.charge, params, &charge, entry.immediate());
+            (entry, fast)
+        });
         let shared_params = if body_slot.is_some_and(|(_, slot)| slot.closures) {
             parameters::shared(&definition)
         } else {
