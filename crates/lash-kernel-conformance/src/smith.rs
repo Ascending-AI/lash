@@ -13,7 +13,7 @@ use lash_kernel_vm::{Bounds, PreparedLibrary};
 
 mod runner;
 #[cfg(test)]
-pub(crate) use runner::plans_agree;
+pub(crate) use runner::Plans;
 pub use runner::{HostCall, Observation, check_interpreter, compare};
 
 /// A program and its environment script. The bytes also choose resource

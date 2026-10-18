@@ -13,7 +13,7 @@ use lash_kernel_exec::charge::Weight;
 use lash_kernel_vm::kernel_internals::{Layout, loop_regions, prepare_with_layout};
 use lash_kernel_vm::{Machine, PreparedLibrary, Program};
 
-use crate::machine::{Run, run_case_in};
+use crate::machine::{Run, case_program, run_program_in};
 use crate::projection::{Image, Plan, Projector, corpus_agrees, taped};
 use crate::{Case, Environment, Expected, ExpectedEnd, HarnessError, Observations};
 
@@ -86,27 +86,9 @@ const PROGRAMS: &[(&str, &str, u32)] = &[
         16,
     ),
     (
-        "nested arms and a let in an arm",
-        "fn arms(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(i, 6) { let d = num.mul(i, 2) if num.lt(d, 7) { set s = num.add(s, d) } else { set s = num.sub(s, 1) } } else { set s = num.add(s, 1) } set i = num.add(i, 1) } return s }\n\
-         main { let r = call arms(13) finish r }",
-        16,
-    ),
-    (
         "a return inside the loop",
         "fn find(n) { let i = 0 while num.lt(i, n) { if num.lt(9, i) { return i } set i = num.add(i, 1) } return 0 }\n\
          main { let r = call find(20) finish r }",
-        16,
-    ),
-    (
-        "a for over a list, with continue",
-        "fn total(xs) { let s = 0 for x in xs { if num.lt(x, 3) { continue } set s = num.add(s, x) } return s }\n\
-         main { let r = call total([1, 2, 3, 4, 5, 6, 7, 8, 9]) finish r }",
-        16,
-    ),
-    (
-        "a for over a tuple, with a let and a break",
-        "fn first(xs) { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\n\
-         main { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
         16,
     ),
     (
@@ -123,6 +105,34 @@ const PROGRAMS: &[(&str, &str, u32)] = &[
     ),
 ];
 
+/// Every shard exercises these R1/R2 mutation witnesses: nested arm exits
+/// and ended declarations, a for cursor with continue, and a declaration
+/// followed by break. Their full sweeps keep each shard red-capable even
+/// when its assigned corpus cases and smith seeds form no such regions.
+const EXIT_PROGRAMS: &[(&str, &str, u32)] = &[
+    (
+        "nested arms and a let in an arm",
+        "fn arms(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(i, 6) { let d = num.mul(i, 2) if num.lt(d, 7) { set s = num.add(s, d) } else { set s = num.sub(s, 1) } } else { set s = num.add(s, 1) } set i = num.add(i, 1) } return s }\n\
+         main { let r = call arms(13) finish r }",
+        16,
+    ),
+    (
+        "a for over a list, with continue",
+        "fn total(xs) { let s = 0 for x in xs { if num.lt(x, 3) { continue } set s = num.add(s, x) } return s }\n\
+         main { let r = call total([1, 2, 3, 4, 5, 6, 7, 8, 9]) finish r }",
+        16,
+    ),
+    (
+        "a for over a tuple, with a let and a break",
+        "fn first(xs) { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\n\
+         main { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
+        16,
+    ),
+];
+
+/// Independent libtest laws, assigned to the target's existing Buck shards.
+const SHARDS: usize = 8;
+
 /// One run of a case under a plan: what it observed, its charge program
 /// and its projections.
 struct Probe<'a> {
@@ -135,7 +145,7 @@ struct Probe<'a> {
 /// every slice return and park and, with `imports`, resuming the other
 /// plan's image there.
 fn probe<'a, const L: u64>(
-    library: &PreparedLibrary,
+    program: &Program,
     case: &Case,
     charge: Option<u64>,
     imports: Option<&'a [Image]>,
@@ -143,7 +153,7 @@ fn probe<'a, const L: u64>(
     let mut projector = Projector {
         imports,
         layout: Layout(L),
-        library: Some(library.clone()),
+        library: Some(program.library.clone()),
         ..Projector::default()
     };
     let (observations, tape) = taped(|| {
@@ -155,8 +165,8 @@ fn probe<'a, const L: u64>(
             printed: &mut || {},
             charge,
         };
-        run_case_in::<Plan<L>>(
-            library,
+        run_program_in::<Plan<L>>(
+            program.clone(),
             case,
             run,
             &mut |at| Ok(at.machine),
@@ -213,6 +223,29 @@ fn bounds(program: &[Weight], limit: u64) -> Vec<u64> {
 struct Counts {
     cases: usize,
     runs: usize,
+    bounds: usize,
+    slices: usize,
+    resumes: usize,
+    slice_bounds: usize,
+    smith_schedules: usize,
+    smith_bounds: usize,
+}
+
+impl Counts {
+    fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
+        println!(
+            "regions shard={shard} through={family}: cases={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            self.cases,
+            self.runs,
+            self.bounds,
+            self.slices,
+            self.resumes,
+            self.slice_bounds,
+            self.smith_schedules,
+            self.smith_bounds,
+            began.elapsed().as_secs_f64(),
+        );
+    }
 }
 
 /// Adds a disagreement of runs `a` and `b` of `case` to `failures`.
@@ -259,7 +292,14 @@ fn check(
     let mut case = case.clone();
     case.environment.resume = false;
     case.environment.slice = u64::MAX;
-    let Ok(natural) = probe::<ON>(on, &case, None, None) else {
+    let Some(on) = case_program(on, &case) else {
+        return;
+    };
+    let off = Program {
+        library: off.clone(),
+        ..on.clone()
+    };
+    let Ok(natural) = probe::<ON>(&on, &case, None, None) else {
         // A case the harness cannot run is the corpus tests' to report.
         return;
     };
@@ -270,8 +310,9 @@ fn check(
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
     for bound in bounds(&program, case.environment.bounds.charge) {
-        let a = probe::<ON>(on, &case, Some(bound), None);
-        let b = probe::<OFF>(off, &case, Some(bound), None);
+        counts.bounds += 1;
+        let a = probe::<ON>(&on, &case, Some(bound), None);
+        let b = probe::<OFF>(&off, &case, Some(bound), None);
         compare(
             &case,
             &format!("bound {bound}"),
@@ -282,11 +323,12 @@ fn check(
         );
     }
     for slice in SLICES {
+        counts.slices += 1;
         let mut sliced = case.clone();
         sliced.environment.slice = slice;
         sliced.environment.max_steps = sliced.environment.max_steps.max(1_000_000);
-        let a = probe::<ON>(on, &sliced, None, None);
-        let b = probe::<OFF>(off, &sliced, None, None);
+        let a = probe::<ON>(&on, &sliced, None, None);
+        let b = probe::<OFF>(&off, &sliced, None, None);
         compare(
             &sliced,
             &format!("slice {slice}"),
@@ -301,8 +343,9 @@ fn check(
         // resumed run: where a resume prices its memory against a
         // continuous run is the slice law's, not the plans'.
         if let (Ok(a), Ok(b)) = (&a, &b) {
-            let off_resumed = probe::<OFF>(off, &sliced, None, Some(&a.projector.images));
-            let on_resumed = probe::<ON>(on, &sliced, None, Some(&b.projector.images));
+            counts.resumes += 1;
+            let off_resumed = probe::<OFF>(&off, &sliced, None, Some(&a.projector.images));
+            let on_resumed = probe::<ON>(&on, &sliced, None, Some(&b.projector.images));
             let what = format!("slice {slice}, each resuming the other's images");
             compare(
                 &sliced,
@@ -314,8 +357,9 @@ fn check(
             );
         }
         for bound in [whole / 3, whole / 2, whole.saturating_sub(5)] {
-            let a = probe::<ON>(on, &sliced, Some(bound), None);
-            let b = probe::<OFF>(off, &sliced, Some(bound), None);
+            counts.slice_bounds += 1;
+            let a = probe::<ON>(&on, &sliced, Some(bound), None);
+            let b = probe::<OFF>(&off, &sliced, Some(bound), None);
             let what = format!("slice {slice}, bound {bound}");
             compare(&sliced, &what, a.as_ref(), b.as_ref(), counts, failures);
         }
@@ -337,10 +381,12 @@ fn check_smith(
     counts.cases += 1;
     let mut schedules: Vec<Vec<u64>> = vec![smith.schedule.slices.clone()];
     schedules.extend(SLICES.iter().map(|slice| vec![*slice]));
+    let plans = crate::smith::Plans::<ON, OFF>::new(smith);
     let mut whole = None;
     for slices in &schedules {
+        counts.smith_schedules += 1;
         counts.runs += 1;
-        match crate::smith::plans_agree::<ON, OFF>(smith, slices) {
+        match plans.agree(smith, slices) {
             Ok(charged) => {
                 whole.get_or_insert(charged);
             }
@@ -356,10 +402,11 @@ fn check_smith(
         whole,
         whole + 1,
     ] {
+        counts.smith_bounds += 1;
         let mut bounded = smith.clone();
         bounded.schedule.bounds.charge_limit = charge;
         counts.runs += 1;
-        if let Err(error) = crate::smith::plans_agree::<ON, OFF>(&bounded, &[u64::MAX]) {
+        if let Err(error) = plans.agree(&bounded, &[u64::MAX]) {
             failures.push(format!("{name}, bound {charge}: {error}"));
         }
     }
@@ -443,15 +490,22 @@ fn formed(library: &PreparedLibrary, case: &Case) -> usize {
 /// as written and wrapped in a function, run alike with regions on and
 /// off, under every bound around their charge programs' events and every
 /// slice, with each plan resuming the other's checkpoints.
-#[test]
-fn regions_on_and_off_agree() {
+fn regions_on_and_off_agree(shard: usize) {
+    let began = std::time::Instant::now();
     let registry = Arc::new(super::corpus_registry());
     let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
     let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     let mut regions = 0;
-    for (name, text, call_depth) in PROGRAMS {
+    let programs = PROGRAMS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, program)| (index % SHARDS == shard).then_some(program))
+        .chain(EXIT_PROGRAMS);
+    let mut region_programs = 0;
+    for (name, text, call_depth) in programs {
+        region_programs += 1;
         let case = program_case(name, text, *call_depth);
         let formed_on = formed(&on, &case);
         assert!(formed_on > 0, "{name}: no loop region forms");
@@ -463,15 +517,23 @@ fn regions_on_and_off_agree() {
         regions += formed_on;
         check(&on, &off, &case, &mut counts, &mut failures);
     }
-    for shard in super::corpus_shards() {
-        for case in &shard.cases {
+    counts.report(shard, "region-programs", began);
+    for (index, case) in super::corpus_shards()
+        .iter()
+        .flat_map(|shard| &shard.cases)
+        .enumerate()
+    {
+        if index % SHARDS == shard {
             check(&on, &off, case, &mut counts, &mut failures);
             if let Some(wrapped) = wrapped(case) {
                 check(&on, &off, &wrapped, &mut counts, &mut failures);
             }
         }
     }
-    for (seed, smith) in crate::smith::tests::seeds() {
+    counts.report(shard, "corpus", began);
+    for (seed, smith) in
+        crate::smith::tests::seeds().filter(|(seed, _)| *seed as usize % SHARDS == shard)
+    {
         check_smith(
             &format!("smith seed {seed}"),
             &smith,
@@ -487,6 +549,7 @@ fn regions_on_and_off_agree() {
             check_smith(&name, &wrapped, &mut counts, &mut failures);
         }
     }
+    counts.report(shard, "smith", began);
     assert!(
         failures.is_empty(),
         "{} of {} paired runs disagree:\n{}",
@@ -495,9 +558,31 @@ fn regions_on_and_off_agree() {
         failures.join("\n")
     );
     println!(
-        "regions on and off: cases={} paired runs={} region programs={} loop regions={regions}",
+        "regions on and off shard={shard}: cases={} paired runs={} region programs={region_programs} loop regions={regions} seconds={:.3}",
         counts.cases,
         counts.runs,
-        PROGRAMS.len(),
+        began.elapsed().as_secs_f64(),
     );
+}
+
+macro_rules! program_shards {
+    ($($name:ident: $shard:expr),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                regions_on_and_off_agree($shard);
+            }
+        )+
+    };
+}
+
+program_shards! {
+    regions_on_and_off_agree_programs_0: 0,
+    regions_on_and_off_agree_programs_1: 1,
+    regions_on_and_off_agree_programs_2: 2,
+    regions_on_and_off_agree_programs_3: 3,
+    regions_on_and_off_agree_programs_4: 4,
+    regions_on_and_off_agree_programs_5: 5,
+    regions_on_and_off_agree_programs_6: 6,
+    regions_on_and_off_agree_programs_7: 7,
 }

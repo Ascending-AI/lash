@@ -234,7 +234,16 @@ opcode fast path outside regions too.
 
 ### 3.3 PLAN-INDEP: the law to add
 
-`lash-kernel-conformance`, `tests::regions::regions_on_and_off_agree`:
+`lash-kernel-conformance`,
+`tests::regions::regions_on_and_off_agree_programs_0` through `_7`:
+
+The eight laws partition the region programs, corpus cases and smith seeds
+by program, so Buck can schedule them independently within the existing test
+budget. Each keeps its program's admitted document and both prepared layouts
+across the sweep; executions, page stores and host scripts start fresh. Three
+region exit witnesses (nested arms with a declaration, list iteration with
+continue, tuple iteration with a declaration and break) run on every shard,
+so every law catches the R1/R2 charge and exit mutants on its own.
 
 - **The cases.** Every corpus case, and the 64-seed smith programs. Each runs
   as written and wrapped in a function, as `scripts/perf/kernel/embedded.py`
@@ -396,7 +405,7 @@ Prototype switches (`PROTO_REGIONS`, `PROTO_INTERPRET`, `LASH_REGIONS`,
     and the verifier;
   - the layout bit that turns regions off;
   - tape recording for regions (§3.1);
-  - `regions_on_and_off_agree` with its mutants (§3.3).
+  - `regions_on_and_off_agree_programs_0` through `_7` with their mutants (§3.3).
 - **Deletes:** the prototype's run-time eligibility lookup and per-machine
   caches; plans are per `Executable`.
 - **Coordinate with:** fix-formula. The region's scalar table and `Fast` are

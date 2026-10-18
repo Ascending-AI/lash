@@ -132,10 +132,18 @@ fn observe<M: Machine>(
     slices: &[u64],
     projection: &mut Projector<'_>,
 ) -> Result<Execution<Observation>, HarnessError> {
+    observe_in::<M>(program(smith), smith, slices, projection)
+}
+
+fn observe_in<M: Machine>(
+    program: Program,
+    smith: &Smith,
+    slices: &[u64],
+    projection: &mut Projector<'_>,
+) -> Result<Execution<Observation>, HarnessError> {
     if slices.is_empty() {
         return Err(HarnessError("smith schedules require slices".into()));
     }
-    let program = program(smith);
     let mut session = session();
     if let Some(image) = projection.imports.and_then(|images| images.first()) {
         session.source = image.source.clone();
@@ -488,51 +496,71 @@ fn semantic_end(mut end: lash_kernel_vm::End) -> lash_kernel_vm::End {
     end
 }
 
-/// PLAN-INDEP of regions on `smith` under `slices`
-/// (`docs/design/kernel-regions.md` §3.3): plans `A` and `B` make the same
-/// run and charge program, and each resumes the other's images at every
-/// slice and park. Gives the run's charge under `A`.
+/// A smith program's two prepared layouts, shared by every schedule and
+/// charge bound of the regions PLAN-INDEP law (§3.3). Each observation still
+/// starts a fresh machine and opens every checkpoint witness.
 #[cfg(test)]
-pub(crate) fn plans_agree<const A: u64, const B: u64>(
-    smith: &Smith,
-    slices: &[u64],
-) -> Result<u64, HarnessError> {
-    use crate::projection::{Plan, taped};
-    use lash_kernel_vm::kernel_internals::Layout;
-    let projector = |layout: u64, imports| Projector {
-        imports,
-        layout: Layout(layout),
-        ..Projector::default()
-    };
-    let (mut a_images, mut b_images) = (projector(A, None), projector(B, None));
-    let (a, a_tape) = taped(|| observe::<Plan<A>>(smith, slices, &mut a_images));
-    let (b, b_tape) = taped(|| observe::<Plan<B>>(smith, slices, &mut b_images));
-    let (a, b) = (a?, b?);
-    let expanded = |tape: &[lash_kernel_exec::charge::Weight]| {
-        lash_kernel_exec::charge::Weight::expand(tape.iter().copied())
-    };
-    if !agree(&a, &b)
-        || a_images.terminal != b_images.terminal
-        || (!memory(&a) && !memory(&b) && expanded(&a_tape) != expanded(&b_tape))
-    {
-        return Err(fault(format!("plans disagree:\n{a:#?}\n{b:#?}")));
+pub(crate) struct Plans<const A: u64, const B: u64> {
+    a: Program,
+    b: Program,
+}
+
+#[cfg(test)]
+impl<const A: u64, const B: u64> Plans<A, B> {
+    pub(crate) fn new(smith: &Smith) -> Self {
+        use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
+        let mut a = program(smith);
+        let mut b = a.clone();
+        a.library = prepare_with_layout(Arc::clone(a.library.registry()), Layout(A));
+        b.library = prepare_with_layout(Arc::clone(b.library.registry()), Layout(B));
+        Self { a, b }
     }
-    let mut b_resuming = projector(B, Some(&a_images.images));
-    let resumed = observe::<Plan<B>>(smith, slices, &mut b_resuming)?;
-    if !agree(&a, &resumed) || a_images.terminal != b_resuming.terminal {
-        return Err(fault(format!(
-            "B resuming A's images:\n{a:#?}\n{resumed:#?}"
-        )));
+
+    /// Compares the end, charge tape and checkpoints, with each plan also
+    /// resuming the other's images at every slice and park. Only the smith's
+    /// schedule changes within a sweep; its document is held by these plans.
+    pub(crate) fn agree(&self, smith: &Smith, slices: &[u64]) -> Result<u64, HarnessError> {
+        use crate::projection::{Plan, taped};
+        use lash_kernel_vm::kernel_internals::Layout;
+        let projector = |layout: u64, program: &Program, imports| Projector {
+            imports,
+            layout: Layout(layout),
+            library: Some(program.library.clone()),
+            ..Projector::default()
+        };
+        let (mut a_images, mut b_images) =
+            (projector(A, &self.a, None), projector(B, &self.b, None));
+        let (a, a_tape) =
+            taped(|| observe_in::<Plan<A>>(self.a.clone(), smith, slices, &mut a_images));
+        let (b, b_tape) =
+            taped(|| observe_in::<Plan<B>>(self.b.clone(), smith, slices, &mut b_images));
+        let (a, b) = (a?, b?);
+        let expanded = |tape: &[lash_kernel_exec::charge::Weight]| {
+            lash_kernel_exec::charge::Weight::expand(tape.iter().copied())
+        };
+        if !agree(&a, &b)
+            || a_images.terminal != b_images.terminal
+            || (!memory(&a) && !memory(&b) && expanded(&a_tape) != expanded(&b_tape))
+        {
+            return Err(fault(format!("plans disagree:\n{a:#?}\n{b:#?}")));
+        }
+        let mut b_resuming = projector(B, &self.b, Some(&a_images.images));
+        let resumed = observe_in::<Plan<B>>(self.b.clone(), smith, slices, &mut b_resuming)?;
+        if !agree(&a, &resumed) || a_images.terminal != b_resuming.terminal {
+            return Err(fault(format!(
+                "B resuming A's images:\n{a:#?}\n{resumed:#?}"
+            )));
+        }
+        let mut a_resuming = projector(A, &self.a, Some(&b_images.images));
+        let resumed = observe_in::<Plan<A>>(self.a.clone(), smith, slices, &mut a_resuming)?;
+        if !agree(&b, &resumed) || b_images.terminal != a_resuming.terminal {
+            return Err(fault(format!(
+                "A resuming B's images:\n{b:#?}\n{resumed:#?}"
+            )));
+        }
+        Ok(match &a {
+            Execution::Ran(rows) => rows.last().and_then(|row| row.meters.charged).unwrap_or(0),
+            Execution::Refused(_) => 0,
+        })
     }
-    let mut a_resuming = projector(A, Some(&b_images.images));
-    let resumed = observe::<Plan<A>>(smith, slices, &mut a_resuming)?;
-    if !agree(&b, &resumed) || b_images.terminal != a_resuming.terminal {
-        return Err(fault(format!(
-            "A resuming B's images:\n{b:#?}\n{resumed:#?}"
-        )));
-    }
-    Ok(match &a {
-        Execution::Ran(rows) => rows.last().and_then(|row| row.meters.charged).unwrap_or(0),
-        Execution::Refused(_) => 0,
-    })
 }

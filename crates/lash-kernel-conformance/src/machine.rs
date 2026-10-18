@@ -146,34 +146,52 @@ pub(crate) fn run_case_in<M: Machine>(
     case: &Case,
     run: Run<'_, M>,
     at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
-    mut projection: Option<&mut crate::projection::Projector<'_>>,
+    projection: Option<&mut crate::projection::Projector<'_>>,
 ) -> Result<Observations, HarnessError> {
-    let registry = library.registry();
-    let refused = || Observations {
+    let Some(program) = case_program(library, case) else {
+        return Ok(refused());
+    };
+    run_program_in(program, case, run, at_park, projection)
+}
+
+fn refused() -> Observations {
+    Observations {
         prints: Vec::new(),
         end: ExpectedEnd::Refused,
         trace: Vec::new(),
         charged: None,
         parks: 0,
-    };
-    let document = match parse_document(&case.document) {
-        Ok(document) => document,
-        Err(_) => return Ok(refused()),
-    };
-    let env = &case.environment;
-    let mut admission = lash_kernel_check::Environment::new(registry.as_ref());
-    admission.effects = env
+    }
+}
+
+/// Parses and admits a case once. Retaining the document allocation lets
+/// the prepared library reuse its executable across a law's sweep points.
+pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Program> {
+    let document = parse_document(&case.document).ok()?;
+    let mut admission = lash_kernel_check::Environment::new(library.registry().as_ref());
+    admission.effects = case
+        .environment
         .effects
         .clone()
         .unwrap_or_else(|| document.manifest.effects.clone());
-    if lash_kernel_check::admit(&document, &admission).is_err() {
-        return Ok(refused());
-    }
-    let mut program = Program {
+    lash_kernel_check::admit(&document, &admission).ok()?;
+    Some(Program {
         release: crate::pages::RELEASE,
         document: Arc::new(document),
         library: library.clone(),
-    };
+    })
+}
+
+/// Runs an already admitted case, retaining its prepared code but starting
+/// fresh execution, host script and page state at every sweep point.
+pub(crate) fn run_program_in<M: Machine>(
+    mut program: Program,
+    case: &Case,
+    run: Run<'_, M>,
+    at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
+    mut projection: Option<&mut crate::projection::Projector<'_>>,
+) -> Result<Observations, HarnessError> {
+    let env = &case.environment;
     let mut bounds: lash_kernel_vm::Bounds = env.bounds.into();
     if let Some(charge) = run.charge {
         bounds.charge_limit = charge;
