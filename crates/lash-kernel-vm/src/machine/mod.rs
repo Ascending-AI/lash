@@ -422,6 +422,10 @@ pub struct KernelMachine {
     /// The property read sites' caches: never saved, so a restore
     /// discards them.
     sites: sites::SiteCaches,
+    /// Each loop plan's weight of consecutive unproductive entries in this
+    /// machine, by region (`compile::UNPRODUCTIVE`): never saved, so a
+    /// restore discards it.
+    unproductive: Vec<u32>,
     /// How many generated plans are running: each holds its call's depth
     /// unit as the body's frame would (`K-BND-002`).
     plans: u32,
@@ -1404,6 +1408,12 @@ fn machine_error(halt: Halt) -> MachineError {
             problem: format!("{other:?}"),
         },
     }
+}
+
+/// The most a plan holds beyond what the reference holds at the same
+/// point: a loop region's nursery or an island's admitted headroom.
+pub(crate) fn transient_hold() -> u64 {
+    regions::NURSERY.max(islands::ISLAND_ADMITTED)
 }
 
 /// The most frames one projection on this thread has visited since the

@@ -35,7 +35,6 @@
 //! what it wrote at its exit.
 
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicU32;
 
 use lash_kernel_doc::FunctionId;
 use lash_kernel_exec::{Op, OpRange, Weight};
@@ -55,8 +54,12 @@ use super::{
 use nodes::Libs;
 
 /// The weight of consecutive unproductive entries that retires a loop
-/// plan: sixteen that missed before their iteration's first body
-/// statement, or 128 that missed after one committed.
+/// plan in a machine: sixteen that missed before their iteration's first
+/// body statement, or 128 that missed after one committed. A site whose
+/// prepared entry declines what the run gives it costs the region's work
+/// and the reference's. Retiring changes which code runs a statement,
+/// never what the statement does, and the machine keeps each plan's
+/// weight: other runs of the same code start with none.
 pub(crate) const UNPRODUCTIVE: u32 = 128;
 
 /// What an entry that missed before its iteration's first body statement
@@ -367,12 +370,6 @@ pub(crate) struct LoopPlan {
     /// they first use them: the region's session slots (§3.6).
     pub(crate) sessions: Box<[BindingName]>,
     compiled: OnceLock<Option<CompiledLoop>>,
-    /// The weight of consecutive entries that missed a guard before an
-    /// iteration ended, which at [`UNPRODUCTIVE`] retires the plan: a site whose
-    /// prepared entry declines what this run gives it costs the region's
-    /// work and the reference's. It changes which code runs a statement,
-    /// never what the statement does.
-    pub(crate) unproductive: AtomicU32,
 }
 
 /// Why lowering does not admit a formed plan.
@@ -657,7 +654,6 @@ impl Formation<'_> {
             calls: calls.into(),
             sessions: gathered.sessions.into(),
             compiled: OnceLock::new(),
-            unproductive: AtomicU32::new(0),
         })
     }
 
@@ -1318,7 +1314,6 @@ impl LoopPlan {
             calls: self.calls.clone(),
             sessions: self.sessions.clone(),
             compiled: OnceLock::new(),
-            unproductive: AtomicU32::new(0),
         }
     }
 

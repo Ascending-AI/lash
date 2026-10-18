@@ -379,6 +379,7 @@ impl KernelMachine {
             region: None,
             slice_end: u64::MAX,
             sites: Default::default(),
+            unproductive: Vec::new(),
             islands: Default::default(),
             plans: 0,
             segments: Default::default(),

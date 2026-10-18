@@ -61,6 +61,11 @@ const ISLAND_HOLD: u64 = 1 << 16;
 /// may hold ([`held`]).
 const SLOT_BYTES: u64 = HELD_BYTES;
 
+/// The headroom an island's entry admits: its statements' holdings and its
+/// deepest virtual stack with its variables (§3.5).
+pub(super) const ISLAND_ADMITTED: u64 =
+    ISLAND_HOLD + ISLAND_DEPTH as u64 * (super::FRAME_BYTES + MAX_SLOTS as u64 * SLOT_BYTES);
+
 /// The most arguments an island call passes.
 const MAX_ARGS: usize = MAX_SLOTS;
 
@@ -1169,6 +1174,9 @@ impl Island<'_> {
             let stop = self.boundary(compiled.body.id, 0);
             self.left(island, captured, &slots);
             return Err(stop);
+        }
+        if let Some(tape) = self.tape {
+            tape.entered();
         }
         self.depth += 1;
         let ran = run_block(self, &compiled.body, &mut slots);

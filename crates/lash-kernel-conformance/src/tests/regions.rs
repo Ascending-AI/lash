@@ -10,11 +10,13 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Document, Name, parse_document, print_document};
 use lash_kernel_exec::charge::Weight;
-use lash_kernel_vm::kernel_internals::{Layout, call_islands, loop_regions, prepare_with_layout};
+use lash_kernel_vm::kernel_internals::{
+    Layout, RegionWork, call_islands, loop_regions, prepare_with_layout, transient_hold,
+};
 use lash_kernel_vm::{Machine, PreparedLibrary, Program};
 
 use crate::machine::{Run, case_program, run_program_in};
-use crate::projection::{Image, Plan, Projector, corpus_agrees, taped};
+use crate::projection::{Image, Plan, Projector, corpus_agrees, taped_work};
 use crate::{Case, Environment, Expected, ExpectedEnd, HarnessError, Observations};
 
 /// Regions on: the natural layout.
@@ -326,12 +328,13 @@ const TIGHT: u64 = 96 * 1024;
 /// Independent libtest laws, assigned to the target's existing Buck shards.
 const SHARDS: usize = 8;
 
-/// One run of a case under a plan: what it observed, its charge program
-/// and its projections.
+/// One run of a case under a plan: what it observed, its charge program,
+/// its projections and the work regions committed in it.
 struct Probe<'a> {
     observations: Observations,
     tape: Vec<Weight>,
     projector: Projector<'a>,
+    work: RegionWork,
 }
 
 /// Runs `case` under plan `L`, bounded at `charge` when given, sealing at
@@ -349,7 +352,7 @@ fn probe<'a, const L: u64>(
         library: Some(program.library.clone()),
         ..Projector::default()
     };
-    let (observations, tape) = taped(|| {
+    let (observations, tape, work) = taped_work(|| {
         let mut start = |program, bounds, start, source: &crate::pages::Source| {
             Plan::<L>::start(program, bounds, start, Box::new(source.clone()))
         };
@@ -370,19 +373,63 @@ fn probe<'a, const L: u64>(
         observations: observations?,
         tape,
         projector,
+        work,
     })
 }
 
-/// Whether two runs agree: the run, its checkpoints and its charge
-/// program; before a memory refusal, whose point may depend on the plan
-/// within the transient slack (§3.5), their common prefix.
-fn agree(a: &Probe<'_>, b: &Probe<'_>) -> bool {
-    let memory =
-        |end: &ExpectedEnd| matches!(end, ExpectedEnd::Bound { name, .. } if name == "memory");
-    corpus_agrees(&a.observations, &b.observations, &a.projector, &b.projector)
-        && (memory(&a.observations.end)
-            || memory(&b.observations.end)
-            || Weight::expand(a.tape.iter().copied()) == Weight::expand(b.tape.iter().copied()))
+/// Whether run `on`, with regions on, and run `off`, the reference, agree:
+/// the run, its checkpoints and its charge program. A memory refusal's
+/// point may depend on the plan within the transient slack (§3.5): where
+/// the two runs end apart and one refused memory, the one that refused
+/// first charged no more than the other, its charge program is the
+/// other's up to its end, their checkpoints, prints and trace agree that
+/// far, and its held bytes there are within [`transient_hold`] of the
+/// other plan's at that charge, which `held_at(on, charge)` gives: the
+/// memory counter at the end of plan `on`'s run bounded there.
+fn agree(
+    on: &Probe<'_>,
+    off: &Probe<'_>,
+    held_at: &mut dyn FnMut(bool, u64) -> Option<u64>,
+) -> bool {
+    let memory = |probe: &Probe<'_>| matches!(&probe.observations.end, ExpectedEnd::Bound { name, .. } if name == "memory");
+    let tapes = (
+        Weight::expand(on.tape.iter().copied()),
+        Weight::expand(off.tape.iter().copied()),
+    );
+    let prefix = corpus_agrees(
+        &on.observations,
+        &off.observations,
+        &on.projector,
+        &off.projector,
+    );
+    if !memory(on) && !memory(off) {
+        return prefix && tapes.0 == tapes.1;
+    }
+    if on.observations == off.observations && tapes.0 == tapes.1 {
+        return prefix;
+    }
+    // The run that refused first, and whether it is the run with regions.
+    let first_on = match (memory(on), memory(off)) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => on.observations.charged <= off.observations.charged,
+    };
+    let (first, other, (earlier, later)) = if first_on {
+        (on, off, (&tapes.0, &tapes.1))
+    } else {
+        (off, on, (&tapes.1, &tapes.0))
+    };
+    let (Some(charged), Some(past), Some(held)) = (
+        first.observations.charged,
+        other.observations.charged,
+        first.projector.held,
+    ) else {
+        return false;
+    };
+    prefix
+        && charged <= past
+        && later.get(..earlier.len()) == Some(earlier.as_slice())
+        && held_at(!first_on, charged).is_some_and(|there| held.abs_diff(there) <= transient_hold())
 }
 
 /// The bounds a case sweeps: around each event of its charge program, up
@@ -422,13 +469,20 @@ struct Counts {
     slice_bounds: usize,
     smith_schedules: usize,
     smith_bounds: usize,
+    /// Cases whose natural run with regions on committed region work.
+    ran: usize,
+    /// The work their natural runs committed.
+    work: RegionWork,
 }
 
 impl Counts {
     fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
         println!(
-            "regions shard={shard} through={family}: cases={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            "regions shard={shard} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
             self.cases,
+            self.ran,
+            self.work.iterations,
+            self.work.calls,
             self.runs,
             self.bounds,
             self.slices,
@@ -441,18 +495,20 @@ impl Counts {
     }
 }
 
-/// Adds a disagreement of runs `a` and `b` of `case` to `failures`.
+/// Adds a disagreement of run `a`, with regions on, and run `b`, the
+/// reference, of `case` to `failures`; `held_at` is [`agree`]'s.
 fn compare(
     case: &Case,
     what: &str,
     a: Result<&Probe<'_>, &HarnessError>,
     b: Result<&Probe<'_>, &HarnessError>,
+    held_at: &mut dyn FnMut(bool, u64) -> Option<u64>,
     counts: &mut Counts,
     failures: &mut Vec<String>,
 ) {
     counts.runs += 1;
     match (a, b) {
-        (Ok(a), Ok(b)) if agree(a, b) => {}
+        (Ok(a), Ok(b)) if agree(a, b, held_at) => {}
         // The harness refuses both runs alike: a seal of a run past its
         // memory bound, which neither plan can write.
         (Err(a), Err(b)) if a.0 == b.0 => {}
@@ -474,34 +530,53 @@ fn compare(
 }
 
 /// Checks `case` under both plans across the sweep, adding each
-/// disagreement to `failures`.
+/// disagreement to `failures`. Gives the work regions committed in its
+/// natural run with regions on, which its unsliced run after the sweep
+/// commits again: a plan the sweep retired would leave that run, and every
+/// one after it, to the reference.
 fn check(
     on: &PreparedLibrary,
     off: &PreparedLibrary,
     case: &Case,
     counts: &mut Counts,
     failures: &mut Vec<String>,
-) {
+) -> RegionWork {
     let mut case = case.clone();
     case.environment.resume = false;
     case.environment.slice = u64::MAX;
     let Some(on) = case_program(on, &case) else {
-        return;
+        return RegionWork::default();
     };
     let off = Program {
         library: off.clone(),
         ..on.clone()
     };
-    let Ok(natural) = probe::<ON>(&on, &case, None, None) else {
-        // A case the harness cannot run is the corpus tests' to report.
-        return;
+    let natural = match probe::<ON>(&on, &case, None, None) {
+        Ok(natural) => natural,
+        Err(error) => {
+            failures.push(format!("{}, natural run: {error:?}", case.name));
+            return RegionWork::default();
+        }
     };
     if natural.observations.end == ExpectedEnd::Refused {
-        return;
+        return RegionWork::default();
     }
     counts.cases += 1;
+    counts.work.iterations += natural.work.iterations;
+    counts.work.calls += natural.work.calls;
+    counts.ran += usize::from(natural.work != RegionWork::default());
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
+    // The memory counter at the end of a run under either plan bounded at
+    // a charge, resuming the given images.
+    let held = |case: &Case, imports: Option<&[Image]>, regions: bool, charge: u64| {
+        let probe = if regions {
+            probe::<ON>(&on, case, Some(charge), imports)
+        } else {
+            probe::<OFF>(&off, case, Some(charge), imports)
+        };
+        probe.ok()?.projector.held
+    };
     for bound in bounds(&program, case.environment.bounds.charge) {
         counts.bounds += 1;
         let a = probe::<ON>(&on, &case, Some(bound), None);
@@ -511,6 +586,7 @@ fn check(
             &format!("bound {bound}"),
             a.as_ref(),
             b.as_ref(),
+            &mut |regions, charge| held(&case, None, regions, charge),
             counts,
             failures,
         );
@@ -527,9 +603,19 @@ fn check(
             &format!("slice {slice}"),
             a.as_ref(),
             b.as_ref(),
+            &mut |regions, charge| held(&sliced, None, regions, charge),
             counts,
             failures,
         );
+        if slice == u64::MAX
+            && let Ok(a) = &a
+            && a.work != natural.work
+        {
+            failures.push(format!(
+                "{}: regions committed {:?} in the natural run and {:?} in the unsliced run after the sweep",
+                case.name, natural.work, a.work
+            ));
+        }
         // Cross-resume: each plan resumes the other's images, which the
         // comparison above found equal, so the two resumed runs are one
         // resume under either plan. A resumed run is compared with a
@@ -545,6 +631,14 @@ fn check(
                 &what,
                 on_resumed.as_ref(),
                 off_resumed.as_ref(),
+                &mut |regions, charge| {
+                    let images = if regions {
+                        &b.projector.images
+                    } else {
+                        &a.projector.images
+                    };
+                    held(&sliced, Some(images), regions, charge)
+                },
                 counts,
                 failures,
             );
@@ -554,9 +648,18 @@ fn check(
             let a = probe::<ON>(&on, &sliced, Some(bound), None);
             let b = probe::<OFF>(&off, &sliced, Some(bound), None);
             let what = format!("slice {slice}, bound {bound}");
-            compare(&sliced, &what, a.as_ref(), b.as_ref(), counts, failures);
+            compare(
+                &sliced,
+                &what,
+                a.as_ref(),
+                b.as_ref(),
+                &mut |regions, charge| held(&sliced, None, regions, charge),
+                counts,
+                failures,
+            );
         }
     }
+    natural.work
 }
 
 /// Checks smith program `smith` under both plans: its own schedule, every
@@ -682,6 +785,75 @@ fn formed(library: &PreparedLibrary, case: &Case) -> (usize, usize) {
     )
 }
 
+/// Which plans of a program its natural run leaves to the reference.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Idle {
+    Loops,
+    Islands,
+}
+
+/// Formed plans that their program's natural run leaves to the reference,
+/// by program: [`ran`] requires every other formed plan to run. The dialect
+/// decline witnesses raise or decline at their loop body's first statement
+/// in every iteration, so no iteration ends in a region. The rest are gaps
+/// that FIG-6785 owns: plans that form and never run.
+const LEFT_TO_THE_REFERENCE: &[(&str, Idle)] = &[
+    // Decline witnesses.
+    ("python region: kind decline", Idle::Loops),
+    ("python region: append to a map", Idle::Loops),
+    ("python region: get on a list", Idle::Loops),
+    ("python region: long text keys", Idle::Loops),
+    ("typescript region: branded record", Idle::Loops),
+    ("typescript region: inherited name", Idle::Loops),
+    // FIG-6785: kernel callbacks a helper's body applies.
+    (
+        "callbacks a helper's body applies by root call actions, one raising mid-call",
+        Idle::Islands,
+    ),
+    (
+        "callbacks reading their arguments' lengths and items, past an end and through a cold arm",
+        Idle::Islands,
+    ),
+    // FIG-6785: the TypeScript region programs' islands.
+    ("typescript region: store in a list", Idle::Islands),
+    ("typescript region: dict record", Idle::Islands),
+    ("typescript region: branded record", Idle::Islands),
+    ("typescript region: text of other kinds", Idle::Islands),
+    ("typescript region: push and text", Idle::Islands),
+    ("typescript region: conditional arms", Idle::Islands),
+    ("typescript region: inherited name", Idle::Islands),
+    // FIG-6785: loops whose body is a call.
+    (
+        "python islands: text returns and a discarded call",
+        Idle::Loops,
+    ),
+    (
+        "typescript islands: text returns and a discarded call",
+        Idle::Loops,
+    ),
+];
+
+/// Adds a failure where `plans`, the loop regions and call islands
+/// program `name` forms, are not met by `work`, what its natural run with
+/// regions on committed: a formed plan that never runs leaves the
+/// comparison to the reference against itself. Plans the program leaves
+/// to the reference by [`LEFT_TO_THE_REFERENCE`] are not required.
+fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<String>) {
+    let idle = |kind| LEFT_TO_THE_REFERENCE.contains(&(name, kind));
+    if plans.0 > 0 && work.iterations == 0 && !idle(Idle::Loops) {
+        failures.push(format!(
+            "{name}: {} loop regions form, and its natural run ended no iteration in one",
+            plans.0
+        ));
+    }
+    if plans.1 > 0 && work.calls == 0 && !idle(Idle::Islands) {
+        failures.push(format!(
+            "{name}: {} call islands form, and its natural run entered none",
+            plans.1
+        ));
+    }
+}
+
 /// PLAN-INDEP of regions (`docs/design/kernel-regions.md` §3.3): every
 /// corpus case, the 64-seed smith programs, the region programs and the
 /// call-island programs, each
@@ -705,15 +877,16 @@ fn regions_on_and_off_agree(shard: usize) {
     for (name, text, call_depth) in programs {
         region_programs += 1;
         let case = program_case(name, text, *call_depth);
-        let (formed_on, _) = formed(&on, &case);
-        assert!(formed_on > 0, "{name}: no loop region forms");
+        let plans = formed(&on, &case);
+        assert!(plans.0 > 0, "{name}: no loop region forms");
         assert_eq!(
             formed(&off, &case),
             (0, 0),
             "{name}: regions form with regions off"
         );
-        regions += formed_on;
-        check(&on, &off, &case, &mut counts, &mut failures);
+        regions += plans.0;
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(name, plans, work, &mut failures);
     }
     for (index, (name, text)) in ALLOCATING.iter().enumerate() {
         if index % SHARDS != shard {
@@ -721,15 +894,16 @@ fn regions_on_and_off_agree(shard: usize) {
         }
         region_programs += 1;
         let case = program_case(name, text, 16);
-        let (formed_on, _) = formed(&on, &case);
-        assert!(formed_on > 0, "{name}: no loop region forms");
+        let plans = formed(&on, &case);
+        assert!(plans.0 > 0, "{name}: no loop region forms");
         assert_eq!(
             formed(&off, &case),
             (0, 0),
             "{name}: regions form with regions off"
         );
-        regions += formed_on;
-        check(&on, &off, &case, &mut counts, &mut failures);
+        regions += plans.0;
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(name, plans, work, &mut failures);
         let mut unaccounted = case.clone();
         unaccounted.name = format!("{name} (memory off)");
         unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
@@ -752,15 +926,16 @@ fn regions_on_and_off_agree(shard: usize) {
                 dropped: false,
             }]];
         }
-        let (formed_on, _) = formed(&on, &case);
-        assert!(formed_on > 0, "{name}: no loop region forms");
+        let plans = formed(&on, &case);
+        assert!(plans.0 > 0, "{name}: no loop region forms");
         assert_eq!(
             formed(&off, &case),
             (0, 0),
             "{name}: regions form with regions off"
         );
-        regions += formed_on;
-        check(&on, &off, &case, &mut counts, &mut failures);
+        regions += plans.0;
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(name, plans, work, &mut failures);
         if !*parks {
             sessions_hold(&on, &off, &case, &mut counts, &mut failures);
         }
@@ -778,11 +953,12 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        let (formed_on, _) = formed(&on, &case);
-        assert!(formed_on > 0, "{}: no loop region forms", case.name);
+        let plans = formed(&on, &case);
+        assert!(plans.0 > 0, "{}: no loop region forms", case.name);
         assert_eq!(formed(&off, &case), (0, 0), "{}", case.name);
-        regions += formed_on;
-        check(&on, &off, &case, &mut counts, &mut failures);
+        regions += plans.0;
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(&case.name, plans, work, &mut failures);
         sessions_hold(&on, &off, &case, &mut counts, &mut failures);
     }
     counts.report(shard, "region-programs", began);
@@ -794,15 +970,16 @@ fn regions_on_and_off_agree(shard: usize) {
     {
         island_programs += 1;
         let case = program_case(name, text, *call_depth);
-        let (_, formed_on) = formed(&on, &case);
-        assert!(formed_on > 0, "{name}: no call island forms");
+        let plans = formed(&on, &case);
+        assert!(plans.1 > 0, "{name}: no call island forms");
         assert_eq!(
             formed(&off, &case),
             (0, 0),
             "{name}: islands form with regions off"
         );
-        islands += formed_on;
-        check(&on, &off, &case, &mut counts, &mut failures);
+        islands += plans.1;
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(name, plans, work, &mut failures);
     }
     counts.report(shard, "island-programs", began);
     // FIG-6754: actual Python invokes preserve their atom/action charge,
@@ -821,11 +998,15 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        assert!(formed(&on, &case).0 > 0, "{}", case.name);
+        let plans = formed(&on, &case);
+        assert!(plans.0 > 0, "{}", case.name);
         assert_eq!(formed(&off, &case), (0, 0));
         for call_depth in [1, 2, 3, 4, 16] {
             case.environment.bounds.call_depth = call_depth;
-            check(&on, &off, &case, &mut counts, &mut failures);
+            let work = check(&on, &off, &case, &mut counts, &mut failures);
+            if call_depth == 16 {
+                ran(&case.name, plans, work, &mut failures);
+            }
         }
     }
     counts.report(shard, "dialect-invokes", began);
@@ -843,15 +1024,15 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        assert!(
-            formed(&on, &case).1 > 0,
-            "{}: no call island forms",
-            case.name
-        );
+        let plans = formed(&on, &case);
+        assert!(plans.1 > 0, "{}: no call island forms", case.name);
         assert_eq!(formed(&off, &case), (0, 0));
         for call_depth in [3, 16] {
             case.environment.bounds.call_depth = call_depth;
-            check(&on, &off, &case, &mut counts, &mut failures);
+            let work = check(&on, &off, &case, &mut counts, &mut failures);
+            if call_depth == 16 {
+                ran(&case.name, plans, work, &mut failures);
+            }
         }
     }
     counts.report(shard, "dialect-islands", began);
@@ -1058,6 +1239,110 @@ fn allocating_regions_hold_what_the_reference_holds() {
         ALLOCATING.len() + dialect.len(),
         (ALLOCATING.len() + dialect.len()) * 6
     );
+}
+
+/// A loop plan retires in the machine whose entries kept missing, never in
+/// the code every run of its document shares (FIG-6783). These programs'
+/// sweeps hold entries that miss: the cold sum's binding grows past its
+/// holding, and the list's elements stop being scalars. Their unsliced
+/// runs after the sweep still end iterations in regions, as their natural
+/// runs did.
+#[test]
+fn a_loop_plan_retires_only_in_its_machine() {
+    let registry = Arc::new(super::corpus_registry());
+    let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+    let off = prepare_with_layout(registry, Layout(OFF));
+    let (mut counts, mut failures) = (Counts::default(), Vec::new());
+    let witnesses = [
+        PROGRAMS
+            .iter()
+            .find(|(name, ..)| name.contains("not all scalars"))
+            .copied(),
+        SESSIONS
+            .iter()
+            .find(|(name, ..)| name.contains("cold sum"))
+            .map(|(name, text, _)| (*name, *text, 16)),
+    ];
+    for (name, text, call_depth) in witnesses.into_iter().map(|found| found.expect("a witness")) {
+        let case = program_case(name, text, call_depth);
+        let work = check(&on, &off, &case, &mut counts, &mut failures);
+        ran(name, formed(&on, &case), work, &mut failures);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A `for` region that steps its cursor onto a chunk a resume left cold
+/// stops there, and the reference decodes the chunk before it steps on
+/// (FIG-6783). K-VAL-034's top-level loop walks 129 elements, past its
+/// list's first chunk, and its run resumed from the reference's images
+/// at slices 50 and 333 crosses into that chunk inside a region.
+#[test]
+fn a_for_region_leaves_its_cursor_decoded() {
+    let registry = Arc::new(super::corpus_registry());
+    let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+    let off = prepare_with_layout(registry, Layout(OFF));
+    let shards = super::corpus_shards();
+    let case = shards
+        .iter()
+        .flat_map(|shard| &shard.cases)
+        .find(|case| case.name == "heap nesting is allowed until a copy crosses the boundary")
+        .expect("K-VAL-034's nesting case");
+    let (mut counts, mut failures) = (Counts::default(), Vec::new());
+    let work = check(&on, &off, case, &mut counts, &mut failures);
+    assert!(work.iterations > 0, "{}: {work:?}", case.name);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// [`agree`] holds a run that ends at the memory bound in one plan only
+/// to the slack the plan dependence allows (FIG-6783): the run that
+/// refused charged no more than the other, its charge program is the
+/// other's up to its end, and its held bytes there are within the
+/// transient hold of the other plan's.
+#[test]
+fn a_memory_refusal_agrees_only_within_the_transient_slack() {
+    let run = |end: ExpectedEnd, charged: u64, tape: Vec<Weight>, held: u64| Probe {
+        observations: Observations {
+            prints: Vec::new(),
+            end,
+            trace: Vec::new(),
+            charged: Some(charged),
+            parks: 0,
+        },
+        tape,
+        projector: Projector {
+            held: Some(held),
+            ..Projector::default()
+        },
+        work: RegionWork::default(),
+    };
+    let refused = |charged: u64, tape: Vec<Weight>, held: u64| {
+        let end = ExpectedEnd::Bound {
+            name: "memory".into(),
+            limit: 1 << 20,
+        };
+        run(end, charged, tape, held)
+    };
+    let finished = run(
+        ExpectedEnd::Finished(lash_kernel_doc::Datum::Null),
+        12,
+        vec![Weight::Units(10), Weight::Atomic(2)],
+        1 << 19,
+    );
+    let mut there = |_: bool, _: u64| Some(1 << 20);
+    // Within the slack: a prefix of the other's charges, held near it.
+    let within = refused(10, vec![Weight::Units(10)], (1 << 20) - 64);
+    assert!(agree(&within, &finished, &mut there));
+    assert!(agree(&finished, &within, &mut there));
+    // A refusal past the other run's end.
+    let later = refused(14, vec![Weight::Units(10), Weight::Atomic(4)], 1 << 20);
+    assert!(!agree(&later, &finished, &mut there));
+    // A charge program the other run does not make.
+    let apart = refused(10, vec![Weight::Atomic(10)], 1 << 20);
+    assert!(!agree(&apart, &finished, &mut there));
+    // Held bytes past the transient hold of the other plan's there.
+    let mut short = |_: bool, _: u64| Some(0);
+    let held = refused(10, vec![Weight::Units(10)], transient_hold() + 1);
+    assert!(!agree(&held, &finished, &mut short));
 }
 
 macro_rules! program_shards {

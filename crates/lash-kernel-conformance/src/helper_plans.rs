@@ -184,7 +184,9 @@ fn run_with_options<const L: u64>(
                 }
             }
             Step::Ended(end) => {
-                projector.end(&end, &source).unwrap();
+                projector
+                    .end(&end, &source, machine.meters().memory)
+                    .unwrap();
                 break end;
             }
         }

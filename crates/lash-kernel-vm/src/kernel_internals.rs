@@ -6,6 +6,7 @@ use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use std::sync::Arc;
 
 pub use crate::compile::Layout;
+pub use crate::observe::RegionWork;
 use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 
 /// Prepares `registry` under `layout`; library bodies compile on first use.
@@ -161,4 +162,20 @@ pub fn call_islands(program: &Program) -> Result<usize, StartError> {
             function: missing.0,
         })?;
     Ok(exe.islands.plans.len())
+}
+
+/// The work the regions tier committed while `tape` recorded: the loop
+/// iterations regions ran to their end and the calls islands entered. The regions law requires it nonzero where regions form, so a
+/// run that leaves everything to the reference cannot pass as agreement.
+pub fn region_work(tape: &crate::ChargeTape) -> RegionWork {
+    tape.work()
+}
+
+/// The most a plan holds beyond what the reference holds at the same
+/// point (`docs/design/kernel-regions.md` §3.5): a loop region's nursery,
+/// or an island's transient holdings and its virtual frames. Where one
+/// plan refuses memory and the other runs on, their held bytes there
+/// differ by no more.
+pub fn transient_hold() -> u64 {
+    crate::machine::transient_hold()
 }

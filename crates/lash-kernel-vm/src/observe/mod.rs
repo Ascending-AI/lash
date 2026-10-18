@@ -160,7 +160,26 @@ pub(crate) enum Event {
 /// it, then the unit that passes. Clones share one record, so a law keeps
 /// it across a seal and a reopen and reads it while the run is parked.
 #[derive(Clone, Debug, Default)]
-pub struct ChargeTape(Arc<std::sync::Mutex<Vec<Weight>>>);
+pub struct ChargeTape(Arc<std::sync::Mutex<Recorded>>);
+
+/// What a [`ChargeTape`] records: the charges, and the work the regions
+/// tier committed while it recorded (`docs/design/kernel-regions.md` §1).
+#[derive(Debug, Default)]
+struct Recorded {
+    steps: Vec<Weight>,
+    work: RegionWork,
+}
+
+/// The work the regions tier committed in a recorded run: what tells a law
+/// comparing a run with regions on against the reference that regions ran.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RegionWork {
+    /// Loop iterations a region ran to their end.
+    pub iterations: u64,
+    /// Calls an island entered: their frames, which the reference would
+    /// push, it ran virtually.
+    pub calls: u64,
+}
 
 impl ChargeTape {
     pub fn new() -> Self {
@@ -169,23 +188,38 @@ impl ChargeTape {
 
     /// The charges recorded so far.
     pub fn steps(&self) -> Vec<Weight> {
-        self.lock().clone()
+        self.lock().steps.clone()
     }
 
     /// How many charges are recorded.
     pub fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().steps.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.lock().is_empty()
+        self.lock().steps.is_empty()
     }
 
     pub(crate) fn push(&self, weight: Weight) {
-        self.lock().push(weight);
+        self.lock().steps.push(weight);
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Weight>> {
+    /// The work regions committed so far.
+    pub(crate) fn work(&self) -> RegionWork {
+        self.lock().work
+    }
+
+    /// Counts `iterations` a loop region ran to their end.
+    pub(crate) fn iterated(&self, iterations: u64) {
+        self.lock().work.iterations += iterations;
+    }
+
+    /// Counts a call an island entered.
+    pub(crate) fn entered(&self) {
+        self.lock().work.calls += 1;
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

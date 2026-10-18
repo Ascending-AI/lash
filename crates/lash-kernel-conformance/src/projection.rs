@@ -46,6 +46,8 @@ pub(crate) struct Projector<'a> {
     pub(crate) cold: bool,
     pub(crate) layout: lash_kernel_vm::kernel_internals::Layout,
     pub(crate) library: Option<PreparedLibrary>,
+    /// The memory counter at the run's end.
+    pub(crate) held: Option<u64>,
 }
 
 impl Projector<'_> {
@@ -132,11 +134,14 @@ impl Projector<'_> {
         Ok(state)
     }
 
+    /// Projects the run's end `end`, its memory counter there `held`.
     pub(crate) fn end(
         &mut self,
         end: &lash_kernel_vm::End,
         source: &pages::Source,
+        held: u64,
     ) -> Result<(), HarnessError> {
+        self.held = Some(held);
         if let lash_kernel_vm::End::Finished(finished) = end {
             self.terminal = finished
                 .carry
@@ -181,11 +186,26 @@ thread_local! {
 /// what it answered and the charges in order.
 #[cfg(test)]
 pub(crate) fn taped<T>(run: impl FnOnce() -> T) -> (T, Vec<lash_kernel_exec::charge::Weight>) {
+    let (answered, steps, _) = taped_work(run);
+    (answered, steps)
+}
+
+/// [`taped`], also giving the work the regions tier committed in every
+/// machine the run started or opened.
+#[cfg(test)]
+pub(crate) fn taped_work<T>(
+    run: impl FnOnce() -> T,
+) -> (
+    T,
+    Vec<lash_kernel_exec::charge::Weight>,
+    lash_kernel_vm::kernel_internals::RegionWork,
+) {
     let tape = lash_kernel_vm::ChargeTape::new();
     TAPE.with(|held| *held.borrow_mut() = Some(tape.clone()));
     let answered = run();
     TAPE.with(|held| *held.borrow_mut() = None);
-    (answered, tape.steps())
+    let work = lash_kernel_vm::kernel_internals::region_work(&tape);
+    (answered, tape.steps(), work)
 }
 
 #[cfg(test)]

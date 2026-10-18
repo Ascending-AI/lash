@@ -23,8 +23,6 @@
 //! session write does, and publishes what it wrote to the cell's session
 //! at its exit, in the order it wrote them, before any boundary.
 
-use std::sync::atomic::Ordering::Relaxed;
-
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::Weight;
@@ -42,7 +40,7 @@ use crate::observe::ChargeTape;
 /// (§3.5): a scalar plan's scalar pins, which net to zero at each
 /// statement's end, and the nursery an allocating plan's statements build
 /// and grow in.
-const NURSERY: u64 = 1 << 16;
+pub(super) const NURSERY: u64 = 1 << 16;
 
 #[cfg(test)]
 mod admission_laws;
@@ -81,12 +79,10 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     tape: Option<&'a ChargeTape>,
     /// An allocating plan's admission (`ALLOC`); a scalar plan admits
     /// whole iterations.
-    /// iterations.
     admit: Admit,
     /// The reference's step would end here: a statement spent the slice,
     /// or the arena's collection is due. The region stops at this
     /// boundary, as the reference's step ends at it.
-    /// statement boundary.
     due: bool,
     /// Where an iteration stopped: each block it stands in, outermost
     /// first, at the statement it runs next.
@@ -121,8 +117,13 @@ impl KernelMachine {
         region: u32,
     ) -> Result<Option<Flow>, Halt> {
         let plan = &exe.regions[region as usize];
-        // A plan whose entries keep missing is the reference's.
-        if plan.unproductive.load(Relaxed) >= UNPRODUCTIVE {
+        // A plan whose entries keep missing in this machine is the
+        // reference's.
+        if self
+            .unproductive
+            .get(region as usize)
+            .is_some_and(|weight| *weight >= UNPRODUCTIVE)
+        {
             return Ok(None);
         }
         match (plan.calls.is_empty(), plan.allocates) {
@@ -288,13 +289,21 @@ impl KernelMachine {
         // the reference stops the entry as a barrier does: unproductive
         // only where nothing ran before it.
         if stopped && started <= 1 && (missed || declined && !progressed) {
-            let weight = if progressed { 1 } else { BARREN };
-            plan.unproductive.fetch_add(weight, Relaxed);
-        } else if started > 1 {
-            plan.unproductive.store(0, Relaxed);
+            let at = region as usize;
+            if self.unproductive.len() <= at {
+                self.unproductive.resize(exe.regions.len().max(at + 1), 0);
+            }
+            self.unproductive[at] += if progressed { 1 } else { BARREN };
+        } else if started > 1
+            && let Some(weight) = self.unproductive.get_mut(region as usize)
+        {
+            *weight = 0;
         }
         if let Some(fault) = cx.fault {
             return Err(Halt::from(fault));
+        }
+        if let Some(tape) = tape {
+            tape.iterated(started - u64::from(stopped));
         }
         // The exit publishes the session writes before any boundary, in
         // the order the region made them, as the reference's writes left

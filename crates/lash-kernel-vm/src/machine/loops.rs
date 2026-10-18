@@ -379,6 +379,21 @@ impl KernelMachine {
         self.next_iteration(task, host, exe)
     }
 
+    /// Decodes what the innermost loop's next step reads, before it steps.
+    fn warm_cursor(&mut self, task: TaskId) -> Result<(), Halt> {
+        let arena = std::rc::Rc::clone(&self.arena);
+        loop {
+            let cold = match self.frame(task)?.control.last() {
+                Some(Control::For { cursor, .. }) => cursor.cold(&arena.borrow()),
+                _ => None,
+            };
+            match cold {
+                Some((object, chunk)) => self.warm(object, chunk)?,
+                None => return Ok(()),
+            }
+        }
+    }
+
     /// The test of the innermost loop's continuation, charged once
     /// (`K-CHG-002`): a `for` steps its cursor, a `while` tests its
     /// condition. It starts the next iteration, `Step`, or ends the loop:
@@ -393,18 +408,7 @@ impl KernelMachine {
         if self.charging {
             self.charge(self.costs.loop_test)?;
         }
-        // What the loop's next step reads is decoded before it steps.
-        let arena = std::rc::Rc::clone(&self.arena);
-        loop {
-            let cold = match self.frame(task)?.control.last() {
-                Some(Control::For { cursor, .. }) => cursor.cold(&arena.borrow()),
-                _ => None,
-            };
-            match cold {
-                Some((object, chunk)) => self.warm(object, chunk)?,
-                None => break,
-            }
-        }
+        self.warm_cursor(task)?;
         // Borrowed by field, so that the loop's position can be read
         // against the arena.
         let Some(frame) = self
@@ -436,7 +440,9 @@ impl KernelMachine {
                         if let Some(flow) = self.loop_region(task, host, exe, region)? {
                             return Ok(flow);
                         }
-                        // The region may have stepped the cursor.
+                        // The region may have stepped the cursor, to an
+                        // element it left cold.
+                        self.warm_cursor(task)?;
                         let frame = self
                             .tasks
                             .get_mut(task.0 as usize)?

@@ -22,8 +22,7 @@ use super::super::ops::Flow;
 use super::super::stream::Running;
 use super::super::{Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
 use super::{
-    Exit, ISLAND_DEPTH, ISLAND_HOLD, Island, Level, MAX_ARGS, MAX_SLOTS, RunsOn, SLOT_BYTES,
-    Stands, Stop, closure_island, held,
+    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Stands, Stop, closure_island, held,
 };
 use crate::compile::{CodeId, Executable, NestedCallee, NestedKind};
 use crate::interface::Host;
@@ -236,8 +235,7 @@ impl KernelMachine {
                 .bounds
                 .memory
                 .saturating_sub(self.heap.certificate().upper.0)
-                < ISLAND_HOLD
-                    + u64::from(ISLAND_DEPTH) * (FRAME_BYTES + MAX_SLOTS as u64 * SLOT_BYTES)
+                < ISLAND_ADMITTED
         {
             return Ok(None);
         }

@@ -269,7 +269,7 @@ pub(crate) fn run_program_in<M: Machine>(
             }
             Step::Ended(end) => {
                 if let Some(p) = &mut projection {
-                    p.end(&end, &source)?;
+                    p.end(&end, &source, machine.meters().memory)?;
                 }
                 if !cut && (batches.next().is_some() || !host.answers.is_empty()) {
                     return Err(HarnessError(

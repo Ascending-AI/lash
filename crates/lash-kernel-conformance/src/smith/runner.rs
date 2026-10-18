@@ -199,7 +199,7 @@ fn observe_in<M: Machine>(
         let meters = machine.meters();
         let ended = matches!(step, Step::Ended(_));
         if let Step::Ended(end) = &step {
-            projection.end(end, source)?;
+            projection.end(end, source, meters.memory)?;
         }
         let parked = if ended {
             None
