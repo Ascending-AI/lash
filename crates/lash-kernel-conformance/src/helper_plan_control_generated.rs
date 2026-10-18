@@ -72,6 +72,7 @@ const LAW_HANDLERS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_handlers,
+    template: None,
 };
 
 /// `law.handlers`.
@@ -363,6 +364,7 @@ const LAW_HALT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_halt,
+    template: None,
 };
 
 /// `law.halt`.
@@ -471,6 +473,7 @@ const LAW_FACTORY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_factory,
+    template: None,
 };
 
 /// `law.factory`.
@@ -516,6 +519,7 @@ const LAW_DECLINING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
+    template: None,
 };
 
 /// `law.declining`.
@@ -551,6 +555,7 @@ const LAW_DECLINE_CALLER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_decline_caller,
+    template: None,
 };
 
 /// `law.decline_caller`.

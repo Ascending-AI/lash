@@ -173,20 +173,30 @@ impl PreparedLibrary {
             })
             .collect();
 
-        // Which functions are operators: their native's prepared entry is
-        // the one `prepared` keeps below.
-        let operators: Vec<Option<usize>> = library
+        // Which functions have native or generated helper entries: lowering
+        // and execution use the same entry prepared once here.
+        let entries: Vec<Option<Entry>> = library
             .iter()
             .zip(&machine)
             .map(|((_, registered), machine)| {
                 let definition = registered.definition();
-                let native = registered.native()?;
-                let runs_native =
-                    machine.is_none() && !(layout.declines() && definition.body().is_some());
-                (runs_native && definition.guard.is_none() && layout.0.is_multiple_of(2))
-                    .then(|| native.prepare())
-                    .flatten()
-                    .map(|_| definition.signature.params.len())
+                if machine.is_some() || definition.guard.is_some() || !layout.0.is_multiple_of(2) {
+                    return None;
+                }
+                registered
+                    .plan()
+                    .and_then(|plan| plan.template.as_ref())
+                    .and_then(|template| Entry::template(&registry, template))
+                    .or_else(|| registered.native()?.prepare().map(Entry::Native))
+            })
+            .collect();
+        let operators: Vec<Option<usize>> = entries
+            .iter()
+            .zip(&library)
+            .map(|(entry, (_, registered))| {
+                entry
+                    .as_ref()
+                    .map(|_| registered.definition().signature.params.len())
             })
             .collect();
         let no_bindings = NO_BINDINGS;
@@ -231,7 +241,8 @@ impl PreparedLibrary {
         let libs = library
             .iter()
             .zip(machine)
-            .map(|((function, registered), machine)| {
+            .zip(entries)
+            .map(|(((function, registered), machine), prepared)| {
                 let definition = Arc::clone(registered.definition());
                 let body = bodies.get(function).copied();
                 let run = match (machine, registered.native(), body) {
@@ -280,14 +291,6 @@ impl PreparedLibrary {
                     .map(|guard| Plan::new(&guard.limit, params));
                 // A guarded call counts its work, which only the general
                 // call does; an odd layout takes the general call always.
-                let prepared = match &run {
-                    LibRun::Native { native, .. }
-                        if limit.is_none() && layout.0.is_multiple_of(2) =>
-                    {
-                        native.prepare()
-                    }
-                    _ => None,
-                };
                 let prepared =
                     prepared.map(|entry| (entry, Fast::new(&definition.charge, params, &charge)));
                 Lib {

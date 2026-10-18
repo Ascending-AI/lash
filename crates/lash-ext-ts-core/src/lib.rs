@@ -27,8 +27,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedAnswer,
-    PreparedNative, RegistryError, Value,
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, RegistryError, Value,
 };
 
 /// Why [`implement`] could not add the natives.
@@ -164,22 +163,6 @@ impl NativeFunction for Add {
             _ => Err(NativeError::Decline),
         }
     }
-
-    fn prepare(&self) -> Option<PreparedNative> {
-        fn entry(args: &[Value]) -> Option<Value> {
-            match args {
-                [Value::Float(left), Value::Float(right), ..] => {
-                    Some(Value::Float(Float::new(left.get() + right.get())))
-                }
-                _ => None,
-            }
-        }
-        Some(PreparedNative {
-            entry,
-            charged_entry: Some(|args| entry(args).map(float_answer)),
-            operation: "ts.add / Float",
-        })
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -234,35 +217,6 @@ impl NativeFunction for Relate {
             _ => Err(NativeError::Decline),
         }
     }
-
-    fn prepare(&self) -> Option<PreparedNative> {
-        let entry: fn(&[Value]) -> Option<Value> = match self.relation {
-            Relation::Lt => |args| floats(args, Relation::Lt),
-            Relation::Le => |args| floats(args, Relation::Le),
-            Relation::Gt => |args| floats(args, Relation::Gt),
-            Relation::Ge => |args| floats(args, Relation::Ge),
-        };
-        let charged_entry: fn(&[Value]) -> Option<PreparedAnswer> = match self.relation {
-            Relation::Lt => |args| floats(args, Relation::Lt).map(float_answer),
-            Relation::Le => |args| floats(args, Relation::Le).map(float_answer),
-            Relation::Gt => |args| floats(args, Relation::Gt).map(float_answer),
-            Relation::Ge => |args| floats(args, Relation::Ge).map(float_answer),
-        };
-        Some(PreparedNative {
-            entry,
-            charged_entry: Some(charged_entry),
-            operation: "ts relation / Float",
-        })
-    }
-}
-
-fn floats(args: &[Value], relation: Relation) -> Option<Value> {
-    match args {
-        [Value::Float(left), Value::Float(right), ..] => {
-            Some(Value::Bool(relation.floats(left.get(), right.get())))
-        }
-        _ => None,
-    }
 }
 
 /// Float operands already are ECMA Numbers. Every conversion case, including
@@ -274,19 +228,6 @@ impl NativeFunction for ToNumber {
             [value @ Value::Float(_)] => Ok(*value),
             _ => Err(NativeError::Decline),
         }
-    }
-    fn prepare(&self) -> Option<PreparedNative> {
-        fn entry(args: &[Value]) -> Option<Value> {
-            match args {
-                [value @ Value::Float(_)] => Some(*value),
-                _ => None,
-            }
-        }
-        Some(PreparedNative {
-            entry,
-            charged_entry: Some(|args| entry(args).map(float_answer)),
-            operation: "ts.to_number / Float",
-        })
     }
 }
 
@@ -300,21 +241,6 @@ impl NativeFunction for Subtract {
             [Value::Float(_), Value::Float(_)] => self.native.call(call),
             _ => Err(NativeError::Decline),
         }
-    }
-    fn prepare(&self) -> Option<PreparedNative> {
-        fn entry(args: &[Value]) -> Option<Value> {
-            match args {
-                [Value::Float(left), Value::Float(right)] => {
-                    Some(Value::Float(Float::new(left.get() - right.get())))
-                }
-                _ => None,
-            }
-        }
-        Some(PreparedNative {
-            entry,
-            charged_entry: Some(|args| entry(args).map(float_answer)),
-            operation: "ts.sub / Float",
-        })
     }
 }
 
@@ -346,13 +272,5 @@ impl NativeFunction for Get {
             return Err(NativeError::Decline);
         }
         Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))
-    }
-}
-
-/// The float guards certify size-one arguments and result.
-fn float_answer(value: Value) -> PreparedAnswer {
-    PreparedAnswer {
-        value,
-        scalar_sizes: Some(0),
     }
 }

@@ -171,6 +171,12 @@ pub(crate) fn fault(error: impl std::fmt::Display) -> HarnessError {
 
 /// Test plans differ only in kernel layout; no second execution engine.
 pub(crate) struct Plan<const L: u64>(lash_kernel_vm::KernelMachine);
+impl<const L: u64> Plan<L> {
+    #[cfg(test)]
+    pub(crate) fn record_charges(&mut self, tape: lash_kernel_vm::ChargeTape) {
+        self.0.record_charges(tape);
+    }
+}
 impl<const L: u64> Machine for Plan<L> {
     fn start(
         program: Program,

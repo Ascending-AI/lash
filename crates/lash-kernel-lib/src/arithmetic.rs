@@ -143,6 +143,13 @@ pub(crate) fn plain(op: Binary, a: &Numeric, b: &Numeric) -> Result<Option<Numer
     }
     let a = as_float(a)?;
     let b = as_float(b)?;
+    Ok(Some(Numeric::Float(float_binary(op, a, b))))
+}
+
+/// IEEE arithmetic shared by the general numeric call and prepared float
+/// entries. Min/max retain their operand and signed-zero selection above.
+#[inline]
+pub(crate) fn float_binary(op: Binary, a: f64, b: f64) -> Float {
     let result = match op {
         Binary::Add => a + b,
         Binary::Sub => a - b,
@@ -161,7 +168,7 @@ pub(crate) fn plain(op: Binary, a: &Numeric, b: &Numeric) -> Result<Option<Numer
         Binary::Pow => libm::pow(a, b),
         Binary::Min | Binary::Max => unreachable!("min/max returned before float arithmetic"),
     };
-    Ok(Some(Numeric::Float(Float::new(result))))
+    Float::new(result)
 }
 
 fn floor_remainder(a: f64, b: f64) -> f64 {

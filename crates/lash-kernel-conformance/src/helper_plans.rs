@@ -58,6 +58,7 @@ struct Observed {
     prints: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
+    tape: Vec<lash_kernel_exec::Weight>,
 }
 
 fn run<const L: u64>(
@@ -74,11 +75,21 @@ fn run_bounded<const L: u64>(
     projector: &mut Projector<'_>,
     charge: u64,
 ) -> Observed {
+    run_at_depth::<L>(case, program, projector, charge, 200)
+}
+
+fn run_at_depth<const L: u64>(
+    case: &runner::Case,
+    program: &Program,
+    projector: &mut Projector<'_>,
+    charge: u64,
+    call_depth: u32,
+) -> Observed {
     let bounds = Bounds {
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: charge,
         memory: 64 << 20,
-        call_depth: 200,
+        call_depth,
         live_tasks: 100,
         requests_per_park: 100,
         join_members: 100,
@@ -103,6 +114,8 @@ fn run_bounded<const L: u64>(
         Box::new(source.clone()),
     )
     .unwrap();
+    let tape = lash_kernel_vm::ChargeTape::new();
+    machine.record_charges(tape.clone());
     let mut world = World {
         bits: case.bits,
         stride: case.stride,
@@ -123,6 +136,7 @@ fn run_bounded<const L: u64>(
                         crate::projection::admissions(&park.requests),
                     )
                     .unwrap();
+                machine.record_charges(tape.clone());
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
@@ -153,6 +167,16 @@ fn run_bounded<const L: u64>(
         prints: world.prints,
         requests,
         charged: machine.meters().charged.expect("exact charge"),
+        tape: tape
+            .steps()
+            .into_iter()
+            .flat_map(|weight| match weight {
+                lash_kernel_exec::Weight::Units(units) => {
+                    vec![lash_kernel_exec::Weight::Units(1); units as usize]
+                }
+                atomic => vec![atomic],
+            })
+            .collect(),
     }
 }
 
@@ -693,4 +717,189 @@ fn charge_off_preserves_the_helper_corpus() {
     }
     println!("charge-off helper corpus: executed={executed}");
     assert!(executed > 0);
+}
+
+/// PLAN-INDEP / K-CHG-003: generated typed helper paths agree with their
+/// bodies, including the completion tape, raises and depth refusals.
+#[test]
+fn generated_scalar_templates_agree_with_their_bodies() {
+    use lash_kernel_doc::{Float, PreparedNative, Value, parse_document};
+    use std::sync::Arc;
+    let samples = [
+        "null",
+        "absent",
+        "false",
+        "true",
+        "0",
+        "1",
+        "-1",
+        "9223372036854775807",
+        "0.0",
+        "-0.0",
+        "1.5",
+        "nan",
+        "inf",
+        "\"\"",
+        "\"x\"",
+    ];
+    for (dialect, names) in [
+        (
+            "python",
+            &[
+                "py.add",
+                "py.sub",
+                "py.mul",
+                "py.truediv",
+                "py.floordiv",
+                "py.mod",
+                "py.neg",
+                "py.pos",
+                "py.truth",
+            ][..],
+        ),
+        (
+            "typescript",
+            &[
+                "ts.add",
+                "ts.sub",
+                "ts.mul",
+                "ts.div",
+                "ts.rem",
+                "ts.neg",
+                "ts.to_boolean",
+                "ts.not",
+                "ts.strict_equals",
+                "ts.strict_not_equals",
+                "ts.lt",
+                "ts.le",
+                "ts.gt",
+                "ts.ge",
+            ][..],
+        ),
+    ] {
+        let runner = runner::Runner::new(dialect).unwrap();
+        let case = runner::Case {
+            id: dialect.into(),
+            dialect: dialect.into(),
+            source: if dialect == "python" { "None" } else { "null;" }.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let runner::Lowered::Program(base) = runner.lower(&case).unwrap() else {
+            panic!("template fixture lowers")
+        };
+        let registry = base.library.registry();
+        let general = prepare_with_layout(Arc::clone(registry), Layout(1));
+        let bodies = prepare_with_layout(Arc::clone(registry), Layout(3));
+        for name in names {
+            let (function, registered) = registry
+                .iter()
+                .find(|(_, registered)| registered.definition().name.as_str() == *name)
+                .unwrap();
+            let template = registered
+                .plan()
+                .unwrap()
+                .template
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} has no generated scalar path"));
+            let natives: Vec<PreparedNative> = template
+                .callees
+                .iter()
+                .map(|function| {
+                    registry
+                        .get(function)
+                        .unwrap()
+                        .native()
+                        .unwrap()
+                        .prepare()
+                        .unwrap()
+                })
+                .collect();
+            let arity = registered.definition().signature.params.len();
+            let args = if dialect == "python" {
+                vec![Value::Int(1); arity]
+            } else {
+                vec![Value::Float(Float::new(1.0)); arity]
+            };
+            assert!(
+                (template.entry)(&args, &natives).is_some(),
+                "{name}'s numeric path must be exercised"
+            );
+            // Every depth near the elided helper frames uses the same
+            // refusal point, charge prefix and function name as the body.
+            for call_depth in 0..=template.depth + 2 {
+                let args = vec![if dialect == "python" { "1" } else { "1.0" }; arity];
+                let source = format!(
+                    "kernel 1\nnumbers by_spelling\nuse op = @{function}\nmain {{ let value = invoke op({}) return value }}",
+                    args.join(", ")
+                );
+                let mut program = Program {
+                    release: base.release,
+                    document: Arc::new(parse_document(&source).unwrap()),
+                    library: base.library.clone(),
+                };
+                let expected = run_at_depth::<0>(
+                    &case,
+                    &program,
+                    &mut Projector::default(),
+                    50_000_000,
+                    call_depth,
+                );
+                program.library = bodies.clone();
+                assert_eq!(
+                    run_at_depth::<3>(
+                        &case,
+                        &program,
+                        &mut Projector::default(),
+                        50_000_000,
+                        call_depth
+                    ),
+                    expected,
+                    "{name} depth {call_depth}"
+                );
+            }
+            let mut answered = 0;
+            for index in 0..samples.len().pow(arity as u32) {
+                let mut selected = index;
+                let args: Vec<_> = (0..arity)
+                    .map(|_| {
+                        let value = samples[selected % samples.len()];
+                        selected /= samples.len();
+                        value
+                    })
+                    .collect();
+                let source = format!(
+                    "kernel 1\nnumbers by_spelling\nuse op = @{function}\nmain {{ let value = invoke op({}) return value }}",
+                    args.join(", ")
+                );
+                let mut program = Program {
+                    release: base.release,
+                    document: Arc::new(parse_document(&source).unwrap()),
+                    library: base.library.clone(),
+                };
+                let case = runner::Case {
+                    id: format!("{name}({})", args.join(", ")),
+                    ..case.clone()
+                };
+                let expected = run::<0>(&case, &program, &mut Projector::default());
+                program.library = general.clone();
+                assert_eq!(
+                    run::<1>(&case, &program, &mut Projector::default()),
+                    expected,
+                    "{} general",
+                    case.id
+                );
+                program.library = bodies.clone();
+                assert_eq!(
+                    run::<3>(&case, &program, &mut Projector::default()),
+                    expected,
+                    "{} body",
+                    case.id
+                );
+                answered += 1;
+            }
+            println!("{name}: {answered} template/body cases");
+        }
+    }
 }

@@ -13,6 +13,7 @@ fn numeric(value: &Value) -> bool {
 pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
     use Value as V;
     Some(match (a, b) {
+        (V::Float(a), V::Float(b)) => crate::numeric::float_cmp(*a, *b) == Some(Ordering::Equal),
         (V::Int(_) | V::Float(_), V::Int(_) | V::Float(_)) => {
             scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?).ok()?
                 == Some(Ordering::Equal)
@@ -42,6 +43,7 @@ pub(crate) fn scalar_compare(
 ) -> Option<Result<Option<Ordering>, NativeError>> {
     use Value as V;
     Some(match (a, b) {
+        (V::Float(a), V::Float(b)) => Ok(crate::numeric::float_cmp(*a, *b)),
         (V::Int(_) | V::Float(_), V::Int(_) | V::Float(_)) => {
             scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?)
         }

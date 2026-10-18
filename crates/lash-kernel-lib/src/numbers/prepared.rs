@@ -14,6 +14,31 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
     if args.len() != S::ARITY {
         return None;
     }
+    if DOMAIN != 2
+        && let [Value::Float(a), Value::Float(b)] = args
+    {
+        let value = match S::OPERATION {
+            Operation::Binary(op) if !matches!(op, Binary::Min | Binary::Max) => Some(
+                Value::Float(crate::arithmetic::float_binary(op, a.get(), b.get())),
+            ),
+            Operation::Eq
+            | Operation::Lt
+            | Operation::Le
+            | Operation::Gt
+            | Operation::Ge
+            | Operation::Compare => {
+                Some(super::relation(S::OPERATION, crate::numeric::float_cmp(*a, *b)).ok()?)
+            }
+            _ => None,
+        };
+        if let Some(value) = value {
+            return Some(PreparedAnswer {
+                value,
+                scalar_sizes: CHARGED
+                    .then_some(u8::from(matches!(value, Value::Int(n) if n != 0)) << 3),
+            });
+        }
+    }
     let mut sizes = CHARGED.then_some(0u8);
     if matches!(S::OPERATION, Operation::IntParse | Operation::FloatParse) {
         if !matches!(args[0], Value::Text(_))

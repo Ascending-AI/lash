@@ -685,6 +685,8 @@ impl KernelMachine {
             None
         };
         if let Some((prepared, fast)) = &function.prepared
+            && (prepared.depth() <= u32::from(entry.is_some())
+                || self.template_depth_fits(task, prepared.depth(), entry.as_ref())?)
             && let Some(value) =
                 prepared.answer(&self.regs[args..args + function.arity], self.charging)
         {
@@ -766,7 +768,7 @@ impl KernelMachine {
         lib: LibId,
         args: Reg,
         out: Reg,
-        entry: Option<&super::operation_entry::OperationEntry>,
+        admission: Option<&super::operation_entry::OperationEntry>,
         prepared: bool,
     ) -> Eval<Answer> {
         let function = exe.lib(lib);
@@ -777,12 +779,23 @@ impl KernelMachine {
         if self.observer.is_some() && !matches!(function.run, LibRun::Body(_)) {
             self.observe(Event::NativeEnter { task, lib });
         }
+        if prepared
+            && let Some((entry, fast)) = &function.prepared
+            && (entry.depth() <= u32::from(function.operation())
+                || self.template_depth_fits(task, entry.depth(), admission)?)
+            && let Some(value) = entry.answer(&self.regs[args..end], self.charging)
+        {
+            self.prepared_answered(exe, lib, args, out, value, fast)?;
+            return Ok(Answer::Done);
+        }
         let result = match &function.run {
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
-            LibRun::Plan { plan, .. } => match self.run_plan(task, exe, lib, plan, args, entry)? {
-                Some(result) => result,
-                None => return Ok(Answer::Yielded),
-            },
+            LibRun::Plan { plan, .. } => {
+                match self.run_plan(task, exe, lib, plan, args, admission)? {
+                    Some(result) => result,
+                    None => return Ok(Answer::Yielded),
+                }
+            }
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args).copied() {
                 Some(Value::TaskRef(task)) => Ok(Value::Task(task)),
                 Some(Value::ObjectRef(object)) => {
@@ -808,14 +821,6 @@ impl KernelMachine {
                 body,
                 fallback,
             } => {
-                if prepared
-                    && let Some((entry, fast)) = &function.prepared
-                    // A prepared entry reads and builds no arena object.
-                    && let Some(value) = entry.answer(&self.regs[args..end], self.charging)
-                {
-                    self.prepared_answered(exe, lib, args, out, value, fast)?;
-                    return Ok(Answer::Done);
-                }
                 let limit = match &function.limit {
                     Some(limit) => {
                         self.warm_formula(limit, args, None)?;
@@ -924,7 +929,7 @@ impl KernelMachine {
                             return Err(fault("a native with no kernel body declined").into());
                         };
                         if let Some(plan) = fallback {
-                            match self.run_plan(task, exe, lib, plan, args, entry)? {
+                            match self.run_plan(task, exe, lib, plan, args, admission)? {
                                 Some(result) => result,
                                 None => return Ok(Answer::Yielded),
                             }

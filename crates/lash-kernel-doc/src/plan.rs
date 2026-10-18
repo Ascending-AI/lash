@@ -68,6 +68,21 @@ pub struct HelperPlan {
     /// plan's variables and registers. It reads its parameters through the
     /// context and returns the body's result.
     pub run: fn(&mut dyn PlanContext, u32) -> Result<Value, PlanExit>,
+    /// The body's build-staged immediate paths, when any reduce to
+    /// certified native entries. The helper's own formula charges them.
+    pub template: Option<HelperTemplate>,
+}
+
+/// A helper's scalar paths specialized from its body at build time.
+/// Callees are resolved once when the library is prepared; a missing or
+/// guarded native leaves the helper on its ordinary plan or body.
+#[derive(Debug)]
+pub struct HelperTemplate {
+    pub entry: fn(&[Value], &[crate::PreparedNative]) -> Option<Value>,
+    pub callees: &'static [FunctionId],
+    /// Conservative extra call-depth headroom, including the helper.
+    /// Near the bound the body preserves the exact refusal and its name.
+    pub depth: u32,
 }
 
 /// A callback site: an action of the body where the plan may yield, and

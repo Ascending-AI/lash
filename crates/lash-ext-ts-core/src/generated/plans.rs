@@ -774,6 +774,7 @@ const TS_STRING_TRIM_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_trim_value,
+    template: None,
 };
 
 /// `ts.string.trim_value`.
@@ -827,6 +828,7 @@ const TS_NUMBER_DIGIT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_digit,
+    template: None,
 };
 
 /// `ts.number.digit`.
@@ -979,6 +981,7 @@ const TS_NUMBER_PARSE_INT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parse_int,
+    template: None,
 };
 
 /// `ts.number.parse_int`.
@@ -1353,6 +1356,7 @@ const TS_NUMBER_PARSE_DECIMAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parse_decimal,
+    template: None,
 };
 
 /// `ts.number.parse_decimal`.
@@ -1794,6 +1798,7 @@ const TS_NUMBER_PARSE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parse,
+    template: None,
 };
 
 /// `ts.number.parse`.
@@ -1973,6 +1978,7 @@ const TS_NUMBER_PARTS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parts,
+    template: None,
 };
 
 /// `ts.number.parts`.
@@ -2095,6 +2101,7 @@ const TS_NUMBER_LAYOUT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_layout,
+    template: None,
 };
 
 /// `ts.number.layout`.
@@ -2257,6 +2264,7 @@ const TS_NUMBER_TO_STRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_to_string,
+    template: Some(p::HelperTemplate { entry: ts_number_to_string_template, depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ] }),
 };
 
 /// `ts.number.to_string`.
@@ -2360,6 +2368,156 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.local(5, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
+                if !matches!(v9, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v10;
+                if !matches!(v10, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                if !matches!(v9, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+                if !matches!(v10, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
+                if !matches!(v11, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_NUMBER_RATIO: p::HelperPlan = p::HelperPlan {
     name: "ts.number.ratio",
@@ -2389,6 +2547,7 @@ const TS_NUMBER_RATIO: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_ratio,
+    template: None,
 };
 
 /// `ts.number.ratio`.
@@ -2467,6 +2626,7 @@ const TS_NUMBER_ROUND_DECIMAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_round_decimal,
+    template: None,
 };
 
 /// `ts.number.round_decimal`.
@@ -2594,6 +2754,7 @@ const TS_REGEXP_ESCAPED_SOURCE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_escaped_source,
+    template: Some(p::HelperTemplate { entry: ts_regexp_escaped_source_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.regexp.escaped_source`.
@@ -2769,6 +2930,20 @@ fn ts_regexp_escaped_source(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.call(9, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn ts_regexp_escaped_source_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("(?:)")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_REGEXP_SPELL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.spell",
@@ -2792,6 +2967,7 @@ const TS_REGEXP_SPELL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_spell,
+    template: None,
 };
 
 /// `ts.regexp.spell`.
@@ -2844,6 +3020,7 @@ const TS_EXOTIC_ERROR_NAME: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_error_name,
+    template: None,
 };
 
 /// `ts.exotic.error_name`.
@@ -2966,6 +3143,7 @@ const TS_EXOTIC_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_to_primitive,
+    template: None,
 };
 
 /// `ts.exotic.to_primitive`.
@@ -3131,6 +3309,7 @@ const TS_EXOTIC_GET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_get,
+    template: Some(p::HelperTemplate { entry: ts_exotic_get_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.exotic.get`.
@@ -3275,6 +3454,18 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(5, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_exotic_get_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Bool(_), Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_EXOTIC_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.set",
@@ -3315,6 +3506,7 @@ const TS_EXOTIC_SET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_set,
+    template: None,
 };
 
 /// `ts.exotic.set`.
@@ -3506,6 +3698,7 @@ const TS_EXOTIC_ITERATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_iterate,
+    template: None,
 };
 
 /// `ts.exotic.iterate`.
@@ -3747,6 +3940,7 @@ const TS_RECEIVER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_receiver,
+    template: Some(p::HelperTemplate { entry: ts_receiver_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.receiver`.
@@ -3860,6 +4054,42 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_receiver_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("number")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_CALLABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.callable",
@@ -3884,6 +4114,7 @@ const TS_CALLABLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_callable,
+    template: Some(p::HelperTemplate { entry: ts_callable_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.callable`.
@@ -3926,6 +4157,18 @@ fn ts_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_IDENTITY: p::HelperPlan = p::HelperPlan {
     name: "ts.identity",
@@ -3952,6 +4195,7 @@ const TS_IDENTITY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_identity,
+    template: Some(p::HelperTemplate { entry: ts_identity_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.identity`.
@@ -4009,6 +4253,18 @@ fn ts_identity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_identity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_REQUIRES_NEW: p::HelperPlan = p::HelperPlan {
     name: "ts.requires_new",
@@ -4033,6 +4289,7 @@ const TS_REQUIRES_NEW: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_requires_new,
+    template: None,
 };
 
 /// `ts.requires_new`.
@@ -4072,6 +4329,7 @@ const TS_FUNCTION_FROM_TEXT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_function_from_text,
+    template: None,
 };
 
 /// `ts.function_from_text`.
@@ -4104,6 +4362,7 @@ const TS_NOTHING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_nothing,
+    template: None,
 };
 
 /// `ts.nothing`.
@@ -4142,6 +4401,7 @@ const TS_IS_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_primitive,
+    template: Some(p::HelperTemplate { entry: ts_is_primitive_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.is_primitive`.
@@ -4202,6 +4462,18 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn ts_is_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_IS_NULLISH: p::HelperPlan = p::HelperPlan {
     name: "ts.is_nullish",
@@ -4224,6 +4496,7 @@ const TS_IS_NULLISH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_nullish,
+    template: Some(p::HelperTemplate { entry: ts_is_nullish_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.is_nullish`.
@@ -4243,6 +4516,32 @@ fn ts_is_nullish(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
+}
+fn ts_is_nullish_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_TDZ: p::HelperPlan = p::HelperPlan {
@@ -4270,6 +4569,7 @@ const TS_TDZ: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_tdz,
+    template: None,
 };
 
 /// `ts.tdz`.
@@ -4320,6 +4620,7 @@ const TS_REQUIRE_OBJECT_COERCIBLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_require_object_coercible,
+    template: Some(p::HelperTemplate { entry: ts_require_object_coercible_template, depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.require_object_coercible`.
@@ -4342,6 +4643,35 @@ fn ts_require_object_coercible(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_require_object_coercible_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v2 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+if !matches!(v0, Value::Bool(true)) { return None; }
+Some(Value::Bool(true))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v1;
+Some(v1)
+})() { return Some(value); }
+None
+})()?;
+let _ = v2;
+
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_TO_BOOLEAN: p::HelperPlan = p::HelperPlan {
@@ -4377,6 +4707,7 @@ const TS_TO_BOOLEAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_to_boolean,
+    template: Some(p::HelperTemplate { entry: ts_to_boolean_template, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.to_boolean`.
@@ -4461,6 +4792,55 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(9, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_to_boolean_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[3].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_NOT: p::HelperPlan = p::HelperPlan {
     name: "ts.not",
@@ -4481,6 +4861,7 @@ const TS_NOT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_not,
+    template: Some(p::HelperTemplate { entry: ts_not_template, depth: 2, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.not`.
@@ -4494,6 +4875,67 @@ fn ts_not(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.local(1, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
+}
+fn ts_not_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[3].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v3 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(true)) { return None; }
+Some(Value::Bool(false))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+Some(v2)
+})() { return Some(value); }
+None
+})()?;
+let _ = v3;
+
+                let v4 = (natives[0].entry)(&[v3])?; let _ = v4;
+                Some(v4)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_TYPEOF: p::HelperPlan = p::HelperPlan {
@@ -4526,6 +4968,7 @@ const TS_TYPEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_typeof,
+    template: Some(p::HelperTemplate { entry: ts_typeof_template, depth: 2, callees: &[] }),
 };
 
 /// `ts.typeof`.
@@ -4584,6 +5027,42 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(9, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_typeof_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("boolean")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("number")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("object")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("string")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_string",
@@ -4621,6 +5100,7 @@ const TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_string,
+    template: Some(p::HelperTemplate { entry: ts_primitive_to_string_template, depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ] }),
 };
 
 /// `ts.primitive_to_string`.
@@ -4706,6 +5186,201 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.call(3, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
+fn ts_primitive_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(true)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("true")?))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(false)) { return None; }
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("false")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v11 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(false)) { return None; }
+let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(false)) { return None; }
+let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+if !matches!(v8, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+if !matches!(v8, Value::Bool(false)) { return None; }
+let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
+if !matches!(v9, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v8 = (natives[5].entry)(&[args[0]])?; let _ = v8;
+if !matches!(v8, Value::Bool(false)) { return None; }
+let v9 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v9;
+if !matches!(v9, Value::Bool(false)) { return None; }
+let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v10;
+if !matches!(v10, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+None
+})()?;
+let _ = v11;
+
+                Some(v11)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v13 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(false)) { return None; }
+let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+if !matches!(v6, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v5 = (natives[5].entry)(&[args[0]])?; let _ = v5;
+if !matches!(v5, Value::Bool(false)) { return None; }
+let v6 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v6;
+if !matches!(v6, Value::Bool(false)) { return None; }
+let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v7;
+if !matches!(v7, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+if !matches!(v9, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+if !matches!(v9, Value::Bool(false)) { return None; }
+let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+if !matches!(v10, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v9 = (natives[5].entry)(&[args[0]])?; let _ = v9;
+if !matches!(v9, Value::Bool(false)) { return None; }
+let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+if !matches!(v10, Value::Bool(false)) { return None; }
+let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
+if !matches!(v11, Value::Bool(true)) { return None; }
+Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+})() { return Some(value); }
+None
+})()?;
+let _ = v13;
+
+                Some(v13)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_PRIMITIVE_TO_NUMBER: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_number",
@@ -4743,6 +5418,7 @@ const TS_PRIMITIVE_TO_NUMBER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_number,
+    template: Some(p::HelperTemplate { entry: ts_primitive_to_number_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.primitive_to_number`.
@@ -4825,6 +5501,48 @@ fn ts_primitive_to_number(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.call(4, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
+fn ts_primitive_to_number_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.to_primitive",
@@ -4859,6 +5577,7 @@ const TS_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_primitive,
+    template: Some(p::HelperTemplate { entry: ts_to_primitive_template, depth: 2, callees: &[] }),
 };
 
 /// `ts.to_primitive`.
@@ -4910,6 +5629,18 @@ fn ts_to_primitive(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_to_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_TO_STRING: p::HelperPlan = p::HelperPlan {
     name: "ts.to_string",
@@ -4943,6 +5674,7 @@ const TS_TO_STRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_string,
+    template: Some(p::HelperTemplate { entry: ts_to_string_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.to_string`.
@@ -4984,6 +5716,18 @@ fn ts_to_string(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_TO_NUMBER: p::HelperPlan = p::HelperPlan {
     name: "ts.to_number",
@@ -5019,6 +5763,7 @@ const TS_TO_NUMBER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_number,
+    template: Some(p::HelperTemplate { entry: ts_to_number_template, depth: 3, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.to_number`.
@@ -5061,6 +5806,56 @@ fn ts_to_number(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_to_number_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_TO_PROPERTY_KEY: p::HelperPlan = p::HelperPlan {
     name: "ts.to_property_key",
@@ -5094,6 +5889,7 @@ const TS_TO_PROPERTY_KEY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_property_key,
+    template: Some(p::HelperTemplate { entry: ts_to_property_key_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.to_property_key`.
@@ -5134,6 +5930,18 @@ fn ts_to_property_key(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_to_property_key_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_ADD: p::HelperPlan = p::HelperPlan {
@@ -5191,6 +5999,7 @@ const TS_ADD: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_add,
+    template: Some(p::HelperTemplate { entry: ts_add_template, depth: 3, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ] }),
 };
 
 /// `ts.add`.
@@ -5355,6 +6164,212 @@ fn ts_add(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_add_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_SUB: p::HelperPlan = p::HelperPlan {
     name: "ts.sub",
@@ -5398,6 +6413,7 @@ const TS_SUB: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_sub,
+    template: Some(p::HelperTemplate { entry: ts_sub_template, depth: 4, callees: &[p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.sub`.
@@ -5451,6 +6467,212 @@ fn ts_sub(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_MUL: p::HelperPlan = p::HelperPlan {
     name: "ts.mul",
@@ -5490,6 +6712,7 @@ const TS_MUL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_mul,
+    template: Some(p::HelperTemplate { entry: ts_mul_template, depth: 4, callees: &[p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.mul`.
@@ -5521,6 +6744,212 @@ fn ts_mul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_mul_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_DIV: p::HelperPlan = p::HelperPlan {
@@ -5561,6 +6990,7 @@ const TS_DIV: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_div,
+    template: Some(p::HelperTemplate { entry: ts_div_template, depth: 4, callees: &[p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.div`.
@@ -5592,6 +7022,206 @@ fn ts_div(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_div_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_REM: p::HelperPlan = p::HelperPlan {
@@ -5632,6 +7262,7 @@ const TS_REM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_rem,
+    template: Some(p::HelperTemplate { entry: ts_rem_template, depth: 4, callees: &[p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.rem`.
@@ -5663,6 +7294,206 @@ fn ts_rem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_rem_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))), v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_POW: p::HelperPlan = p::HelperPlan {
@@ -5711,6 +7542,7 @@ const TS_POW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_pow,
+    template: Some(p::HelperTemplate { entry: ts_pow_template, depth: 4, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("9327ff5d434096e51a0d591dfbf5fbf98a2478a276e5e767dc5b3973ef8ecc5a"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ] }),
 };
 
 /// `ts.pow`.
@@ -5773,6 +7605,418 @@ fn ts_pow(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_pow_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] | [Value::Float(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[2].entry)(&[args[1]])?; let _ = v1;
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[2].entry)(&[args[1]])?; let _ = v1;
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[v0])?; let _ = v3;
+                let v4 = (natives[1].entry)(&[v3, Value::Int(1)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = (natives[5].entry)(&[v1])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[4].entry)(&[args[1]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[4].entry)(&[args[1]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[v0])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2, Value::Int(1)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[5].entry)(&[args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[v0])?; let _ = v3;
+                let v4 = (natives[1].entry)(&[v3, Value::Int(1)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = (natives[5].entry)(&[v1])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[1]])?; let _ = v0;
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[1]])?; let _ = v0;
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[1]])?; let _ = v0;
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2, Value::Int(1)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[5].entry)(&[v0])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[4].entry)(&[args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[4].entry)(&[args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[4].entry)(&[args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0]])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[v1, Value::Int(1)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                let v3 = (natives[5].entry)(&[args[1]])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[2].entry)(&[args[1]])?; let _ = v1;
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[2].entry)(&[args[1]])?; let _ = v1;
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[v0])?; let _ = v3;
+                let v4 = (natives[1].entry)(&[v3, Value::Int(1)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = (natives[5].entry)(&[v1])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[4].entry)(&[args[1]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[4].entry)(&[args[1]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[v0])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2, Value::Int(1)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[5].entry)(&[args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                let v2 = (natives[4].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[v0])?; let _ = v3;
+                let v4 = (natives[1].entry)(&[v3, Value::Int(1)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                let v5 = (natives[5].entry)(&[v1])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[1], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[0].entry)(&[args[0]])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2, Value::Int(1)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[5].entry)(&[v0])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_NEG: p::HelperPlan = p::HelperPlan {
     name: "ts.neg",
@@ -5802,6 +8046,7 @@ const TS_NEG: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_neg,
+    template: Some(p::HelperTemplate { entry: ts_neg_template, depth: 4, callees: &[p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.neg`.
@@ -5825,6 +8070,51 @@ fn ts_neg(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_neg_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9223372036854775808))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_TO_INT32: p::HelperPlan = p::HelperPlan {
@@ -5865,6 +8155,7 @@ const TS_TO_INT32: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_int32,
+    template: Some(p::HelperTemplate { entry: ts_to_int32_template, depth: 4, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.to_int32`.
@@ -5921,6 +8212,56 @@ fn ts_to_int32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_to_int32_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_WRAP_INT32: p::HelperPlan = p::HelperPlan {
     name: "ts.wrap_int32",
@@ -5945,6 +8286,7 @@ const TS_WRAP_INT32: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_wrap_int32,
+    template: Some(p::HelperTemplate { entry: ts_wrap_int32_template, depth: 1, callees: &[p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }),
 };
 
 /// `ts.wrap_int32`.
@@ -5969,6 +8311,21 @@ fn ts_wrap_int32(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_wrap_int32_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(4294967296)])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[Value::Int(2147483648), v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_SHIFT_COUNT: p::HelperPlan = p::HelperPlan {
@@ -6001,6 +8358,7 @@ const TS_SHIFT_COUNT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shift_count,
+    template: Some(p::HelperTemplate { entry: ts_shift_count_template, depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.shift_count`.
@@ -6025,6 +8383,18 @@ fn ts_shift_count(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_shift_count_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_BITWISE32: p::HelperPlan = p::HelperPlan {
@@ -6075,6 +8445,7 @@ const TS_BITWISE32: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_bitwise32,
+    template: None,
 };
 
 /// `ts.bitwise32`.
@@ -6256,6 +8627,7 @@ const TS_BIT_AND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_and,
+    template: None,
 };
 
 /// `ts.bit_and`.
@@ -6338,6 +8710,7 @@ const TS_BIT_OR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_or,
+    template: None,
 };
 
 /// `ts.bit_or`.
@@ -6420,6 +8793,7 @@ const TS_BIT_XOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_xor,
+    template: None,
 };
 
 /// `ts.bit_xor`.
@@ -6492,6 +8866,7 @@ const TS_BIT_NOT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_not,
+    template: Some(p::HelperTemplate { entry: ts_bit_not_template, depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.bit_not`.
@@ -6518,6 +8893,18 @@ fn ts_bit_not(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_bit_not_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_SHL: p::HelperPlan = p::HelperPlan {
@@ -6566,6 +8953,7 @@ const TS_SHL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shl,
+    template: None,
 };
 
 /// `ts.shl`.
@@ -6656,6 +9044,7 @@ const TS_SHR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shr,
+    template: None,
 };
 
 /// `ts.shr`.
@@ -6737,6 +9126,7 @@ const TS_USHR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_ushr,
+    template: None,
 };
 
 /// `ts.ushr`.
@@ -6803,6 +9193,7 @@ const TS_STRICT_EQUALS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_strict_equals,
+    template: Some(p::HelperTemplate { entry: ts_strict_equals_template, depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }),
 };
 
 /// `ts.strict_equals`.
@@ -6852,6 +9243,38 @@ fn ts_strict_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn ts_strict_equals_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_STRICT_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
     name: "ts.strict_not_equals",
@@ -6873,6 +9296,7 @@ const TS_STRICT_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_strict_not_equals,
+    template: Some(p::HelperTemplate { entry: ts_strict_not_equals_template, depth: 3, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }),
 };
 
 /// `ts.strict_not_equals`.
@@ -6888,6 +9312,40 @@ fn ts_strict_not_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     ctx.local(2, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
+}
+fn ts_strict_not_equals_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0], args[1]])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_LOOSE_EQUALS: p::HelperPlan = p::HelperPlan {
@@ -6920,6 +9378,7 @@ const TS_LOOSE_EQUALS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_loose_equals,
+    template: None,
 };
 
 /// `ts.loose_equals`.
@@ -6986,6 +9445,7 @@ const TS_LOOSE_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_loose_not_equals,
+    template: None,
 };
 
 /// `ts.loose_not_equals`.
@@ -7060,6 +9520,7 @@ const TS_RELATIONAL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_relational,
+    template: None,
 };
 
 /// `ts.relational`.
@@ -7168,6 +9629,7 @@ const TS_LT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_lt,
+    template: Some(p::HelperTemplate { entry: ts_lt_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }),
 };
 
 /// `ts.lt`.
@@ -7262,6 +9724,19 @@ fn ts_lt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_lt_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_GT: p::HelperPlan = p::HelperPlan {
     name: "ts.gt",
@@ -7301,6 +9776,7 @@ const TS_GT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_gt,
+    template: Some(p::HelperTemplate { entry: ts_gt_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }),
 };
 
 /// `ts.gt`.
@@ -7395,6 +9871,19 @@ fn ts_gt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_gt_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[1], args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_LE: p::HelperPlan = p::HelperPlan {
     name: "ts.le",
@@ -7436,6 +9925,7 @@ const TS_LE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_le,
+    template: Some(p::HelperTemplate { entry: ts_le_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }),
 };
 
 /// `ts.le`.
@@ -7532,6 +10022,19 @@ fn ts_le(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_le_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_GE: p::HelperPlan = p::HelperPlan {
     name: "ts.ge",
@@ -7573,6 +10076,7 @@ const TS_GE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_ge,
+    template: Some(p::HelperTemplate { entry: ts_ge_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }),
 };
 
 /// `ts.ge`.
@@ -7669,6 +10173,19 @@ fn ts_ge(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_ge_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[1], args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_PAD: p::HelperPlan = p::HelperPlan {
     name: "ts.pad",
@@ -7695,6 +10212,7 @@ const TS_PAD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_pad,
+    template: None,
 };
 
 /// `ts.pad`.
@@ -7775,6 +10293,7 @@ const TS_HOLE_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_hole_value,
+    template: None,
 };
 
 /// `ts.hole_value`.
@@ -7821,6 +10340,7 @@ const TS_REST: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_rest,
+    template: None,
 };
 
 /// `ts.rest`.
@@ -7894,6 +10414,7 @@ const TS_SPREAD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_spread,
+    template: None,
 };
 
 /// `ts.spread`.
@@ -8018,6 +10539,7 @@ const TS_ITERATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_iterate,
+    template: None,
 };
 
 /// `ts.iterate`.
@@ -8367,6 +10889,7 @@ const TS_NUMBER_INDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_index,
+    template: None,
 };
 
 /// `ts.number_index`.
@@ -8427,6 +10950,7 @@ const TS_LIST_INDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_list_index,
+    template: None,
 };
 
 /// `ts.list_index`.
@@ -8494,6 +11018,7 @@ const TS_GET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get,
+    template: None,
 };
 
 /// `ts.get`.
@@ -8704,6 +11229,7 @@ const TS_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set,
+    template: None,
 };
 
 /// `ts.set`.
@@ -9421,6 +11947,7 @@ const TS_DELETE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_delete,
+    template: None,
 };
 
 /// `ts.delete`.
@@ -9981,6 +12508,7 @@ const TS_HAS_OWN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has_own,
+    template: None,
 };
 
 /// `ts.has_own`.
@@ -10653,6 +13181,7 @@ const TS_HAS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has,
+    template: None,
 };
 
 /// `ts.has`.
@@ -10900,6 +13429,7 @@ const TS_KEYS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_keys,
+    template: None,
 };
 
 /// `ts.keys`.
@@ -11394,6 +13924,7 @@ const TS_ASSIGN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_assign,
+    template: None,
 };
 
 /// `ts.assign`.
@@ -11495,6 +14026,7 @@ const TS_OBJECT_REST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_rest,
+    template: None,
 };
 
 /// `ts.object_rest`.
@@ -11655,6 +14187,7 @@ const TS_BOUNDARY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boundary,
+    template: Some(p::HelperTemplate { entry: ts_boundary_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.boundary`.
@@ -12035,6 +14568,18 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_boundary_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ARGUMENTS: p::HelperPlan = p::HelperPlan {
     name: "ts.arguments",
@@ -12066,6 +14611,7 @@ const TS_ARGUMENTS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_arguments,
+    template: None,
 };
 
 /// `ts.arguments`.
@@ -12155,6 +14701,7 @@ const TS_FUNCTION_CALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_function_call,
+    template: None,
 };
 
 /// `ts.function.call`.
@@ -12286,6 +14833,7 @@ const TS_FUNCTION_APPLY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_function_apply,
+    template: None,
 };
 
 /// `ts.function.apply`.
@@ -12508,6 +15056,7 @@ const TS_FUNCTION_BIND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_function_bind,
+    template: None,
 };
 
 /// `ts.function.bind`.
@@ -12679,6 +15228,7 @@ const TS_FUNCTION_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_function_tostring,
+    template: None,
 };
 
 /// `ts.function.toString`.
@@ -12758,6 +15308,7 @@ const TS_FUNCTION_EVAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_function_eval,
+    template: None,
 };
 
 /// `ts.function.eval`.
@@ -12794,6 +15345,7 @@ const TS_MAP_CALL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_call,
+    template: None,
 };
 
 /// `ts.map.call`.
@@ -12829,6 +15381,7 @@ const TS_MAP_KEY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_key,
+    template: None,
 };
 
 /// `ts.map.key`.
@@ -12879,6 +15432,7 @@ const TS_MAP_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_value,
+    template: Some(p::HelperTemplate { entry: ts_map_value_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.map.value`.
@@ -13003,6 +15557,18 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_map_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_MAP_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.map.construct",
@@ -13073,6 +15639,7 @@ const TS_MAP_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_map_construct,
+    template: None,
 };
 
 /// `ts.map.construct`.
@@ -13227,6 +15794,7 @@ const TS_MAP_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_is,
+    template: Some(p::HelperTemplate { entry: ts_map_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.map.is`.
@@ -13238,6 +15806,18 @@ fn ts_map_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
+}
+fn ts_map_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
@@ -13266,6 +15846,7 @@ const TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_size,
+    template: None,
 };
 
 /// `ts.map.size`.
@@ -13325,6 +15906,7 @@ const TS_MAP_SET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_set,
+    template: None,
 };
 
 /// `ts.map.set`.
@@ -13402,6 +15984,7 @@ const TS_MAP_GET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_get,
+    template: None,
 };
 
 /// `ts.map.get`.
@@ -13481,6 +16064,7 @@ const TS_MAP_HAS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_has,
+    template: None,
 };
 
 /// `ts.map.has`.
@@ -13552,6 +16136,7 @@ const TS_MAP_DELETE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_delete,
+    template: None,
 };
 
 /// `ts.map.delete`.
@@ -13625,6 +16210,7 @@ const TS_MAP_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_clear,
+    template: None,
 };
 
 /// `ts.map.clear`.
@@ -13700,6 +16286,7 @@ const TS_MAP_KEYS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_keys,
+    template: None,
 };
 
 /// `ts.map.keys`.
@@ -13788,6 +16375,7 @@ const TS_MAP_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_values,
+    template: None,
 };
 
 /// `ts.map.values`.
@@ -13878,6 +16466,7 @@ const TS_MAP_ENTRIES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_entries,
+    template: None,
 };
 
 /// `ts.map.entries`.
@@ -13987,6 +16576,7 @@ const TS_MAP_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_map_foreach,
+    template: None,
 };
 
 /// `ts.map.forEach`.
@@ -14164,6 +16754,7 @@ const TS_MAP_GROUPBY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_map_groupby,
+    template: None,
 };
 
 /// `ts.map.groupBy`.
@@ -14340,6 +16931,7 @@ const TS_SET_CALL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_call,
+    template: None,
 };
 
 /// `ts.set.call`.
@@ -14396,6 +16988,7 @@ const TS_SET_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_construct,
+    template: None,
 };
 
 /// `ts.set.construct`.
@@ -14502,6 +17095,7 @@ const TS_SET_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_is,
+    template: Some(p::HelperTemplate { entry: ts_set_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.set.is`.
@@ -14513,6 +17107,18 @@ fn ts_set_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
+}
+fn ts_set_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_SET_SIZE: p::HelperPlan = p::HelperPlan {
@@ -14541,6 +17147,7 @@ const TS_SET_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_size,
+    template: None,
 };
 
 /// `ts.set.size`.
@@ -14600,6 +17207,7 @@ const TS_SET_ADD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_add,
+    template: None,
 };
 
 /// `ts.set.add`.
@@ -14678,6 +17286,7 @@ const TS_SET_HAS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_has,
+    template: None,
 };
 
 /// `ts.set.has`.
@@ -14754,6 +17363,7 @@ const TS_SET_DELETE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_delete,
+    template: None,
 };
 
 /// `ts.set.delete`.
@@ -14834,6 +17444,7 @@ const TS_SET_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_clear,
+    template: None,
 };
 
 /// `ts.set.clear`.
@@ -14910,6 +17521,7 @@ const TS_SET_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_values,
+    template: None,
 };
 
 /// `ts.set.values`.
@@ -14993,6 +17605,7 @@ const TS_SET_ENTRIES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_entries,
+    template: None,
 };
 
 /// `ts.set.entries`.
@@ -15095,6 +17708,7 @@ const TS_SET_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_foreach,
+    template: None,
 };
 
 /// `ts.set.forEach`.
@@ -15272,6 +17886,7 @@ const TS_SET_OTHER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_other,
+    template: None,
 };
 
 /// `ts.set.other`.
@@ -15428,6 +18043,7 @@ const TS_SET_CONTAINS_OTHER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_contains_other,
+    template: None,
 };
 
 /// `ts.set.contains_other`.
@@ -15476,6 +18092,7 @@ const TS_SET_OTHER_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_other_size,
+    template: None,
 };
 
 /// `ts.set.other_size`.
@@ -15547,6 +18164,7 @@ const TS_SET_UNION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_union,
+    template: None,
 };
 
 /// `ts.set.union`.
@@ -15703,6 +18321,7 @@ const TS_SET_INTERSECTION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_intersection,
+    template: None,
 };
 
 /// `ts.set.intersection`.
@@ -15880,6 +18499,7 @@ const TS_SET_DIFFERENCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_difference,
+    template: None,
 };
 
 /// `ts.set.difference`.
@@ -16022,6 +18642,7 @@ const TS_SET_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_symmetricdifference,
+    template: None,
 };
 
 /// `ts.set.symmetricDifference`.
@@ -16190,6 +18811,7 @@ const TS_SET_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_issubsetof,
+    template: None,
 };
 
 /// `ts.set.isSubsetOf`.
@@ -16326,6 +18948,7 @@ const TS_SET_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_issupersetof,
+    template: None,
 };
 
 /// `ts.set.isSupersetOf`.
@@ -16459,6 +19082,7 @@ const TS_SET_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_isdisjointfrom,
+    template: None,
 };
 
 /// `ts.set.isDisjointFrom`.
@@ -16572,6 +19196,7 @@ const TS_BOOLEAN_CONVERT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_convert,
+    template: None,
 };
 
 /// `ts.boolean.convert`.
@@ -16622,6 +19247,7 @@ const TS_BOOLEAN_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_valueof,
+    template: None,
 };
 
 /// `ts.boolean.valueOf`.
@@ -16665,6 +19291,7 @@ const TS_BOOLEAN_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_tostring,
+    template: None,
 };
 
 /// `ts.boolean.toString`.
@@ -16740,6 +19367,7 @@ const TS_OBJECT_OWN_KEYS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_own_keys,
+    template: None,
 };
 
 /// `ts.object.own_keys`.
@@ -16956,6 +19584,7 @@ const TS_OBJECT_CONVERT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_convert,
+    template: None,
 };
 
 /// `ts.object.convert`.
@@ -17038,6 +19667,7 @@ const TS_OBJECT_KEYS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_keys,
+    template: None,
 };
 
 /// `ts.object.keys`.
@@ -17138,6 +19768,7 @@ const TS_OBJECT_VALUES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_values,
+    template: None,
 };
 
 /// `ts.object.values`.
@@ -17266,6 +19897,7 @@ const TS_OBJECT_ENTRIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_entries,
+    template: None,
 };
 
 /// `ts.object.entries`.
@@ -17422,6 +20054,7 @@ const TS_OBJECT_FROMENTRIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_fromentries,
+    template: None,
 };
 
 /// `ts.object.fromEntries`.
@@ -17602,6 +20235,7 @@ const TS_OBJECT_ASSIGN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_assign,
+    template: None,
 };
 
 /// `ts.object.assign`.
@@ -17773,6 +20407,7 @@ const TS_OBJECT_HASOWN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_hasown,
+    template: None,
 };
 
 /// `ts.object.hasOwn`.
@@ -17868,6 +20503,7 @@ const TS_OBJECT_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_is,
+    template: None,
 };
 
 /// `ts.object.is`.
@@ -18024,6 +20660,7 @@ const TS_OBJECT_GROUPBY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_groupby,
+    template: None,
 };
 
 /// `ts.object.groupBy`.
@@ -18200,6 +20837,7 @@ const TS_OBJECT_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_defineproperty,
+    template: None,
 };
 
 /// `ts.object.defineProperty`.
@@ -18236,6 +20874,7 @@ const TS_OBJECT_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_defineproperties,
+    template: None,
 };
 
 /// `ts.object.defineProperties`.
@@ -18272,6 +20911,7 @@ const TS_OBJECT_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_getownpropertydescriptor,
+    template: None,
 };
 
 /// `ts.object.getOwnPropertyDescriptor`.
@@ -18308,6 +20948,7 @@ const TS_OBJECT_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_getownpropertydescriptors,
+    template: None,
 };
 
 /// `ts.object.getOwnPropertyDescriptors`.
@@ -18344,6 +20985,7 @@ const TS_OBJECT_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_getownpropertynames,
+    template: None,
 };
 
 /// `ts.object.getOwnPropertyNames`.
@@ -18380,6 +21022,7 @@ const TS_OBJECT_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_getownpropertysymbols,
+    template: None,
 };
 
 /// `ts.object.getOwnPropertySymbols`.
@@ -18416,6 +21059,7 @@ const TS_OBJECT_CREATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_create,
+    template: None,
 };
 
 /// `ts.object.create`.
@@ -18452,6 +21096,7 @@ const TS_OBJECT_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_getprototypeof,
+    template: None,
 };
 
 /// `ts.object.getPrototypeOf`.
@@ -18488,6 +21133,7 @@ const TS_OBJECT_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_setprototypeof,
+    template: None,
 };
 
 /// `ts.object.setPrototypeOf`.
@@ -18524,6 +21170,7 @@ const TS_OBJECT_FREEZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_freeze,
+    template: None,
 };
 
 /// `ts.object.freeze`.
@@ -18560,6 +21207,7 @@ const TS_OBJECT_SEAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_seal,
+    template: None,
 };
 
 /// `ts.object.seal`.
@@ -18596,6 +21244,7 @@ const TS_OBJECT_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_preventextensions,
+    template: None,
 };
 
 /// `ts.object.preventExtensions`.
@@ -18632,6 +21281,7 @@ const TS_OBJECT_ISFROZEN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_isfrozen,
+    template: None,
 };
 
 /// `ts.object.isFrozen`.
@@ -18668,6 +21318,7 @@ const TS_OBJECT_ISSEALED: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_issealed,
+    template: None,
 };
 
 /// `ts.object.isSealed`.
@@ -18704,6 +21355,7 @@ const TS_OBJECT_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_isextensible,
+    template: None,
 };
 
 /// `ts.object.isExtensible`.
@@ -18763,6 +21415,7 @@ const TS_OBJECT_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_hasownproperty,
+    template: None,
 };
 
 /// `ts.object.hasOwnProperty`.
@@ -18869,6 +21522,7 @@ const TS_OBJECT_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_tostring,
+    template: None,
 };
 
 /// `ts.object.toString`.
@@ -19078,6 +21732,7 @@ const TS_OBJECT_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_propertyisenumerable,
+    template: None,
 };
 
 /// `ts.object.propertyIsEnumerable`.
@@ -19196,6 +21851,7 @@ const TS_OBJECT_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_tolocalestring,
+    template: None,
 };
 
 /// `ts.object.toLocaleString`.
@@ -19346,6 +22002,7 @@ const TS_OBJECT_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_isprototypeof,
+    template: None,
 };
 
 /// `ts.object.isPrototypeOf`.
@@ -19455,6 +22112,7 @@ const TS_OBJECT_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_valueof,
+    template: None,
 };
 
 /// `ts.object.valueOf`.
@@ -19510,6 +22168,7 @@ const TS_OBJECT_IS_INSTANCE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_is_instance,
+    template: Some(p::HelperTemplate { entry: ts_object_is_instance_template, depth: 2, callees: &[] }),
 };
 
 /// `ts.object.is_instance`.
@@ -19551,6 +22210,18 @@ fn ts_object_is_instance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_object_is_instance_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_MATH_ABS: p::HelperPlan = p::HelperPlan {
     name: "ts.math.abs",
@@ -19587,6 +22258,7 @@ const TS_MATH_ABS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_abs,
+    template: None,
 };
 
 /// `ts.math.abs`.
@@ -19662,6 +22334,7 @@ const TS_MATH_FLOOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_floor,
+    template: None,
 };
 
 /// `ts.math.floor`.
@@ -19737,6 +22410,7 @@ const TS_MATH_CEIL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_ceil,
+    template: None,
 };
 
 /// `ts.math.ceil`.
@@ -19812,6 +22486,7 @@ const TS_MATH_TRUNC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_trunc,
+    template: None,
 };
 
 /// `ts.math.trunc`.
@@ -19887,6 +22562,7 @@ const TS_MATH_SIGN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sign,
+    template: None,
 };
 
 /// `ts.math.sign`.
@@ -19962,6 +22638,7 @@ const TS_MATH_ACOS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acos,
+    template: None,
 };
 
 /// `ts.math.acos`.
@@ -20037,6 +22714,7 @@ const TS_MATH_ASIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asin,
+    template: None,
 };
 
 /// `ts.math.asin`.
@@ -20112,6 +22790,7 @@ const TS_MATH_ACOSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acosh,
+    template: None,
 };
 
 /// `ts.math.acosh`.
@@ -20187,6 +22866,7 @@ const TS_MATH_ASINH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asinh,
+    template: None,
 };
 
 /// `ts.math.asinh`.
@@ -20262,6 +22942,7 @@ const TS_MATH_ATAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan,
+    template: None,
 };
 
 /// `ts.math.atan`.
@@ -20337,6 +23018,7 @@ const TS_MATH_ATANH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atanh,
+    template: None,
 };
 
 /// `ts.math.atanh`.
@@ -20412,6 +23094,7 @@ const TS_MATH_CBRT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cbrt,
+    template: None,
 };
 
 /// `ts.math.cbrt`.
@@ -20487,6 +23170,7 @@ const TS_MATH_COS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cos,
+    template: None,
 };
 
 /// `ts.math.cos`.
@@ -20562,6 +23246,7 @@ const TS_MATH_COSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cosh,
+    template: None,
 };
 
 /// `ts.math.cosh`.
@@ -20637,6 +23322,7 @@ const TS_MATH_EXP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_exp,
+    template: None,
 };
 
 /// `ts.math.exp`.
@@ -20712,6 +23398,7 @@ const TS_MATH_EXPM1: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_expm1,
+    template: None,
 };
 
 /// `ts.math.expm1`.
@@ -20787,6 +23474,7 @@ const TS_MATH_LOG: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log,
+    template: None,
 };
 
 /// `ts.math.log`.
@@ -20862,6 +23550,7 @@ const TS_MATH_LOG1P: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log1p,
+    template: None,
 };
 
 /// `ts.math.log1p`.
@@ -20937,6 +23626,7 @@ const TS_MATH_LOG10: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log10,
+    template: None,
 };
 
 /// `ts.math.log10`.
@@ -21012,6 +23702,7 @@ const TS_MATH_LOG2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log2,
+    template: None,
 };
 
 /// `ts.math.log2`.
@@ -21087,6 +23778,7 @@ const TS_MATH_SIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sin,
+    template: None,
 };
 
 /// `ts.math.sin`.
@@ -21162,6 +23854,7 @@ const TS_MATH_SINH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sinh,
+    template: None,
 };
 
 /// `ts.math.sinh`.
@@ -21237,6 +23930,7 @@ const TS_MATH_TAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tan,
+    template: None,
 };
 
 /// `ts.math.tan`.
@@ -21312,6 +24006,7 @@ const TS_MATH_TANH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tanh,
+    template: None,
 };
 
 /// `ts.math.tanh`.
@@ -21387,6 +24082,7 @@ const TS_MATH_SQRT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sqrt,
+    template: None,
 };
 
 /// `ts.math.sqrt`.
@@ -21462,6 +24158,7 @@ const TS_MATH_ROUND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_round,
+    template: None,
 };
 
 /// `ts.math.round`.
@@ -21548,6 +24245,7 @@ const TS_MATH_ATAN2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan2,
+    template: None,
 };
 
 /// `ts.math.atan2`.
@@ -21638,6 +24336,7 @@ const TS_MATH_POW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_pow,
+    template: None,
 };
 
 /// `ts.math.pow`.
@@ -21719,6 +24418,7 @@ const TS_MATH_MAX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_max,
+    template: None,
 };
 
 /// `ts.math.max`.
@@ -21804,6 +24504,7 @@ const TS_MATH_MIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_min,
+    template: None,
 };
 
 /// `ts.math.min`.
@@ -21909,6 +24610,7 @@ const TS_MATH_HYPOT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_hypot,
+    template: None,
 };
 
 /// `ts.math.hypot`.
@@ -22125,6 +24827,7 @@ const TS_MATH_IMUL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_imul,
+    template: None,
 };
 
 /// `ts.math.imul`.
@@ -22234,6 +24937,7 @@ const TS_MATH_CLZ32: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_clz32,
+    template: None,
 };
 
 /// `ts.math.clz32`.
@@ -22361,6 +25065,7 @@ const TS_MATH_FROUND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_fround,
+    template: None,
 };
 
 /// `ts.math.fround`.
@@ -22519,6 +25224,7 @@ const TS_MATH_E: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_e,
+    template: Some(p::HelperTemplate { entry: ts_math_e_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.E`.
@@ -22526,6 +25232,18 @@ fn ts_math_e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4613303445314885481))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_LN10: p::HelperPlan = p::HelperPlan {
@@ -22544,6 +25262,7 @@ const TS_MATH_LN10: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_ln10,
+    template: Some(p::HelperTemplate { entry: ts_math_ln10_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.LN10`.
@@ -22551,6 +25270,18 @@ fn ts_math_ln10(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_ln10_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4612367379483415830))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_LN2: p::HelperPlan = p::HelperPlan {
@@ -22569,6 +25300,7 @@ const TS_MATH_LN2: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_ln2,
+    template: Some(p::HelperTemplate { entry: ts_math_ln2_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.LN2`.
@@ -22576,6 +25308,18 @@ fn ts_math_ln2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_ln2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4604418534313441775))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_LOG10E: p::HelperPlan = p::HelperPlan {
@@ -22594,6 +25338,7 @@ const TS_MATH_LOG10E: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_log10e,
+    template: Some(p::HelperTemplate { entry: ts_math_log10e_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.LOG10E`.
@@ -22601,6 +25346,18 @@ fn ts_math_log10e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_log10e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4601495173785380110))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_LOG2E: p::HelperPlan = p::HelperPlan {
@@ -22619,6 +25376,7 @@ const TS_MATH_LOG2E: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_log2e,
+    template: Some(p::HelperTemplate { entry: ts_math_log2e_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.LOG2E`.
@@ -22626,6 +25384,18 @@ fn ts_math_log2e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_log2e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4609176140021203710))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_PI: p::HelperPlan = p::HelperPlan {
@@ -22644,6 +25414,7 @@ const TS_MATH_PI: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_pi,
+    template: Some(p::HelperTemplate { entry: ts_math_pi_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.PI`.
@@ -22651,6 +25422,18 @@ fn ts_math_pi(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_pi_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4614256656552045848))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_SQRT1_2: p::HelperPlan = p::HelperPlan {
@@ -22669,6 +25452,7 @@ const TS_MATH_SQRT1_2: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_sqrt1_2,
+    template: Some(p::HelperTemplate { entry: ts_math_sqrt1_2_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.SQRT1_2`.
@@ -22676,6 +25460,18 @@ fn ts_math_sqrt1_2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_sqrt1_2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4604544271217802189))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_MATH_SQRT2: p::HelperPlan = p::HelperPlan {
@@ -22694,6 +25490,7 @@ const TS_MATH_SQRT2: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_sqrt2,
+    template: Some(p::HelperTemplate { entry: ts_math_sqrt2_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.math.SQRT2`.
@@ -22701,6 +25498,18 @@ fn ts_math_sqrt2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_math_sqrt2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4609047870845172685))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_CONVERT: p::HelperPlan = p::HelperPlan {
@@ -22740,6 +25549,7 @@ const TS_NUMBER_CONVERT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_convert,
+    template: None,
 };
 
 /// `ts.number.convert`.
@@ -22820,6 +25630,7 @@ const TS_NUMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_isfinite,
+    template: None,
 };
 
 /// `ts.number.isFinite`.
@@ -22885,6 +25696,7 @@ const TS_NUMBER_ISNAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_isnan,
+    template: None,
 };
 
 /// `ts.number.isNaN`.
@@ -22950,6 +25762,7 @@ const TS_NUMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_isinteger,
+    template: None,
 };
 
 /// `ts.number.isInteger`.
@@ -23018,6 +25831,7 @@ const TS_NUMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_issafeinteger,
+    template: None,
 };
 
 /// `ts.number.isSafeInteger`.
@@ -23101,6 +25915,7 @@ const TS_NUMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parsefloat,
+    template: None,
 };
 
 /// `ts.number.parseFloat`.
@@ -23196,6 +26011,7 @@ const TS_NUMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parseint,
+    template: None,
 };
 
 /// `ts.number.parseInt`.
@@ -23281,6 +26097,7 @@ const TS_NUMBER_RECEIVER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_receiver,
+    template: Some(p::HelperTemplate { entry: ts_number_receiver_template, depth: 2, callees: &[] }),
 };
 
 /// `ts.number.receiver`.
@@ -23306,6 +26123,18 @@ fn ts_number_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.call(2, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
+fn ts_number_receiver_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_NUMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.number.valueOf",
@@ -23326,6 +26155,7 @@ const TS_NUMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_valueof,
+    template: None,
 };
 
 /// `ts.number.valueOf`.
@@ -23417,6 +26247,7 @@ const TS_NUMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_tostring,
+    template: None,
 };
 
 /// `ts.number.toString`.
@@ -23737,6 +26568,7 @@ const TS_NUMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_tofixed,
+    template: None,
 };
 
 /// `ts.number.toFixed`.
@@ -24027,6 +26859,7 @@ const TS_NUMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_toexponential,
+    template: None,
 };
 
 /// `ts.number.toExponential`.
@@ -24382,6 +27215,7 @@ const TS_NUMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_toprecision,
+    template: None,
 };
 
 /// `ts.number.toPrecision`.
@@ -24674,6 +27508,7 @@ const TS_NUMBER_EPSILON: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_epsilon,
+    template: Some(p::HelperTemplate { entry: ts_number_epsilon_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.EPSILON`.
@@ -24681,6 +27516,18 @@ fn ts_number_epsilon(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_epsilon_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4372995238176751616))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
@@ -24699,6 +27546,7 @@ const TS_NUMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_max_safe_integer,
+    template: Some(p::HelperTemplate { entry: ts_number_max_safe_integer_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.MAX_SAFE_INTEGER`.
@@ -24706,6 +27554,18 @@ fn ts_number_max_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_max_safe_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653695))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
@@ -24724,6 +27584,7 @@ const TS_NUMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_min_safe_integer,
+    template: Some(p::HelperTemplate { entry: ts_number_min_safe_integer_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.MIN_SAFE_INTEGER`.
@@ -24731,6 +27592,18 @@ fn ts_number_min_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_min_safe_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(14069245235905429503))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
@@ -24749,6 +27622,7 @@ const TS_NUMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_max_value,
+    template: Some(p::HelperTemplate { entry: ts_number_max_value_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.MAX_VALUE`.
@@ -24756,6 +27630,18 @@ fn ts_number_max_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_max_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405311))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
@@ -24774,6 +27660,7 @@ const TS_NUMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_min_value,
+    template: Some(p::HelperTemplate { entry: ts_number_min_value_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.MIN_VALUE`.
@@ -24781,6 +27668,18 @@ fn ts_number_min_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_min_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(1))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_NAN: p::HelperPlan = p::HelperPlan {
@@ -24799,6 +27698,7 @@ const TS_NUMBER_NAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_nan,
+    template: Some(p::HelperTemplate { entry: ts_number_nan_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.NaN`.
@@ -24806,6 +27706,18 @@ fn ts_number_nan(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_nan_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
@@ -24824,6 +27736,7 @@ const TS_NUMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_positive_infinity,
+    template: Some(p::HelperTemplate { entry: ts_number_positive_infinity_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.POSITIVE_INFINITY`.
@@ -24831,6 +27744,18 @@ fn ts_number_positive_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_positive_infinity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
@@ -24849,6 +27774,7 @@ const TS_NUMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_negative_infinity,
+    template: Some(p::HelperTemplate { entry: ts_number_negative_infinity_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.number.NEGATIVE_INFINITY`.
@@ -24856,6 +27782,18 @@ fn ts_number_negative_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_number_negative_infinity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120))))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_NUMBER_GLOBAL_ISFINITE: p::HelperPlan = p::HelperPlan {
@@ -24893,6 +27831,7 @@ const TS_NUMBER_GLOBAL_ISFINITE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isfinite,
+    template: None,
 };
 
 /// `ts.number.global_isFinite`.
@@ -24968,6 +27907,7 @@ const TS_NUMBER_GLOBAL_ISNAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isnan,
+    template: None,
 };
 
 /// `ts.number.global_isNaN`.
@@ -25038,6 +27978,7 @@ const TS_DATE_DAY_FROM_YEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_day_from_year,
+    template: None,
 };
 
 /// `ts.date.day_from_year`.
@@ -25159,6 +28100,7 @@ const TS_DATE_UTC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_utc,
+    template: None,
 };
 
 /// `ts.date.utc`.
@@ -25463,6 +28405,7 @@ const TS_DATE_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_is,
+    template: Some(p::HelperTemplate { entry: ts_date_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.date.is`.
@@ -25500,6 +28443,18 @@ fn ts_date_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_date_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_DATE_REQUIRE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.require",
@@ -25524,6 +28479,7 @@ const TS_DATE_REQUIRE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_require,
+    template: None,
 };
 
 /// `ts.date.require`.
@@ -25583,6 +28539,7 @@ const TS_DATE_PARSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_parse,
+    template: None,
 };
 
 /// `ts.date.parse`.
@@ -25651,6 +28608,7 @@ const TS_DATE_UTC_2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_utc_2,
+    template: None,
 };
 
 /// `ts.date.UTC`.
@@ -25738,6 +28696,7 @@ const TS_DATE_PARTS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_parts,
+    template: None,
 };
 
 /// `ts.date.parts`.
@@ -25945,6 +28904,7 @@ const TS_DATE_GETTIME: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_gettime,
+    template: None,
 };
 
 /// `ts.date.getTime`.
@@ -25979,6 +28939,7 @@ const TS_DATE_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_valueof,
+    template: None,
 };
 
 /// `ts.date.valueOf`.
@@ -26015,6 +28976,7 @@ const TS_DATE_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcfullyear,
+    template: None,
 };
 
 /// `ts.date.getUTCFullYear`.
@@ -26053,6 +29015,7 @@ const TS_DATE_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmonth,
+    template: None,
 };
 
 /// `ts.date.getUTCMonth`.
@@ -26091,6 +29054,7 @@ const TS_DATE_GETUTCDATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcdate,
+    template: None,
 };
 
 /// `ts.date.getUTCDate`.
@@ -26129,6 +29093,7 @@ const TS_DATE_GETUTCDAY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcday,
+    template: None,
 };
 
 /// `ts.date.getUTCDay`.
@@ -26167,6 +29132,7 @@ const TS_DATE_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutchours,
+    template: None,
 };
 
 /// `ts.date.getUTCHours`.
@@ -26205,6 +29171,7 @@ const TS_DATE_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcminutes,
+    template: None,
 };
 
 /// `ts.date.getUTCMinutes`.
@@ -26243,6 +29210,7 @@ const TS_DATE_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcseconds,
+    template: None,
 };
 
 /// `ts.date.getUTCSeconds`.
@@ -26281,6 +29249,7 @@ const TS_DATE_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmilliseconds,
+    template: None,
 };
 
 /// `ts.date.getUTCMilliseconds`.
@@ -26319,6 +29288,7 @@ const TS_DATE_TOISOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_toisostring,
+    template: None,
 };
 
 /// `ts.date.toISOString`.
@@ -26356,6 +29326,7 @@ const TS_DATE_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_toutcstring,
+    template: None,
 };
 
 /// `ts.date.toUTCString`.
@@ -26393,6 +29364,7 @@ const TS_DATE_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_tostring,
+    template: None,
 };
 
 /// `ts.date.toString`.
@@ -26475,6 +29447,7 @@ const TS_DATE_TOJSON: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_tojson,
+    template: None,
 };
 
 /// `ts.date.toJSON`.
@@ -26609,6 +29582,7 @@ const TS_DATE_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getfullyear,
+    template: None,
 };
 
 /// `ts.date.getFullYear`.
@@ -26664,6 +29638,7 @@ const TS_DATE_GETMONTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getmonth,
+    template: None,
 };
 
 /// `ts.date.getMonth`.
@@ -26719,6 +29694,7 @@ const TS_DATE_GETDATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getdate,
+    template: None,
 };
 
 /// `ts.date.getDate`.
@@ -26774,6 +29750,7 @@ const TS_DATE_GETDAY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getday,
+    template: None,
 };
 
 /// `ts.date.getDay`.
@@ -26829,6 +29806,7 @@ const TS_DATE_GETHOURS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_gethours,
+    template: None,
 };
 
 /// `ts.date.getHours`.
@@ -26884,6 +29862,7 @@ const TS_DATE_GETMINUTES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getminutes,
+    template: None,
 };
 
 /// `ts.date.getMinutes`.
@@ -26939,6 +29918,7 @@ const TS_DATE_GETSECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getseconds,
+    template: None,
 };
 
 /// `ts.date.getSeconds`.
@@ -26994,6 +29974,7 @@ const TS_DATE_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getmilliseconds,
+    template: None,
 };
 
 /// `ts.date.getMilliseconds`.
@@ -27049,6 +30030,7 @@ const TS_DATE_SETTIME: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_settime,
+    template: None,
 };
 
 /// `ts.date.setTime`.
@@ -27104,6 +30086,7 @@ const TS_DATE_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setfullyear,
+    template: None,
 };
 
 /// `ts.date.setFullYear`.
@@ -27159,6 +30142,7 @@ const TS_DATE_SETMONTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setmonth,
+    template: None,
 };
 
 /// `ts.date.setMonth`.
@@ -27214,6 +30198,7 @@ const TS_DATE_SETDATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setdate,
+    template: None,
 };
 
 /// `ts.date.setDate`.
@@ -27269,6 +30254,7 @@ const TS_DATE_SETHOURS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_sethours,
+    template: None,
 };
 
 /// `ts.date.setHours`.
@@ -27324,6 +30310,7 @@ const TS_DATE_SETMINUTES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setminutes,
+    template: None,
 };
 
 /// `ts.date.setMinutes`.
@@ -27379,6 +30366,7 @@ const TS_DATE_SETSECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setseconds,
+    template: None,
 };
 
 /// `ts.date.setSeconds`.
@@ -27434,6 +30422,7 @@ const TS_DATE_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setmilliseconds,
+    template: None,
 };
 
 /// `ts.date.setMilliseconds`.
@@ -27485,6 +30474,7 @@ const TS_DATE_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcfullyear,
+    template: None,
 };
 
 /// `ts.date.setUTCFullYear`.
@@ -27521,6 +30511,7 @@ const TS_DATE_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcmonth,
+    template: None,
 };
 
 /// `ts.date.setUTCMonth`.
@@ -27557,6 +30548,7 @@ const TS_DATE_SETUTCDATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcdate,
+    template: None,
 };
 
 /// `ts.date.setUTCDate`.
@@ -27593,6 +30585,7 @@ const TS_DATE_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutchours,
+    template: None,
 };
 
 /// `ts.date.setUTCHours`.
@@ -27629,6 +30622,7 @@ const TS_DATE_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcminutes,
+    template: None,
 };
 
 /// `ts.date.setUTCMinutes`.
@@ -27665,6 +30659,7 @@ const TS_DATE_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcseconds,
+    template: None,
 };
 
 /// `ts.date.setUTCSeconds`.
@@ -27701,6 +30696,7 @@ const TS_DATE_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_setutcmilliseconds,
+    template: None,
 };
 
 /// `ts.date.setUTCMilliseconds`.
@@ -27741,6 +30737,7 @@ const TS_DATE_LOCAL_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_local_unsupported,
+    template: None,
 };
 
 /// `ts.date.local_unsupported`.
@@ -27837,6 +30834,7 @@ const TS_ERROR_NAME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_name,
+    template: None,
 };
 
 /// `ts.error.name`.
@@ -28006,6 +31004,7 @@ const TS_ERROR_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_construct,
+    template: None,
 };
 
 /// `ts.error.construct`.
@@ -28263,6 +31262,7 @@ const TS_ERROR_NEW_ERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_error,
+    template: None,
 };
 
 /// `ts.error.new_Error`.
@@ -28312,6 +31312,7 @@ const TS_ERROR_IS_ERROR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_error_is_error,
+    template: Some(p::HelperTemplate { entry: ts_error_is_error_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_Error`.
@@ -28331,6 +31332,18 @@ fn ts_error_is_error(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_error_is_error_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_ERROR_NEW_TYPEERROR: p::HelperPlan = p::HelperPlan {
@@ -28364,6 +31377,7 @@ const TS_ERROR_NEW_TYPEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_typeerror,
+    template: None,
 };
 
 /// `ts.error.new_TypeError`.
@@ -28428,6 +31442,7 @@ const TS_ERROR_IS_TYPEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_typeerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_typeerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_TypeError`.
@@ -28490,6 +31505,18 @@ fn ts_error_is_typeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_typeerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_RANGEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_RangeError",
@@ -28522,6 +31549,7 @@ const TS_ERROR_NEW_RANGEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_rangeerror,
+    template: None,
 };
 
 /// `ts.error.new_RangeError`.
@@ -28586,6 +31614,7 @@ const TS_ERROR_IS_RANGEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_rangeerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_rangeerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_RangeError`.
@@ -28648,6 +31677,18 @@ fn ts_error_is_rangeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_rangeerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_SyntaxError",
@@ -28680,6 +31721,7 @@ const TS_ERROR_NEW_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_syntaxerror,
+    template: None,
 };
 
 /// `ts.error.new_SyntaxError`.
@@ -28744,6 +31786,7 @@ const TS_ERROR_IS_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_syntaxerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_syntaxerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_SyntaxError`.
@@ -28806,6 +31849,18 @@ fn ts_error_is_syntaxerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_syntaxerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_ReferenceError",
@@ -28838,6 +31893,7 @@ const TS_ERROR_NEW_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_referenceerror,
+    template: None,
 };
 
 /// `ts.error.new_ReferenceError`.
@@ -28902,6 +31958,7 @@ const TS_ERROR_IS_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_referenceerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_referenceerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_ReferenceError`.
@@ -28964,6 +32021,18 @@ fn ts_error_is_referenceerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_referenceerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_URIERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_URIError",
@@ -28996,6 +32065,7 @@ const TS_ERROR_NEW_URIERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_urierror,
+    template: None,
 };
 
 /// `ts.error.new_URIError`.
@@ -29060,6 +32130,7 @@ const TS_ERROR_IS_URIERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_urierror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_urierror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_URIError`.
@@ -29122,6 +32193,18 @@ fn ts_error_is_urierror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_urierror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_EVALERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_EvalError",
@@ -29154,6 +32237,7 @@ const TS_ERROR_NEW_EVALERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_evalerror,
+    template: None,
 };
 
 /// `ts.error.new_EvalError`.
@@ -29218,6 +32302,7 @@ const TS_ERROR_IS_EVALERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_evalerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_evalerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_EvalError`.
@@ -29280,6 +32365,18 @@ fn ts_error_is_evalerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_evalerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_NEW_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_AggregateError",
@@ -29312,6 +32409,7 @@ const TS_ERROR_NEW_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_aggregateerror,
+    template: None,
 };
 
 /// `ts.error.new_AggregateError`.
@@ -29376,6 +32474,7 @@ const TS_ERROR_IS_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_aggregateerror,
+    template: Some(p::HelperTemplate { entry: ts_error_is_aggregateerror_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.error.is_AggregateError`.
@@ -29438,6 +32537,18 @@ fn ts_error_is_aggregateerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_error_is_aggregateerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ERROR_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.error.toString",
@@ -29494,6 +32605,7 @@ const TS_ERROR_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_tostring,
+    template: None,
 };
 
 /// `ts.error.toString`.
@@ -29627,6 +32739,7 @@ const TS_URL_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_construct,
+    template: None,
 };
 
 /// `ts.url.construct`.
@@ -29751,6 +32864,7 @@ const TS_URL_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_is,
+    template: Some(p::HelperTemplate { entry: ts_url_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.url.is`.
@@ -29777,6 +32891,18 @@ fn ts_url_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.begin()?;
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_url_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_URL_CANPARSE: p::HelperPlan = p::HelperPlan {
@@ -29832,6 +32958,7 @@ const TS_URL_CANPARSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_canparse,
+    template: None,
 };
 
 /// `ts.url.canParse`.
@@ -29968,6 +33095,7 @@ const TS_URL_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tostring,
+    template: None,
 };
 
 /// `ts.url.toString`.
@@ -29997,6 +33125,7 @@ const TS_URL_TOJSON: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tojson,
+    template: None,
 };
 
 /// `ts.url.toJSON`.
@@ -30026,6 +33155,7 @@ const TS_URL_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_valueof,
+    template: None,
 };
 
 /// `ts.url.valueOf`.
@@ -30066,6 +33196,7 @@ const TS_URL_SEARCH_PARAMS_REFRESH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_refresh,
+    template: None,
 };
 
 /// `ts.url_search_params.refresh`.
@@ -30220,6 +33351,7 @@ const TS_URL_SEARCH_PARAMS_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_construct,
+    template: None,
 };
 
 /// `ts.url_search_params.construct`.
@@ -30499,6 +33631,7 @@ const TS_URL_SEARCH_PARAMS_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_is,
+    template: Some(p::HelperTemplate { entry: ts_url_search_params_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.url_search_params.is`.
@@ -30526,6 +33659,18 @@ fn ts_url_search_params_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_url_search_params_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.size",
@@ -30545,6 +33690,7 @@ const TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_size,
+    template: None,
 };
 
 /// `ts.url_search_params.size`.
@@ -30576,6 +33722,7 @@ const TS_URL_SEARCH_PARAMS_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_tostring,
+    template: None,
 };
 
 /// `ts.url_search_params.toString`.
@@ -30605,6 +33752,7 @@ const TS_URL_SEARCH_PARAMS_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_valueof,
+    template: None,
 };
 
 /// `ts.url_search_params.valueOf`.
@@ -30667,6 +33815,7 @@ const TS_URL_SEARCH_PARAMS_GET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_get,
+    template: None,
 };
 
 /// `ts.url_search_params.get`.
@@ -30816,6 +33965,7 @@ const TS_URL_SEARCH_PARAMS_GETALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_getall,
+    template: None,
 };
 
 /// `ts.url_search_params.getAll`.
@@ -30970,6 +34120,7 @@ const TS_URL_SEARCH_PARAMS_HAS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_has,
+    template: None,
 };
 
 /// `ts.url_search_params.has`.
@@ -31132,6 +34283,7 @@ const TS_URL_SEARCH_PARAMS_APPEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_append,
+    template: None,
 };
 
 /// `ts.url_search_params.append`.
@@ -31256,6 +34408,7 @@ const TS_URL_SEARCH_PARAMS_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_set,
+    template: None,
 };
 
 /// `ts.url_search_params.set`.
@@ -31450,6 +34603,7 @@ const TS_URL_SEARCH_PARAMS_DELETE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_delete,
+    template: None,
 };
 
 /// `ts.url_search_params.delete`.
@@ -31624,6 +34778,7 @@ const TS_URL_SEARCH_PARAMS_SORT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_sort,
+    template: None,
 };
 
 /// `ts.url_search_params.sort`.
@@ -31747,6 +34902,7 @@ const TS_URL_SEARCH_PARAMS_KEYS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_keys,
+    template: None,
 };
 
 /// `ts.url_search_params.keys`.
@@ -31806,6 +34962,7 @@ const TS_URL_SEARCH_PARAMS_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_values,
+    template: None,
 };
 
 /// `ts.url_search_params.values`.
@@ -31866,6 +35023,7 @@ const TS_URL_SEARCH_PARAMS_ENTRIES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_entries,
+    template: None,
 };
 
 /// `ts.url_search_params.entries`.
@@ -31948,6 +35106,7 @@ const TS_URL_SEARCH_PARAMS_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_url_search_params_foreach,
+    template: None,
 };
 
 /// `ts.url_search_params.forEach`.
@@ -32082,6 +35241,7 @@ const TS_CONSOLE_JSON: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_console_json,
+    template: None,
 };
 
 /// `ts.console.json`.
@@ -32168,6 +35328,7 @@ const TS_JSON_PARSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_json_parse,
+    template: None,
 };
 
 /// `ts.json.parse`.
@@ -32405,6 +35566,7 @@ const TS_JSON_STRINGIFY_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_json_stringify_generic,
+    template: None,
 };
 
 /// `ts.json.stringify_generic`.
@@ -32684,6 +35846,7 @@ const TS_JSON_PLAIN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_json_plain,
+    template: None,
 };
 
 /// `ts.json.plain`.
@@ -32753,6 +35916,7 @@ const TS_JSON_STRINGIFY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_json_stringify,
+    template: None,
 };
 
 /// `ts.json.stringify`.
@@ -32874,6 +36038,7 @@ const TS_ARRAY_MATCH_LENGTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_match_length,
+    template: None,
 };
 
 /// `ts.array.match_length`.
@@ -32928,6 +36093,7 @@ const TS_ARRAY_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_set,
+    template: None,
 };
 
 /// `ts.array.set`.
@@ -33042,6 +36208,7 @@ const TS_ARRAY_REMOVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_remove,
+    template: None,
 };
 
 /// `ts.array.remove`.
@@ -33134,6 +36301,7 @@ const TS_ARRAY_ARGUMENT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_argument,
+    template: None,
 };
 
 /// `ts.array.argument`.
@@ -33190,6 +36358,7 @@ const TS_ARRAY_INTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_integer,
+    template: Some(p::HelperTemplate { entry: ts_array_integer_template, depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.array.integer`.
@@ -33234,6 +36403,120 @@ fn ts_array_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_array_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[3].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[3].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_ARRAY_LENGTH: p::HelperPlan = p::HelperPlan {
@@ -33286,6 +36569,7 @@ const TS_ARRAY_LENGTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_length,
+    template: None,
 };
 
 /// `ts.array.length`.
@@ -33367,6 +36651,7 @@ const TS_ARRAY_LENGTH_PROPERTY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_length_property,
+    template: None,
 };
 
 /// `ts.array.length_property`.
@@ -33403,6 +36688,7 @@ const TS_ARRAY_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_is,
+    template: Some(p::HelperTemplate { entry: ts_array_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.array.is`.
@@ -33440,6 +36726,18 @@ fn ts_array_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_array_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ARRAY_IS_ARRAY: p::HelperPlan = p::HelperPlan {
     name: "ts.array.is_array",
@@ -33469,6 +36767,7 @@ const TS_ARRAY_IS_ARRAY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_is_array,
+    template: None,
 };
 
 /// `ts.array.is_array`.
@@ -33533,6 +36832,7 @@ const TS_ARRAY_CALLBACK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_callback,
+    template: None,
 };
 
 /// `ts.array.callback`.
@@ -33619,6 +36919,7 @@ const TS_ARRAY_REUSABLE_CALLBACK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_reusable_callback,
+    template: None,
 };
 
 /// `ts.array.reusable_callback`.
@@ -33708,6 +37009,7 @@ const TS_ARRAY_BOUND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_bound,
+    template: Some(p::HelperTemplate { entry: ts_array_bound_template, depth: 5, callees: &[p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.array.bound`.
@@ -33761,6 +37063,33 @@ fn ts_array_bound(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_array_bound_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Absent, Value::Int(_), Value::Int(_)] | [Value::Absent, Value::Float(_), Value::Int(_)] | [Value::Absent, Value::Int(_), Value::Float(_)] | [Value::Absent, Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[2])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null, Value::Int(_), Value::Int(_)] | [Value::Null, Value::Float(_), Value::Int(_)] | [Value::Null, Value::Int(_), Value::Float(_)] | [Value::Null, Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Int(_), Value::Int(_)] | [Value::Int(_), Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_), Value::Int(_)] | [Value::Text(_), Value::Int(_), Value::Int(_)] | [Value::Bool(_), Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_), Value::Int(_)] | [Value::Float(_), Value::Float(_), Value::Int(_)] | [Value::Text(_), Value::Float(_), Value::Int(_)] | [Value::Bool(_), Value::Int(_), Value::Float(_)] | [Value::Int(_), Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Int(_), Value::Float(_)] | [Value::Text(_), Value::Int(_), Value::Float(_)] | [Value::Bool(_), Value::Float(_), Value::Float(_)] | [Value::Int(_), Value::Float(_), Value::Float(_)] | [Value::Float(_), Value::Float(_), Value::Float(_)] | [Value::Text(_), Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ARRAY_DENSE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.dense",
@@ -33812,6 +37141,7 @@ const TS_ARRAY_DENSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_dense,
+    template: None,
 };
 
 /// `ts.array.dense`.
@@ -33936,6 +37266,7 @@ const TS_ARRAY_SPREAD: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_spread,
+    template: None,
 };
 
 /// `ts.array.spread`.
@@ -34008,6 +37339,7 @@ const TS_ARRAY_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_construct,
+    template: None,
 };
 
 /// `ts.array.construct`.
@@ -34124,6 +37456,7 @@ const TS_ARRAY_OF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_of,
+    template: None,
 };
 
 /// `ts.array.of`.
@@ -34154,6 +37487,7 @@ const TS_ARRAY_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_valueof,
+    template: None,
 };
 
 /// `ts.array.valueOf`.
@@ -34224,6 +37558,7 @@ const TS_ARRAY_AT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_at,
+    template: None,
 };
 
 /// `ts.array.at`.
@@ -34363,6 +37698,7 @@ const TS_ARRAY_PUSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_push,
+    template: None,
 };
 
 /// `ts.array.push`.
@@ -34524,6 +37860,7 @@ const TS_ARRAY_POP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_pop,
+    template: None,
 };
 
 /// `ts.array.pop`.
@@ -34706,6 +38043,7 @@ const TS_ARRAY_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_slice_generic,
+    template: None,
 };
 
 /// `ts.array.slice_generic`.
@@ -34945,6 +38283,7 @@ const TS_ARRAY_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_slice,
+    template: None,
 };
 
 /// `ts.array.slice`.
@@ -35232,6 +38571,7 @@ const TS_ARRAY_CONCAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_concat,
+    template: None,
 };
 
 /// `ts.array.concat`.
@@ -35468,6 +38808,7 @@ const TS_ARRAY_FILL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_fill,
+    template: None,
 };
 
 /// `ts.array.fill`.
@@ -35676,6 +39017,7 @@ const TS_ARRAY_COPYWITHIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_copywithin,
+    template: None,
 };
 
 /// `ts.array.copyWithin`.
@@ -35906,6 +39248,7 @@ const TS_ARRAY_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_primitive,
+    template: Some(p::HelperTemplate { entry: ts_array_primitive_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.array.primitive`.
@@ -35957,6 +39300,32 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn ts_array_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_ARRAY_SEARCHABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.searchable",
@@ -35996,6 +39365,7 @@ const TS_ARRAY_SEARCHABLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_searchable,
+    template: None,
 };
 
 /// `ts.array.searchable`.
@@ -36158,6 +39528,7 @@ const TS_ARRAY_SEARCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_search,
+    template: None,
 };
 
 /// `ts.array.search`.
@@ -36398,6 +39769,7 @@ const TS_ARRAY_GENERIC_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_indexof,
+    template: None,
 };
 
 /// `ts.array.generic_indexOf`.
@@ -36643,6 +40015,7 @@ const TS_ARRAY_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_indexof,
+    template: None,
 };
 
 /// `ts.array.indexOf`.
@@ -36774,6 +40147,7 @@ const TS_ARRAY_GENERIC_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_lastindexof,
+    template: None,
 };
 
 /// `ts.array.generic_lastIndexOf`.
@@ -36990,6 +40364,7 @@ const TS_ARRAY_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_lastindexof,
+    template: None,
 };
 
 /// `ts.array.lastIndexOf`.
@@ -37124,6 +40499,7 @@ const TS_ARRAY_GENERIC_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_includes,
+    template: None,
 };
 
 /// `ts.array.generic_includes`.
@@ -37354,6 +40730,7 @@ const TS_ARRAY_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_includes,
+    template: None,
 };
 
 /// `ts.array.includes`.
@@ -37507,6 +40884,7 @@ const TS_ARRAY_MAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_map,
+    template: None,
 };
 
 /// `ts.array.map`.
@@ -37883,6 +41261,7 @@ const TS_ARRAY_FILTER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_filter,
+    template: None,
 };
 
 /// `ts.array.filter`.
@@ -38241,6 +41620,7 @@ const TS_ARRAY_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_foreach,
+    template: None,
 };
 
 /// `ts.array.forEach`.
@@ -38546,6 +41926,7 @@ const TS_ARRAY_EVERY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_every,
+    template: None,
 };
 
 /// `ts.array.every`.
@@ -38895,6 +42276,7 @@ const TS_ARRAY_SOME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_some,
+    template: None,
 };
 
 /// `ts.array.some`.
@@ -39243,6 +42625,7 @@ const TS_ARRAY_FIND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_find,
+    template: None,
 };
 
 /// `ts.array.find`.
@@ -39584,6 +42967,7 @@ const TS_ARRAY_FINDINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_findindex,
+    template: None,
 };
 
 /// `ts.array.findIndex`.
@@ -39915,6 +43299,7 @@ const TS_ARRAY_FINDLAST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_findlast,
+    template: None,
 };
 
 /// `ts.array.findLast`.
@@ -40200,6 +43585,7 @@ const TS_ARRAY_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_findlastindex,
+    template: None,
 };
 
 /// `ts.array.findLastIndex`.
@@ -40495,6 +43881,7 @@ const TS_ARRAY_REDUCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_reduce,
+    template: None,
 };
 
 /// `ts.array.reduce`.
@@ -40866,6 +44253,7 @@ const TS_ARRAY_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_reduceright,
+    template: None,
 };
 
 /// `ts.array.reduceRight`.
@@ -41178,6 +44566,7 @@ const TS_ARRAY_GENERIC_JOIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_join,
+    template: None,
 };
 
 /// `ts.array.generic_join`.
@@ -41357,6 +44746,7 @@ const TS_ARRAY_JOIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_join,
+    template: None,
 };
 
 /// `ts.array.join`.
@@ -41526,6 +44916,7 @@ const TS_ARRAY_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_tostring,
+    template: None,
 };
 
 /// `ts.array.toString`.
@@ -41759,6 +45150,7 @@ const TS_ARRAY_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_tolocalestring,
+    template: None,
 };
 
 /// `ts.array.toLocaleString`.
@@ -41884,6 +45276,7 @@ const TS_ARRAY_REVERSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_reverse,
+    template: None,
 };
 
 /// `ts.array.reverse`.
@@ -42086,6 +45479,7 @@ const TS_ARRAY_TOREVERSED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_toreversed,
+    template: None,
 };
 
 /// `ts.array.toReversed`.
@@ -42311,6 +45705,7 @@ const TS_ARRAY_SPLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_splice,
+    template: None,
 };
 
 /// `ts.array.splice`.
@@ -42846,6 +46241,7 @@ const TS_ARRAY_SHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_shift,
+    template: None,
 };
 
 /// `ts.array.shift`.
@@ -42967,6 +46363,7 @@ const TS_ARRAY_UNSHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_unshift,
+    template: None,
 };
 
 /// `ts.array.unshift`.
@@ -43127,6 +46524,7 @@ const TS_ARRAY_TOSPLICED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_tospliced,
+    template: None,
 };
 
 /// `ts.array.toSpliced`.
@@ -43477,6 +46875,7 @@ const TS_ARRAY_WITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_with,
+    template: None,
 };
 
 /// `ts.array.with`.
@@ -43746,6 +47145,7 @@ const TS_ARRAY_SORT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_sort,
+    template: None,
 };
 
 /// `ts.array.sort`.
@@ -44038,6 +47438,7 @@ const TS_ARRAY_TOSORTED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_tosorted,
+    template: None,
 };
 
 /// `ts.array.toSorted`.
@@ -44103,6 +47504,7 @@ const TS_ARRAY_FLATTEN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_flatten,
+    template: None,
 };
 
 /// `ts.array.flatten`.
@@ -44191,6 +47593,7 @@ const TS_ARRAY_FLAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_flat,
+    template: None,
 };
 
 /// `ts.array.flat`.
@@ -44342,6 +47745,7 @@ const TS_ARRAY_FLATMAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_flatmap,
+    template: None,
 };
 
 /// `ts.array.flatMap`.
@@ -44531,6 +47935,7 @@ const TS_ARRAY_KEYS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_keys,
+    template: None,
 };
 
 /// `ts.array.keys`.
@@ -44592,6 +47997,7 @@ const TS_ARRAY_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_values,
+    template: None,
 };
 
 /// `ts.array.values`.
@@ -44653,6 +48059,7 @@ const TS_ARRAY_ENTRIES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_entries,
+    template: None,
 };
 
 /// `ts.array.entries`.
@@ -44728,6 +48135,7 @@ const TS_ARRAY_ITERATOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_iterator,
+    template: None,
 };
 
 /// `ts.array.iterator`.
@@ -44869,6 +48277,7 @@ const TS_FOR_OF_OPEN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_for_of_open,
+    template: None,
 };
 
 /// `ts.for_of.open`.
@@ -45005,6 +48414,7 @@ const TS_FOR_OF_NEXT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_for_of_next,
+    template: None,
 };
 
 /// `ts.for_of.next`.
@@ -45106,6 +48516,7 @@ const TS_FOR_OF_ITEM: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_for_of_item,
+    template: Some(p::HelperTemplate { entry: ts_for_of_item_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.for_of.item`.
@@ -45167,6 +48578,18 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_for_of_item_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Bool(_), Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[1])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_ARRAY_FROM: p::HelperPlan = p::HelperPlan {
@@ -45295,6 +48718,7 @@ const TS_ARRAY_FROM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_from,
+    template: None,
 };
 
 /// `ts.array.from`.
@@ -45729,6 +49153,7 @@ const TS_PROMISE_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_is,
+    template: Some(p::HelperTemplate { entry: ts_promise_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.promise.is`.
@@ -45756,6 +49181,18 @@ fn ts_promise_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_promise_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_PROMISE_PENDING: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.pending",
@@ -45775,6 +49212,7 @@ const TS_PROMISE_PENDING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_pending,
+    template: None,
 };
 
 /// `ts.promise.pending`.
@@ -45822,6 +49260,7 @@ const TS_PROMISE_RUN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_run,
+    template: None,
 };
 
 /// `ts.promise.run`.
@@ -45960,6 +49399,7 @@ const TS_PROMISE_RESOLVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_resolve,
+    template: None,
 };
 
 /// `ts.promise.resolve`.
@@ -46050,6 +49490,7 @@ const TS_PROMISE_REJECT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_reject,
+    template: None,
 };
 
 /// `ts.promise.reject`.
@@ -46111,6 +49552,7 @@ const TS_PROMISE_CALLABLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_callable,
+    template: Some(p::HelperTemplate { entry: ts_promise_callable_template, depth: 2, callees: &[] }),
 };
 
 /// `ts.promise.callable`.
@@ -46125,6 +49567,18 @@ fn ts_promise_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
+}
+fn ts_promise_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_PROMISE_THEN: p::HelperPlan = p::HelperPlan {
@@ -46167,6 +49621,7 @@ const TS_PROMISE_THEN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_then,
+    template: None,
 };
 
 /// `ts.promise.then`.
@@ -46260,6 +49715,7 @@ const TS_PROMISE_CATCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_catch,
+    template: None,
 };
 
 /// `ts.promise.catch`.
@@ -46340,6 +49796,7 @@ const TS_PROMISE_FINALLY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_finally,
+    template: None,
 };
 
 /// `ts.promise.finally`.
@@ -46437,6 +49894,7 @@ const TS_PROMISE_MEMBERS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_members,
+    template: None,
 };
 
 /// `ts.promise.members`.
@@ -46571,6 +50029,7 @@ const TS_PROMISE_DECIDED: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_decided,
+    template: None,
 };
 
 /// `ts.promise.decided`.
@@ -46734,6 +50193,7 @@ const TS_PROMISE_ALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_all,
+    template: None,
 };
 
 /// `ts.promise.all`.
@@ -46857,6 +50317,7 @@ const TS_PROMISE_ALL_SETTLED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_all_settled,
+    template: None,
 };
 
 /// `ts.promise.all_settled`.
@@ -46977,6 +50438,7 @@ const TS_PROMISE_RACE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_race,
+    template: None,
 };
 
 /// `ts.promise.race`.
@@ -47090,6 +50552,7 @@ const TS_PROMISE_ANY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_any,
+    template: None,
 };
 
 /// `ts.promise.any`.
@@ -47189,6 +50652,7 @@ const TS_STRING_INTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_integer,
+    template: Some(p::HelperTemplate { entry: ts_string_integer_template, depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `ts.string.integer`.
@@ -47259,6 +50723,169 @@ fn ts_string_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_string_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                let v3 = (natives[3].entry)(&[args[0], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v7 = (natives[5].entry)(&[args[0]])?; let _ = v7;
+                Some(v7)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[3].entry)(&[v0, Value::Int(0)])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v8 = (natives[5].entry)(&[v0])?; let _ = v8;
+                Some(v8)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_STRING_CLAMP: p::HelperPlan = p::HelperPlan {
     name: "ts.string.clamp",
@@ -47282,6 +50909,7 @@ const TS_STRING_CLAMP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_clamp,
+    template: Some(p::HelperTemplate { entry: ts_string_clamp_template, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ] }),
 };
 
 /// `ts.string.clamp`.
@@ -47311,6 +50939,27 @@ fn ts_string_clamp(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+fn ts_string_clamp_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                Some(args[1])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_STRING_RELATIVE: p::HelperPlan = p::HelperPlan {
@@ -47347,6 +50996,7 @@ const TS_STRING_RELATIVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_relative,
+    template: Some(p::HelperTemplate { entry: ts_string_relative_template, depth: 5, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ] }),
 };
 
 /// `ts.string.relative`.
@@ -47391,6 +51041,33 @@ fn ts_string_relative(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_string_relative_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v1 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+if !matches!(v0, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+Some(args[1])
+})() { return Some(value); }
+None
+})()?;
+let _ = v1;
+
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_STRING_LENGTH_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.length_value",
@@ -47423,6 +51100,7 @@ const TS_STRING_LENGTH_VALUE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length_value,
+    template: Some(p::HelperTemplate { entry: ts_string_length_value_template, depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ] }),
 };
 
 /// `ts.string.length_value`.
@@ -47452,6 +51130,18 @@ fn ts_string_length_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_string_length_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_STRING_UINT32: p::HelperPlan = p::HelperPlan {
@@ -47488,6 +51178,7 @@ const TS_STRING_UINT32: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_uint32,
+    template: Some(p::HelperTemplate { entry: ts_string_uint32_template, depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), ] }),
 };
 
 /// `ts.string.uint32`.
@@ -47526,6 +51217,268 @@ fn ts_string_uint32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn ts_string_uint32_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v8 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+if !matches!(v2, Value::Bool(true)) { return None; }
+let v3 = (natives[3].entry)(&[args[0], Value::Int(0)])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
+let v5 = (natives[5].entry)(&[v4])?; let _ = v5;
+let v6 = (natives[4].entry)(&[v5])?; let _ = v6;
+Some(v6)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+if !matches!(v2, Value::Bool(true)) { return None; }
+let v3 = (natives[3].entry)(&[args[0], Value::Int(0)])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+let v7 = (natives[5].entry)(&[args[0]])?; let _ = v7;
+Some(v7)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+if !matches!(v0, Value::Bool(false)) { return None; }
+let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+Some(args[0])
+})() { return Some(value); }
+None
+})()?;
+let _ = v8;
+
+                let v9 = (natives[2].entry)(&[v8])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v9 = (|| {
+if let Some(value) = (|| {
+let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[3].entry)(&[v0, Value::Int(0)])?; let _ = v4;
+if !matches!(v4, Value::Bool(true)) { return None; }
+let v5 = (natives[4].entry)(&[v0])?; let _ = v5;
+let v6 = (natives[5].entry)(&[v5])?; let _ = v6;
+let v7 = (natives[4].entry)(&[v6])?; let _ = v7;
+Some(v7)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[3].entry)(&[v0, Value::Int(0)])?; let _ = v4;
+if !matches!(v4, Value::Bool(false)) { return None; }
+let v8 = (natives[5].entry)(&[v0])?; let _ = v8;
+Some(v8)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (natives[6].entry)(&[args[0]])?; let _ = v0;
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+Some(v0)
+})() { return Some(value); }
+None
+})()?;
+let _ = v9;
+
+                let v10 = (natives[2].entry)(&[v9])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v9 = (|| {
+if let Some(value) = (|| {
+let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(true)) { return None; }
+Some(Value::Int(0))
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[3].entry)(&[v0, Value::Int(0)])?; let _ = v4;
+if !matches!(v4, Value::Bool(true)) { return None; }
+let v5 = (natives[4].entry)(&[v0])?; let _ = v5;
+let v6 = (natives[5].entry)(&[v5])?; let _ = v6;
+let v7 = (natives[4].entry)(&[v6])?; let _ = v7;
+Some(v7)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(true)) { return None; }
+let v4 = (natives[3].entry)(&[v0, Value::Int(0)])?; let _ = v4;
+if !matches!(v4, Value::Bool(false)) { return None; }
+let v8 = (natives[5].entry)(&[v0])?; let _ = v8;
+Some(v8)
+})() { return Some(value); }
+if let Some(value) = (|| {
+let v0 = (|| {
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(true)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+})() { return Some(value); }
+if let Some(value) = (|| {
+if !matches!(args[0], Value::Bool(false)) { return None; }
+Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+})() { return Some(value); }
+None
+})()?;
+let _ = v0;
+
+let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+if !matches!(v1, Value::Bool(false)) { return None; }
+let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
+if !matches!(v2, Value::Bool(false)) { return None; }
+let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
+if !matches!(v3, Value::Bool(false)) { return None; }
+Some(v0)
+})() { return Some(value); }
+None
+})()?;
+let _ = v9;
+
+                let v10 = (natives[2].entry)(&[v9])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_STRING_RECEIVER: p::HelperPlan = p::HelperPlan {
     name: "ts.string.receiver",
@@ -47555,6 +51508,7 @@ const TS_STRING_RECEIVER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_receiver,
+    template: None,
 };
 
 /// `ts.string.receiver`.
@@ -47612,6 +51566,7 @@ const TS_STRING_SLICE_UNITS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_slice_units,
+    template: None,
 };
 
 /// `ts.string.slice_units`.
@@ -47721,6 +51676,7 @@ const TS_STRING_CREATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_create,
+    template: None,
 };
 
 /// `ts.string.create`.
@@ -47794,6 +51750,7 @@ const TS_STRING_LENGTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length,
+    template: None,
 };
 
 /// `ts.string.length`.
@@ -47845,6 +51802,7 @@ const TS_STRING_TOSTRING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_tostring,
+    template: None,
 };
 
 /// `ts.string.toString`.
@@ -47894,6 +51852,7 @@ const TS_STRING_VALUEOF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_valueof,
+    template: None,
 };
 
 /// `ts.string.valueOf`.
@@ -47973,6 +51932,7 @@ const TS_STRING_AT_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_at_generic,
+    template: None,
 };
 
 /// `ts.string.at_generic`.
@@ -48135,6 +52095,7 @@ const TS_STRING_AT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_at,
+    template: None,
 };
 
 /// `ts.string.at`.
@@ -48340,6 +52301,7 @@ const TS_STRING_CHARAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_charat,
+    template: None,
 };
 
 /// `ts.string.charAt`.
@@ -48489,6 +52451,7 @@ const TS_STRING_CHARCODEAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_charcodeat,
+    template: None,
 };
 
 /// `ts.string.charCodeAt`.
@@ -48643,6 +52606,7 @@ const TS_STRING_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_codepointat,
+    template: None,
 };
 
 /// `ts.string.codePointAt`.
@@ -48851,6 +52815,7 @@ const TS_STRING_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_slice_generic,
+    template: None,
 };
 
 /// `ts.string.slice_generic`.
@@ -49003,6 +52968,7 @@ const TS_STRING_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_slice,
+    template: None,
 };
 
 /// `ts.string.slice`.
@@ -49291,6 +53257,7 @@ const TS_STRING_SUBSTRING_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_substring_generic,
+    template: None,
 };
 
 /// `ts.string.substring_generic`.
@@ -49474,6 +53441,7 @@ const TS_STRING_SUBSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_substring,
+    template: None,
 };
 
 /// `ts.string.substring`.
@@ -49753,6 +53721,7 @@ const TS_STRING_INDEXOF_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_indexof_generic,
+    template: None,
 };
 
 /// `ts.string.indexOf_generic`.
@@ -49889,6 +53858,7 @@ const TS_STRING_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_indexof,
+    template: None,
 };
 
 /// `ts.string.indexOf`.
@@ -50103,6 +54073,7 @@ const TS_STRING_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_lastindexof,
+    template: None,
 };
 
 /// `ts.string.lastIndexOf`.
@@ -50329,6 +54300,7 @@ const TS_STRING_INCLUDES_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_includes_generic,
+    template: None,
 };
 
 /// `ts.string.includes_generic`.
@@ -50514,6 +54486,7 @@ const TS_STRING_STARTSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_startswith_generic,
+    template: None,
 };
 
 /// `ts.string.startsWith_generic`.
@@ -50703,6 +54676,7 @@ const TS_STRING_ENDSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_endswith_generic,
+    template: None,
 };
 
 /// `ts.string.endsWith_generic`.
@@ -50903,6 +54877,7 @@ const TS_STRING_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_includes,
+    template: None,
 };
 
 /// `ts.string.includes`.
@@ -51090,6 +55065,7 @@ const TS_STRING_STARTSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_startswith,
+    template: None,
 };
 
 /// `ts.string.startsWith`.
@@ -51281,6 +55257,7 @@ const TS_STRING_ENDSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_endswith,
+    template: None,
 };
 
 /// `ts.string.endsWith`.
@@ -51483,6 +55460,7 @@ const TS_STRING_CONCAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_concat,
+    template: None,
 };
 
 /// `ts.string.concat`.
@@ -51606,6 +55584,7 @@ const TS_STRING_NORMALIZE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_normalize,
+    template: None,
 };
 
 /// `ts.string.normalize`.
@@ -51753,6 +55732,7 @@ const TS_STRING_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_tolowercase,
+    template: None,
 };
 
 /// `ts.string.toLowerCase`.
@@ -51808,6 +55788,7 @@ const TS_STRING_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_touppercase,
+    template: None,
 };
 
 /// `ts.string.toUpperCase`.
@@ -51870,6 +55851,7 @@ const TS_STRING_TRIM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trim,
+    template: None,
 };
 
 /// `ts.string.trim`.
@@ -51958,6 +55940,7 @@ const TS_STRING_TRIMSTART: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimstart,
+    template: None,
 };
 
 /// `ts.string.trimStart`.
@@ -52046,6 +56029,7 @@ const TS_STRING_TRIMEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimend,
+    template: None,
 };
 
 /// `ts.string.trimEnd`.
@@ -52150,6 +56134,7 @@ const TS_STRING_REPEAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_repeat,
+    template: None,
 };
 
 /// `ts.string.repeat`.
@@ -52301,6 +56286,7 @@ const TS_STRING_PADSTART: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_padstart,
+    template: None,
 };
 
 /// `ts.string.padStart`.
@@ -52522,6 +56508,7 @@ const TS_STRING_PADEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_padend,
+    template: None,
 };
 
 /// `ts.string.padEnd`.
@@ -52711,6 +56698,7 @@ const TS_STRING_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_fromcharcode,
+    template: None,
 };
 
 /// `ts.string.fromCharCode`.
@@ -52865,6 +56853,7 @@ const TS_STRING_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_fromcodepoint,
+    template: None,
 };
 
 /// `ts.string.fromCodePoint`.
@@ -53119,6 +57108,7 @@ const TS_STRING_RAW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_raw,
+    template: None,
 };
 
 /// `ts.string.raw`.
@@ -53347,6 +57337,7 @@ const TS_STRING_APPLY_ARGUMENTS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_apply_arguments,
+    template: None,
 };
 
 /// `ts.string.apply_arguments`.
@@ -53493,6 +57484,7 @@ const TS_STRING_LOCALE_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_locale_unsupported,
+    template: None,
 };
 
 /// `ts.string.locale_unsupported`.
@@ -53532,6 +57524,7 @@ const TS_REGEXP_IS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_is,
+    template: Some(p::HelperTemplate { entry: ts_regexp_is_template, depth: 1, callees: &[] }),
 };
 
 /// `ts.regexp.is`.
@@ -53559,6 +57552,18 @@ fn ts_regexp_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_regexp_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_REGEXP_REQUIRE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.require",
@@ -53583,6 +57588,7 @@ const TS_REGEXP_REQUIRE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_require,
+    template: None,
 };
 
 /// `ts.regexp.require`.
@@ -53668,6 +57674,7 @@ const TS_REGEXP_CREATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_create,
+    template: None,
 };
 
 /// `ts.regexp.create`.
@@ -53923,6 +57930,7 @@ const TS_REGEXP_CALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_call,
+    template: None,
 };
 
 /// `ts.regexp.call`.
@@ -54019,6 +58027,7 @@ const TS_REGEXP_SNAPSHOT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_snapshot,
+    template: None,
 };
 
 /// `ts.regexp.snapshot`.
@@ -54091,6 +58100,7 @@ const TS_REGEXP_MATCH_RECORD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_match_record,
+    template: Some(p::HelperTemplate { entry: ts_regexp_match_record_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `ts.regexp.match_record`.
@@ -54196,6 +58206,26 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.record(0, 0)?;
     Ok(ctx.take(0))
 }
+fn ts_regexp_match_record_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const TS_REGEXP_NATIVE_EXEC: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_exec",
@@ -54222,6 +58252,7 @@ const TS_REGEXP_NATIVE_EXEC: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_exec,
+    template: None,
 };
 
 /// `ts.regexp.native_exec`.
@@ -54321,6 +58352,7 @@ const TS_REGEXP_NATIVE_MATCH_ALL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_match_all,
+    template: None,
 };
 
 /// `ts.regexp.native_match_all`.
@@ -54421,6 +58453,7 @@ const TS_REGEXP_NATIVE_REPLACE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_replace,
+    template: None,
 };
 
 /// `ts.regexp.native_replace`.
@@ -54523,6 +58556,7 @@ const TS_REGEXP_NATIVE_SPLIT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_split,
+    template: None,
 };
 
 /// `ts.regexp.native_split`.
@@ -54656,6 +58690,7 @@ const TS_REGEXP_EXEC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_exec,
+    template: None,
 };
 
 /// `ts.regexp.exec`.
@@ -54832,6 +58867,7 @@ const TS_REGEXP_TEST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_test,
+    template: None,
 };
 
 /// `ts.regexp.test`.
@@ -55017,6 +59053,7 @@ const TS_REGEXP_GLOBAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_global,
+    template: None,
 };
 
 /// `ts.regexp.global`.
@@ -55058,6 +59095,7 @@ const TS_REGEXP_IGNORECASE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_ignorecase,
+    template: None,
 };
 
 /// `ts.regexp.ignoreCase`.
@@ -55099,6 +59137,7 @@ const TS_REGEXP_MULTILINE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_multiline,
+    template: None,
 };
 
 /// `ts.regexp.multiline`.
@@ -55140,6 +59179,7 @@ const TS_REGEXP_DOTALL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_dotall,
+    template: None,
 };
 
 /// `ts.regexp.dotAll`.
@@ -55181,6 +59221,7 @@ const TS_REGEXP_UNICODE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_unicode,
+    template: None,
 };
 
 /// `ts.regexp.unicode`.
@@ -55222,6 +59263,7 @@ const TS_REGEXP_STICKY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_sticky,
+    template: None,
 };
 
 /// `ts.regexp.sticky`.
@@ -55258,6 +59300,7 @@ const TS_REGEXP_FLAGS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_flags,
+    template: None,
 };
 
 /// `ts.regexp.flags`.
@@ -55292,6 +59335,7 @@ const TS_REGEXP_SOURCE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_source,
+    template: None,
 };
 
 /// `ts.regexp.source`.
@@ -55380,6 +59424,7 @@ const TS_REGEXP_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_tostring,
+    template: None,
 };
 
 /// `ts.regexp.toString`.
@@ -55481,6 +59526,7 @@ const TS_REGEXP_ARGUMENT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_argument,
+    template: None,
 };
 
 /// `ts.regexp.argument`.
@@ -55603,6 +59649,7 @@ const TS_STRING_MATCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_match,
+    template: None,
 };
 
 /// `ts.string.match`.
@@ -55801,6 +59848,7 @@ const TS_STRING_SEARCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_search,
+    template: None,
 };
 
 /// `ts.string.search`.
@@ -55952,6 +60000,7 @@ const TS_STRING_MATCHALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_matchall,
+    template: None,
 };
 
 /// `ts.string.matchAll`.
@@ -56179,6 +60228,7 @@ const TS_STRING_SPLIT_GENERIC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_split_generic,
+    template: None,
 };
 
 /// `ts.string.split_generic`.
@@ -56486,6 +60536,7 @@ const TS_STRING_SPLIT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_split,
+    template: None,
 };
 
 /// `ts.string.split`.
@@ -56666,6 +60717,7 @@ const TS_STRING_SUBSTITUTE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_substitute,
+    template: None,
 };
 
 /// `ts.string.substitute`.
@@ -57021,6 +61073,7 @@ const TS_STRING_REPLACE_VALUE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replace_value,
+    template: None,
 };
 
 /// `ts.string.replace_value`.
@@ -57734,6 +61787,7 @@ const TS_STRING_REPLACE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replace,
+    template: None,
 };
 
 /// `ts.string.replace`.
@@ -57791,6 +61845,7 @@ const TS_STRING_REPLACEALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replaceall,
+    template: None,
 };
 
 /// `ts.string.replaceAll`.
@@ -57848,6 +61903,7 @@ const TS_URI_ESCAPE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_escape,
+    template: None,
 };
 
 /// `ts.uri.escape`.
@@ -57952,6 +62008,7 @@ const TS_URI_ENCODE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_encode,
+    template: None,
 };
 
 /// `ts.uri.encode`.
@@ -58230,6 +62287,7 @@ const TS_URI_FLUSH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_flush,
+    template: None,
 };
 
 /// `ts.uri.flush`.
@@ -58348,6 +62406,7 @@ const TS_URI_DECODE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_decode,
+    template: None,
 };
 
 /// `ts.uri.decode`.
@@ -58644,6 +62703,7 @@ const TS_URI_ENCODEURI: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuri,
+    template: None,
 };
 
 /// `ts.uri.encodeURI`.
@@ -58727,6 +62787,7 @@ const TS_URI_DECODEURI: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuri,
+    template: None,
 };
 
 /// `ts.uri.decodeURI`.
@@ -58810,6 +62871,7 @@ const TS_URI_ENCODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuricomponent,
+    template: None,
 };
 
 /// `ts.uri.encodeURIComponent`.
@@ -58893,6 +62955,7 @@ const TS_URI_DECODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuricomponent,
+    template: None,
 };
 
 /// `ts.uri.decodeURIComponent`.
@@ -59033,6 +63096,7 @@ const TS_READ: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_read,
+    template: None,
 };
 
 /// `ts.read`.
@@ -59535,6 +63599,7 @@ const TS_IN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_in,
+    template: None,
 };
 
 /// `ts.in`.
@@ -60468,6 +64533,7 @@ const TS_MEMBER_E: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_e,
+    template: None,
 };
 
 /// `ts.member.E`.
@@ -60680,6 +64746,7 @@ const TS_MEMBER_EPSILON: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_epsilon,
+    template: None,
 };
 
 /// `ts.member.EPSILON`.
@@ -60892,6 +64959,7 @@ const TS_MEMBER_LN10: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_ln10,
+    template: None,
 };
 
 /// `ts.member.LN10`.
@@ -61104,6 +65172,7 @@ const TS_MEMBER_LN2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_ln2,
+    template: None,
 };
 
 /// `ts.member.LN2`.
@@ -61316,6 +65385,7 @@ const TS_MEMBER_LOG10E: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log10e,
+    template: None,
 };
 
 /// `ts.member.LOG10E`.
@@ -61528,6 +65598,7 @@ const TS_MEMBER_LOG2E: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log2e,
+    template: None,
 };
 
 /// `ts.member.LOG2E`.
@@ -61740,6 +65811,7 @@ const TS_MEMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_max_safe_integer,
+    template: None,
 };
 
 /// `ts.member.MAX_SAFE_INTEGER`.
@@ -61952,6 +66024,7 @@ const TS_MEMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_max_value,
+    template: None,
 };
 
 /// `ts.member.MAX_VALUE`.
@@ -62164,6 +66237,7 @@ const TS_MEMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_min_safe_integer,
+    template: None,
 };
 
 /// `ts.member.MIN_SAFE_INTEGER`.
@@ -62376,6 +66450,7 @@ const TS_MEMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_min_value,
+    template: None,
 };
 
 /// `ts.member.MIN_VALUE`.
@@ -62588,6 +66663,7 @@ const TS_MEMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_negative_infinity,
+    template: None,
 };
 
 /// `ts.member.NEGATIVE_INFINITY`.
@@ -62800,6 +66876,7 @@ const TS_MEMBER_NAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_nan,
+    template: None,
 };
 
 /// `ts.member.NaN`.
@@ -63012,6 +67089,7 @@ const TS_MEMBER_PI: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pi,
+    template: None,
 };
 
 /// `ts.member.PI`.
@@ -63224,6 +67302,7 @@ const TS_MEMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_positive_infinity,
+    template: None,
 };
 
 /// `ts.member.POSITIVE_INFINITY`.
@@ -63436,6 +67515,7 @@ const TS_MEMBER_SQRT1_2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sqrt1_2,
+    template: None,
 };
 
 /// `ts.member.SQRT1_2`.
@@ -63648,6 +67728,7 @@ const TS_MEMBER_SQRT2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sqrt2,
+    template: None,
 };
 
 /// `ts.member.SQRT2`.
@@ -63862,6 +67943,7 @@ const TS_MEMBER_UTC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_utc,
+    template: None,
 };
 
 /// `ts.member.UTC`.
@@ -64078,6 +68160,7 @@ const TS_MEMBER_ABS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_abs,
+    template: None,
 };
 
 /// `ts.member.abs`.
@@ -64294,6 +68377,7 @@ const TS_MEMBER_ACOS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_acos,
+    template: None,
 };
 
 /// `ts.member.acos`.
@@ -64510,6 +68594,7 @@ const TS_MEMBER_ACOSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_acosh,
+    template: None,
 };
 
 /// `ts.member.acosh`.
@@ -64728,6 +68813,7 @@ const TS_MEMBER_ADD: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_add,
+    template: None,
 };
 
 /// `ts.member.add`.
@@ -64960,6 +69046,7 @@ const TS_MEMBER_ALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_all,
+    template: None,
 };
 
 /// `ts.member.all`.
@@ -65176,6 +69263,7 @@ const TS_MEMBER_ALLSETTLED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_allsettled,
+    template: None,
 };
 
 /// `ts.member.allSettled`.
@@ -65392,6 +69480,7 @@ const TS_MEMBER_ANY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_any,
+    template: None,
 };
 
 /// `ts.member.any`.
@@ -65610,6 +69699,7 @@ const TS_MEMBER_APPEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_append,
+    template: None,
 };
 
 /// `ts.member.append`.
@@ -65844,6 +69934,7 @@ const TS_MEMBER_APPLY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_apply,
+    template: None,
 };
 
 /// `ts.member.apply`.
@@ -66103,6 +70194,7 @@ const TS_MEMBER_ASIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_asin,
+    template: None,
 };
 
 /// `ts.member.asin`.
@@ -66319,6 +70411,7 @@ const TS_MEMBER_ASINH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_asinh,
+    template: None,
 };
 
 /// `ts.member.asinh`.
@@ -66535,6 +70628,7 @@ const TS_MEMBER_ASSIGN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_assign,
+    template: None,
 };
 
 /// `ts.member.assign`.
@@ -66761,6 +70855,7 @@ const TS_MEMBER_AT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_at,
+    template: None,
 };
 
 /// `ts.member.at`.
@@ -67057,6 +71152,7 @@ const TS_MEMBER_ATAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_atan,
+    template: None,
 };
 
 /// `ts.member.atan`.
@@ -67273,6 +71369,7 @@ const TS_MEMBER_ATAN2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_atan2,
+    template: None,
 };
 
 /// `ts.member.atan2`.
@@ -67489,6 +71586,7 @@ const TS_MEMBER_ATANH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_atanh,
+    template: None,
 };
 
 /// `ts.member.atanh`.
@@ -67707,6 +71805,7 @@ const TS_MEMBER_BIND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_bind,
+    template: None,
 };
 
 /// `ts.member.bind`.
@@ -67968,6 +72067,7 @@ const TS_MEMBER_CALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_call,
+    template: None,
 };
 
 /// `ts.member.call`.
@@ -68227,6 +72327,7 @@ const TS_MEMBER_CANPARSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_canparse,
+    template: None,
 };
 
 /// `ts.member.canParse`.
@@ -68445,6 +72546,7 @@ const TS_MEMBER_CATCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_catch,
+    template: None,
 };
 
 /// `ts.member.catch`.
@@ -68677,6 +72779,7 @@ const TS_MEMBER_CBRT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_cbrt,
+    template: None,
 };
 
 /// `ts.member.cbrt`.
@@ -68893,6 +72996,7 @@ const TS_MEMBER_CEIL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_ceil,
+    template: None,
 };
 
 /// `ts.member.ceil`.
@@ -69111,6 +73215,7 @@ const TS_MEMBER_CHARAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_charat,
+    template: None,
 };
 
 /// `ts.member.charAt`.
@@ -69345,6 +73450,7 @@ const TS_MEMBER_CHARCODEAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_charcodeat,
+    template: None,
 };
 
 /// `ts.member.charCodeAt`.
@@ -69584,6 +73690,7 @@ const TS_MEMBER_CLEAR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_clear,
+    template: None,
 };
 
 /// `ts.member.clear`.
@@ -69848,6 +73955,7 @@ const TS_MEMBER_CLZ32: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_clz32,
+    template: None,
 };
 
 /// `ts.member.clz32`.
@@ -70066,6 +74174,7 @@ const TS_MEMBER_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_codepointat,
+    template: None,
 };
 
 /// `ts.member.codePointAt`.
@@ -70308,6 +74417,7 @@ const TS_MEMBER_CONCAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_concat,
+    template: None,
 };
 
 /// `ts.member.concat`.
@@ -70698,6 +74808,7 @@ const TS_MEMBER_CONSTRUCTOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_constructor,
+    template: None,
 };
 
 /// `ts.member.constructor`.
@@ -71558,6 +75669,7 @@ const TS_MEMBER_COPYWITHIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_copywithin,
+    template: None,
 };
 
 /// `ts.member.copyWithin`.
@@ -71822,6 +75934,7 @@ const TS_MEMBER_COS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_cos,
+    template: None,
 };
 
 /// `ts.member.cos`.
@@ -72038,6 +76151,7 @@ const TS_MEMBER_COSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_cosh,
+    template: None,
 };
 
 /// `ts.member.cosh`.
@@ -72254,6 +76368,7 @@ const TS_MEMBER_CREATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_create,
+    template: None,
 };
 
 /// `ts.member.create`.
@@ -72470,6 +76585,7 @@ const TS_MEMBER_DEBUG: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_debug,
+    template: None,
 };
 
 /// `ts.member.debug`.
@@ -72686,6 +76802,7 @@ const TS_MEMBER_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_defineproperties,
+    template: None,
 };
 
 /// `ts.member.defineProperties`.
@@ -72902,6 +77019,7 @@ const TS_MEMBER_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_defineproperty,
+    template: None,
 };
 
 /// `ts.member.defineProperty`.
@@ -73130,6 +77248,7 @@ const TS_MEMBER_DELETE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_delete,
+    template: None,
 };
 
 /// `ts.member.delete`.
@@ -73428,6 +77547,7 @@ const TS_MEMBER_DIFFERENCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_difference,
+    template: None,
 };
 
 /// `ts.member.difference`.
@@ -73662,6 +77782,7 @@ const TS_MEMBER_ENDSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_endswith,
+    template: None,
 };
 
 /// `ts.member.endsWith`.
@@ -73918,6 +78039,7 @@ const TS_MEMBER_ENTRIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_entries,
+    template: None,
 };
 
 /// `ts.member.entries`.
@@ -74294,6 +78416,7 @@ const TS_MEMBER_ERROR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_error,
+    template: None,
 };
 
 /// `ts.member.error`.
@@ -74515,6 +78638,7 @@ const TS_MEMBER_EVERY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_every,
+    template: None,
 };
 
 /// `ts.member.every`.
@@ -74781,6 +78905,7 @@ const TS_MEMBER_EXEC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_exec,
+    template: None,
 };
 
 /// `ts.member.exec`.
@@ -75013,6 +79138,7 @@ const TS_MEMBER_EXP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_exp,
+    template: None,
 };
 
 /// `ts.member.exp`.
@@ -75229,6 +79355,7 @@ const TS_MEMBER_EXPM1: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_expm1,
+    template: None,
 };
 
 /// `ts.member.expm1`.
@@ -75450,6 +79577,7 @@ const TS_MEMBER_FILL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fill,
+    template: None,
 };
 
 /// `ts.member.fill`.
@@ -75719,6 +79847,7 @@ const TS_MEMBER_FILTER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_filter,
+    template: None,
 };
 
 /// `ts.member.filter`.
@@ -75985,6 +80114,7 @@ const TS_MEMBER_FINALLY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_finally,
+    template: None,
 };
 
 /// `ts.member.finally`.
@@ -76222,6 +80352,7 @@ const TS_MEMBER_FIND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_find,
+    template: None,
 };
 
 /// `ts.member.find`.
@@ -76491,6 +80622,7 @@ const TS_MEMBER_FINDINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findindex,
+    template: None,
 };
 
 /// `ts.member.findIndex`.
@@ -76760,6 +80892,7 @@ const TS_MEMBER_FINDLAST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlast,
+    template: None,
 };
 
 /// `ts.member.findLast`.
@@ -77029,6 +81162,7 @@ const TS_MEMBER_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlastindex,
+    template: None,
 };
 
 /// `ts.member.findLastIndex`.
@@ -77298,6 +81432,7 @@ const TS_MEMBER_FLAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flat,
+    template: None,
 };
 
 /// `ts.member.flat`.
@@ -77567,6 +81702,7 @@ const TS_MEMBER_FLATMAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flatmap,
+    template: None,
 };
 
 /// `ts.member.flatMap`.
@@ -77831,6 +81967,7 @@ const TS_MEMBER_FLOOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_floor,
+    template: None,
 };
 
 /// `ts.member.floor`.
@@ -78067,6 +82204,7 @@ const TS_MEMBER_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_foreach,
+    template: None,
 };
 
 /// `ts.member.forEach`.
@@ -78427,6 +82565,7 @@ const TS_MEMBER_FREEZE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_freeze,
+    template: None,
 };
 
 /// `ts.member.freeze`.
@@ -78643,6 +82782,7 @@ const TS_MEMBER_FROM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_from,
+    template: None,
 };
 
 /// `ts.member.from`.
@@ -78859,6 +82999,7 @@ const TS_MEMBER_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fromcharcode,
+    template: None,
 };
 
 /// `ts.member.fromCharCode`.
@@ -79075,6 +83216,7 @@ const TS_MEMBER_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fromcodepoint,
+    template: None,
 };
 
 /// `ts.member.fromCodePoint`.
@@ -79291,6 +83433,7 @@ const TS_MEMBER_FROMENTRIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fromentries,
+    template: None,
 };
 
 /// `ts.member.fromEntries`.
@@ -79507,6 +83650,7 @@ const TS_MEMBER_FROUND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fround,
+    template: None,
 };
 
 /// `ts.member.fround`.
@@ -79730,6 +83874,7 @@ const TS_MEMBER_GET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_get,
+    template: None,
 };
 
 /// `ts.member.get`.
@@ -79996,6 +84141,7 @@ const TS_MEMBER_GETALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getall,
+    template: None,
 };
 
 /// `ts.member.getAll`.
@@ -80232,6 +84378,7 @@ const TS_MEMBER_GETDATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getdate,
+    template: None,
 };
 
 /// `ts.member.getDate`.
@@ -80484,6 +84631,7 @@ const TS_MEMBER_GETDAY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getday,
+    template: None,
 };
 
 /// `ts.member.getDay`.
@@ -80736,6 +84884,7 @@ const TS_MEMBER_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getfullyear,
+    template: None,
 };
 
 /// `ts.member.getFullYear`.
@@ -80988,6 +85137,7 @@ const TS_MEMBER_GETHOURS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_gethours,
+    template: None,
 };
 
 /// `ts.member.getHours`.
@@ -81240,6 +85390,7 @@ const TS_MEMBER_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getmilliseconds,
+    template: None,
 };
 
 /// `ts.member.getMilliseconds`.
@@ -81492,6 +85643,7 @@ const TS_MEMBER_GETMINUTES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getminutes,
+    template: None,
 };
 
 /// `ts.member.getMinutes`.
@@ -81744,6 +85896,7 @@ const TS_MEMBER_GETMONTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getmonth,
+    template: None,
 };
 
 /// `ts.member.getMonth`.
@@ -81992,6 +86145,7 @@ const TS_MEMBER_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getownpropertydescriptor,
+    template: None,
 };
 
 /// `ts.member.getOwnPropertyDescriptor`.
@@ -82208,6 +86362,7 @@ const TS_MEMBER_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getownpropertydescriptors,
+    template: None,
 };
 
 /// `ts.member.getOwnPropertyDescriptors`.
@@ -82424,6 +86579,7 @@ const TS_MEMBER_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getownpropertynames,
+    template: None,
 };
 
 /// `ts.member.getOwnPropertyNames`.
@@ -82640,6 +86796,7 @@ const TS_MEMBER_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getownpropertysymbols,
+    template: None,
 };
 
 /// `ts.member.getOwnPropertySymbols`.
@@ -82856,6 +87013,7 @@ const TS_MEMBER_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getprototypeof,
+    template: None,
 };
 
 /// `ts.member.getPrototypeOf`.
@@ -83076,6 +87234,7 @@ const TS_MEMBER_GETSECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getseconds,
+    template: None,
 };
 
 /// `ts.member.getSeconds`.
@@ -83328,6 +87487,7 @@ const TS_MEMBER_GETTIME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_gettime,
+    template: None,
 };
 
 /// `ts.member.getTime`.
@@ -83582,6 +87742,7 @@ const TS_MEMBER_GETTIMEZONEOFFSET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_gettimezoneoffset,
+    template: None,
 };
 
 /// `ts.member.getTimezoneOffset`.
@@ -83834,6 +87995,7 @@ const TS_MEMBER_GETUTCDATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcdate,
+    template: None,
 };
 
 /// `ts.member.getUTCDate`.
@@ -84086,6 +88248,7 @@ const TS_MEMBER_GETUTCDAY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcday,
+    template: None,
 };
 
 /// `ts.member.getUTCDay`.
@@ -84338,6 +88501,7 @@ const TS_MEMBER_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcfullyear,
+    template: None,
 };
 
 /// `ts.member.getUTCFullYear`.
@@ -84590,6 +88754,7 @@ const TS_MEMBER_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutchours,
+    template: None,
 };
 
 /// `ts.member.getUTCHours`.
@@ -84842,6 +89007,7 @@ const TS_MEMBER_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcmilliseconds,
+    template: None,
 };
 
 /// `ts.member.getUTCMilliseconds`.
@@ -85094,6 +89260,7 @@ const TS_MEMBER_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcminutes,
+    template: None,
 };
 
 /// `ts.member.getUTCMinutes`.
@@ -85346,6 +89513,7 @@ const TS_MEMBER_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcmonth,
+    template: None,
 };
 
 /// `ts.member.getUTCMonth`.
@@ -85598,6 +89766,7 @@ const TS_MEMBER_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getutcseconds,
+    template: None,
 };
 
 /// `ts.member.getUTCSeconds`.
@@ -85849,6 +90018,7 @@ const TS_MEMBER_GROUPBY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_groupby,
+    template: None,
 };
 
 /// `ts.member.groupBy`.
@@ -86093,6 +90263,7 @@ const TS_MEMBER_HAS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_has,
+    template: None,
 };
 
 /// `ts.member.has`.
@@ -86389,6 +90560,7 @@ const TS_MEMBER_HASOWN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hasown,
+    template: None,
 };
 
 /// `ts.member.hasOwn`.
@@ -86629,6 +90801,7 @@ const TS_MEMBER_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hasownproperty,
+    template: None,
 };
 
 /// `ts.member.hasOwnProperty`.
@@ -87070,6 +91243,7 @@ const TS_MEMBER_HYPOT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hypot,
+    template: None,
 };
 
 /// `ts.member.hypot`.
@@ -87286,6 +91460,7 @@ const TS_MEMBER_IMUL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_imul,
+    template: None,
 };
 
 /// `ts.member.imul`.
@@ -87512,6 +91687,7 @@ const TS_MEMBER_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_includes,
+    template: None,
 };
 
 /// `ts.member.includes`.
@@ -87818,6 +91994,7 @@ const TS_MEMBER_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_indexof,
+    template: None,
 };
 
 /// `ts.member.indexOf`.
@@ -88114,6 +92291,7 @@ const TS_MEMBER_INFO: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_info,
+    template: None,
 };
 
 /// `ts.member.info`.
@@ -88332,6 +92510,7 @@ const TS_MEMBER_INTERSECTION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_intersection,
+    template: None,
 };
 
 /// `ts.member.intersection`.
@@ -88564,6 +92743,7 @@ const TS_MEMBER_IS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_is,
+    template: None,
 };
 
 /// `ts.member.is`.
@@ -88780,6 +92960,7 @@ const TS_MEMBER_ISARRAY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isarray,
+    template: None,
 };
 
 /// `ts.member.isArray`.
@@ -88998,6 +93179,7 @@ const TS_MEMBER_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isdisjointfrom,
+    template: None,
 };
 
 /// `ts.member.isDisjointFrom`.
@@ -89230,6 +93412,7 @@ const TS_MEMBER_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isextensible,
+    template: None,
 };
 
 /// `ts.member.isExtensible`.
@@ -89446,6 +93629,7 @@ const TS_MEMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isfinite,
+    template: None,
 };
 
 /// `ts.member.isFinite`.
@@ -89662,6 +93846,7 @@ const TS_MEMBER_ISFROZEN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isfrozen,
+    template: None,
 };
 
 /// `ts.member.isFrozen`.
@@ -89878,6 +94063,7 @@ const TS_MEMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isinteger,
+    template: None,
 };
 
 /// `ts.member.isInteger`.
@@ -90094,6 +94280,7 @@ const TS_MEMBER_ISNAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isnan,
+    template: None,
 };
 
 /// `ts.member.isNaN`.
@@ -90334,6 +94521,7 @@ const TS_MEMBER_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isprototypeof,
+    template: None,
 };
 
 /// `ts.member.isPrototypeOf`.
@@ -90775,6 +94963,7 @@ const TS_MEMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_issafeinteger,
+    template: None,
 };
 
 /// `ts.member.isSafeInteger`.
@@ -90991,6 +95180,7 @@ const TS_MEMBER_ISSEALED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_issealed,
+    template: None,
 };
 
 /// `ts.member.isSealed`.
@@ -91209,6 +95399,7 @@ const TS_MEMBER_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_issubsetof,
+    template: None,
 };
 
 /// `ts.member.isSubsetOf`.
@@ -91443,6 +95634,7 @@ const TS_MEMBER_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_issupersetof,
+    template: None,
 };
 
 /// `ts.member.isSupersetOf`.
@@ -91680,6 +95872,7 @@ const TS_MEMBER_JOIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_join,
+    template: None,
 };
 
 /// `ts.member.join`.
@@ -91969,6 +96162,7 @@ const TS_MEMBER_KEYS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_keys,
+    template: None,
 };
 
 /// `ts.member.keys`.
@@ -92355,6 +96549,7 @@ const TS_MEMBER_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_lastindexof,
+    template: None,
 };
 
 /// `ts.member.lastIndexOf`.
@@ -92649,6 +96844,7 @@ const TS_MEMBER_LENGTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_length,
+    template: None,
 };
 
 /// `ts.member.length`.
@@ -92876,6 +97072,7 @@ const TS_MEMBER_LOCALECOMPARE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_localecompare,
+    template: None,
 };
 
 /// `ts.member.localeCompare`.
@@ -93112,6 +97309,7 @@ const TS_MEMBER_LOG: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log,
+    template: None,
 };
 
 /// `ts.member.log`.
@@ -93344,6 +97542,7 @@ const TS_MEMBER_LOG10: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log10,
+    template: None,
 };
 
 /// `ts.member.log10`.
@@ -93560,6 +97759,7 @@ const TS_MEMBER_LOG1P: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log1p,
+    template: None,
 };
 
 /// `ts.member.log1p`.
@@ -93776,6 +97976,7 @@ const TS_MEMBER_LOG2: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_log2,
+    template: None,
 };
 
 /// `ts.member.log2`.
@@ -93997,6 +98198,7 @@ const TS_MEMBER_MAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_map,
+    template: None,
 };
 
 /// `ts.member.map`.
@@ -94263,6 +98465,7 @@ const TS_MEMBER_MATCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_match,
+    template: None,
 };
 
 /// `ts.member.match`.
@@ -94497,6 +98700,7 @@ const TS_MEMBER_MATCHALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_matchall,
+    template: None,
 };
 
 /// `ts.member.matchAll`.
@@ -94729,6 +98933,7 @@ const TS_MEMBER_MAX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_max,
+    template: None,
 };
 
 /// `ts.member.max`.
@@ -94948,6 +99153,7 @@ const TS_MEMBER_MESSAGE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_message,
+    template: None,
 };
 
 /// `ts.member.message`.
@@ -95236,6 +99442,7 @@ const TS_MEMBER_MIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_min,
+    template: None,
 };
 
 /// `ts.member.min`.
@@ -95463,6 +99670,7 @@ const TS_MEMBER_NAME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_name,
+    template: None,
 };
 
 /// `ts.member.name`.
@@ -95753,6 +99961,7 @@ const TS_MEMBER_NORMALIZE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_normalize,
+    template: None,
 };
 
 /// `ts.member.normalize`.
@@ -95985,6 +100194,7 @@ const TS_MEMBER_NOW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_now,
+    template: None,
 };
 
 /// `ts.member.now`.
@@ -96201,6 +100411,7 @@ const TS_MEMBER_OF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_of,
+    template: None,
 };
 
 /// `ts.member.of`.
@@ -96419,6 +100630,7 @@ const TS_MEMBER_PADEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_padend,
+    template: None,
 };
 
 /// `ts.member.padEnd`.
@@ -96653,6 +100865,7 @@ const TS_MEMBER_PADSTART: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_padstart,
+    template: None,
 };
 
 /// `ts.member.padStart`.
@@ -96889,6 +101102,7 @@ const TS_MEMBER_PARSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_parse,
+    template: None,
 };
 
 /// `ts.member.parse`.
@@ -97120,6 +101334,7 @@ const TS_MEMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_parsefloat,
+    template: None,
 };
 
 /// `ts.member.parseFloat`.
@@ -97335,6 +101550,7 @@ const TS_MEMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_parseint,
+    template: None,
 };
 
 /// `ts.member.parseInt`.
@@ -97556,6 +101772,7 @@ const TS_MEMBER_POP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pop,
+    template: None,
 };
 
 /// `ts.member.pop`.
@@ -97820,6 +102037,7 @@ const TS_MEMBER_POW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pow,
+    template: None,
 };
 
 /// `ts.member.pow`.
@@ -98036,6 +102254,7 @@ const TS_MEMBER_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_preventextensions,
+    template: None,
 };
 
 /// `ts.member.preventExtensions`.
@@ -98276,6 +102495,7 @@ const TS_MEMBER_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_propertyisenumerable,
+    template: None,
 };
 
 /// `ts.member.propertyIsEnumerable`.
@@ -98758,6 +102978,7 @@ const TS_MEMBER_PROTOTYPE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_prototype,
+    template: None,
 };
 
 /// `ts.member.prototype`.
@@ -99259,6 +103480,7 @@ const TS_MEMBER_PUSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_push,
+    template: None,
 };
 
 /// `ts.member.push`.
@@ -99523,6 +103745,7 @@ const TS_MEMBER_RACE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_race,
+    template: None,
 };
 
 /// `ts.member.race`.
@@ -99739,6 +103962,7 @@ const TS_MEMBER_RANDOM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_random,
+    template: None,
 };
 
 /// `ts.member.random`.
@@ -99955,6 +104179,7 @@ const TS_MEMBER_RAW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_raw,
+    template: None,
 };
 
 /// `ts.member.raw`.
@@ -100176,6 +104401,7 @@ const TS_MEMBER_REDUCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduce,
+    template: None,
 };
 
 /// `ts.member.reduce`.
@@ -100445,6 +104671,7 @@ const TS_MEMBER_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduceright,
+    template: None,
 };
 
 /// `ts.member.reduceRight`.
@@ -100709,6 +104936,7 @@ const TS_MEMBER_REJECT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reject,
+    template: None,
 };
 
 /// `ts.member.reject`.
@@ -100927,6 +105155,7 @@ const TS_MEMBER_REPEAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_repeat,
+    template: None,
 };
 
 /// `ts.member.repeat`.
@@ -101161,6 +105390,7 @@ const TS_MEMBER_REPLACE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_replace,
+    template: None,
 };
 
 /// `ts.member.replace`.
@@ -101395,6 +105625,7 @@ const TS_MEMBER_REPLACEALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_replaceall,
+    template: None,
 };
 
 /// `ts.member.replaceAll`.
@@ -101627,6 +105858,7 @@ const TS_MEMBER_RESOLVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_resolve,
+    template: None,
 };
 
 /// `ts.member.resolve`.
@@ -101848,6 +106080,7 @@ const TS_MEMBER_REVERSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reverse,
+    template: None,
 };
 
 /// `ts.member.reverse`.
@@ -102112,6 +106345,7 @@ const TS_MEMBER_ROUND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_round,
+    template: None,
 };
 
 /// `ts.member.round`.
@@ -102328,6 +106562,7 @@ const TS_MEMBER_SEAL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_seal,
+    template: None,
 };
 
 /// `ts.member.seal`.
@@ -102546,6 +106781,7 @@ const TS_MEMBER_SEARCH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_search,
+    template: None,
 };
 
 /// `ts.member.search`.
@@ -102785,6 +107021,7 @@ const TS_MEMBER_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_set,
+    template: None,
 };
 
 /// `ts.member.set`.
@@ -103053,6 +107290,7 @@ const TS_MEMBER_SETDATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setdate,
+    template: None,
 };
 
 /// `ts.member.setDate`.
@@ -103305,6 +107543,7 @@ const TS_MEMBER_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setfullyear,
+    template: None,
 };
 
 /// `ts.member.setFullYear`.
@@ -103557,6 +107796,7 @@ const TS_MEMBER_SETHOURS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sethours,
+    template: None,
 };
 
 /// `ts.member.setHours`.
@@ -103809,6 +108049,7 @@ const TS_MEMBER_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setmilliseconds,
+    template: None,
 };
 
 /// `ts.member.setMilliseconds`.
@@ -104061,6 +108302,7 @@ const TS_MEMBER_SETMINUTES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setminutes,
+    template: None,
 };
 
 /// `ts.member.setMinutes`.
@@ -104313,6 +108555,7 @@ const TS_MEMBER_SETMONTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setmonth,
+    template: None,
 };
 
 /// `ts.member.setMonth`.
@@ -104561,6 +108804,7 @@ const TS_MEMBER_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setprototypeof,
+    template: None,
 };
 
 /// `ts.member.setPrototypeOf`.
@@ -104781,6 +109025,7 @@ const TS_MEMBER_SETSECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setseconds,
+    template: None,
 };
 
 /// `ts.member.setSeconds`.
@@ -105033,6 +109278,7 @@ const TS_MEMBER_SETTIME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_settime,
+    template: None,
 };
 
 /// `ts.member.setTime`.
@@ -105285,6 +109531,7 @@ const TS_MEMBER_SETUTCDATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcdate,
+    template: None,
 };
 
 /// `ts.member.setUTCDate`.
@@ -105537,6 +109784,7 @@ const TS_MEMBER_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcfullyear,
+    template: None,
 };
 
 /// `ts.member.setUTCFullYear`.
@@ -105789,6 +110037,7 @@ const TS_MEMBER_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutchours,
+    template: None,
 };
 
 /// `ts.member.setUTCHours`.
@@ -106041,6 +110290,7 @@ const TS_MEMBER_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcmilliseconds,
+    template: None,
 };
 
 /// `ts.member.setUTCMilliseconds`.
@@ -106293,6 +110543,7 @@ const TS_MEMBER_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcminutes,
+    template: None,
 };
 
 /// `ts.member.setUTCMinutes`.
@@ -106545,6 +110796,7 @@ const TS_MEMBER_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcmonth,
+    template: None,
 };
 
 /// `ts.member.setUTCMonth`.
@@ -106797,6 +111049,7 @@ const TS_MEMBER_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_setutcseconds,
+    template: None,
 };
 
 /// `ts.member.setUTCSeconds`.
@@ -107050,6 +111303,7 @@ const TS_MEMBER_SHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_shift,
+    template: None,
 };
 
 /// `ts.member.shift`.
@@ -107314,6 +111568,7 @@ const TS_MEMBER_SIGN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sign,
+    template: None,
 };
 
 /// `ts.member.sign`.
@@ -107530,6 +111785,7 @@ const TS_MEMBER_SIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sin,
+    template: None,
 };
 
 /// `ts.member.sin`.
@@ -107746,6 +112002,7 @@ const TS_MEMBER_SINH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sinh,
+    template: None,
 };
 
 /// `ts.member.sinh`.
@@ -107964,6 +112221,7 @@ const TS_MEMBER_SIZE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_size,
+    template: None,
 };
 
 /// `ts.member.size`.
@@ -108202,6 +112460,7 @@ const TS_MEMBER_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_slice,
+    template: None,
 };
 
 /// `ts.member.slice`.
@@ -108503,6 +112762,7 @@ const TS_MEMBER_SOME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_some,
+    template: None,
 };
 
 /// `ts.member.some`.
@@ -108778,6 +113038,7 @@ const TS_MEMBER_SORT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sort,
+    template: None,
 };
 
 /// `ts.member.sort`.
@@ -109079,6 +113340,7 @@ const TS_MEMBER_SPLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_splice,
+    template: None,
 };
 
 /// `ts.member.splice`.
@@ -109345,6 +113607,7 @@ const TS_MEMBER_SPLIT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_split,
+    template: None,
 };
 
 /// `ts.member.split`.
@@ -109577,6 +113840,7 @@ const TS_MEMBER_SQRT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sqrt,
+    template: None,
 };
 
 /// `ts.member.sqrt`.
@@ -109795,6 +114059,7 @@ const TS_MEMBER_STARTSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_startswith,
+    template: None,
 };
 
 /// `ts.member.startsWith`.
@@ -110027,6 +114292,7 @@ const TS_MEMBER_STRINGIFY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_stringify,
+    template: None,
 };
 
 /// `ts.member.stringify`.
@@ -110245,6 +114511,7 @@ const TS_MEMBER_SUBSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_substring,
+    template: None,
 };
 
 /// `ts.member.substring`.
@@ -110479,6 +114746,7 @@ const TS_MEMBER_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_symmetricdifference,
+    template: None,
 };
 
 /// `ts.member.symmetricDifference`.
@@ -110711,6 +114979,7 @@ const TS_MEMBER_TAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tan,
+    template: None,
 };
 
 /// `ts.member.tan`.
@@ -110927,6 +115196,7 @@ const TS_MEMBER_TANH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tanh,
+    template: None,
 };
 
 /// `ts.member.tanh`.
@@ -111145,6 +115415,7 @@ const TS_MEMBER_TEST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_test,
+    template: None,
 };
 
 /// `ts.member.test`.
@@ -111379,6 +115650,7 @@ const TS_MEMBER_THEN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_then,
+    template: None,
 };
 
 /// `ts.member.then`.
@@ -111617,6 +115889,7 @@ const TS_MEMBER_TODATESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_todatestring,
+    template: None,
 };
 
 /// `ts.member.toDateString`.
@@ -111867,6 +116140,7 @@ const TS_MEMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toexponential,
+    template: None,
 };
 
 /// `ts.member.toExponential`.
@@ -112101,6 +116375,7 @@ const TS_MEMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tofixed,
+    template: None,
 };
 
 /// `ts.member.toFixed`.
@@ -112337,6 +116612,7 @@ const TS_MEMBER_TOISOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toisostring,
+    template: None,
 };
 
 /// `ts.member.toISOString`.
@@ -112595,6 +116871,7 @@ const TS_MEMBER_TOJSON: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tojson,
+    template: None,
 };
 
 /// `ts.member.toJSON`.
@@ -112881,6 +117158,7 @@ const TS_MEMBER_TOLOCALEDATESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocaledatestring,
+    template: None,
 };
 
 /// `ts.member.toLocaleDateString`.
@@ -113133,6 +117411,7 @@ const TS_MEMBER_TOLOCALELOWERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocalelowercase,
+    template: None,
 };
 
 /// `ts.member.toLocaleLowerCase`.
@@ -113376,6 +117655,7 @@ const TS_MEMBER_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocalestring,
+    template: None,
 };
 
 /// `ts.member.toLocaleString`.
@@ -113711,6 +117991,7 @@ const TS_MEMBER_TOLOCALETIMESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocaletimestring,
+    template: None,
 };
 
 /// `ts.member.toLocaleTimeString`.
@@ -113961,6 +118242,7 @@ const TS_MEMBER_TOLOCALEUPPERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocaleuppercase,
+    template: None,
 };
 
 /// `ts.member.toLocaleUpperCase`.
@@ -114195,6 +118477,7 @@ const TS_MEMBER_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolowercase,
+    template: None,
 };
 
 /// `ts.member.toLowerCase`.
@@ -114429,6 +118712,7 @@ const TS_MEMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toprecision,
+    template: None,
 };
 
 /// `ts.member.toPrecision`.
@@ -114666,6 +118950,7 @@ const TS_MEMBER_TOREVERSED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toreversed,
+    template: None,
 };
 
 /// `ts.member.toReversed`.
@@ -114935,6 +119220,7 @@ const TS_MEMBER_TOSORTED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tosorted,
+    template: None,
 };
 
 /// `ts.member.toSorted`.
@@ -115204,6 +119490,7 @@ const TS_MEMBER_TOSPLICED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tospliced,
+    template: None,
 };
 
 /// `ts.member.toSpliced`.
@@ -115538,6 +119825,7 @@ const TS_MEMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tostring,
+    template: None,
 };
 
 /// `ts.member.toString`.
@@ -116230,6 +120518,7 @@ const TS_MEMBER_TOTIMESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_totimestring,
+    template: None,
 };
 
 /// `ts.member.toTimeString`.
@@ -116482,6 +120771,7 @@ const TS_MEMBER_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toutcstring,
+    template: None,
 };
 
 /// `ts.member.toUTCString`.
@@ -116732,6 +121022,7 @@ const TS_MEMBER_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_touppercase,
+    template: None,
 };
 
 /// `ts.member.toUpperCase`.
@@ -116966,6 +121257,7 @@ const TS_MEMBER_TRIM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_trim,
+    template: None,
 };
 
 /// `ts.member.trim`.
@@ -117200,6 +121492,7 @@ const TS_MEMBER_TRIMEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_trimend,
+    template: None,
 };
 
 /// `ts.member.trimEnd`.
@@ -117434,6 +121727,7 @@ const TS_MEMBER_TRIMSTART: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_trimstart,
+    template: None,
 };
 
 /// `ts.member.trimStart`.
@@ -117666,6 +121960,7 @@ const TS_MEMBER_TRUNC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_trunc,
+    template: None,
 };
 
 /// `ts.member.trunc`.
@@ -117884,6 +122179,7 @@ const TS_MEMBER_UNION: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_union,
+    template: None,
 };
 
 /// `ts.member.union`.
@@ -118121,6 +122417,7 @@ const TS_MEMBER_UNSHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_unshift,
+    template: None,
 };
 
 /// `ts.member.unshift`.
@@ -118430,6 +122727,7 @@ const TS_MEMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_valueof,
+    template: None,
 };
 
 /// `ts.member.valueOf`.
@@ -119007,6 +123305,7 @@ const TS_MEMBER_VALUES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_values,
+    template: None,
 };
 
 /// `ts.member.values`.
@@ -119383,6 +123682,7 @@ const TS_MEMBER_WARN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_warn,
+    template: None,
 };
 
 /// `ts.member.warn`.
@@ -119604,6 +123904,7 @@ const TS_MEMBER_WITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_with,
+    template: None,
 };
 
 /// `ts.member.with`.
@@ -119848,6 +124149,7 @@ const TS_PROPERTY_DOTALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_dotall,
+    template: None,
 };
 
 /// `ts.property.dotAll`.
@@ -119971,6 +124273,7 @@ const TS_PROPERTY_FLAGS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_flags,
+    template: None,
 };
 
 /// `ts.property.flags`.
@@ -120094,6 +124397,7 @@ const TS_PROPERTY_GLOBAL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_global,
+    template: None,
 };
 
 /// `ts.property.global`.
@@ -120217,6 +124521,7 @@ const TS_PROPERTY_IGNORECASE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_ignorecase,
+    template: None,
 };
 
 /// `ts.property.ignoreCase`.
@@ -120353,6 +124658,7 @@ const TS_PROPERTY_LENGTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_length,
+    template: None,
 };
 
 /// `ts.property.length`.
@@ -120531,6 +124837,7 @@ const TS_PROPERTY_MULTILINE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_multiline,
+    template: None,
 };
 
 /// `ts.property.multiline`.
@@ -120659,6 +124966,7 @@ const TS_PROPERTY_SIZE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_size,
+    template: None,
 };
 
 /// `ts.property.size`.
@@ -120811,6 +125119,7 @@ const TS_PROPERTY_SOURCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_source,
+    template: None,
 };
 
 /// `ts.property.source`.
@@ -120934,6 +125243,7 @@ const TS_PROPERTY_STICKY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_sticky,
+    template: None,
 };
 
 /// `ts.property.sticky`.
@@ -121057,6 +125367,7 @@ const TS_PROPERTY_UNICODE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_unicode,
+    template: None,
 };
 
 /// `ts.property.unicode`.
@@ -123906,6 +128217,7 @@ const TS_GET_COMPUTED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get_computed,
+    template: None,
 };
 
 /// `ts.get_computed`.

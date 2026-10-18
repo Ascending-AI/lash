@@ -663,6 +663,10 @@ impl KernelMachine {
     /// operation answers are synchronous, so their unit ends with dispatch;
     /// a decline transfers it to the body's frame until return or raise.
     pub(super) fn check_call_depth(&mut self, task: TaskId) -> Eval<()> {
+        self.call_depth_headroom(task).map(|_| ())
+    }
+
+    pub(super) fn call_depth_headroom(&mut self, task: TaskId) -> Eval<u32> {
         // `main`'s own frame is not a call.
         let depth = self.task(task)?.frames.len()
             + self.plans as usize
@@ -670,7 +674,7 @@ impl KernelMachine {
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        Ok(())
+        Ok(self.bounds.call_depth - depth as u32)
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to

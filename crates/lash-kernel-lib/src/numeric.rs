@@ -74,10 +74,15 @@ pub(crate) fn int_float_cmp(integer: &BigInt, float: f64) -> Option<Ordering> {
     })
 }
 
+#[inline]
+pub(crate) fn float_cmp(a: Float, b: Float) -> Option<Ordering> {
+    a.get().partial_cmp(&b.get())
+}
+
 pub(crate) fn scalar_cmp(a: &Numeric, b: &Numeric) -> Result<Option<Ordering>, NativeError> {
     match (a, b) {
         (Numeric::Int(a), Numeric::Int(b)) => Ok(Some(a.cmp(b))),
-        (Numeric::Float(a), Numeric::Float(b)) => Ok(a.get().partial_cmp(&b.get())),
+        (Numeric::Float(a), Numeric::Float(b)) => Ok(float_cmp(*a, *b)),
         (Numeric::Int(a), Numeric::Float(b)) => Ok(int_float_cmp(&a.as_bigint(), b.get())),
         (Numeric::Float(a), Numeric::Int(b)) => {
             Ok(int_float_cmp(&b.as_bigint(), a.get()).map(Ordering::reverse))

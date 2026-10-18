@@ -20,6 +20,7 @@
 pub mod analysis;
 pub mod emit;
 pub mod library;
+mod template;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;

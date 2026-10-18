@@ -602,21 +602,9 @@ fn plain(
                     None => return Ok(None),
                 },
             };
-            match operation {
-                Operation::Compare => Value::Int(match order {
-                    Some(Ordering::Less) => -1,
-                    Some(Ordering::Equal) => 0,
-                    Some(Ordering::Greater) => 1,
-                    None => return Err(raised("unordered", "NaN has no ordering")),
-                }),
-                Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
-                Operation::Le => {
-                    Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal)))
-                }
-                Operation::Gt => Value::Bool(order == Some(Ordering::Greater)),
-                _ => Value::Bool(matches!(order, Some(Ordering::Greater | Ordering::Equal))),
-            }
+            relation(operation, order)?
         }
+
         Operation::Kind => kind_name(a.kind()),
         Operation::Ref => match a {
             Value::Task(id) => Value::TaskRef(*id),
@@ -837,4 +825,22 @@ fn parse_float(text: &str) -> Result<f64, NativeError> {
         return Err(raised("number_range", "decimal text rounds to infinity"));
     }
     Ok(value)
+}
+
+/// The scalar relation of an ordering, shared by general and prepared calls.
+#[inline]
+fn relation(operation: Operation, order: Option<Ordering>) -> Result<Value, NativeError> {
+    Ok(match operation {
+        Operation::Compare => Value::Int(match order {
+            Some(Ordering::Less) => -1,
+            Some(Ordering::Equal) => 0,
+            Some(Ordering::Greater) => 1,
+            None => return Err(raised("unordered", "NaN has no ordering")),
+        }),
+        Operation::Eq => Value::Bool(order == Some(Ordering::Equal)),
+        Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
+        Operation::Le => Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal))),
+        Operation::Gt => Value::Bool(order == Some(Ordering::Greater)),
+        _ => Value::Bool(matches!(order, Some(Ordering::Greater | Ordering::Equal))),
+    })
 }

@@ -186,6 +186,7 @@ const PY_TEXT_WHITESPACE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_whitespace,
+    template: None,
 };
 
 /// `py.text.whitespace`.
@@ -1501,6 +1502,7 @@ const PY_TEXT_PRINTABLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_printable,
+    template: Some(p::HelperTemplate { entry: py_text_printable_template, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ] }),
 };
 
 /// `py.text.printable`.
@@ -3727,6 +3729,27 @@ fn py_text_printable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
 }
+fn py_text_printable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(32)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(32)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Int(126)])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_TEXT_DECIMAL: p::HelperPlan = p::HelperPlan {
     name: "py.text.decimal",
@@ -3821,6 +3844,7 @@ const PY_TEXT_DECIMAL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_decimal,
+    template: None,
 };
 
 /// `py.text.decimal`.
@@ -3993,6 +4017,7 @@ const PY_EXC_NAME: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_name,
+    template: Some(p::HelperTemplate { entry: py_exc_name_template, depth: 1, callees: &[] }),
 };
 
 /// `py.exc.name`.
@@ -4087,6 +4112,18 @@ fn py_exc_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
+fn py_exc_name_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Exception")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_EXC_ARGS: p::HelperPlan = p::HelperPlan {
     name: "py.exc.args",
@@ -4113,6 +4150,7 @@ const PY_EXC_ARGS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_args,
+    template: None,
 };
 
 /// `py.exc.args`.
@@ -4215,6 +4253,7 @@ const PY_FLOAT_TEXT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_float_text,
+    template: None,
 };
 
 /// `py.float_text`.
@@ -4479,6 +4518,7 @@ const PY_TEXT_REPR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_repr,
+    template: None,
 };
 
 /// `py.text_repr`.
@@ -4698,6 +4738,7 @@ const PY_REPR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_repr,
+    template: None,
 };
 
 /// `py.repr`.
@@ -4766,6 +4807,7 @@ const PY_STR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_str,
+    template: Some(p::HelperTemplate { entry: py_str_template, depth: 1, callees: &[] }),
 };
 
 /// `py.str`.
@@ -4818,6 +4860,18 @@ fn py_str(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn py_str_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_TYPE: p::HelperPlan = p::HelperPlan {
     name: "py.type",
@@ -4854,6 +4908,7 @@ const PY_TYPE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_type,
+    template: Some(p::HelperTemplate { entry: py_type_template, depth: 1, callees: &[] }),
 };
 
 /// `py.type`.
@@ -4934,6 +4989,48 @@ fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
+fn py_type_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NoneType")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("int")?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("str")?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_FAIL: p::HelperPlan = p::HelperPlan {
     name: "py.fail",
@@ -4955,6 +5052,7 @@ const PY_FAIL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_fail,
+    template: None,
 };
 
 /// `py.fail`.
@@ -4997,6 +5095,7 @@ const PY_EXC_CHECK_CAUSE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_check_cause,
+    template: Some(p::HelperTemplate { entry: py_exc_check_cause_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `py.exc.check_cause`.
@@ -5026,6 +5125,26 @@ fn py_exc_check_cause(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
+}
+fn py_exc_check_cause_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] | [Value::Int(_)] | [Value::Float(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Null)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_EXC_NEW: p::HelperPlan = p::HelperPlan {
@@ -5086,6 +5205,7 @@ const PY_EXC_NEW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_exc_new,
+    template: None,
 };
 
 /// `py.exc.new`.
@@ -5214,6 +5334,7 @@ const PY_EXC_CAUSE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_cause,
+    template: None,
 };
 
 /// `py.exc.cause`.
@@ -5285,6 +5406,7 @@ const PY_EXC_WITH_CAUSE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_with_cause,
+    template: None,
 };
 
 /// `py.exc.with_cause`.
@@ -5342,6 +5464,7 @@ const PY_EXC_MATCHES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_matches,
+    template: None,
 };
 
 /// `py.exc.matches`.
@@ -5386,6 +5509,7 @@ const PY_EXC_IS_EXCEPTION: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_is_exception,
+    template: None,
 };
 
 /// `py.exc.is_exception`.
@@ -5439,6 +5563,7 @@ const PY_EXC_RERAISE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_reraise,
+    template: None,
 };
 
 /// `py.exc.reraise`.
@@ -5483,6 +5608,7 @@ const PY_EXC_THROW: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_exc_throw,
+    template: None,
 };
 
 /// `py.exc.throw`.
@@ -5539,6 +5665,7 @@ const PY_NAME_CHECK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_name_check,
+    template: Some(p::HelperTemplate { entry: py_name_check_template, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `py.name_check`.
@@ -5586,6 +5713,26 @@ fn py_name_check(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
+fn py_name_check_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Text(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Text(_), Value::Bool(_)] | [Value::Int(_), Value::Text(_), Value::Bool(_)] | [Value::Float(_), Value::Text(_), Value::Bool(_)] | [Value::Text(_), Value::Text(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_ARG_MISSING: p::HelperPlan = p::HelperPlan {
     name: "py.arg_missing",
@@ -5610,6 +5757,7 @@ const PY_ARG_MISSING: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_arg_missing,
+    template: None,
 };
 
 /// `py.arg_missing`.
@@ -5652,6 +5800,7 @@ const PY_IS_NUMBER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_is_number,
+    template: Some(p::HelperTemplate { entry: py_is_number_template, depth: 1, callees: &[] }),
 };
 
 /// `py.is_number`.
@@ -5675,6 +5824,24 @@ fn py_is_number(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.literal(2, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
+}
+fn py_is_number_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] | [Value::Absent] | [Value::Bool(_)] | [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_OPERAND_ERROR: p::HelperPlan = p::HelperPlan {
@@ -5709,6 +5876,7 @@ const PY_OPERAND_ERROR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_operand_error,
+    template: None,
 };
 
 /// `py.operand_error`.
@@ -5787,6 +5955,7 @@ const PY_TRUTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_truth,
+    template: Some(p::HelperTemplate { entry: py_truth_template, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }),
 };
 
 /// `py.truth`.
@@ -5914,6 +6083,46 @@ fn py_truth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.literal(13, 0)?;
     Ok(ctx.take(0))
 }
+fn py_truth_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[2].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_ADD: p::HelperPlan = p::HelperPlan {
     name: "py.add",
@@ -5949,6 +6158,7 @@ const PY_ADD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_add,
+    template: Some(p::HelperTemplate { entry: py_add_template, depth: 1, callees: &[p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }),
 };
 
 /// `py.add`.
@@ -6067,6 +6277,19 @@ fn py_add(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.literal(6, 0)?;
     Ok(ctx.take(0))
 }
+fn py_add_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_TO_LIST: p::HelperPlan = p::HelperPlan {
     name: "py.to_list",
@@ -6109,6 +6332,7 @@ const PY_TO_LIST: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_list,
+    template: None,
 };
 
 /// `py.to_list`.
@@ -6239,6 +6463,7 @@ const PY_IADD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_iadd,
+    template: Some(p::HelperTemplate { entry: py_iadd_template, depth: 1, callees: &[p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }),
 };
 
 /// `py.iadd`.
@@ -6390,6 +6615,19 @@ fn py_iadd(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
 }
+fn py_iadd_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_SUB: p::HelperPlan = p::HelperPlan {
     name: "py.sub",
@@ -6426,6 +6664,7 @@ const PY_SUB: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_sub,
+    template: Some(p::HelperTemplate { entry: py_sub_template, depth: 1, callees: &[p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), ] }),
 };
 
 /// `py.sub`.
@@ -6548,6 +6787,19 @@ fn py_sub(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.literal(5, 0)?;
     Ok(ctx.take(0))
 }
+fn py_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_MUL: p::HelperPlan = p::HelperPlan {
     name: "py.mul",
@@ -6596,6 +6848,7 @@ const PY_MUL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_mul,
+    template: Some(p::HelperTemplate { entry: py_mul_template, depth: 2, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), ] }),
 };
 
 /// `py.mul`.
@@ -6768,6 +7021,19 @@ fn py_mul(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.literal(7, 0)?;
     Ok(ctx.take(0))
 }
+fn py_mul_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_TRUEDIV: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
@@ -6802,6 +7068,7 @@ const PY_TRUEDIV: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_truediv,
+    template: Some(p::HelperTemplate { entry: py_truediv_template, depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e14bda27238ed858ee9307d2c894b3400add981ebb21583bd441b5531f49321a"), ] }),
 };
 
 /// `py.truediv`.
@@ -6864,6 +7131,21 @@ fn py_truediv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.call(7, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn py_truediv_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_FLOORDIV: p::HelperPlan = p::HelperPlan {
     name: "py.floordiv",
@@ -6898,6 +7180,7 @@ const PY_FLOORDIV: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_floordiv,
+    template: Some(p::HelperTemplate { entry: py_floordiv_template, depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), ] }),
 };
 
 /// `py.floordiv`.
@@ -6960,6 +7243,21 @@ fn py_floordiv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.call(7, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn py_floordiv_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_MOD: p::HelperPlan = p::HelperPlan {
     name: "py.mod",
@@ -6994,6 +7292,7 @@ const PY_MOD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_mod,
+    template: Some(p::HelperTemplate { entry: py_mod_template, depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), ] }),
 };
 
 /// `py.mod`.
@@ -7056,6 +7355,21 @@ fn py_mod(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.call(7, 0, 2)?;
     Ok(ctx.take(0))
 }
+fn py_mod_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_POW: p::HelperPlan = p::HelperPlan {
     name: "py.pow",
@@ -7098,6 +7412,7 @@ const PY_POW: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_pow,
+    template: None,
 };
 
 /// `py.pow`.
@@ -7243,6 +7558,7 @@ const PY_NEG: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_neg,
+    template: Some(p::HelperTemplate { entry: py_neg_template, depth: 2, callees: &[p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ] }),
 };
 
 /// `py.neg`.
@@ -7280,6 +7596,19 @@ fn py_neg(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
 }
+fn py_neg_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_POS: p::HelperPlan = p::HelperPlan {
     name: "py.pos",
@@ -7310,6 +7639,7 @@ const PY_POS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_pos,
+    template: Some(p::HelperTemplate { entry: py_pos_template, depth: 2, callees: &[] }),
 };
 
 /// `py.pos`.
@@ -7345,6 +7675,18 @@ fn py_pos(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.begin()?;
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
+}
+fn py_pos_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] | [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_SET_OP: p::HelperPlan = p::HelperPlan {
@@ -7387,6 +7729,7 @@ const PY_SET_OP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_set_op,
+    template: None,
 };
 
 /// `py.set_op`.
@@ -7604,6 +7947,7 @@ const PY_CONTAINS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_contains,
+    template: None,
 };
 
 /// `py.contains`.
@@ -7777,6 +8121,7 @@ const PY_INDEX: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_index,
+    template: Some(p::HelperTemplate { entry: py_index_template, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ] }),
 };
 
 /// `py.index`.
@@ -7852,6 +8197,55 @@ fn py_index(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.local(6, 0)?;
     Ok(ctx.take(0))
 }
+fn py_index_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Int(_), Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                let v2 = (natives[2].entry)(&[Value::Int(0), v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                let v3 = (natives[0].entry)(&[v1, args[1]])?; let _ = v3;
+                let v4 = (natives[3].entry)(&[v3])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                Some(v1)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                let v2 = (natives[2].entry)(&[Value::Int(0), v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v5 = (natives[3].entry)(&[v2])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(v1)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[Value::Int(0), args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                let v7 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v7;
+                let v8 = (natives[3].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[Value::Int(0), args[0]])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v9 = (natives[3].entry)(&[v6])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_GETITEM: p::HelperPlan = p::HelperPlan {
     name: "py.getitem",
@@ -7923,6 +8317,7 @@ const PY_GETITEM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_getitem,
+    template: None,
 };
 
 /// `py.getitem`.
@@ -8167,6 +8562,7 @@ const PY_SETITEM: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_setitem,
+    template: None,
 };
 
 /// `py.setitem`.
@@ -8292,6 +8688,7 @@ const PY_DELITEM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_delitem,
+    template: None,
 };
 
 /// `py.delitem`.
@@ -8476,6 +8873,7 @@ const PY_SLICE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_slice,
+    template: None,
 };
 
 /// `py.slice`.
@@ -8904,6 +9302,7 @@ const PY_LENGTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_length,
+    template: None,
 };
 
 /// `py.length`.
@@ -9033,6 +9432,7 @@ const PY_FOR_IN_OPEN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_open,
+    template: None,
 };
 
 /// `py.for_in.open`.
@@ -9134,6 +9534,7 @@ const PY_FOR_IN_CHECK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_check,
+    template: None,
 };
 
 /// `py.for_in.check`.
@@ -9226,6 +9627,7 @@ const PY_TO_TUPLE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_tuple,
+    template: None,
 };
 
 /// `py.to_tuple`.
@@ -9298,6 +9700,7 @@ const PY_TO_SET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_set,
+    template: None,
 };
 
 /// `py.to_set`.
@@ -9380,6 +9783,7 @@ const PY_TO_DICT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_dict,
+    template: None,
 };
 
 /// `py.to_dict`.
@@ -9476,6 +9880,7 @@ const PY_REPLY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_reply,
+    template: None,
 };
 
 /// `py.reply`.
@@ -9552,6 +9957,7 @@ const PY_UNPACK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_unpack,
+    template: None,
 };
 
 /// `py.unpack`.
@@ -9679,6 +10085,7 @@ const PY_SHOW: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_show,
+    template: None,
 };
 
 /// `py.show`.
@@ -9768,6 +10175,7 @@ const PY_NUMBER_TEXT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_number_text,
+    template: None,
 };
 
 /// `py.number_text`.
@@ -9889,6 +10297,7 @@ const PY_NUMBER_UNDERSCORES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_number_underscores,
+    template: None,
 };
 
 /// `py.number_underscores`.
@@ -10114,6 +10523,7 @@ const PY_INT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_int,
+    template: Some(p::HelperTemplate { entry: py_int_template, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ] }),
 };
 
 /// `py.int`.
@@ -10627,6 +11037,55 @@ fn py_int(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn py_int_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(true)) { return None; }
+                Some(Value::Int(1))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Bool(_)] | [Value::Int(_), Value::Int(_)] | [Value::Int(_), Value::Float(_)] | [Value::Int(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_), Value::Bool(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Bool(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(args[0], Value::Bool(true)) { return None; }
+                Some(Value::Int(1))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                if !matches!(args[0], Value::Bool(false)) { return None; }
+                Some(Value::Int(0))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_FLOAT: p::HelperPlan = p::HelperPlan {
     name: "py.float",
@@ -10706,6 +11165,7 @@ const PY_FLOAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_float,
+    template: Some(p::HelperTemplate { entry: py_float_template, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }),
 };
 
 /// `py.float`.
@@ -11027,6 +11487,36 @@ fn py_float(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
     ctx.begin()?;
     Ok(Value::Null)
 }
+fn py_float_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                if !matches!(args[0], Value::Bool(false)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_ABS: p::HelperPlan = p::HelperPlan {
     name: "py.abs",
@@ -11065,6 +11555,7 @@ const PY_ABS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_abs,
+    template: Some(p::HelperTemplate { entry: py_abs_template, depth: 2, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }),
 };
 
 /// `py.abs`.
@@ -11127,6 +11618,49 @@ fn py_abs(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
+fn py_abs_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0], Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2 = (natives[2].entry)(&[args[0], Value::Int(0)])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_EXTREME: p::HelperPlan = p::HelperPlan {
     name: "py.extreme",
@@ -11168,6 +11702,7 @@ const PY_EXTREME: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_extreme,
+    template: None,
 };
 
 /// `py.extreme`.
@@ -11302,6 +11837,7 @@ const PY_SUM: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_sum,
+    template: None,
 };
 
 /// `py.sum`.
@@ -11405,6 +11941,7 @@ const PY_SORTED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_sorted,
+    template: None,
 };
 
 /// `py.sorted`.
@@ -11593,6 +12130,7 @@ const COLLECTION_RANGE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: collection_range,
+    template: None,
 };
 
 /// `collection.range`.
@@ -11733,6 +12271,7 @@ const PY_RANGE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_range,
+    template: None,
 };
 
 /// `py.range`.
@@ -11861,6 +12400,7 @@ const PY_ENUMERATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_enumerate,
+    template: None,
 };
 
 /// `py.enumerate`.
@@ -11954,6 +12494,7 @@ const PY_ZIP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_zip,
+    template: None,
 };
 
 /// `py.zip`.
@@ -12102,6 +12643,7 @@ const PY_REVERSED: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_reversed,
+    template: None,
 };
 
 /// `py.reversed`.
@@ -12174,6 +12716,7 @@ const PY_ANY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_any,
+    template: None,
 };
 
 /// `py.any`.
@@ -12238,6 +12781,7 @@ const PY_ALL: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_all,
+    template: None,
 };
 
 /// `py.all`.
@@ -12359,6 +12903,7 @@ const PY_ROUND: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_round,
+    template: Some(p::HelperTemplate { entry: py_round_template, depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("cd91b81988a7145858c9559d959114c267071a60f10fed10a8e5a2e267c2a456"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), ] }),
 };
 
 /// `py.round`.
@@ -12725,6 +13270,1420 @@ fn py_round(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.call(25, 0, 1)?;
     Ok(ctx.take(0))
 }
+fn py_round_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_), Value::Null] | [Value::Int(_), Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Float(_)] | [Value::Int(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v11 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v15 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[2].entry)(&[args[0]])?; let _ = v20;
+                let v21 = (natives[1].entry)(&[v20])?; let _ = v21;
+                if !matches!(v21, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[2].entry)(&[args[0]])?; let _ = v20;
+                let v21 = (natives[1].entry)(&[v20])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v24 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v28 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Float(_)] | [Value::Float(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v10 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(true)) { return None; }
+                let v11 = (natives[8].entry)(&[args[1]])?; let _ = v11;
+                let v12 = (natives[9].entry)(&[args[0]])?; let _ = v12;
+                let v13 = (natives[7].entry)(&[Value::Int(308), v11])?; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                let v14 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v14;
+                Some(v14)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v10 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v15 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[2].entry)(&[args[0]])?; let _ = v19;
+                let v20 = (natives[1].entry)(&[v19])?; let _ = v20;
+                if !matches!(v20, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[2].entry)(&[args[0]])?; let _ = v19;
+                let v20 = (natives[1].entry)(&[v19])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v23 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(true)) { return None; }
+                let v24 = (natives[8].entry)(&[args[1]])?; let _ = v24;
+                let v25 = (natives[9].entry)(&[args[0]])?; let _ = v25;
+                let v26 = (natives[7].entry)(&[Value::Int(308), v24])?; let _ = v26;
+                if !matches!(v26, Value::Bool(true)) { return None; }
+                let v27 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v27;
+                Some(v27)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[2].entry)(&[args[0]])?; let _ = v19;
+                let v20 = (natives[1].entry)(&[v19])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v23 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v28 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v11 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v15 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[2].entry)(&[args[0]])?; let _ = v20;
+                let v21 = (natives[1].entry)(&[v20])?; let _ = v21;
+                if !matches!(v21, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v16 = (natives[1].entry)(&[v0])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v17 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v20 = (natives[2].entry)(&[args[0]])?; let _ = v20;
+                let v21 = (natives[1].entry)(&[v20])?; let _ = v21;
+                if !matches!(v21, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v24 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v24;
+                if !matches!(v24, Value::Bool(false)) { return None; }
+                let v28 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v10;
+                let v11 = (natives[1].entry)(&[v10])?; let _ = v11;
+                if !matches!(v11, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                let v10 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v10;
+                let v11 = (natives[1].entry)(&[v10])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v12 = (natives[2].entry)(&[args[0]])?; let _ = v12;
+                let v13 = (natives[1].entry)(&[v12])?; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v22 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(true)) { return None; }
+                let v23 = (natives[8].entry)(&[args[1]])?; let _ = v23;
+                let v24 = (natives[9].entry)(&[args[0]])?; let _ = v24;
+                let v25 = (natives[7].entry)(&[Value::Int(308), v23])?; let _ = v25;
+                if !matches!(v25, Value::Bool(true)) { return None; }
+                let v26 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v26;
+                Some(v26)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v22 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v27 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v27;
+                if !matches!(v27, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[2].entry)(&[args[0]])?; let _ = v31;
+                let v32 = (natives[1].entry)(&[v31])?; let _ = v32;
+                if !matches!(v32, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v35;
+                let v36 = (natives[1].entry)(&[v35])?; let _ = v36;
+                if !matches!(v36, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(args[1], Value::Bool(false)) { return None; }
+                let v35 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v35;
+                let v36 = (natives[1].entry)(&[v35])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v37 = (natives[2].entry)(&[args[0]])?; let _ = v37;
+                let v38 = (natives[1].entry)(&[v37])?; let _ = v38;
+                if !matches!(v38, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v47 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v47;
+                if !matches!(v47, Value::Bool(true)) { return None; }
+                let v48 = (natives[8].entry)(&[args[1]])?; let _ = v48;
+                let v49 = (natives[9].entry)(&[args[0]])?; let _ = v49;
+                let v50 = (natives[7].entry)(&[Value::Int(308), v48])?; let _ = v50;
+                if !matches!(v50, Value::Bool(true)) { return None; }
+                let v51 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v51;
+                Some(v51)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v47 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v47;
+                if !matches!(v47, Value::Bool(false)) { return None; }
+                let v52 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v52;
+                if !matches!(v52, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v4;
+                if !matches!(v4, Value::Bool(false)) { return None; }
+                let v5 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v5;
+                let v6 = (natives[1].entry)(&[v5])?; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                let v7 = (natives[2].entry)(&[args[0]])?; let _ = v7;
+                let v8 = (natives[1].entry)(&[v7])?; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v11 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                let v15 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v16 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v16;
+                if !matches!(v16, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v16 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v16 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[2].entry)(&[args[0]])?; let _ = v19;
+                let v20 = (natives[1].entry)(&[v19])?; let _ = v20;
+                if !matches!(v20, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v16 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                let v17 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v17;
+                let v18 = (natives[1].entry)(&[v17])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[2].entry)(&[args[0]])?; let _ = v19;
+                let v20 = (natives[1].entry)(&[v19])?; let _ = v20;
+                if !matches!(v20, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v23 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v27 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v27;
+                if !matches!(v27, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v29 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v29;
+                if !matches!(v29, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v29 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v30;
+                let v31 = (natives[1].entry)(&[v30])?; let _ = v31;
+                if !matches!(v31, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v29 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v30;
+                let v31 = (natives[1].entry)(&[v30])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[2].entry)(&[args[0]])?; let _ = v32;
+                let v33 = (natives[1].entry)(&[v32])?; let _ = v33;
+                if !matches!(v33, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v29 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                let v30 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v30;
+                let v31 = (natives[1].entry)(&[v30])?; let _ = v31;
+                if !matches!(v31, Value::Bool(false)) { return None; }
+                let v32 = (natives[2].entry)(&[args[0]])?; let _ = v32;
+                let v33 = (natives[1].entry)(&[v32])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v36 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v36;
+                if !matches!(v36, Value::Bool(false)) { return None; }
+                let v40 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v40;
+                if !matches!(v40, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v41 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v41;
+                if !matches!(v41, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v41 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v42;
+                let v43 = (natives[1].entry)(&[v42])?; let _ = v43;
+                if !matches!(v43, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v41 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v42;
+                let v43 = (natives[1].entry)(&[v42])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[2].entry)(&[args[0]])?; let _ = v44;
+                let v45 = (natives[1].entry)(&[v44])?; let _ = v45;
+                if !matches!(v45, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v41 = (natives[6].entry)(&[Value::Int(0), args[1]])?; let _ = v41;
+                if !matches!(v41, Value::Bool(false)) { return None; }
+                let v42 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v42;
+                let v43 = (natives[1].entry)(&[v42])?; let _ = v43;
+                if !matches!(v43, Value::Bool(false)) { return None; }
+                let v44 = (natives[2].entry)(&[args[0]])?; let _ = v44;
+                let v45 = (natives[1].entry)(&[v44])?; let _ = v45;
+                if !matches!(v45, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v48 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v48;
+                if !matches!(v48, Value::Bool(false)) { return None; }
+                let v52 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v52;
+                if !matches!(v52, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v10 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(true)) { return None; }
+                let v11 = (natives[8].entry)(&[args[1]])?; let _ = v11;
+                let v12 = (natives[9].entry)(&[args[0]])?; let _ = v12;
+                let v13 = (natives[7].entry)(&[Value::Int(308), v11])?; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                let v14 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v14;
+                Some(v14)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v4;
+                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                let v6 = (natives[2].entry)(&[args[0]])?; let _ = v6;
+                let v7 = (natives[1].entry)(&[v6])?; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v10 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                let v15 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v15;
+                if !matches!(v15, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v22 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(true)) { return None; }
+                let v23 = (natives[8].entry)(&[args[1]])?; let _ = v23;
+                let v24 = (natives[9].entry)(&[args[0]])?; let _ = v24;
+                let v25 = (natives[7].entry)(&[Value::Int(308), v23])?; let _ = v25;
+                if !matches!(v25, Value::Bool(true)) { return None; }
+                let v26 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v26;
+                Some(v26)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = (natives[5].entry)(&[args[1], Value::Null])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v16 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v16;
+                let v17 = (natives[1].entry)(&[v16])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                let v18 = (natives[2].entry)(&[args[0]])?; let _ = v18;
+                let v19 = (natives[1].entry)(&[v18])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v22 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                let v27 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v27;
+                if !matches!(v27, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[2].entry)(&[args[0]])?; let _ = v31;
+                let v32 = (natives[1].entry)(&[v31])?; let _ = v32;
+                if !matches!(v32, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[2].entry)(&[args[0]])?; let _ = v31;
+                let v32 = (natives[1].entry)(&[v31])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v35 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(true)) { return None; }
+                let v36 = (natives[8].entry)(&[args[1]])?; let _ = v36;
+                let v37 = (natives[9].entry)(&[args[0]])?; let _ = v37;
+                let v38 = (natives[7].entry)(&[Value::Int(308), v36])?; let _ = v38;
+                if !matches!(v38, Value::Bool(true)) { return None; }
+                let v39 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v39;
+                Some(v39)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(true)) { return None; }
+                let v29 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v29;
+                let v30 = (natives[1].entry)(&[v29])?; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v31 = (natives[2].entry)(&[args[0]])?; let _ = v31;
+                let v32 = (natives[1].entry)(&[v31])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v35 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v35;
+                if !matches!(v35, Value::Bool(false)) { return None; }
+                let v40 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v40;
+                if !matches!(v40, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(true)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v47 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v47;
+                if !matches!(v47, Value::Bool(true)) { return None; }
+                let v48 = (natives[8].entry)(&[args[1]])?; let _ = v48;
+                let v49 = (natives[9].entry)(&[args[0]])?; let _ = v49;
+                let v50 = (natives[7].entry)(&[Value::Int(308), v48])?; let _ = v50;
+                if !matches!(v50, Value::Bool(true)) { return None; }
+                let v51 = (natives[11].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v51;
+                Some(v51)
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
+                let v28 = (natives[1].entry)(&[v0])?; let _ = v28;
+                if !matches!(v28, Value::Bool(false)) { return None; }
+                let v41 = (natives[0].entry)(&[args[0], args[0]])?; let _ = v41;
+                let v42 = (natives[1].entry)(&[v41])?; let _ = v42;
+                if !matches!(v42, Value::Bool(false)) { return None; }
+                let v43 = (natives[2].entry)(&[args[0]])?; let _ = v43;
+                let v44 = (natives[1].entry)(&[v43])?; let _ = v44;
+                if !matches!(v44, Value::Bool(false)) { return None; }
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v47 = (natives[7].entry)(&[args[1], Value::Int(0)])?; let _ = v47;
+                if !matches!(v47, Value::Bool(false)) { return None; }
+                let v52 = (natives[7].entry)(&[Value::Int(323), args[1]])?; let _ = v52;
+                if !matches!(v52, Value::Bool(true)) { return None; }
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_ISINSTANCE: p::HelperPlan = p::HelperPlan {
     name: "py.isinstance",
@@ -12752,6 +14711,7 @@ const PY_ISINSTANCE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_isinstance,
+    template: None,
 };
 
 /// `py.isinstance`.
@@ -12826,6 +14786,7 @@ const PY_ORD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_ord,
+    template: None,
 };
 
 /// `py.ord`.
@@ -12926,6 +14887,7 @@ const PY_CHR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_chr,
+    template: None,
 };
 
 /// `py.chr`.
@@ -13036,6 +14998,7 @@ const PY_DIVMOD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_divmod,
+    template: None,
 };
 
 /// `py.divmod`.
@@ -13087,6 +15050,7 @@ const PY_NO_ATTRIBUTE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_no_attribute,
+    template: None,
 };
 
 /// `py.no_attribute`.
@@ -13145,6 +15109,7 @@ const PY_TEXT_OF: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_of,
+    template: Some(p::HelperTemplate { entry: py_text_of_template, depth: 1, callees: &[] }),
 };
 
 /// `py.text_of`.
@@ -13181,6 +15146,18 @@ fn py_text_of(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
 }
+fn py_text_of_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
 
 const PY_METHOD_APPEND: p::HelperPlan = p::HelperPlan {
     name: "py.method.append",
@@ -13207,6 +15184,7 @@ const PY_METHOD_APPEND: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_append,
+    template: None,
 };
 
 /// `py.method.append`.
@@ -13268,6 +15246,7 @@ const PY_METHOD_EXTEND: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_extend,
+    template: None,
 };
 
 /// `py.method.extend`.
@@ -13344,6 +15323,7 @@ const LIST_INSERT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: list_insert,
+    template: None,
 };
 
 /// `list.insert`.
@@ -13469,6 +15449,7 @@ const PY_METHOD_INSERT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_insert,
+    template: None,
 };
 
 /// `py.method.insert`.
@@ -13637,6 +15618,7 @@ const PY_METHOD_POP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_pop,
+    template: None,
 };
 
 /// `py.method.pop`.
@@ -13942,6 +15924,7 @@ const PY_METHOD_REMOVE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_remove,
+    template: None,
 };
 
 /// `py.method.remove`.
@@ -14100,6 +16083,7 @@ const PY_METHOD_INDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_index,
+    template: None,
 };
 
 /// `py.method.index`.
@@ -14286,6 +16270,7 @@ const PY_METHOD_COUNT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_count,
+    template: None,
 };
 
 /// `py.method.count`.
@@ -14432,6 +16417,7 @@ const PY_METHOD_SORT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_sort,
+    template: None,
 };
 
 /// `py.method.sort`.
@@ -14545,6 +16531,7 @@ const PY_METHOD_REVERSE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_reverse,
+    template: None,
 };
 
 /// `py.method.reverse`.
@@ -14636,6 +16623,7 @@ const PY_METHOD_COPY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_copy,
+    template: None,
 };
 
 /// `py.method.copy`.
@@ -14707,6 +16695,7 @@ const LIST_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: list_clear,
+    template: None,
 };
 
 /// `list.clear`.
@@ -14759,6 +16748,7 @@ const SET_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: set_clear,
+    template: None,
 };
 
 /// `set.clear`.
@@ -14810,6 +16800,7 @@ const MAP_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: map_clear,
+    template: None,
 };
 
 /// `map.clear`.
@@ -14870,6 +16861,7 @@ const PY_METHOD_CLEAR: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_clear,
+    template: None,
 };
 
 /// `py.method.clear`.
@@ -14959,6 +16951,7 @@ const PY_METHOD_GET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_get,
+    template: None,
 };
 
 /// `py.method.get`.
@@ -15071,6 +17064,7 @@ const PY_METHOD_KEYS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_keys,
+    template: None,
 };
 
 /// `py.method.keys`.
@@ -15131,6 +17125,7 @@ const PY_METHOD_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_values,
+    template: None,
 };
 
 /// `py.method.values`.
@@ -15180,6 +17175,7 @@ const PY_METHOD_ITEMS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_items,
+    template: None,
 };
 
 /// `py.method.items`.
@@ -15227,6 +17223,7 @@ const PY_FOR_IN_KEYS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_keys,
+    template: None,
 };
 
 /// `py.for_in.keys`.
@@ -15273,6 +17270,7 @@ const PY_FOR_IN_VALUES: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_values,
+    template: None,
 };
 
 /// `py.for_in.values`.
@@ -15319,6 +17317,7 @@ const PY_FOR_IN_ITEMS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_items,
+    template: None,
 };
 
 /// `py.for_in.items`.
@@ -15364,6 +17363,7 @@ const PY_FOR_IN_VALUE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_value,
+    template: Some(p::HelperTemplate { entry: py_for_in_value_template, depth: 1, callees: &[] }),
 };
 
 /// `py.for_in.value`.
@@ -15385,6 +17385,18 @@ fn py_for_in_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+fn py_for_in_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Bool(_), Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[1])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_FOR_IN_ITEM: p::HelperPlan = p::HelperPlan {
@@ -15408,6 +17420,7 @@ const PY_FOR_IN_ITEM: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_item,
+    template: Some(p::HelperTemplate { entry: py_for_in_item_template, depth: 1, callees: &[] }),
 };
 
 /// `py.for_in.item`.
@@ -15431,6 +17444,18 @@ fn py_for_in_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
+}
+fn py_for_in_item_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null, Value::Null] | [Value::Absent, Value::Null] | [Value::Bool(_), Value::Null] | [Value::Int(_), Value::Null] | [Value::Float(_), Value::Null] | [Value::Text(_), Value::Null] | [Value::Null, Value::Absent] | [Value::Absent, Value::Absent] | [Value::Bool(_), Value::Absent] | [Value::Int(_), Value::Absent] | [Value::Float(_), Value::Absent] | [Value::Text(_), Value::Absent] | [Value::Null, Value::Bool(_)] | [Value::Absent, Value::Bool(_)] | [Value::Bool(_), Value::Bool(_)] | [Value::Int(_), Value::Bool(_)] | [Value::Float(_), Value::Bool(_)] | [Value::Text(_), Value::Bool(_)] | [Value::Null, Value::Int(_)] | [Value::Absent, Value::Int(_)] | [Value::Bool(_), Value::Int(_)] | [Value::Int(_), Value::Int(_)] | [Value::Float(_), Value::Int(_)] | [Value::Text(_), Value::Int(_)] | [Value::Null, Value::Float(_)] | [Value::Absent, Value::Float(_)] | [Value::Bool(_), Value::Float(_)] | [Value::Int(_), Value::Float(_)] | [Value::Float(_), Value::Float(_)] | [Value::Text(_), Value::Float(_)] | [Value::Null, Value::Text(_)] | [Value::Absent, Value::Text(_)] | [Value::Bool(_), Value::Text(_)] | [Value::Int(_), Value::Text(_)] | [Value::Float(_), Value::Text(_)] | [Value::Text(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[1])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_METHOD_SETDEFAULT: p::HelperPlan = p::HelperPlan {
@@ -15462,6 +17487,7 @@ const PY_METHOD_SETDEFAULT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_setdefault,
+    template: None,
 };
 
 /// `py.method.setdefault`.
@@ -15553,6 +17579,7 @@ const PY_METHOD_UPDATE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_update,
+    template: None,
 };
 
 /// `py.method.update`.
@@ -15661,6 +17688,7 @@ const PY_METHOD_ADD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_add,
+    template: None,
 };
 
 /// `py.method.add`.
@@ -15716,6 +17744,7 @@ const PY_METHOD_DISCARD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_discard,
+    template: None,
 };
 
 /// `py.method.discard`.
@@ -15774,6 +17803,7 @@ const PY_METHOD_UNION: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_union,
+    template: None,
 };
 
 /// `py.method.union`.
@@ -15838,6 +17868,7 @@ const PY_METHOD_INTERSECTION: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_intersection,
+    template: None,
 };
 
 /// `py.method.intersection`.
@@ -15905,6 +17936,7 @@ const PY_METHOD_DIFFERENCE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_difference,
+    template: None,
 };
 
 /// `py.method.difference`.
@@ -16001,6 +18033,7 @@ const PY_METHOD_JOIN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_join,
+    template: None,
 };
 
 /// `py.method.join`.
@@ -16114,6 +18147,7 @@ const PY_METHOD_SPLIT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_split,
+    template: None,
 };
 
 /// `py.method.split`.
@@ -16271,6 +18305,7 @@ const PY_METHOD_STRIP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_strip,
+    template: None,
 };
 
 /// `py.method.strip`.
@@ -16320,6 +18355,7 @@ const PY_METHOD_LSTRIP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_lstrip,
+    template: None,
 };
 
 /// `py.method.lstrip`.
@@ -16369,6 +18405,7 @@ const PY_METHOD_RSTRIP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_rstrip,
+    template: None,
 };
 
 /// `py.method.rstrip`.
@@ -16418,6 +18455,7 @@ const PY_METHOD_UPPER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_upper,
+    template: None,
 };
 
 /// `py.method.upper`.
@@ -16467,6 +18505,7 @@ const PY_METHOD_LOWER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_lower,
+    template: None,
 };
 
 /// `py.method.lower`.
@@ -16519,6 +18558,7 @@ const PY_METHOD_STARTSWITH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_startswith,
+    template: None,
 };
 
 /// `py.method.startswith`.
@@ -16578,6 +18618,7 @@ const PY_METHOD_ENDSWITH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_endswith,
+    template: None,
 };
 
 /// `py.method.endswith`.
@@ -16639,6 +18680,7 @@ const PY_METHOD_REPLACE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_replace,
+    template: None,
 };
 
 /// `py.method.replace`.
@@ -16705,6 +18747,7 @@ const PY_METHOD_FIND: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_find,
+    template: None,
 };
 
 /// `py.method.find`.
@@ -16768,6 +18811,7 @@ const PY_FORMAT_GROUP: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_format_group,
+    template: None,
 };
 
 /// `py.format.group`.
@@ -16861,6 +18905,7 @@ const PY_FORMAT_EXPONENT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_format_exponent,
+    template: None,
 };
 
 /// `py.format.exponent`.
@@ -17108,6 +19153,7 @@ const PY_FORMAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_format,
+    template: None,
 };
 
 /// `py.format`.

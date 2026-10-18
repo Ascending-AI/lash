@@ -7,6 +7,7 @@ use lash_kernel_doc::arena::ArenaHandle;
 
 pub(super) struct OperationEntry {
     pub(super) shared: Vec<Option<ArenaHandle>>,
+    pub(super) depth_headroom: u32,
 }
 
 pub(super) struct AdmittedBody {
@@ -21,6 +22,27 @@ impl From<CodeId> for AdmittedBody {
 }
 
 impl KernelMachine {
+    /// A template may elide nested helper frames only with sufficient
+    /// depth headroom. On a miss the normal path names the exact refusal.
+    #[inline]
+    pub(super) fn template_depth_fits(
+        &mut self,
+        task: TaskId,
+        extra: u32,
+        entry: Option<&OperationEntry>,
+    ) -> Eval<bool> {
+        if extra == 0 {
+            return Ok(true);
+        }
+        if let Some(entry) = entry {
+            return Ok(extra <= entry.depth_headroom);
+        }
+        let depth = self.task(task)?.frames.len()
+            + self.plans as usize
+            + usize::from(task != TaskId::MAIN || !self.session_cell);
+        Ok(depth as u64 + u64::from(extra) <= u64::from(self.bounds.call_depth))
+    }
+
     /// Admits a call of an operation before any implementation is offered
     /// it: the call's depth unit (K-BND-002) and the cells of its shared
     /// parameters, so their identities are the same whichever
@@ -33,7 +55,7 @@ impl KernelMachine {
         lib: LibId,
         args: usize,
     ) -> Eval<OperationEntry> {
-        self.check_call_depth(task)?;
+        let depth_headroom = self.call_depth_headroom(task)?;
         let function = exe.lib(lib);
         let code = match function.run {
             LibRun::Body(code)
@@ -53,6 +75,9 @@ impl KernelMachine {
                 }
             }
         }
-        Ok(OperationEntry { shared })
+        Ok(OperationEntry {
+            shared,
+            depth_headroom,
+        })
     }
 }
