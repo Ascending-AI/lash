@@ -179,6 +179,9 @@ pub struct RegionWork {
     /// Calls an island entered: their frames, which the reference would
     /// push, it ran virtually.
     pub calls: u64,
+    /// Loop passes a helper plan's region ran to their end
+    /// (`machine::plan_regions`).
+    pub passes: u64,
 }
 
 impl ChargeTape {
@@ -212,6 +215,11 @@ impl ChargeTape {
     /// Counts `iterations` a loop region ran to their end.
     pub(crate) fn iterated(&self, iterations: u64) {
         self.lock().work.iterations += iterations;
+    }
+
+    /// Counts a pass a helper plan's loop region ran to its end.
+    pub(crate) fn passed(&self) {
+        self.lock().work.passes += 1;
     }
 
     /// Counts a call an island entered.

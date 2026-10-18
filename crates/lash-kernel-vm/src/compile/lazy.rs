@@ -434,14 +434,20 @@ impl Prepared {
         let tables = (!plan.sites.is_empty() || !plan.closures.is_empty())
             .then(|| (self.tables.tables(self, at), &slot.base));
         let mut sites = self.plan_sites[index];
+        let same = |lib: LibId| {
+            self.libs
+                .get(lib.0 as usize)
+                .is_some_and(|lib| lib.definition.name.as_str() == "same")
+        };
         PreparedPlan::new(
             plan,
             registered.definition(),
             &self.lib_of,
-            self.layout.shape(),
+            self.layout,
             CodeId(slot.base.codes),
             tables,
             &mut sites,
+            &same,
         )
         .map(|plan| Some(Arc::new(plan)))
     }

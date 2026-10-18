@@ -587,6 +587,7 @@ impl KernelMachine {
                         cursor: cursor.clone(),
                         held,
                         started: *started,
+                        region: plan.region(*walked),
                     });
                 }
                 (Control::While { started, .. }, Some(SiteControl::While { .. })) => {

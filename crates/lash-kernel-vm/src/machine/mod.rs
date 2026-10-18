@@ -22,6 +22,7 @@ mod operation_entry;
 mod ops;
 #[cfg(test)]
 mod park_laws;
+mod plan_regions;
 mod plans;
 pub(crate) mod project;
 mod queue;

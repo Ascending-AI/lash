@@ -485,11 +485,12 @@ struct Counts {
 impl Counts {
     fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
         println!(
-            "regions shard={shard} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            "regions shard={shard} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} plan_passes={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
             self.cases,
             self.ran,
             self.work.iterations,
             self.work.calls,
+            self.work.passes,
             self.runs,
             self.bounds,
             self.slices,
@@ -606,6 +607,7 @@ fn check_in(
     counts.cases += 1;
     counts.work.iterations += natural.work.iterations;
     counts.work.calls += natural.work.calls;
+    counts.work.passes += natural.work.passes;
     counts.ran += usize::from(natural.work != RegionWork::default());
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
@@ -881,6 +883,14 @@ const LEFT_TO_THE_REFERENCE: &[&str] = &[
     "typescript islands: texts echoed by root call actions in a loop",
 ];
 
+/// Programs whose helpers' plans run a loop as a region over its cursor
+/// (FIG-6780): [`ran`] requires their natural run to end a pass in one,
+/// or the comparison leaves those plans' generated code against itself.
+const PLAN_REGIONS: &[&str] = &[
+    "typescript islands: map and filter callbacks",
+    "typescript islands: a callback leaving its island on a text",
+];
+
 /// Adds a failure where `plans`, the loop regions and call islands
 /// program `name` forms, are not met by `work`, what its natural run with
 /// regions on committed: a formed plan that never runs leaves the
@@ -891,6 +901,11 @@ fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<S
         failures.push(format!(
             "{name}: {} loop regions form, and its natural run ended no iteration in one",
             plans.0
+        ));
+    }
+    if PLAN_REGIONS.contains(&name) && work.passes == 0 {
+        failures.push(format!(
+            "{name}: its helpers' plans form loop regions, and its natural run ended no pass in one"
         ));
     }
     if plans.1 > 0 && work.calls == 0 {

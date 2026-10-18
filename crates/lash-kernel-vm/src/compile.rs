@@ -47,6 +47,7 @@ mod lazy;
 mod lower;
 mod occurrences;
 mod parameters;
+pub(crate) mod plan_regions;
 mod preparation;
 mod reads;
 mod regions;

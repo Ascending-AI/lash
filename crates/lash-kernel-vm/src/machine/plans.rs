@@ -42,6 +42,9 @@ pub(super) struct Walk {
     pub(super) cursor: Cursor,
     pub(super) held: Reg,
     pub(super) started: u64,
+    /// The region the plan runs the loop's iterations as, if any
+    /// (`super::plan_regions`).
+    pub(super) region: Option<u32>,
 }
 
 /// One running plan: the machine, the caller's arguments and the plan's
@@ -90,7 +93,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
         }
     }
 
-    fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
+    pub(super) fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
         let holding = if self.shared(slot) {
             let allocated = self.machine.new_cell(value);
             Value::ObjectRef(self.held(allocated)?)
@@ -151,7 +154,9 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
             };
             machine.pins.values.truncate(pins);
             machine.pins.borrowed.truncate(borrowed);
-            machine.heap.release_reserved_to(reserved)?;
+            if machine.heap.statement_reserved() != reserved {
+                machine.heap.release_reserved_to(reserved)?;
+            }
         }
         let registers = self.prepared.plan.registers as usize;
         machine.regs.clear_range(self.base..self.base + registers);
@@ -161,6 +166,65 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
 }
 
 impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
+    /// Steps the loop on `cursor` to its next element, counting the pass
+    /// it starts, or finds it exhausted.
+    pub(super) fn step(&mut self, cursor: PlanCursor) -> Result<Option<Value>, PlanExit> {
+        let stepped = loop {
+            let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
+                let missing = Err(fault("a plan stepped a loop it has not opened"));
+                return self.held(missing);
+            };
+            let stepped = walk.cursor.step(&mut self.machine.arena.borrow_mut());
+            // What the loop walks is decoded, then stepped again.
+            match stepped {
+                Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                    let warmed = self.machine.warm(object, chunk);
+                    self.held(warmed)?;
+                }
+                stepped => {
+                    let stepped = stepped.inspect(|element| {
+                        walk.started += u64::from(element.is_some());
+                    });
+                    break stepped.map_err(Interrupt::from);
+                }
+            }
+        };
+        self.check(stepped)
+    }
+
+    /// Calls library function `lib` on the `count` arguments from register
+    /// `at`, its value to `at`, as the plan's general call does.
+    pub(super) fn call_at(&mut self, lib: LibId, at: Reg, count: usize) -> Result<(), PlanExit> {
+        let function = self.exe.lib(lib);
+        // The general call's first answer, taken directly: an unobserved
+        // call of every parameter that no admission precedes, which its
+        // prepared entry answers at the plan's own depth. One it declines
+        // goes on past that entry.
+        if count == function.arity
+            && !function.operation()
+            && !self.machine.charging
+            && self.machine.observer.is_none()
+            && let Some((entry, _)) = &function.prepared
+            && entry.depth() == 0
+        {
+            let Some(answer) = entry.answer(
+                &self.machine.regs[at..at + function.arity],
+                self.machine.charging,
+            ) else {
+                let called = self.machine.call_declined(self.task, self.exe, lib, at);
+                return self.check(called);
+            };
+            let pinned = self.machine.pin_value(&answer.value);
+            self.held(pinned)?;
+            self.machine.put(at, answer.value);
+            return Ok(());
+        }
+        let called = self
+            .machine
+            .call_answered(self.task, self.exe, lib, at, count);
+        self.check(called)
+    }
+
     /// Opens the next statement, ending the one open.
     pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
         let ended = self.end_statement();
@@ -320,14 +384,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
 
     fn call(&mut self, callee: u32, args: u32, count: u32) -> Result<(), PlanExit> {
         let lib = self.prepared.callees[callee as usize];
-        let called = self.machine.call_answered(
-            self.task,
-            self.exe,
-            lib,
-            self.base + args as usize,
-            count as usize,
-        );
-        self.check(called)
+        self.call_at(lib, self.base + args as usize, count as usize)
     }
 
     fn field(&mut self, at: u32, field: u32) -> Result<(), PlanExit> {
@@ -424,6 +481,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
     }
 
     fn open(&mut self, iterable: u32, slot: u32) -> Result<PlanCursor, PlanExit> {
+        let region = self.prepared.region(slot);
         let value = self.machine.take(self.base + iterable as usize);
         let Ok(cursor) = Cursor::over(value, false) else {
             let raised = raise(
@@ -441,32 +499,20 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
             cursor,
             held,
             started: 0,
+            region,
         });
         Ok(PlanCursor(at as u32))
     }
 
     fn next(&mut self, cursor: PlanCursor, dst: u32) -> Result<bool, PlanExit> {
-        let stepped = loop {
-            let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
-                let missing = Err(fault("a plan stepped a loop it has not opened"));
-                return self.held(missing);
-            };
-            let stepped = walk.cursor.step(&mut self.machine.arena.borrow_mut());
-            // What the loop walks is decoded, then stepped again.
-            match stepped {
-                Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
-                    let warmed = self.machine.warm(object, chunk);
-                    self.held(warmed)?;
-                }
-                stepped => {
-                    let stepped = stepped.inspect(|element| {
-                        walk.started += u64::from(element.is_some());
-                    });
-                    break stepped.map_err(Interrupt::from);
-                }
-            }
-        };
-        match self.check(stepped)? {
+        if let Some(region) = self
+            .cursors
+            .get(cursor.0 as usize)
+            .and_then(|walk| walk.region)
+        {
+            return self.walk_region(cursor, region);
+        }
+        match self.step(cursor)? {
             Some(element) => {
                 self.machine.put(self.base + dst as usize, element);
                 Ok(true)

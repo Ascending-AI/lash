@@ -684,6 +684,27 @@ impl KernelMachine {
         }
     }
 
+    /// [`Self::call_answered`] of every parameter of `lib`, an unobserved
+    /// call that no admission precedes, whose prepared entry declined.
+    pub(super) fn call_declined(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+    ) -> Eval<()> {
+        let function = exe.lib(lib);
+        match self
+            .answer_admitted(task, exe, lib, args, args, None, false)
+            .map_err(|interrupt| interrupt.answering(function))?
+        {
+            Answer::Done => Ok(()),
+            Answer::Body(_) | Answer::Yielded => {
+                Err(fault("a call that runs its body was lowered as one that answers").into())
+            }
+        }
+    }
+
     /// Answers a call of a library function that needs no frame: a native
     /// implementation or one of the machine's own, its value in `out`.
     /// [`Answer::Body`] leaves the arguments from `args`, one per parameter,

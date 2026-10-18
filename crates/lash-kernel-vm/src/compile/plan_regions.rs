@@ -1,0 +1,498 @@
+//! Loop regions of generated helper plans (FIG-6780): a `for` of a helper
+//! body that applies a callback, run by its plan as a region over the
+//! loop's own cursor.
+//!
+//! A segment's plan walks a list loop element by element through its
+//! generated code: each statement a dispatch, each callback an entry
+//! through the plan's site. A [`PlanRegion`] states the same loop as its
+//! body's resolved statements ([`super::expr`]) over the plan's own
+//! variables and registers, which the machine runs whole iterations of
+//! from the plan's loop step, entering the callback's island inline. It
+//! performs the plan's forms in the plan's order on the plan's registers
+//! and variables, so where it stops (between iterations, at a callback
+//! site, or at a raise) the plan stands exactly where its generated code
+//! would; a callback that does not return there stands its frames as the
+//! segment path materialises them.
+//!
+//! A loop forms when it is a `for` with no `else` and no protocol, outside
+//! any `try`, whose body statements are `if`, `break`, `let` and `set` of
+//! the plan's unshared variables, member writes and `do`, of expressions
+//! that read variables and resident constants, call library functions the
+//! plan calls, and build the empty tuple; a statement's root action is a
+//! callback the plan applies at its site, or a library call. Plans belong
+//! to the layout's prepared library: deterministic, immutable and never
+//! saved, formed only when the layout forms regions.
+
+use lash_kernel_doc::Value;
+use lash_kernel_doc::plan::{HelperPlan, SiteCall};
+use lash_kernel_exec::{LocalRef, Op, Reg};
+
+use super::expr::{self, Expr, Kind, Make};
+use super::segments::{Segment, SiteControl};
+use super::{
+    ActionKind, Atom, Base, BlockId, Callee, Constant, Form, LibId, Local, StmtId, Tables, Var,
+};
+
+/// A `for` of a helper plan that runs as a region over its cursor.
+pub(crate) struct PlanRegion {
+    /// The plan variable that holds what the loop walks: the loop the
+    /// plan opens with it is this one.
+    pub(crate) walked: u32,
+    /// The plan variable each element is bound to.
+    pub(crate) binding: u32,
+    /// The units each test of the loop charges.
+    pub(crate) metered: u64,
+    pub(crate) body: Block,
+}
+
+/// A block of the loop's body, its statements in order.
+pub(crate) struct Block {
+    pub(crate) steps: Box<[Step]>,
+    /// The plan variables it declares, which its end empties.
+    pub(crate) declares: Box<[u32]>,
+}
+
+/// One statement: each opens a statement of the plan.
+pub(crate) enum Step {
+    If {
+        cond: Node,
+        then: Block,
+        otherwise: Block,
+    },
+    /// A `break`: it empties these variables, the blocks' it leaves.
+    Break(Box<[u32]>),
+    /// `set` of an unshared plan variable.
+    Assign { slot: u32, value: Node },
+    /// `let` of an unshared plan variable.
+    Bind { slot: u32, value: Node },
+    /// `set target[index] = value`: the three in the plan's evaluation
+    /// order, the target in register `target` before the index, the value
+    /// in register `src`.
+    Store {
+        order: [Node; 3],
+        target: u32,
+        src: u32,
+    },
+    /// `do`: a value computed and dropped.
+    Discard(Node),
+}
+
+/// A value a statement computes into its register.
+pub(crate) struct Node {
+    pub(crate) reg: u32,
+    pub(crate) kind: NodeKind,
+}
+
+pub(crate) enum NodeKind {
+    /// A plan variable's value.
+    Local(u32),
+    /// A resident constant.
+    Const(Value),
+    /// The value held while the place after it is evaluated.
+    Pin(Box<Node>),
+    /// The empty tuple.
+    Unit,
+    /// An `if`'s test `same(value, ())` by `lib`, the kernel's `same`, on
+    /// its two arguments: whether the value is the empty tuple, which the
+    /// statement need not build.
+    IsUnit { lib: LibId, args: Box<[Node]> },
+    /// A call of library function `lib` on the arguments from the node's
+    /// register, which the plan answers by its general call.
+    Call { lib: LibId, args: Box<[Node]> },
+    /// The statement's root action: the callback in plan variable
+    /// `callee`, applied at site `site` to the arguments after it.
+    Apply {
+        site: u32,
+        callee: u32,
+        args: Box<[Node]>,
+    },
+    /// The statement's root action: a call of `lib` its plan offers at
+    /// site `site`, which may run its body in a frame.
+    Invoke {
+        site: u32,
+        lib: LibId,
+        args: Box<[Node]>,
+    },
+}
+
+/// What forming one plan's regions reads.
+struct Former<'a> {
+    plan: &'static HelperPlan,
+    locals: &'a [Option<Local>],
+    segment: &'a Segment,
+    tables: &'a Tables,
+    base: &'a Base,
+    /// Whether a library function is the kernel's `same`.
+    same: &'a dyn Fn(LibId) -> bool,
+    /// The plan registers its statements may use.
+    registers: u32,
+}
+
+/// Forms the regions of the loops `plan`'s callback sites stand in.
+pub(super) fn form(
+    plan: &'static HelperPlan,
+    locals: &[Option<Local>],
+    segment: &Segment,
+    tables: &Tables,
+    base: &Base,
+    same: &dyn Fn(LibId) -> bool,
+) -> Vec<PlanRegion> {
+    let former = Former {
+        plan,
+        locals,
+        segment,
+        tables,
+        base,
+        same,
+        registers: plan.registers,
+    };
+    let mut loops: Vec<(StmtId, u32)> = Vec::new();
+    for site in &segment.sites {
+        // A loop inside a `try` stands in its handler's protection, which
+        // a region does not hold.
+        let mut guarded = false;
+        for control in &site.control {
+            match *control {
+                SiteControl::Try { .. } => guarded = true,
+                SiteControl::For { stmt, walked }
+                    if !guarded && !loops.contains(&(stmt, walked)) =>
+                {
+                    loops.push((stmt, walked));
+                }
+                _ => {}
+            }
+        }
+    }
+    loops
+        .into_iter()
+        .filter_map(|(stmt, walked)| former.region(stmt, walked))
+        .collect()
+}
+
+impl Former<'_> {
+    fn stmt(&self, id: StmtId) -> &super::Stmt {
+        &self.tables.stmts[(id.0 - self.base.stmts) as usize]
+    }
+
+    fn block_of(&self, id: BlockId) -> &super::Block {
+        &self.tables.blocks[(id.0 - self.base.blocks) as usize]
+    }
+
+    /// The plan variable of the body's code slot `slot`, when no closure
+    /// shares it.
+    fn slot(&self, slot: u32) -> Option<u32> {
+        let at = self
+            .locals
+            .iter()
+            .position(|local| local.is_some_and(|local| local.slot == slot))?;
+        let local = self.locals[at]?;
+        (!local.shared).then_some(at as u32)
+    }
+
+    fn local(&self, local: LocalRef) -> Option<u32> {
+        self.slot(local.slot)
+    }
+
+    fn region(&self, stmt: StmtId, walked: u32) -> Option<PlanRegion> {
+        let Form::For {
+            metered,
+            binding,
+            via: None,
+            body,
+            else_block: None,
+            ..
+        } = &self.stmt(stmt).form
+        else {
+            return None;
+        };
+        let binding = self.slot(binding.slot)?;
+        let body = self.block(*body, &mut Vec::new())?;
+        Some(PlanRegion {
+            walked,
+            binding,
+            metered: *metered,
+            body,
+        })
+    }
+
+    /// The plan variables block `id` declares: each named one whose
+    /// declaration is the block itself or one of its statements.
+    fn declares(&self, id: BlockId) -> Option<Box<[u32]>> {
+        let block = self.block_of(id);
+        let path = &block.site.path;
+        let declared: Box<[u32]> = self
+            .plan
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(_, local)| {
+                !local.name.is_empty()
+                    && local.path.starts_with(path)
+                    && local.path.len() <= path.len() + 1
+            })
+            .map(|(at, _)| at as u32)
+            .collect();
+        (declared.len() == block.declares.len()).then_some(declared)
+    }
+
+    /// Block `id`, inside the blocks whose declarations `enclosing` holds,
+    /// innermost last.
+    fn block(&self, id: BlockId, enclosing: &mut Vec<Box<[u32]>>) -> Option<Block> {
+        let declares = self.declares(id)?;
+        enclosing.push(declares.clone());
+        let steps = self
+            .block_of(id)
+            .stmts
+            .iter()
+            .map(|stmt| self.step(*stmt, enclosing))
+            .collect::<Option<_>>();
+        enclosing.pop();
+        Some(Block {
+            steps: steps?,
+            declares,
+        })
+    }
+
+    fn step(&self, id: StmtId, enclosing: &mut Vec<Box<[u32]>>) -> Option<Step> {
+        let statement = self.stmt(id);
+        match &statement.form {
+            Form::Plain | Form::If { .. } => {}
+            Form::Action(action) => return self.action(id, action),
+            _ => return None,
+        }
+        let mut tree = expr::statement(&self.tables.stream, statement.ops, false)?;
+        let step = match (&statement.form, tree.last) {
+            (Form::Plain, Op::Break) => {
+                let mut left: Vec<u32> = Vec::new();
+                for declares in enclosing.iter().rev() {
+                    left.extend(declares.iter().rev());
+                }
+                Step::Break(left.into())
+            }
+            (
+                Form::If {
+                    then_block,
+                    else_block,
+                },
+                Op::Branch { cond, then_, else_ },
+            ) if then_.0 == then_block.0 && else_.0 == else_block.0 => Step::If {
+                cond: self.test(tree.take(cond)?)?,
+                then: self.block(*then_block, enclosing)?,
+                otherwise: self.block(*else_block, enclosing)?,
+            },
+            (Form::Plain, Op::WriteLocal { local, src }) if src.0 == 0 => Step::Assign {
+                slot: self.local(local)?,
+                value: self.node(tree.take(src)?)?,
+            },
+            (Form::Plain, Op::Bind { local, src }) if src.0 == 0 => Step::Bind {
+                slot: self.local(local)?,
+                value: self.node(tree.take(src)?)?,
+            },
+            (Form::Plain, Op::SetIndex { target, src }) => {
+                self.store(&mut tree, target, src, None)?
+            }
+            (Form::Plain, Op::End) => Step::Discard(self.node(tree.take(Reg(0))?)?),
+            _ => return None,
+        };
+        tree.spent().then_some(step)
+    }
+
+    /// A statement whose root action is a call: its value is the first
+    /// register of its continuation.
+    fn action(&self, id: StmtId, action: &super::Action) -> Option<Step> {
+        let statement = self.stmt(id);
+        let ActionKind::Call { callee, args } = &action.kind else {
+            return None;
+        };
+        let args = args
+            .iter()
+            .enumerate()
+            .map(|(at, atom)| self.atom(atom, at as u32 + 1))
+            .collect::<Option<Box<[Node]>>>()?;
+        let site = self.segment.by_stand.get(&(id, None)).copied();
+        let kind = match (callee, site) {
+            (Callee::Value(Var::Local(local)), Some(site))
+                if self.plan.sites.get(site as usize)?.call == SiteCall::Apply =>
+            {
+                NodeKind::Apply {
+                    site,
+                    callee: self.slot(local.slot)?,
+                    args,
+                }
+            }
+            (Callee::Library(lib), Some(site))
+                if matches!(
+                    self.plan.sites.get(site as usize)?.call,
+                    SiteCall::Invoke(_)
+                ) =>
+            {
+                NodeKind::Invoke {
+                    site,
+                    lib: *lib,
+                    args: shifted(args)?,
+                }
+            }
+            (Callee::Library(lib), None) => NodeKind::Call {
+                lib: *lib,
+                args: shifted(args)?,
+            },
+            _ => return None,
+        };
+        if let Some(site) = site {
+            let stated = self.plan.sites.get(site as usize)?;
+            if stated.dst != 0 || !stated.roles.is_empty() {
+                return None;
+            }
+        }
+        let act = Node { reg: 0, kind };
+        let mut tree = expr::statement(&self.tables.stream, statement.ops, true)?;
+        let step = match tree.last {
+            Op::Bind { local, src } if src.0 == 0 => {
+                tree.take(src)?;
+                Step::Bind {
+                    slot: self.local(local)?,
+                    value: act,
+                }
+            }
+            Op::WriteLocal { local, src } if src.0 == 0 => {
+                tree.take(src)?;
+                Step::Assign {
+                    slot: self.local(local)?,
+                    value: act,
+                }
+            }
+            Op::SetIndex { target, src } => self.store(&mut tree, target, src, Some(act))?,
+            Op::End => {
+                tree.take(Reg(0))?;
+                Step::Discard(act)
+            }
+            _ => return None,
+        };
+        tree.spent().then_some(step)
+    }
+
+    /// A member write of the value in `src` to the target in `target` at
+    /// the index after it, `act` standing for the statement's root action.
+    fn store(
+        &self,
+        tree: &mut expr::Statement,
+        target: Reg,
+        src: Reg,
+        act: Option<Node>,
+    ) -> Option<Step> {
+        let mut act = act;
+        let mut nodes = [
+            tree.take(target)?,
+            tree.take(Reg(target.0 + 1))?,
+            tree.take(src)?,
+        ]
+        .map(|expr| (expr.pc, self.acted(expr, &mut act)));
+        if act.is_some() {
+            return None;
+        }
+        nodes.sort_by_key(|(pc, _)| *pc);
+        let [a, b, c] = nodes.map(|(_, node)| node);
+        Some(Step::Store {
+            order: [a?, b?, c?],
+            target: target.0,
+            src: src.0,
+        })
+    }
+
+    /// `expr`, the root action's value standing where the tree reads it.
+    fn acted(&self, expr: Expr, act: &mut Option<Node>) -> Option<Node> {
+        match expr.kind {
+            Kind::Act => act.take(),
+            Kind::Pin(inner) => Some(Node {
+                reg: expr.reg,
+                kind: NodeKind::Pin(Box::new(self.acted(*inner, act)?)),
+            }),
+            _ => self.node(expr),
+        }
+    }
+
+    /// An action's argument read into register `reg`.
+    fn atom(&self, atom: &Atom, reg: u32) -> Option<Node> {
+        let kind = match atom {
+            Atom::Var(Var::Local(local)) => NodeKind::Local(self.slot(local.slot)?),
+            Atom::Literal(Constant::Resident(value)) => NodeKind::Const(*value),
+            _ => return None,
+        };
+        self.fits(reg)?;
+        Some(Node { reg, kind })
+    }
+
+    /// Whether register `reg` is one of the plan's.
+    fn fits(&self, reg: u32) -> Option<()> {
+        (reg < self.registers).then_some(())
+    }
+
+    fn node(&self, expr: Expr) -> Option<Node> {
+        self.fits(expr.reg)?;
+        let kind = match expr.kind {
+            Kind::Local { local, scoped, .. } if !scoped => NodeKind::Local(self.local(local)?),
+            Kind::Const(value) => NodeKind::Const(value),
+            Kind::Pin(inner) => NodeKind::Pin(Box::new(self.node(*inner)?)),
+            Kind::Make {
+                make: Make::Tuple,
+                items,
+            } if items.is_empty() => NodeKind::Unit,
+            Kind::Operator {
+                lib, invoke, args, ..
+            } if invoke.is_none_or(|invoke| invoke.operator) => self.call(lib, args)?,
+            Kind::Native { lib, args, .. } => self.call(lib, args)?,
+            _ => return None,
+        };
+        Some(Node {
+            reg: expr.reg,
+            kind,
+        })
+    }
+
+    /// An `if`'s test: its statement grows nothing, so a hole test need
+    /// not hold the tuple it compares with.
+    fn test(&self, expr: Expr) -> Option<Node> {
+        let node = self.node(expr)?;
+        Some(match node.kind {
+            NodeKind::Call { lib, args }
+                if (self.same)(lib)
+                    && args.len() == 2
+                    && matches!(args[1].kind, NodeKind::Unit) =>
+            {
+                Node {
+                    reg: node.reg,
+                    kind: NodeKind::IsUnit { lib, args },
+                }
+            }
+            kind => Node {
+                reg: node.reg,
+                kind,
+            },
+        })
+    }
+
+    fn call(&self, lib: LibId, args: Box<[Expr]>) -> Option<NodeKind> {
+        let args = args
+            .into_vec()
+            .into_iter()
+            .map(|arg| self.node(arg))
+            .collect::<Option<Box<[Node]>>>()?;
+        Some(NodeKind::Call { lib, args })
+    }
+}
+
+/// A library call's arguments, from the action's first register.
+fn shifted(args: Box<[Node]>) -> Option<Box<[Node]>> {
+    Some(
+        args.into_vec()
+            .into_iter()
+            .map(|node| {
+                Some(Node {
+                    reg: node.reg.checked_sub(1)?,
+                    kind: node.kind,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?
+            .into(),
+    )
+}

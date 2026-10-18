@@ -75,9 +75,26 @@ pub(crate) struct PreparedPlan {
     pub(crate) closures: Vec<CodeId>,
     /// A segment's sites where its body's frame stands at them (FIG-6709).
     pub(crate) segment: Option<segments::Segment>,
+    /// The loops of its body it runs as regions over their cursors, by
+    /// the variable that holds what each walks (FIG-6780).
+    pub(crate) regions: Vec<plan_regions::PlanRegion>,
 }
 
 impl PreparedPlan {
+    /// The region of the loop that walks what plan variable `walked`
+    /// holds, by its index.
+    #[inline]
+    pub(crate) fn region(&self, walked: u32) -> Option<u32> {
+        self.regions
+            .iter()
+            .position(|region| region.walked == walked)
+            .map(|at| at as u32)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a plan resolves against its body, its library and its layout"
+    )]
     pub(super) fn new(
         plan: &'static doc::plan::HelperPlan,
         definition: &doc::FunctionDefinition,
@@ -86,6 +103,7 @@ impl PreparedPlan {
         body: CodeId,
         tables: Option<(&Tables, &Base)>,
         sites: &mut u32,
+        same: &dyn Fn(LibId) -> bool,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
         let arity = definition.signature.params.len();
@@ -121,7 +139,7 @@ impl PreparedPlan {
             .iter()
             .map(|name| {
                 *sites += 1;
-                Field::new(name, *sites - 1, layout)
+                Field::new(name, *sites - 1, layout.shape())
             })
             .collect();
         let Some((tables, base)) = tables else {
@@ -136,6 +154,7 @@ impl PreparedPlan {
                 shared: None,
                 closures: Vec::new(),
                 segment: None,
+                regions: Vec::new(),
             });
         };
         let code = &tables.codes[(body.0 - base.codes) as usize];
@@ -176,6 +195,12 @@ impl PreparedPlan {
         let segment = (!plan.sites.is_empty())
             .then(|| segments::Segment::resolve(plan, &locals, body, tables, base))
             .transpose()?;
+        let regions = match &segment {
+            Some(segment) if layout.regions() => {
+                plan_regions::form(plan, &locals, segment, tables, base, same)
+            }
+            _ => Vec::new(),
+        };
         Ok(Self {
             arity,
             operation,
@@ -195,6 +220,7 @@ impl PreparedPlan {
             locals,
             closures,
             segment,
+            regions,
         })
     }
 }
