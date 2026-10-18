@@ -13,21 +13,19 @@
 
 use std::rc::Rc;
 
-use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::{KernelDataLimits, TaskId, Value};
 use lash_kernel_exec::{ActIx, RegRange, Weight};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::PhaseRecord;
 
 use super::super::ops::Flow;
+use super::super::project::closure_code;
 use super::super::session::Session;
 use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
-use super::{
-    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, closure_island,
-    held,
-};
+use super::{Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, held};
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
 };
@@ -114,11 +112,14 @@ impl KernelMachine {
         if running.exe.island_of(code).is_none() {
             return Ok(None);
         }
+        // The callee runs charged or paced as its code is, not as the
+        // caller's: a helper's body is uncharged, its callbacks are not.
+        let callee = running.exe.code(code);
         let ran = self.island(
             host.observes_sites(),
             running.task,
             running.exe,
-            self.charging || self.paced,
+            callee.charging || callee.paced,
             Target::Code(code, cells),
             (out, count),
             None,
@@ -204,9 +205,7 @@ impl KernelMachine {
         // before any guard is paid for.
         let plan = match target {
             Target::Declared(code) | Target::Code(code, _) => exe.island_of(code),
-            Target::Closure(handle) => {
-                closure_island(&self.arena.borrow(), exe, handle).map(|(plan, _)| plan)
-            }
+            Target::Closure(handle) => self.closure_plan(exe, handle),
         };
         if plan.is_none_or(|plan| {
             given > exe.islands.plans[plan as usize].params.len()
@@ -344,6 +343,31 @@ impl KernelMachine {
         self.convert(host, &running, caller, levels)
     }
 
+    /// The island plan of the closure `handle`'s code. A closure no call
+    /// has found its code for yet finds it by its site, as the reference's
+    /// call does ([`Self::target`]), and keeps it for its next calls: a
+    /// closure's first call enters its island too.
+    fn closure_plan(&self, exe: &Executable, handle: ArenaHandle) -> Option<u32> {
+        let mut arena = self.arena.borrow_mut();
+        let found = match arena.closure(handle).ok()? {
+            (_, _, Some(code)) if code.executable == exe.local() => {
+                return exe.island_of(CodeId(code.code));
+            }
+            (site, ..) => closure_code(exe, site).ok()?,
+        };
+        let executable = exe.local();
+        arena
+            .found_closure_code(
+                handle,
+                LocalCode {
+                    executable,
+                    code: found.0,
+                },
+            )
+            .ok()?;
+        exe.island_of(found)
+    }
+
     /// Converts the virtual frames an island left, `levels` innermost
     /// first, into the machine frames the reference holds there, the
     /// caller standing at its call in `running` as `caller` says; then
@@ -368,7 +392,12 @@ impl KernelMachine {
             top = self.convert_level(task, exe, level)?;
         }
         match top {
-            Some(top) => Ok(self.run_on(host, task, exe, top)?),
+            Some(top) => {
+                // The top frame's statement runs on charged as its code
+                // is, not as the caller's: a helper's body is uncharged.
+                self.refresh_charging(task)?;
+                Ok(self.run_on(host, task, exe, top)?)
+            }
             None => Ok(()),
         }
     }

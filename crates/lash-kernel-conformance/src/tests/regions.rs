@@ -864,49 +864,21 @@ fn formed_alike(on: &PreparedLibrary, off: &PreparedLibrary, case: &Case) -> (us
     formed_on
 }
 
-/// Which plans of a program its natural run leaves to the reference.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Idle {
-    Loops,
-    Islands,
-}
-
-/// Formed plans that their program's natural run leaves to the reference,
-/// by program: [`ran`] requires every other formed plan to run. The dialect
-/// decline witnesses raise or decline at their loop body's first statement
-/// in every iteration, so no iteration ends in a region. The rest are gaps
-/// that FIG-6785 owns: plans that form and never run.
-const LEFT_TO_THE_REFERENCE: &[(&str, Idle)] = &[
-    // Decline witnesses.
-    ("python region: kind decline", Idle::Loops),
-    ("python region: append to a map", Idle::Loops),
-    ("python region: get on a list", Idle::Loops),
-    ("python region: long text keys", Idle::Loops),
-    ("typescript region: branded record", Idle::Loops),
-    ("typescript region: inherited name", Idle::Loops),
-    // FIG-6785: kernel callbacks a helper's body applies.
-    (
-        "callbacks a helper's body applies by root call actions, one raising mid-call",
-        Idle::Islands,
-    ),
-    (
-        "callbacks reading their arguments' lengths and items, past an end and through a cold arm",
-        Idle::Islands,
-    ),
-    // FIG-6785: the TypeScript region programs' islands.
-    ("typescript region: store in a list", Idle::Islands),
-    ("typescript region: dict record", Idle::Islands),
-    ("typescript region: branded record", Idle::Islands),
-    ("typescript region: text of other kinds", Idle::Islands),
-    ("typescript region: push and text", Idle::Islands),
-    ("typescript region: conditional arms", Idle::Islands),
-    ("typescript region: inherited name", Idle::Islands),
-    // FIG-6785: a `for...of` over an array, whose `ts.for_of.item` hook's
-    // generated template declines a list's items.
-    (
-        "typescript islands: texts echoed by root call actions in a loop",
-        Idle::Loops,
-    ),
+/// Programs whose loop regions their natural run leaves to the reference:
+/// [`ran`] requires every other formed plan to run. The dialect decline
+/// witnesses raise or decline at their loop body's first statement in
+/// every iteration, so no iteration ends in a region.
+const LEFT_TO_THE_REFERENCE: &[&str] = &[
+    "python region: kind decline",
+    "python region: append to a map",
+    "python region: get on a list",
+    "python region: long text keys",
+    "typescript region: branded record",
+    "typescript region: inherited name",
+    // Not by design: a `for...of` over an array, whose `ts.for_of.item`
+    // hook has no generated list path, since its hole test `same(raw, ())`
+    // builds a tuple before a guard that may decline.
+    "typescript islands: texts echoed by root call actions in a loop",
 ];
 
 /// Adds a failure where `plans`, the loop regions and call islands
@@ -915,14 +887,13 @@ const LEFT_TO_THE_REFERENCE: &[(&str, Idle)] = &[
 /// comparison to the reference against itself. Plans the program leaves
 /// to the reference by [`LEFT_TO_THE_REFERENCE`] are not required.
 fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<String>) {
-    let idle = |kind| LEFT_TO_THE_REFERENCE.contains(&(name, kind));
-    if plans.0 > 0 && work.iterations == 0 && !idle(Idle::Loops) {
+    if plans.0 > 0 && work.iterations == 0 && !LEFT_TO_THE_REFERENCE.contains(&name) {
         failures.push(format!(
             "{name}: {} loop regions form, and its natural run ended no iteration in one",
             plans.0
         ));
     }
-    if plans.1 > 0 && work.calls == 0 && !idle(Idle::Islands) {
+    if plans.1 > 0 && work.calls == 0 {
         failures.push(format!(
             "{name}: {} call islands form, and its natural run entered none",
             plans.1

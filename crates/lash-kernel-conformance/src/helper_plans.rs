@@ -1102,6 +1102,10 @@ fn memory_off_15_helper_plans_keep_the_corpus_without_memory_scopes() {
 /// invokes, and FIG-6758's heap paths: integer text, list appends, plain
 /// record and map reads and writes, expression variables, conditional
 /// arms and a comprehension's stored invoke, with each kind they decline.
+/// Each TypeScript program also calls its function through its value: a
+/// direct call runs the function's positional body, so only that call
+/// runs the call island the value's packed entry forms (FIG-6785). The
+/// branded record's direct call raises, so its value call comes first.
 pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
     let python = [
         (
@@ -1170,31 +1174,31 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
     let typescript = [
         (
             "dict record",
-            "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key_\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\n",
+            "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key_\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
         ),
         (
             "push and text",
-            "function build(n) {\n  const rows = [];\n  for (let i = 0; i < n; i++) {\n    rows.push(\"row-\" + String(i));\n  }\n  return rows.join(\",\");\n}\nconst result = build(6);\n",
+            "function build(n) {\n  const rows = [];\n  for (let i = 0; i < n; i++) {\n    rows.push(\"row-\" + String(i));\n  }\n  return rows.join(\",\");\n}\nconst result = build(6);\nconst call = build;\ncall(2);\n",
         ),
         (
             "conditional arms",
-            "function build(n) {\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const step = i % 3 === 0 ? i : -i;\n    total = total + step;\n  }\n  return total;\n}\nconst result = build(7);\n",
+            "function build(n) {\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    const step = i % 3 === 0 ? i : -i;\n    total = total + step;\n  }\n  return total;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
         ),
         (
             "text of other kinds",
-            "function build(values) {\n  const parts = [];\n  for (let i = 0; i < values.length; i++) {\n    parts.push(String(values[i]));\n  }\n  return parts;\n}\nconst result = build([1, 2.5, true, null, \"x\", 1e21, -0, NaN, 123456789012345]);\n",
+            "function build(values) {\n  const parts = [];\n  for (let i = 0; i < values.length; i++) {\n    parts.push(String(values[i]));\n  }\n  return parts;\n}\nconst result = build([1, 2.5, true, null, \"x\", 1e21, -0, NaN, 123456789012345]);\nconst call = build;\ncall([1]);\n",
         ),
         (
             "branded record",
-            "function build(n) {\n  const row = new Map();\n  for (let i = 0; i < n; i++) {\n    row[\"total\"] = (row[\"total\"] || 0) + i;\n  }\n  return row[\"total\"];\n}\nconst result = build(5);\n",
+            "function build(n) {\n  const row = new Map();\n  for (let i = 0; i < n; i++) {\n    row[\"total\"] = (row[\"total\"] || 0) + i;\n  }\n  return row[\"total\"];\n}\nconst call = build;\ncall(0);\nconst result = build(5);\n",
         ),
         (
             "inherited name",
-            "function build(n) {\n  const counts = {};\n  let found = 0;\n  for (let i = 0; i < n; i++) {\n    if (counts[\"toString\"]) { found = found + 1; }\n    counts[\"k\" + String(i % 2)] = i;\n  }\n  return found;\n}\nconst result = build(4);\n",
+            "function build(n) {\n  const counts = {};\n  let found = 0;\n  for (let i = 0; i < n; i++) {\n    if (counts[\"toString\"]) { found = found + 1; }\n    counts[\"k\" + String(i % 2)] = i;\n  }\n  return found;\n}\nconst result = build(4);\nconst call = build;\ncall(2);\n",
         ),
         (
             "store in a list",
-            "function build(n) {\n  const rows = [[0], [1], [2]];\n  for (let i = 0; i < n; i++) {\n    rows[i % 3] = [i];\n  }\n  return rows;\n}\nconst result = build(9);\n",
+            "function build(n) {\n  const rows = [[0], [1], [2]];\n  for (let i = 0; i < n; i++) {\n    rows[i % 3] = [i];\n  }\n  return rows;\n}\nconst result = build(9);\nconst call = build;\ncall(2);\n",
         ),
     ];
     let mut programs = Vec::new();

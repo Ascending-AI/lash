@@ -768,15 +768,19 @@ fn sizes(args: &[Value], result: &Value) -> u8 {
 }
 
 /// The island of the closure `handle`'s code, with its captured cells:
-/// only a closure this executable made, whose code the arena names.
+/// the code a call found for it in this executable, else the code its
+/// site names here, as the reference's call finds it.
 fn closure_island<'a>(
     arena: &'a Arena,
     exe: &Executable,
     handle: ArenaHandle,
 ) -> Option<(u32, &'a [ArenaHandle])> {
-    let (_, cells, code) = arena.closure(handle).ok()?;
-    let code = code.filter(|code| code.executable == exe.local())?;
-    Some((exe.island_of(CodeId(code.code))?, cells))
+    let (site, cells, code) = arena.closure(handle).ok()?;
+    let code = match code {
+        Some(code) if code.executable == exe.local() => CodeId(code.code),
+        _ => super::project::closure_code(exe, site).ok()?,
+    };
+    Some((exe.island_of(code)?, cells))
 }
 
 /// Records the events of charge region `region` of `stream`, as
