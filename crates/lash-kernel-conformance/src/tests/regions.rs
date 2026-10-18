@@ -231,6 +231,51 @@ const ALLOCATING: &[(&str, &str)] = &[
     ),
 ];
 
+/// Top-level programs (`docs/design/kernel-regions.md` §6): their
+/// variables are session bindings, which a region holds as slots between
+/// boundaries. Each names what it reaches, and whether it parks on a
+/// `sleep` the run delivers. The first two run on every shard: the cold
+/// sum shape's binding grows past its holding, and the park stands
+/// between two regions over the same bindings, so each shard catches a
+/// region that skips a session admission, publishes nothing, or holds its
+/// writes past a boundary.
+const SESSIONS: &[(&str, &str, bool)] = &[
+    (
+        "the cold sum shape at top level",
+        "main { let total = 0 let i = 0 while num.lt(i, 40) { set total = num.add(total, i) set i = num.add(i, 1) } finish total }",
+        false,
+    ),
+    (
+        "a park between two top-level loops",
+        "main { let i = 0 let s = 0 while num.lt(i, 10) { set s = num.add(s, i) set i = num.add(i, 1) } do sleep 0 while num.lt(i, 20) { set s = num.sub(s, i) set i = num.add(i, 1) } finish (s, i) }",
+        true,
+    ),
+    (
+        "the cold branch shape at top level",
+        "main { let total = 0 let i = 0 while num.lt(i, 40) { if num.lt(num.rem_trunc(i, 2), 1) { set total = num.add(total, i) } else { set total = num.sub(total, i) } set i = num.add(i, 1) } finish total }",
+        false,
+    ),
+    (
+        "a session alias of a list, written through and rebound",
+        "main { let xs = [0, 0, 0] let ys = xs let zs = 0 let i = 0 while num.lt(i, 12) { set ys[num.rem_trunc(i, 3)] = i set zs = ys set i = num.add(i, 1) } finish (xs, zs) }",
+        false,
+    ),
+    (
+        "a session binding that shrinks and grows by turns",
+        "main { let x = 1 let i = 0 while num.lt(i, 20) { if num.lt(x, 2) { set x = 100000000 } else { set x = 1 } set i = num.add(i, 1) } finish x }",
+        false,
+    ),
+    (
+        "a top-level loop and a function's loop over the same names",
+        "fn inner(n) { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\n\
+         main { let s = 0 let i = 0 while num.lt(i, 8) { set s = num.add(s, i) set i = num.add(i, 1) } let t = call inner(i) finish (s, t) }",
+        false,
+    ),
+];
+
+/// How many [`SESSIONS`] programs every shard runs.
+const SESSION_WITNESSES: usize = 2;
+
 /// The memory bound an allocating program runs under besides the
 /// default: past a region's nursery, short of what the longest run holds.
 const TIGHT: u64 = 96 * 1024;
@@ -651,6 +696,52 @@ fn regions_on_and_off_agree(shard: usize) {
         tight.environment.bounds.memory = TIGHT;
         check(&on, &off, &tight, &mut counts, &mut failures);
     }
+    for (index, (name, text, parks)) in SESSIONS.iter().enumerate() {
+        if index >= SESSION_WITNESSES && index % SHARDS != shard {
+            continue;
+        }
+        region_programs += 1;
+        let mut case = program_case(name, text, 16);
+        if *parks {
+            case.environment.deliveries = vec![vec![crate::Delivery {
+                request: 0,
+                outcome: crate::ScriptOutcome::Elapsed,
+                dropped: false,
+            }]];
+        }
+        let (formed_on, _) = formed(&on, &case);
+        assert!(formed_on > 0, "{name}: no loop region forms");
+        assert_eq!(
+            formed(&off, &case),
+            (0, 0),
+            "{name}: regions form with regions off"
+        );
+        regions += formed_on;
+        check(&on, &off, &case, &mut counts, &mut failures);
+        if !*parks {
+            sessions_hold(&on, &off, &case, &mut counts, &mut failures);
+        }
+    }
+    for (index, (lowered, program)) in crate::helper_plans::top_level_region_programs()
+        .into_iter()
+        .enumerate()
+    {
+        if index % SHARDS != shard {
+            continue;
+        }
+        region_programs += 1;
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        let (formed_on, _) = formed(&on, &case);
+        assert!(formed_on > 0, "{}: no loop region forms", case.name);
+        assert_eq!(formed(&off, &case), (0, 0), "{}", case.name);
+        regions += formed_on;
+        check(&on, &off, &case, &mut counts, &mut failures);
+        sessions_hold(&on, &off, &case, &mut counts, &mut failures);
+    }
     counts.report(shard, "region-programs", began);
     let (mut island_programs, mut islands) = (0, 0);
     for (name, text, call_depth) in ISLANDS
@@ -741,6 +832,51 @@ fn regions_on_and_off_agree(shard: usize) {
     );
 }
 
+/// Session regions hold what the reference holds (§6): `case`'s run has
+/// the memory counter where the reference has it at every slice return
+/// and at its end, durable and ephemeral, with memory accounted and off.
+/// PLAN-INDEP leaves memory out, so this is what sees a region skip a
+/// session write's admission.
+fn sessions_hold(
+    on: &PreparedLibrary,
+    off: &PreparedLibrary,
+    case: &Case,
+    counts: &mut Counts,
+    failures: &mut Vec<String>,
+) {
+    for durability in [
+        lash_kernel_vm::Durability::Durable,
+        lash_kernel_vm::Durability::Ephemeral,
+    ] {
+        for memory_limit in [
+            lash_kernel_vm::MemoryLimit::Recount,
+            lash_kernel_vm::MemoryLimit::Off,
+        ] {
+            let mut case = case.clone();
+            case.environment.bounds.memory_limit = memory_limit;
+            let Some(program) = case_program(on, &case) else {
+                failures.push(format!("{}: not admitted", case.name));
+                return;
+            };
+            let reference = Program {
+                library: off.clone(),
+                ..program.clone()
+            };
+            for slice in [7, 50, u64::MAX] {
+                counts.runs += 1;
+                let a = finished::<ON>(&program, &case, slice, durability);
+                let b = finished::<OFF>(&reference, &case, slice, durability);
+                if a != b {
+                    failures.push(format!(
+                        "{}, {durability:?}, memory {memory_limit:?}, slice {slice}: {a:?}, {b:?}",
+                        case.name
+                    ));
+                }
+            }
+        }
+    }
+}
+
 /// What an allocating program's run under plan `L` with slice `slice`
 /// shows: its memory counter at each slice return, which no exact count
 /// has refined, and its end, its charge and its counter at its end.
@@ -748,6 +884,7 @@ fn finished<const L: u64>(
     program: &Program,
     case: &Case,
     slice: u64,
+    durability: lash_kernel_vm::Durability,
 ) -> (Vec<u64>, ExpectedEnd, Option<u64>, u64) {
     let start = lash_kernel_vm::CellStart {
         target: lash_kernel_vm::Target::Main,
@@ -757,9 +894,11 @@ fn finished<const L: u64>(
         modes: Default::default(),
         host: Vec::new(),
     };
+    let mut bounds: lash_kernel_vm::Bounds = case.environment.bounds.into();
+    bounds.durability = durability;
     let mut machine = Plan::<L>::start(
         program.clone(),
-        case.environment.bounds.into(),
+        bounds,
         start,
         Box::new(crate::pages::Source::default()),
     )
@@ -812,9 +951,10 @@ fn allocating_regions_hold_what_the_reference_holds() {
                 ..program.clone()
             };
             for slice in [7, 50, u64::MAX] {
+                let durable = lash_kernel_vm::Durability::Durable;
                 assert_eq!(
-                    finished::<ON>(&program, &case, slice),
-                    finished::<OFF>(&reference, &case, slice),
+                    finished::<ON>(&program, &case, slice, durable),
+                    finished::<OFF>(&reference, &case, slice, durable),
                     "{name}, memory {memory_limit:?}, slice {slice}"
                 );
             }

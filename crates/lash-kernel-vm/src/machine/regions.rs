@@ -16,6 +16,12 @@
 //! runs the statement's kill set: what the statement made is held by a
 //! root or garbage. When the arena's collection is due, the region exits
 //! at that boundary, where the reference's step collects.
+//!
+//! Session bindings are region slots between boundaries (§3.6): a region
+//! takes each binding its plan names at its resident value on entry, reads
+//! and writes it there, admitting a write's holding as the reference's
+//! session write does, and publishes what it wrote to the cell's session
+//! at its exit, in the order it wrote them, before any boundary.
 
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -28,7 +34,7 @@ use super::ops::Flow;
 use super::{Control, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, Executable,
-    LoopPlan, Meter, NESTING, Role, UNPRODUCTIVE, scalar, store,
+    LoopPlan, Meter, NESTING, Role, SessionSlot, UNPRODUCTIVE, scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -37,6 +43,9 @@ use crate::observe::ChargeTape;
 /// statement's end, and the nursery an allocating plan's statements build
 /// and grow in.
 const NURSERY: u64 = 1 << 16;
+
+/// The session slots a region holds without allocating.
+const SESSIONS_INLINE: usize = 8;
 
 /// How a pass through a block of an iteration went.
 enum Went {
@@ -82,6 +91,11 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// The last statement the region tried was one it runs, not one it
     /// leaves: where it stopped there, a guard missed.
     missed: bool,
+    /// Whether a session binding's holding is priced: a durable run that
+    /// accounts memory, whose session writes admit it.
+    priced: bool,
+    /// The session writes the region made.
+    writes: u64,
 }
 
 impl KernelMachine {
@@ -174,6 +188,20 @@ impl KernelMachine {
         let Some(compiled) = plan.compiled(exe) else {
             return Ok(None);
         };
+        // The session slots: each binding the plan names, at its resident
+        // value (§3.6), held inline for a plan that names few.
+        let mut inline = [SessionSlot::default(); SESSIONS_INLINE];
+        let mut spilled = Vec::new();
+        let sessions: &mut [SessionSlot] = match inline.get_mut(..plan.sessions.len()) {
+            Some(inline) => inline,
+            None => {
+                spilled.resize(plan.sessions.len(), SessionSlot::default());
+                &mut spilled
+            }
+        };
+        for (slot, name) in sessions.iter_mut().zip(&plan.sessions) {
+            slot.value = self.session.resident(&name.key);
+        }
         let tape = self
             .observer
             .as_deref()
@@ -212,6 +240,7 @@ impl KernelMachine {
                 arena: &mut arena,
                 heap: &mut self.heap,
                 sites: &mut self.sites,
+                sessions: &mut *sessions,
                 limits: self.limits,
                 memory,
                 room: NURSERY,
@@ -228,6 +257,8 @@ impl KernelMachine {
             due: false,
             chain: Vec::new(),
             missed: false,
+            priced: durable && memory,
+            writes: 0,
         };
         let (started, stepped, stopped) = run.batch(plan, compiled, walk, bound, slice_end)?;
         let Run {
@@ -235,6 +266,7 @@ impl KernelMachine {
             chain,
             cx,
             missed,
+            writes,
             ..
         } = run;
         // An entry that missed a guard before an iteration ended was
@@ -246,6 +278,26 @@ impl KernelMachine {
         }
         if let Some(fault) = cx.fault {
             return Err(Halt::from(fault));
+        }
+        // The exit publishes the session writes before any boundary, in
+        // the order the region made them, as the reference's writes left
+        // the bindings.
+        if writes != 0 {
+            let mut written: Vec<(u64, usize)> = sessions
+                .iter()
+                .enumerate()
+                .filter(|(_, slot)| slot.written != 0)
+                .map(|(at, slot)| (slot.written, at))
+                .collect();
+            written.sort_unstable();
+            for (_, at) in written {
+                let (name, value) = (&plan.sessions[at], sessions[at].value);
+                if !value.is_some_and(|value| self.session.publish(&name.key, value)) {
+                    return Err(fault(
+                        "a region wrote a session binding the cell does not hold",
+                    ));
+                }
+            }
         }
         // The exit materializes the control the reference holds there:
         // the loop's iterations started, a `for`'s cursor past the
@@ -420,6 +472,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                         let value = value(self.frame.slot_states(), &mut self.cx);
                         self.bind(value, *at, commit)?
                     }
+                    CompiledStep::Session { value, at, commit } => {
+                        let value = value(self.frame.slot_states(), &mut self.cx);
+                        self.write_session(value, *at, commit)?
+                    }
                     CompiledStep::If {
                         condition,
                         commit,
@@ -535,6 +591,51 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         Ok(true)
     }
 
+    /// Assigns `value`, the statement's, to the session slot at `at`, which
+    /// holds a resident binding: a priced binding's write admits its
+    /// holding as the reference's session write does. One that grows it
+    /// is the reference's to admit; one that shrinks it moves the census
+    /// as the reference's does.
+    #[inline(always)]
+    fn write_session(
+        &mut self,
+        value: Option<Value>,
+        at: u32,
+        commit: &Commit,
+    ) -> Result<bool, Halt> {
+        let (
+            Some(value),
+            Some(SessionSlot {
+                value: Some(old), ..
+            }),
+        ) = (value, self.cx.sessions.get(at as usize).copied())
+        else {
+            return Ok(false);
+        };
+        if !self.fits(commit) {
+            return Ok(false);
+        }
+        if self.priced {
+            let (before, after) = (self.cx.arena.cost_of(&old), self.cx.arena.cost_of(&value));
+            if after > before {
+                return Ok(false);
+            }
+            if after < before {
+                self.cx
+                    .heap
+                    .hold_session_binding(before, after)
+                    .map_err(super::write_halt)?;
+            }
+        }
+        self.writes += 1;
+        self.cx.sessions[at as usize] = SessionSlot {
+            value: Some(value),
+            written: self.writes,
+        };
+        self.commit(commit)?;
+        Ok(true)
+    }
+
     /// Declares the slot at `at` with `value`, the statement's, holding its
     /// memory as the reference's `bind` does.
     #[inline(always)]
@@ -595,6 +696,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         let commit = match step {
             CompiledStep::Write { commit, .. }
             | CompiledStep::Bind { commit, .. }
+            | CompiledStep::Session { commit, .. }
             | CompiledStep::If { commit, .. }
             | CompiledStep::Continue(commit)
             | CompiledStep::Store { commit, .. }

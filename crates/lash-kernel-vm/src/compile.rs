@@ -58,10 +58,10 @@ pub(crate) use reads::{Field, ReadSite, find as find_property};
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event, LoopPlan, Meter,
-    NESTING, Role, UNPRODUCTIVE, scalar, store,
+    NESTING, Role, SessionSlot, UNPRODUCTIVE, scalar, store,
 };
 #[cfg(test)]
-pub(crate) use regions::{Head, Step, Summary};
+pub(crate) use regions::{Head, RegionSlot, Step, Summary};
 #[cfg(test)]
 pub(crate) use regions::{Lowered, Refused};
 

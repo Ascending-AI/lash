@@ -27,8 +27,8 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::PagedHeap;
 
 use super::super::{
-    BlockId, Charge, Constant, Executable, Lib, LibId, LibRun, Plan, ReadSite, Source, Stream,
-    find_property,
+    BindingName, BlockId, Charge, Constant, Executable, Lib, LibId, LibRun, Plan, ReadSite, Source,
+    Stream, find_property,
 };
 use crate::machine::SlotState;
 use crate::machine::registers::Arguments;
@@ -78,9 +78,23 @@ impl Meter {
     }
 }
 
+/// A session binding a region holds as a slot (`docs/design/kernel-regions.md`
+/// §3.6): its resident value from the region's entry, and which of the
+/// region's writes wrote it last.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SessionSlot {
+    /// `None` where the cell holds no resident value for it: a read or a
+    /// write of it misses, and the reference loads it.
+    pub(crate) value: Option<Value>,
+    /// The region's session writes up to and including its last write of
+    /// this binding; 0 when the region has not written it.
+    pub(crate) written: u64,
+}
+
 /// What a region's statements read, build and hold with: the meter of
 /// the running statement, the executable's libraries, the arena, the
-/// heap's census and the machine's property caches.
+/// heap's census, the machine's property caches and the region's session
+/// slots.
 pub(crate) struct Cx<'a> {
     pub(crate) meter: Meter,
     pub(crate) args: Arguments,
@@ -89,6 +103,9 @@ pub(crate) struct Cx<'a> {
     pub(crate) arena: &'a mut Arena,
     pub(crate) heap: &'a mut PagedHeap,
     pub(crate) sites: &'a mut SiteCaches,
+    /// The session bindings the plan names, by [`super::LoopPlan::sessions`]
+    /// index.
+    pub(crate) sessions: &'a mut [SessionSlot],
     pub(crate) limits: KernelDataLimits,
     /// Whether memory is accounted (`MemoryLimit` not off).
     pub(crate) memory: bool,
@@ -413,6 +430,12 @@ pub(crate) enum CompiledStep {
         at: u32,
         commit: Commit,
     },
+    /// `set` of the session binding at this index of the plan's.
+    Session {
+        value: Node,
+        at: u32,
+        commit: Commit,
+    },
     If {
         condition: Node,
         commit: Commit,
@@ -465,6 +488,19 @@ pub(super) struct Libs<'e> {
     pub(super) exe: &'e Executable,
     /// Whether the plan allocates: its nodes hold any value.
     pub(super) general: bool,
+    /// The plan's session bindings.
+    pub(super) sessions: &'e [BindingName],
+}
+
+impl Libs<'_> {
+    /// The read of the session binding `name`, a slot of the plan's.
+    fn session(&self, name: &BindingName) -> Option<Node> {
+        let at = self
+            .sessions
+            .iter()
+            .position(|held| held.name == name.name)?;
+        Some(Box::new(move |_, cx| cx.sessions.get(at)?.value))
+    }
 }
 
 /// What the region statement in `range` computes: its last op, and the
@@ -480,7 +516,9 @@ impl Compiled {
     pub(super) fn root(mut self) -> Option<Node> {
         let at = match self.last {
             Op::Test { cond } | Op::Branch { cond, .. } => cond.ix(),
-            Op::WriteLocal { src, .. } | Op::Bind { src, .. } => src.ix(),
+            Op::WriteLocal { src, .. } | Op::WriteSession { src, .. } | Op::Bind { src, .. } => {
+                src.ix()
+            }
             _ => return None,
         };
         self.take(at)
@@ -547,6 +585,7 @@ pub(super) fn compile(stream: &Stream, libs: &Libs<'_>, range: OpRange) -> Optio
                 });
                 (dst.ix(), node)
             }
+            Op::Session { dst, name } => (dst.ix(), libs.session(stream.names.get(name.ix())?)?),
             Op::Const { dst, c } => match stream.consts.get(c.ix())? {
                 Constant::Resident(value) => {
                     let value = *value;
@@ -619,6 +658,7 @@ pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) ->
                         _ => None,
                     }))
                 }
+                super::super::Atom::Var(super::super::Var::Session(name)) => libs.session(name),
                 super::super::Atom::Literal(Constant::Resident(value)) => {
                     let value = *value;
                     Some(Box::new(move |_, _| Some(value)))

@@ -6,7 +6,7 @@
 
 use super::embedder::Embedder;
 use crate::compile::islands::{self, Expr, Kind};
-use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, Step};
+use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
 use crate::costs::Costs;
 
 const LOOP: &str = "fn count(n) { let i = 0 let s = 0 \
@@ -93,7 +93,10 @@ fn lowering_admits_a_loop_plan_only_as_its_stream_states_it() {
         );
         assert_eq!(
             refused(&|plan| edit(plan, 1, &|summary| summary.write =
-                summary.write.map(|at| at + 1))),
+                summary.write.map(|slot| match slot {
+                    RegionSlot::Frame(at) => RegionSlot::Frame(at + 1),
+                    RegionSlot::Session(at) => RegionSlot::Session(at + 1),
+                }))),
             Err(Refused::Slots { statement: 1 })
         );
         assert_eq!(
@@ -180,6 +183,36 @@ fn lowering_admits_a_loop_body_tree_only_as_its_blocks_state_it() {
         assert_eq!(
             refused(&|plan| plan.binds = false),
             Err(Refused::Shape { statement: 0 })
+        );
+    });
+}
+
+const SESSIONS: &str = "main { let s = 0 let i = 0 \
+                        while num.lt(i, 5) { set s = num.add(s, i) set i = num.add(i, 1) } finish s }";
+
+#[test]
+fn lowering_admits_a_session_plan_only_as_its_ops_name_the_bindings() {
+    checked(SESSIONS, |plan, verify| {
+        let refused = |change: &dyn Fn(&mut LoopPlan)| verify(&misstated(plan, change));
+        // The test reads `i` first, so it is the plan's first binding.
+        let named: Vec<_> = plan.sessions.iter().map(|name| name.as_str()).collect();
+        assert_eq!(named, ["i", "s"]);
+        assert_eq!(
+            refused(&|plan| plan.sessions.reverse()),
+            Err(Refused::Slots { statement: 0 })
+        );
+        assert_eq!(
+            refused(&|plan| plan.sessions = plan.sessions[..1].into()),
+            Err(Refused::Slots { statement: 0 })
+        );
+        // The body's first write stated as another binding's.
+        assert_eq!(
+            refused(&|plan| {
+                if let Step::Write(summary) = &mut plan.body.steps[0] {
+                    summary.write = Some(RegionSlot::Session(0));
+                }
+            }),
+            Err(Refused::Slots { statement: 1 })
         );
     });
 }

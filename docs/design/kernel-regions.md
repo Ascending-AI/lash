@@ -33,6 +33,8 @@ of region are built from one unit.
 - **Region statement.** A statement that contains only region ops:
   - reads of unshared frame slots, resident constants and writes to unshared
     slots;
+  - reads and writes of session bindings, which are region slots between
+    boundaries (§3.6);
   - prepared operators (`Op::Operator`, or `Op::Nested` with `operator` set),
     that is, natives that state a prepared entry and a scalar charge table;
   - helper templates (§2.3);
@@ -49,8 +51,9 @@ of region are built from one unit.
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host
 observations `Clock`, `Random`, `HostRead` and `Print`; `Finish` and `Fail`;
 `try`, `catch` and `finally` (handler entry); a `for` loop's protocol hooks,
-which are callbacks; closure creation; session reads and writes; and, in v1,
-allocation and heap writes. Allocation becomes a region op in a later lane
+which are callbacks; closure creation; and, in v1, allocation and heap
+writes. Session reads and writes were barriers in v1; they are region ops
+since R6 (§3.6). Allocation becomes a region op in a later lane
 (§5, R5), with admission before growth (§3.5). An op that may raise is not a
 barrier. A raise is a guard miss: the region exits and the reference raises
 the error with the exact charge prefix.
@@ -67,7 +70,15 @@ holds:
 - for a loop, `iteration_max`: the test's plus every body statement's fixed
   units plus their formula maxima, with checked arithmetic;
 - the call sites with their occurrence indexes, and the slots each statement
-  reads and writes.
+  reads and writes: frame positions, and session bindings by their index in
+  the plan's own table of the bindings its statements use (§3.6).
+
+A block's statements after its first barrier are left to the reference
+unread. The region stops at the barrier, so it never reaches them, and
+they neither make the plan allocate nor name its session bindings. Without
+this rule, an allocating statement past a barrier would put every entry of
+a loop whose region always stops at that barrier on the allocating path
+for nothing (cold `dict_record.ts`, FIG-6755).
 
 A verifier checks each summary against the stream's `RegionTable` events and
 the statement units before the plan is admitted, as `RegionSummary::verify`
@@ -260,8 +271,19 @@ charge and exit mutants on its own.
   allocating program also runs with memory off and under a 96 KiB memory
   bound. Each runs
   as written and wrapped in a function, as `scripts/perf/kernel/embedded.py`
-  wraps its bodies. At top level, variables are session bindings and no
-  region forms, which is why the prototype's first check saw nothing.
+  wraps its bodies. At top level, variables are session bindings, which
+  regions hold as slots (§3.6). The prototype formed no region at top
+  level, which is why its first check saw nothing.
+- **Top-level sessions (R6).** The cold `sum1m` and `branch1m` shapes as
+  kernel programs and lowered from both dialects, a session alias of a list
+  written through and rebound, a binding that shrinks and grows by turns, a
+  top-level loop beside a function's loop over the same names, and a park
+  between two top-level loops. The sum shape and the park run on every
+  shard. Each program that does not park also runs to its end unsliced and
+  under slices 7 and 50, durable and ephemeral, with memory accounted and
+  off, and its memory counter must equal the reference's at every slice
+  return and at its end: PLAN-INDEP leaves memory out, and this is what
+  sees a session write's admission.
 - **The two plans.** Regions on, and regions off through the layout bit, with
   everything else equal.
 - **Equal across the plans:**
@@ -289,7 +311,12 @@ charge and exit mutants on its own.
   - a skipped `started` increment;
   - an exit that materializes `next` off by one (at an op, at a step end);
   - a converted frame's roles dropped;
-  - the island depth guard off by one.
+  - the island depth guard off by one;
+  - a session write not admitted (the growth exit and the shrink's census
+    move skipped);
+  - a region spanning a park (its writes published without their write
+    marks, so the park's projection does not see them);
+  - a stale session read after a region exit (the exit publishes nothing).
 
 The prototype checker (`LASH_PROTO_CHECK` in the patch's
 `kernel_perf/embedded.rs`) checked a subset of this law. It used 9 wrapped
@@ -368,6 +395,70 @@ on (`.kiln/FIG-6741/check/`).
   each allocating program unsliced and under two slices, with memory
   accounted and off, and requires the memory counter to equal the
   reference's at every slice return and at the end.
+
+### 3.6 Session bindings (R6)
+
+Top-level cell code reads and writes session bindings, not frame slots
+(`K-SES-001`). Since FIG-6748 a binding the cell read or wrote is resident:
+the session overlay holds its arena value, a write keeps the arena value
+and admits only the binding's holding, and its page form, ids and dirty
+marks come only at a boundary's projection. Between boundaries a binding is
+therefore a plain resident value, as a frame local is, and a region holds
+it as a slot.
+
+- **Formation.** `Op::Session` and `Op::WriteSession` are region ops, and a
+  Python statement-root invoke may take session atoms and write a session
+  binding. A plan names the bindings its statements use, in the order they
+  first use them (`LoopPlan::sessions`), and each summary states its reads
+  and its write as frame positions or indexes into that table. The verifier
+  checks both against the ops, as it checks frame slots.
+- **Entry.** The region takes each binding the plan names at its resident
+  value in the overlay. A binding the cell holds no resident value for (not
+  yet read in this cell, or a binding shared through a cell) is a missing
+  slot: a read or a write of it misses, the reference loads it, and the next
+  entry finds it resident.
+- **Aliasing.** A slot holds the binding's arena value, never a copy. A
+  list read through a session binding is the object a frame slot or another
+  binding holds, and a member write through either reaches that one object
+  with its dirty mark, as the reference's does. While the region runs,
+  nothing else reads or writes the bindings: it runs inside one step, and
+  calls only natives and prepared operators, which reach no session, and no
+  guest code (closures and islands are barriers to loop regions). So a
+  binding's slot is the binding for the region's duration.
+- **Admission and memory.** A durable run that accounts memory moves the
+  census from a binding's old holding to its new one at each write
+  (`hold_session_binding`), admitting growth first. In a region, a write
+  that would grow the holding misses and exits before its statement, and
+  the reference admits it, as a frame slot's growth exits (§3.5). A write
+  that shrinks the holding moves the census exactly as the reference's
+  write does: `hold_session_binding(before, after)` with no growth, which
+  takes no credit and cannot refuse. An equal write moves nothing. The
+  reference's statement hold of the written value's cost is released at
+  the statement's end and nets to zero, as scalar pins do (§3.4). An
+  ephemeral run, or one with memory off (FIG-6731), holds no binding, and
+  the region admits nothing.
+- **Charge.** A session read is an op inside its statement's charge region,
+  and a write ends its statement, whose unit is the statement's fixed unit.
+  A session atom of an invoke charges its atom unit, as a local's does. So
+  session reads and writes are fixed events of the region's static program,
+  checked against the stream's `RegionTable` events like any other, and the
+  tape records them unchanged. With charge off (FIG-6732), no region runs
+  and nothing is recorded.
+- **Exit.** Every exit publishes, before the step returns, each binding the
+  region wrote: its last value, with a write mark that orders it among the
+  bindings written since the last projection point, in the order of the
+  region's last writes, after every binding written before the region. The
+  reference orders bindings by their last writes too, so the next
+  projection gives the same ids in the same order. A binding the region only
+  read publishes nothing. The loop's control materializes as §3.1 states.
+- **No region spans a boundary.** Projection points (a park, a slice
+  return, the end, an explicit checkpoint) occur only between steps. A
+  region lies inside one step: effects and waits are barriers, and the
+  headroom guard keeps the slice threshold out (§3.4). Its publication
+  happens at its exit, so every projection sees each binding at the value
+  the reference would hold, and page forms, ids and dirty marks are given
+  only there. A region whose slots outlived a boundary would leave that
+  boundary's projection without its writes.
 
 ## 4. Prototype numbers
 
@@ -502,11 +593,17 @@ concurrency, durability and coordinates).
   shows a fast path it subsumes. The reference interpreter stays: it is the
   oracle and the fallback every region exits to.
 
+**R6. Top-level session regions** (opus).
+
+- **Do:** session reads and writes as region ops in loop regions, with the
+  rules of §3.6; the top-level programs and the session mutants of the
+  regions law (§3.3).
+- **Deletes:** nothing; the formation rule can exclude sessions again.
+
 ## 6. Open questions
 
-- **Sessions.** Should session reads, which are resident overlay reads, be
-  region ops? The rows wrap their bodies in functions, so v1 leaves sessions
-  as barriers. Code that agents write at cell top level would need them.
+- **Sessions.** Resolved (FIG-6755): session reads and writes are region
+  ops, and bindings are region slots between boundaries (§3.6).
 - **Site observation.** Can a host that observes sites take committed counts
   (§3.2) in place of per-occurrence `enter_site`?
 - **Quiet-host wall time.** It is unmeasured.

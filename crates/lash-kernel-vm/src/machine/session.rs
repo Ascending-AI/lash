@@ -251,6 +251,27 @@ impl Session {
         self.bindings.values().for_each(|bound| visit(&bound.value));
     }
 
+    /// The resident value of the binding under `key`: what a region holds
+    /// as its session slot from its entry (`docs/design/kernel-regions.md`
+    /// §3.6).
+    pub(super) fn resident(&self, key: &Arc<[u8]>) -> Option<Value> {
+        self.bindings.get(key).map(|bound| bound.value)
+    }
+
+    /// A region's write of the resident binding under `key`, published at
+    /// its exit: the binding holds `value`, written now, as the slot write
+    /// that wrote it would have left it. Its holding was admitted when the
+    /// region wrote it.
+    pub(super) fn publish(&mut self, key: &Arc<[u8]>, value: Value) -> bool {
+        let Some(bound) = self.bindings.get_mut(key) else {
+            return false;
+        };
+        bound.value = value;
+        bound.written = Some(self.writes);
+        self.writes += 1;
+        true
+    }
+
     /// The bindings written since the last projection point, in the order
     /// their values were bound: the order write-time ids took, so where a
     /// projection point falls moves no id among them.

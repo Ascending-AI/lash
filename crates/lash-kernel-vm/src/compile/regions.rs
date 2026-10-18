@@ -16,8 +16,9 @@
 //! layout bit turns formation off ([`super::Layout::regions`]), which is
 //! how the regions law compares the two plans.
 //!
-//! Region ops: reads of unshared slots, resident constants, prepared
-//! operators (`Op::Operator`, or `Op::Nested` of an operator), writes and
+//! Region ops: reads of unshared slots and of session bindings, resident
+//! constants, prepared operators (`Op::Operator`, or `Op::Nested` of an
+//! operator), writes of unshared slots and of session bindings,
 //! declarations of unshared slots, an `if`'s branch and `continue`; and,
 //! in an allocating plan (R5), constructions of tuples, lists, sets, maps
 //! and records, general calls of natives, field and index reads, member
@@ -27,6 +28,11 @@
 //! they are given, so each of its statements is admitted on its own. A
 //! statement with any other op is a barrier: the region stops before it
 //! and the reference runs it, as it runs a `break` or a `return`.
+//!
+//! A session binding is a region slot between boundaries (§3.6): a plan
+//! names the bindings its statements read and write ([`LoopPlan::sessions`]),
+//! and a region holds their resident values from its entry and publishes
+//! what it wrote at its exit.
 
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU32;
@@ -36,13 +42,13 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 mod nodes;
 
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Meter, Place, Role, scalar,
-    store,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Meter, Place, Role,
+    SessionSlot, scalar, store,
 };
 
 use super::{
-    Block, BlockId, Code, Constant, Executable, Form, Lib, LibId, LibRun, NestedKind, Stmt, StmtId,
-    Stream,
+    BindingName, Block, BlockId, Code, Constant, Executable, Form, Lib, LibId, LibRun, NestedKind,
+    Stmt, StmtId, Stream,
 };
 use nodes::Libs;
 
@@ -69,7 +75,7 @@ pub(crate) enum Event {
 enum End {
     /// A `while`'s test.
     Test,
-    /// An assignment of an unshared slot.
+    /// An assignment of an unshared slot or of a session binding.
     Write,
     /// A declaration of an unshared slot.
     Bind,
@@ -88,7 +94,7 @@ impl End {
     /// region runs.
     fn of(op: Op) -> Option<Self> {
         Some(match op {
-            Op::WriteLocal { .. } => Self::Write,
+            Op::WriteLocal { .. } | Op::WriteSession { .. } => Self::Write,
             Op::Bind { .. } => Self::Bind,
             Op::Continue => Self::Continue,
             Op::SetField { .. } | Op::SetIndex { .. } => Self::Store,
@@ -103,13 +109,26 @@ impl End {
             (op, self),
             (Some(Op::Test { .. }), Self::Test)
                 | (Some(Op::Branch { .. }), Self::Branch)
-                | (Some(Op::WriteLocal { .. }), Self::Write)
+                | (
+                    Some(Op::WriteLocal { .. } | Op::WriteSession { .. }),
+                    Self::Write
+                )
                 | (Some(Op::Bind { .. }), Self::Bind)
                 | (Some(Op::Continue), Self::Continue)
                 | (Some(Op::SetField { .. } | Op::SetIndex { .. }), Self::Store)
                 | (Some(Op::End), Self::Discard)
         )
     }
+}
+
+/// What a region statement reads or writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RegionSlot {
+    /// The frame position of an unshared slot.
+    Frame(u32),
+    /// The session binding at this index of its plan's
+    /// [`LoopPlan::sessions`].
+    Session(u32),
 }
 
 /// A region statement on its one path: a loop's test, the `for`'s head, a
@@ -126,10 +145,10 @@ pub(crate) struct Summary {
     pub(crate) formula_max: Option<u64>,
     /// What it charges, in order.
     pub(crate) program: Box<[Event]>,
-    /// The frame positions it reads.
-    pub(crate) reads: Box<[u32]>,
-    /// The frame position it writes or declares.
-    pub(crate) write: Option<u32>,
+    /// The slots it reads.
+    pub(crate) reads: Box<[RegionSlot]>,
+    /// The slot it writes or declares: a declaration's is a frame's.
+    pub(crate) write: Option<RegionSlot>,
     /// Whether it allocates, calls a native, reads a member, writes the
     /// heap or holds a value other than a scalar: its plan allocates.
     pub(crate) general: bool,
@@ -155,7 +174,7 @@ impl Summary {
 /// A statement of a loop body's plan.
 #[derive(Clone)]
 pub(crate) enum Step {
-    /// `set` of an unshared slot.
+    /// `set` of an unshared slot or of a session binding.
     Write(Summary),
     /// `let` of an unshared slot its block declares.
     Bind(Summary),
@@ -306,6 +325,9 @@ pub(crate) struct LoopPlan {
     pub(crate) depth: Option<u32>,
     /// Its invoke sites' occurrence indexes (`K-EFF-008`), in source order.
     pub(crate) calls: Box<[usize]>,
+    /// The session bindings its statements read and write, in the order
+    /// they first use them: the region's session slots (§3.6).
+    pub(crate) sessions: Box<[BindingName]>,
     compiled: OnceLock<Option<CompiledLoop>>,
     /// The consecutive entries that missed a guard before an iteration
     /// ended, which [`UNPRODUCTIVE`] of retire the plan: a site whose
@@ -328,7 +350,8 @@ pub(crate) enum Refused {
     /// loop-test unit's sum, or not 0 for an allocating plan.
     Iteration,
     /// A summary's reads or write are not the slots its ops read and
-    /// write.
+    /// write, or the plan's session bindings are not the ones its ops
+    /// use, in order.
     Slots { statement: usize },
     /// The call sites are not the occurrences of the calls its ops make.
     Calls,
@@ -385,6 +408,8 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
     ops.iter().any(|op| match *op {
         Op::Region { .. }
         | Op::Local { .. }
+        | Op::Session { .. }
+        | Op::WriteSession { .. }
         | Op::MakeTuple { .. }
         | Op::MakeList { .. }
         | Op::MakeSet { .. }
@@ -460,6 +485,28 @@ fn scalar_site(function: &Lib, count: usize) -> bool {
             .is_some_and(|(_, fast)| fast.scalar().is_some())
 }
 
+/// What forming a plan gathers across its statements: the call depth its
+/// sites need, and its session bindings in the order they are first used.
+#[derive(Default)]
+struct Gathered {
+    depth: Option<u32>,
+    sessions: Vec<BindingName>,
+}
+
+impl Gathered {
+    /// The session slot of `name`, given one on its first use.
+    fn session(&mut self, name: &BindingName) -> RegionSlot {
+        let at = match self.sessions.iter().position(|held| held.name == name.name) {
+            Some(at) => at,
+            None => {
+                self.sessions.push(name.clone());
+                self.sessions.len() - 1
+            }
+        };
+        RegionSlot::Session(at as u32)
+    }
+}
+
 /// The libraries and the lowered code a plan is formed against.
 pub(super) struct Formation<'a> {
     pub(super) lowered: Lowered<'a>,
@@ -475,7 +522,7 @@ impl Formation<'_> {
             return None;
         }
         let statement = (self.lowered.stmt)(id);
-        let mut depth = None;
+        let mut gathered = Gathered::default();
         let (head, block) = match &statement.form {
             Form::While {
                 metered,
@@ -484,7 +531,8 @@ impl Formation<'_> {
                 ..
             } => {
                 let units = vec![Event::Fixed(Weight::Atomic(*metered))];
-                let test = self.summarize(code, *test, End::Test, *metered, units, &mut depth)?;
+                let test =
+                    self.summarize(code, *test, End::Test, *metered, units, &mut gathered)?;
                 (Head::While(test), *body)
             }
             Form::For {
@@ -504,7 +552,7 @@ impl Formation<'_> {
                 if let Some(item) = item {
                     let mut defined = vec![true, true];
                     general = !scalar_site((self.lowered.lib)(item), 2);
-                    self.site(item, 0, 2, &mut defined, &mut formula_max, &mut depth)?;
+                    self.site(item, 0, 2, &mut defined, &mut formula_max, &mut gathered)?;
                     program.push(Event::Formula);
                 }
                 let charge = Summary {
@@ -513,7 +561,7 @@ impl Formation<'_> {
                     formula_max,
                     program: lean(program),
                     reads: Box::default(),
-                    write: Some(binding.at),
+                    write: Some(RegionSlot::Frame(binding.at)),
                     general,
                     calls: Box::default(),
                     action: None,
@@ -527,7 +575,7 @@ impl Formation<'_> {
             }
             _ => return None,
         };
-        let body = self.body(code, block, &mut depth, 0)?;
+        let body = self.body(code, block, &mut gathered, 0)?;
         // A plan runs from its head into its body's first statement: one
         // that leaves at once would run nothing.
         if matches!(body.steps.first(), None | Some(Step::Leave)) {
@@ -556,8 +604,9 @@ impl Formation<'_> {
             iteration_max,
             allocates,
             binds,
-            depth,
+            depth: gathered.depth,
             calls: calls.into(),
+            sessions: gathered.sessions.into(),
             compiled: OnceLock::new(),
             unproductive: AtomicU32::new(0),
         })
@@ -568,24 +617,37 @@ impl Formation<'_> {
         &self,
         code: &Code,
         block: BlockId,
-        depth: &mut Option<u32>,
+        gathered: &mut Gathered,
         nesting: usize,
     ) -> Option<Body> {
         if nesting > NESTING {
             return None;
         }
         let lowered = (self.lowered.block)(block);
+        // The region stops at the block's first statement it leaves, so it
+        // never reaches the ones after it: they are the reference's, unread.
+        let mut left = false;
         let steps = lowered
             .stmts
             .iter()
             .map(|id| {
+                if left {
+                    return Some(Step::Leave);
+                }
                 let statement = (self.lowered.stmt)(*id);
                 // A statement-root invoke of a prepared operator runs in
                 // the region; any other action is a barrier.
                 if let Form::Action(_) = statement.form {
-                    return Some(self.action_summary(code, *id, depth).unwrap_or(Step::Leave));
+                    let used = gathered.sessions.len();
+                    let step = self.action_summary(code, *id, gathered);
+                    if step.is_none() {
+                        gathered.sessions.truncate(used);
+                        left = true;
+                    }
+                    return Some(step.unwrap_or(Step::Leave));
                 }
                 if barrier(&self.lowered, statement) {
+                    left = true;
                     return Some(Step::Leave);
                 }
                 let unit = || vec![Event::Fixed(Weight::Atomic(1))];
@@ -593,7 +655,8 @@ impl Formation<'_> {
                     Form::Plain => {
                         let last = self.stream_op(statement.ops.end().checked_sub(1)?)?;
                         let end = End::of(last)?;
-                        let summary = self.summarize(code, statement.ops, end, 1, unit(), depth)?;
+                        let summary =
+                            self.summarize(code, statement.ops, end, 1, unit(), gathered)?;
                         Some(match end {
                             End::Write => Step::Write(summary),
                             End::Bind => Step::Bind(summary),
@@ -606,9 +669,16 @@ impl Formation<'_> {
                         then_block,
                         else_block,
                     } => Some(Step::If {
-                        test: self.summarize(code, statement.ops, End::Branch, 1, unit(), depth)?,
-                        then: self.body(code, *then_block, depth, nesting + 1)?,
-                        otherwise: self.body(code, *else_block, depth, nesting + 1)?,
+                        test: self.summarize(
+                            code,
+                            statement.ops,
+                            End::Branch,
+                            1,
+                            unit(),
+                            gathered,
+                        )?,
+                        then: self.body(code, *then_block, gathered, nesting + 1)?,
+                        otherwise: self.body(code, *else_block, gathered, nesting + 1)?,
                     }),
                     _ => None,
                 }
@@ -623,36 +693,43 @@ impl Formation<'_> {
 
     /// A root invoke has atom charge events rather than expression ops.
     /// Keep its action form so a decline resumes the original continuation.
-    fn action_summary(&self, code: &Code, id: StmtId, depth: &mut Option<u32>) -> Option<Step> {
+    fn action_summary(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Step> {
         let statement = (self.lowered.stmt)(id);
         let (action, lib, args) = library_invoke(&statement.form)?;
-        let ops = self
-            .lowered
-            .stream
+        let stream = self.lowered.stream;
+        let ops = stream
             .ops
             .get(statement.ops.start as usize..statement.ops.end() as usize)?;
         let [Op::Act, end] = ops else {
             return None;
         };
-        let (local, bind) = match end {
-            Op::WriteLocal { local, .. } => (local, false),
-            Op::Bind { local, .. } => (local, true),
-            _ => return None,
-        };
-        if code.slots.get(local.slot as usize)?.shared {
-            return None;
-        }
         let mut reads = Vec::new();
         for arg in args {
             match arg {
-                super::Atom::Var(super::Var::Local(local)) if !local.shared => reads.push(local.at),
+                super::Atom::Var(super::Var::Local(local)) if !local.shared => {
+                    reads.push(RegionSlot::Frame(local.at));
+                }
+                super::Atom::Var(super::Var::Session(name)) => reads.push(gathered.session(name)),
                 super::Atom::Literal(Constant::Resident(value)) if scalar(value) => {}
                 _ => return None,
             }
         }
+        let (write, bind) = match end {
+            Op::WriteLocal { local, .. } | Op::Bind { local, .. }
+                if code.slots.get(local.slot as usize)?.shared =>
+            {
+                return None;
+            }
+            Op::WriteLocal { local, .. } => (RegionSlot::Frame(local.at), false),
+            Op::Bind { local, .. } => (RegionSlot::Frame(local.at), true),
+            Op::WriteSession { name, .. } => {
+                (gathered.session(stream.names.get(name.ix())?), false)
+            }
+            _ => return None,
+        };
         let mut defined = vec![true; args.len()];
         let mut formula_max = Some(0);
-        self.site(lib, 0, args.len(), &mut defined, &mut formula_max, depth)?;
+        self.site(lib, 0, args.len(), &mut defined, &mut formula_max, gathered)?;
         let mut program = vec![Event::Fixed(Weight::Atomic(1))];
         program.extend(args.iter().map(|_| Event::Fixed(Weight::Atomic(1))));
         program.push(Event::Formula);
@@ -667,7 +744,7 @@ impl Formation<'_> {
             formula_max,
             program: program.into(),
             reads: reads.into(),
-            write: Some(local.at),
+            write: Some(write),
             general: !scalar_site((self.lowered.lib)(lib), args.len()),
             calls,
             action: Some(id),
@@ -692,7 +769,7 @@ impl Formation<'_> {
         end: End,
         mut fixed: u64,
         mut program: Vec<Event>,
-        depth: &mut Option<u32>,
+        gathered: &mut Gathered,
     ) -> Option<Summary> {
         let stream = self.lowered.stream;
         let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
@@ -724,7 +801,13 @@ impl Formation<'_> {
                     {
                         return None;
                     }
-                    reads.push(local.at);
+                    reads.push(RegionSlot::Frame(local.at));
+                }
+                Op::Session { dst, name } => {
+                    if !define(&mut defined, dst.ix()) {
+                        return None;
+                    }
+                    reads.push(gathered.session(stream.names.get(name.ix())?));
                 }
                 Op::Const { dst, c } => match stream.consts.get(c.ix())? {
                     Constant::Resident(_) if define(&mut defined, dst.ix()) => {}
@@ -738,7 +821,7 @@ impl Formation<'_> {
                         count,
                         &mut defined,
                         &mut formula_max,
-                        depth,
+                        gathered,
                     )?;
                     program.push(Event::Formula);
                 }
@@ -749,7 +832,7 @@ impl Formation<'_> {
                         return None;
                     }
                     let (start, count) = (args.start.ix(), args.len as usize);
-                    self.site(lib, start, count, &mut defined, &mut formula_max, depth)?;
+                    self.site(lib, start, count, &mut defined, &mut formula_max, gathered)?;
                     if matches!(nested.kind, NestedKind::Call(_))
                         && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
                     {
@@ -815,7 +898,10 @@ impl Formation<'_> {
             (Op::WriteLocal { local, src }, End::Write) | (Op::Bind { local, src }, End::Bind)
                 if unshared(local.slot) && take(&mut defined, src.ix()) =>
             {
-                Some(local.at)
+                Some(RegionSlot::Frame(local.at))
+            }
+            (Op::WriteSession { name, src }, End::Write) if take(&mut defined, src.ix()) => {
+                Some(gathered.session(stream.names.get(name.ix())?))
             }
             (Op::Continue, End::Continue)
                 if reads.is_empty() && !program.contains(&Event::Formula) =>
@@ -877,7 +963,7 @@ impl Formation<'_> {
         count: usize,
         defined: &mut Vec<bool>,
         formula_max: &mut Option<u64>,
-        depth: &mut Option<u32>,
+        gathered: &mut Gathered,
     ) -> Option<()> {
         let function = (self.lowered.lib)(lib);
         if !operator_site(function, count) {
@@ -894,7 +980,7 @@ impl Formation<'_> {
             _ => None,
         };
         if function.operation() || entry.depth() > 0 {
-            *depth = Some(depth.unwrap_or(0).max(entry.depth()));
+            gathered.depth = Some(gathered.depth.unwrap_or(0).max(entry.depth()));
         }
         Some(())
     }
@@ -929,6 +1015,8 @@ struct Check<'a, 'l> {
     lowered: &'a Lowered<'l>,
     statement: usize,
     calls: Vec<usize>,
+    /// The session bindings the ops use, in the order they first use them.
+    sessions: Gathered,
 }
 
 impl Check<'_, '_> {
@@ -982,8 +1070,14 @@ impl Check<'_, '_> {
                     let (action, lib, args) = library_invoke(&(self.lowered.stmt)(id).form)
                         .ok_or(Refused::Shape { statement: index })?;
                     for arg in args {
-                        if let super::Atom::Var(super::Var::Local(local)) = arg {
-                            reads.push(local.at);
+                        match arg {
+                            super::Atom::Var(super::Var::Local(local)) => {
+                                reads.push(RegionSlot::Frame(local.at));
+                            }
+                            super::Atom::Var(super::Var::Session(name)) => {
+                                reads.push(self.sessions.session(name));
+                            }
+                            _ => {}
                         }
                         expected.push(Event::Fixed(Weight::Atomic(1)));
                     }
@@ -1008,8 +1102,24 @@ impl Check<'_, '_> {
                     }
                     expected.push(Event::Formula);
                 }
-                Op::Local { local, .. } => reads.push(local.at),
-                Op::WriteLocal { local, .. } | Op::Bind { local, .. } => write = Some(local.at),
+                Op::Local { local, .. } => reads.push(RegionSlot::Frame(local.at)),
+                Op::Session { name, .. } => {
+                    let name = stream
+                        .names
+                        .get(name.ix())
+                        .ok_or(Refused::Slots { statement: index })?;
+                    reads.push(self.sessions.session(name));
+                }
+                Op::WriteLocal { local, .. } | Op::Bind { local, .. } => {
+                    write = Some(RegionSlot::Frame(local.at));
+                }
+                Op::WriteSession { name, .. } => {
+                    let name = stream
+                        .names
+                        .get(name.ix())
+                        .ok_or(Refused::Slots { statement: index })?;
+                    write = Some(self.sessions.session(name));
+                }
                 _ => {}
             }
         }
@@ -1063,8 +1173,16 @@ impl Check<'_, '_> {
         {
             return Err(shape);
         }
+        // Past the block's first statement the region leaves, it leaves
+        // every statement.
+        let mut left = false;
         for (step, id) in body.steps.iter().zip(&lowered.stmts) {
             let statement = (self.lowered.stmt)(*id);
+            if left && !matches!(step, Step::Leave) {
+                return Err(Refused::Shape {
+                    statement: self.statement,
+                });
+            }
             // Each statement's summary covers exactly its own ops.
             let own = match step {
                 Step::Write(summary)
@@ -1099,8 +1217,11 @@ impl Check<'_, '_> {
                 (Step::Discard(summary), Form::Plain) => {
                     self.summary(summary, unit, End::Discard)?;
                 }
-                // A region leaves only a barrier to the reference.
-                (Step::Leave, _) if barrier(self.lowered, statement) => {}
+                // A region leaves to the reference only a barrier, and what
+                // follows one.
+                (Step::Leave, _) if left || barrier(self.lowered, statement) => {
+                    left = true;
+                }
                 (
                     Step::If {
                         test,
@@ -1146,6 +1267,7 @@ impl LoopPlan {
             lowered,
             statement: 0,
             calls: Vec::new(),
+            sessions: Gathered::default(),
         };
         let statement = (lowered.stmt)(self.stmt);
         let head = Refused::Shape { statement: 0 };
@@ -1182,7 +1304,7 @@ impl LoopPlan {
                 if *binding != bound.at
                     || bound.shared
                     || *item != via.and_then(|via| via.item)
-                    || charge.write != Some(bound.at)
+                    || charge.write != Some(RegionSlot::Frame(bound.at))
                     || !charge.reads.is_empty()
                 {
                     return Err(head);
@@ -1225,6 +1347,15 @@ impl LoopPlan {
         if *self.calls != *check.calls {
             return Err(Refused::Calls);
         }
+        let named = |sessions: &[BindingName]| {
+            sessions
+                .iter()
+                .map(|session| session.name.clone())
+                .collect::<Vec<_>>()
+        };
+        if named(&self.sessions) != named(&check.sessions.sessions) {
+            return Err(Refused::Slots { statement: 0 });
+        }
         Ok(())
     }
 
@@ -1241,6 +1372,7 @@ impl LoopPlan {
             binds: self.binds,
             depth: self.depth,
             calls: self.calls.clone(),
+            sessions: self.sessions.clone(),
             compiled: OnceLock::new(),
             unproductive: AtomicU32::new(0),
         }
@@ -1254,6 +1386,7 @@ impl LoopPlan {
                 let libs = Libs {
                     exe,
                     general: self.allocates,
+                    sessions: &self.sessions,
                 };
                 let head = match &self.head {
                     Head::While(test) => CompiledHead::While {
@@ -1316,14 +1449,24 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
         .iter()
         .map(|step| {
             Some(match step {
-                Step::Write(summary) => CompiledStep::Write {
-                    value: value(stream, libs, summary)?,
-                    at: summary.write?,
-                    commit: summary.into(),
+                Step::Write(summary) => match summary.write? {
+                    RegionSlot::Frame(at) => CompiledStep::Write {
+                        value: value(stream, libs, summary)?,
+                        at,
+                        commit: summary.into(),
+                    },
+                    RegionSlot::Session(at) => CompiledStep::Session {
+                        value: value(stream, libs, summary)?,
+                        at,
+                        commit: summary.into(),
+                    },
                 },
                 Step::Bind(summary) => CompiledStep::Bind {
                     value: value(stream, libs, summary)?,
-                    at: summary.write?,
+                    at: match summary.write? {
+                        RegionSlot::Frame(at) => at,
+                        RegionSlot::Session(_) => return None,
+                    },
                     commit: summary.into(),
                 },
                 Step::If {

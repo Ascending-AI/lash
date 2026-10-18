@@ -1121,9 +1121,43 @@ pub(crate) fn python_region_programs() -> Vec<(runner::Case, Program)> {
         .collect()
 }
 
+/// FIG-6755: the cold `sum1m` and `branch1m` shapes of
+/// `scripts/perf/kernel/embedded`, shortened, at a cell's top level in
+/// both dialects: their variables are session bindings, which regions
+/// hold as slots between boundaries.
+pub(crate) fn top_level_region_programs() -> Vec<(runner::Case, Program)> {
+    let sum_ts =
+        "let result = 0;\nlet i = 0;\nwhile (i < 12) { result = result + i; i = i + 1; }\n";
+    let branch_ts = "let result = 0;\nlet i = 0;\nwhile (i < 12) {\n  if (i % 2 === 0) { result = result + i; } else { result = result - i; }\n  i = i + 1;\n}\n";
+    let sum_py = "result = 0\ni = 0\nwhile i < 12:\n    result = result + i\n    i = i + 1\n";
+    let branch_py = "result = 0\ni = 0\nwhile i < 12:\n    if i % 2 == 0:\n        result = result + i\n    else:\n        result = result - i\n    i = i + 1\n";
+    [
+        ("typescript", "sum", sum_ts),
+        ("typescript", "branch", branch_ts),
+        ("python", "sum", sum_py),
+        ("python", "branch", branch_py),
+    ]
+    .into_iter()
+    .map(|(dialect, name, source)| {
+        let runner = runner::Runner::new(dialect).unwrap();
+        let case = runner::Case {
+            id: format!("top-level {dialect} region: {name}"),
+            dialect: dialect.into(),
+            source: source.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+            panic!("{} lowers", case.id)
+        };
+        (case, program)
+    })
+    .collect()
+}
+
 /// FIG-6754: lowered Python branch and modulo loops reach the generated
-/// templates and form regions over unshared frame slots. Top-level cell
-/// bindings remain session state, outside the scalar region contract.
+/// templates and form regions over unshared frame slots.
 #[test]
 fn lowered_python_modulo_branch_loops_form_regions() {
     use lash_kernel_vm::kernel_internals::loop_regions;
