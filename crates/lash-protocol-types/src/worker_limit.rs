@@ -61,6 +61,11 @@ pub enum WorkerLimit {
     Deadline {
         bound_ms: u64,
     },
+    /// The worker's resident memory passed the `memory.max` of the cgroup
+    /// its host placed it in, and the kernel killed it (FIG-6787).
+    Memory {
+        bound_bytes: u64,
+    },
     /// The execution spent its configured replacement attempts.
     Attempts {
         bound: u32,
@@ -74,9 +79,10 @@ impl WorkerLimit {
     /// against its heap budget, so every execution of the run meets them at
     /// the same point. Encoded effect values, VM state and frames likewise
     /// meet their size bounds on every execution. The CPU budget and the
-    /// compute deadline are limits lash set on the run's worker: the same
-    /// run on the same inputs meets them again, so they are the run's own
-    /// end, never a retry (FIG-6523). Only the replacement attempts are
+    /// compute deadline are limits lash set on the run's worker, and the
+    /// cgroup memory ceiling one its host set on it: the same run on the
+    /// same inputs meets them again, so they are the run's own end, never a
+    /// retry (FIG-6523, FIG-6787). Only the replacement attempts are
     /// the host's: they count infrastructure losses, which a replay, or
     /// another host with capacity, answers differently (FIG-4451).
     pub const fn is_host_verdict(self) -> bool {
@@ -101,6 +107,9 @@ impl std::fmt::Display for WorkerLimit {
             Self::Cpu { bound_ms } => write!(f, "CPU time exceeds its {bound_ms} ms budget"),
             Self::Deadline { bound_ms } => {
                 write!(f, "computation exceeds its {bound_ms} ms deadline")
+            }
+            Self::Memory { bound_bytes } => {
+                write!(f, "worker memory exceeds its {bound_bytes}-byte ceiling")
             }
             Self::Attempts { bound } => write!(f, "the execution spent its {bound} attempts"),
             other => write!(f, "{other:?}"),

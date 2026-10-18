@@ -653,7 +653,8 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
             PoolFault::Recovery
             | PoolFault::InvalidConfiguration
             | PoolFault::UnsupportedPlatform
-            | PoolFault::Io { .. } => None,
+            | PoolFault::Io { .. }
+            | PoolFault::Cgroup { .. } => None,
         },
         InfrastructureOutcome::WorkerLimitExceeded { limit } => limit
             .is_host_verdict()

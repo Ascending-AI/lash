@@ -1341,6 +1341,217 @@ main {
     assert_eq!(checkout(&pool).pid(), Some(pid), "the worker is reused");
 }
 
+/// FIG-6787: a host's pool memory budget holds `n` workers when `n` times a
+/// worker's ceiling and page budgets, plus the staging quota, fit in it. The
+/// pool starts no worker past it: a checkout that finds every running
+/// worker taken meets the pool's capacity faults, as past `max_workers`,
+/// and takes a worker once one is released. A budget that holds no worker
+/// is refused.
+#[test]
+fn the_pool_memory_budget_refuses_the_worker_that_would_exceed_it() {
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("");
+    config.max_workers = 2;
+    // A checkout that finds no worker answers at once.
+    config.max_queue_items = 0;
+    let one = config.committed_memory(1).expect("one worker's commitment");
+    let mut too_small = config.clone();
+    too_small.memory_budget_bytes = Some(one - 1);
+    assert!(matches!(
+        WorkerPool::new(too_small),
+        Err(PoolError::InvalidConfiguration)
+    ));
+    let two = config.committed_memory(2).expect("two workers' commitment");
+    config.memory_budget_bytes = Some(two - 1);
+    let pool = WorkerPool::new(config).expect("pool");
+    let first = checkout(&pool);
+    let pid = first.pid();
+    let refused = pool.checkout(
+        4 * 1024 * 1024 + FRAME_HEADER_BYTES,
+        OwnerEpoch(1),
+        FrameEpoch(1),
+        ExecutionBudget::default(),
+    );
+    assert!(
+        matches!(refused, Err(PoolError::QueueFull { .. })),
+        "{:?}",
+        refused.map(|checkout| checkout.pid())
+    );
+    assert_eq!(pool.stats().workers, 1, "no second worker started");
+    first.release().expect("reset");
+    assert_eq!(checkout(&pool).pid(), pid, "the released worker serves");
+}
+
+/// Why this host runs no cgroup law: the laws need a cgroup v2 subtree
+/// delegated to them, named by `LASH_TEST_WORKER_CGROUP`.
+#[derive(Debug)]
+enum NoCgroup {
+    /// The environment names no subtree.
+    Unnamed,
+    /// The subtree it names cannot hold a worker.
+    Refused(CgroupRefusal),
+}
+
+impl std::fmt::Display for NoCgroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unnamed => write!(f, "unnamed: LASH_TEST_WORKER_CGROUP names no subtree"),
+            Self::Refused(refusal) => write!(f, "refused: {refusal}"),
+        }
+    }
+}
+
+/// The subtree this host delegates to the laws, under `limits`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law's host names the cgroup subtree it delegates in its environment"
+)]
+fn delegated(limits: impl FnOnce(&mut WorkerCgroup)) -> Result<WorkerCgroup, NoCgroup> {
+    let subtree = std::env::var_os("LASH_TEST_WORKER_CGROUP").ok_or(NoCgroup::Unnamed)?;
+    let mut cgroup = WorkerCgroup {
+        subtree: subtree.into(),
+        memory_max_bytes: 512 << 20,
+        memory_high_bytes: None,
+        cpu: None,
+    };
+    limits(&mut cgroup);
+    cgroup.probe().map_err(NoCgroup::Refused)?;
+    eprintln!("CGROUP_LAW_RAN subtree={}", cgroup.subtree.display());
+    Ok(cgroup)
+}
+
+/// The cgroup `pid` runs in, as a directory of the cgroup v2 mount.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law reads where the kernel placed its worker"
+)]
+fn cgroup_of(pid: u32) -> std::path::PathBuf {
+    let membership =
+        std::fs::read_to_string(format!("/proc/{pid}/cgroup")).expect("the worker's cgroup");
+    let path = membership
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .expect("a cgroup v2 membership");
+    std::path::Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/'))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law reads the limits its worker's cgroup holds"
+)]
+fn cgroup_file(cgroup: &std::path::Path, file: &str) -> String {
+    std::fs::read_to_string(cgroup.join(file))
+        .expect("a cgroup interface file")
+        .trim()
+        .to_owned()
+}
+
+/// FIG-6787: a host that delegates a cgroup v2 subtree to the pool gets
+/// each worker in a cgroup of its own there, entered before the worker
+/// execs, holding the memory ceiling, the reclaim threshold and the CPU
+/// share the host configured; the pool removes it once the worker is
+/// reaped.
+#[test]
+fn a_worker_runs_in_a_cgroup_of_its_own_under_the_hosts_memory_and_cpu_limits() {
+    let cgroup = match delegated(|cgroup| {
+        cgroup.memory_high_bytes = Some(384 << 20);
+        cgroup.cpu = Some(CpuShare {
+            quota: Duration::from_millis(50),
+            period: Duration::from_millis(100),
+        });
+    }) {
+        Ok(cgroup) => cgroup,
+        Err(reason) => {
+            eprintln!("CGROUP_LAW_SKIPPED reason={reason}");
+            return;
+        }
+    };
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("");
+    let subtree = cgroup.subtree.clone();
+    config.cgroup = Some(cgroup);
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document("main { return num.add(1, 2) }");
+    let mut worker = checkout(&pool);
+    let placed = cgroup_of(worker.pid().expect("pid"));
+    assert_eq!(placed.parent(), Some(subtree.as_path()), "{placed:?}");
+    assert_eq!(
+        cgroup_file(&placed, "memory.max"),
+        (512_u64 << 20).to_string()
+    );
+    assert_eq!(
+        cgroup_file(&placed, "memory.high"),
+        (384_u64 << 20).to_string()
+    );
+    assert_eq!(cgroup_file(&placed, "cpu.max"), "50000 100000");
+    worker
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("start");
+    let End::Finished(finished) = ended(worker.run(SLICE, false).expect("run")) else {
+        panic!("the placed worker serves the run")
+    };
+    assert_eq!(finished.result, int(3));
+    worker.release().expect("reset");
+    drop(pool);
+    assert!(!placed.exists(), "the reaped worker's cgroup is removed");
+}
+
+/// FIG-6787: a worker whose resident memory passes its cgroup's
+/// `memory.max` is killed by the kernel, and its run ends with the typed
+/// memory limit it met, not a crash: the same run meets it again, so it is
+/// the run's own end, never the host's to retry. Its address-space ceiling
+/// and its logical memory bound are far above the ceiling, so only the
+/// cgroup stops it.
+#[test]
+fn a_worker_past_its_cgroup_memory_max_ends_its_run_with_the_typed_memory_limit() {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    const CEILING: u64 = 256 << 20;
+    let cgroup = match delegated(|cgroup| cgroup.memory_max_bytes = CEILING) {
+        Ok(cgroup) => cgroup,
+        Err(reason) => {
+            eprintln!("CGROUP_LAW_SKIPPED reason={reason}");
+            return;
+        }
+    };
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("");
+    config.cgroup = Some(cgroup);
+    config.confinement.address_space_bytes = 16 * GIB;
+    config.run_bounds.memory = 8 * GIB;
+    config.run_bounds.charge_limit = u64::MAX;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document(
+        r#"
+main {
+  let big = text.repeat("x", 600000000)
+  return 0
+}"#,
+    );
+    let mut worker = checkout(&pool);
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.bounds.memory = 8 * GIB;
+    start.bounds.charge_limit = u64::MAX;
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("start");
+    let Err(lost) = worker.run(SLICE, false) else {
+        panic!("the killed worker answers nothing")
+    };
+    assert_eq!(
+        lost,
+        PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+            limit: WorkerLimit::Memory {
+                bound_bytes: CEILING
+            }
+        })
+    );
+    assert!(!lost.is_host_verdict(), "the run's own end: {lost:?}");
+}
+
 /// FIG-5876: a heap-profiled worker serves under the same confinement as
 /// any other, and still writes its DHAT profile and receipt when its first
 /// clean reset ends the window: the flush acknowledges the reset instead of

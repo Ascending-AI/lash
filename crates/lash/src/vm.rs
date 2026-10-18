@@ -58,11 +58,11 @@ pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, Sour
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
-/// Host-selected worker entry, pool bounds, execution deadlines and process
-/// confinement.
+/// Host-selected worker entry, pool bounds, execution deadlines, process
+/// confinement and the cgroup placement of workers.
 pub use lash_vm_client::{
-    Deadlines as WorkerDeadlines, PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig,
-    WorkerConfinement, WorkerEntry, WorkerTuning,
+    CpuShare as WorkerCpuShare, Deadlines as WorkerDeadlines, PageBudgets as WorkerPageBudgets,
+    PoolConfig as WorkerPoolConfig, WorkerCgroup, WorkerConfinement, WorkerEntry, WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
 pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
@@ -109,15 +109,15 @@ pub use crate::kernel_migration::{
 };
 pub use lash_protocol_types::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
-    BootstrapFault, BoundReached, Charge as RunCharge, CheckpointRefusal, CodecRefusal,
-    DecodeLimits, Detail, DetailLimit, DiskSpool, EffectPhase, EffectPhases, Exchange,
-    ExecutionClass, ExecutionLease, ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal,
-    HeapFault, HostReadKind, InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal,
-    LimitDecision as RunLimitDecision, LimitedBound, MemoryMeter as RunMemoryMeter, OwnerEpoch,
-    PageRefusal, PayloadKind, PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds,
-    ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunChargeLimiter, RunInput,
-    RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault, SpoolRoot, SupervisorEvidence,
-    TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
+    BootstrapFault, BoundReached, CgroupController, CgroupRefusal, Charge as RunCharge,
+    CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit, DiskSpool, EffectPhase,
+    EffectPhases, Exchange, ExecutionClass, ExecutionLease, ExecutionReceipt, FrameEpoch,
+    FrameTraffic, HeaderRefusal, HeapFault, HostReadKind, InfrastructureOutcome, IpcTraffic,
+    KernelRestoreRefusal, LimitDecision as RunLimitDecision, LimitedBound,
+    MemoryMeter as RunMemoryMeter, OwnerEpoch, PageRefusal, PayloadKind, PoolCounters, PoolError,
+    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
+    RunChargeLimiter, RunInput, RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault, SpoolRoot,
+    SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

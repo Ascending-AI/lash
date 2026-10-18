@@ -5721,6 +5721,29 @@
         },
         {
           "additionalProperties": false,
+          "description": "The worker's resident memory passed the `memory.max` of the cgroup\nits host placed it in, and the kernel killed it (FIG-6787).",
+          "properties": {
+            "memory": {
+              "properties": {
+                "bound_bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound_bytes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "memory"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The execution spent its configured replacement attempts.",
           "properties": {
             "attempts": {

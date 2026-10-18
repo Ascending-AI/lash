@@ -609,7 +609,7 @@ pub mod runtime_ops {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             pool.as_ref().is_none_or(|pool| {
                 let stats = pool.stats();
-                stats.idle > 0 || stats.workers < self.config.max_workers
+                stats.idle > 0 || stats.workers < self.config.worker_capacity()
             })
         }
 

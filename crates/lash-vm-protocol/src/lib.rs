@@ -47,9 +47,10 @@ pub use message::{
     WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{
-    BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
-    ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
-    WorkerFrameKind, WorkerLimit, WorkerRefusal,
+    BootstrapFault, CgroupController, CgroupRefusal, Detail, DetailLimit, Exchange,
+    InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach, RunInput, RunRefusal,
+    SequenceFault, SupervisorEvidence, WorkerDeploymentFault, WorkerFrameKind, WorkerLimit,
+    WorkerRefusal,
 };
 pub use state::VmOwner;
 pub use version::{

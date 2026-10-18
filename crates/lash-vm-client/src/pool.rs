@@ -87,6 +87,8 @@ struct Pool {
     epoch: u64,
     measurements: SharedMeasurements,
     config: PoolConfig,
+    /// The most workers the pool runs at once, within its memory budget.
+    capacity: usize,
     state: Mutex<State>,
     available: Condvar,
 }
@@ -104,11 +106,15 @@ impl WorkerPool {
         phases: Option<crate::phases::Recorder>,
     ) -> Result<Self, PoolError> {
         config.validate()?;
+        if let Some(cgroup) = &config.cgroup {
+            cgroup.probe().map_err(PoolError::cgroup)?;
+        }
         static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
             phases,
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             measurements: Arc::new(Mutex::new(Measurements::default())),
+            capacity: config.worker_capacity(),
             config,
             state: Mutex::new(State {
                 #[cfg(feature = "testing")]
@@ -1358,7 +1364,7 @@ pub mod runtime_ops {
                 }
                 let worker = if let Some(worker) = state.idle.pop() {
                     Some(worker)
-                } else if state.workers < self.0.config.max_workers {
+                } else if state.workers < self.0.capacity {
                     state.workers += 1;
                     self.0
                         .unqueue(&mut state, queued, queued_bytes, queue_started);

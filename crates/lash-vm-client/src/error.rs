@@ -24,6 +24,12 @@ pub enum PoolError {
     UnsupportedPlatform,
     #[error("worker I/O failed with OS error {code:?}: {message}")]
     Io { code: Option<i32>, message: String },
+    /// The host's cgroup subtree cannot hold a worker under its limits
+    /// ([`crate::WorkerCgroup`]).
+    #[error("{refusal}")]
+    Cgroup {
+        refusal: lash_vm_protocol::CgroupRefusal,
+    },
 }
 
 impl PoolError {
@@ -63,7 +69,8 @@ impl PoolError {
             Self::QueueFull { .. }
             | Self::CheckoutTimedOut
             | Self::RestartStorm
-            | Self::RetryLimitExceeded { .. } => true,
+            | Self::RetryLimitExceeded { .. }
+            | Self::Cgroup { .. } => true,
             Self::ProtocolVersion(_)
             | Self::InvalidConfiguration
             | Self::UnsupportedPlatform
@@ -105,8 +112,12 @@ impl PoolError {
             Self::InvalidConfiguration => PoolFault::InvalidConfiguration,
             Self::UnsupportedPlatform => PoolFault::UnsupportedPlatform,
             Self::Io { code, .. } => PoolFault::Io { code },
+            Self::Cgroup { refusal } => PoolFault::Cgroup { refusal },
         };
         ProtocolBreach::Pool { fault }.into()
+    }
+    pub(crate) fn cgroup(refusal: lash_vm_protocol::CgroupRefusal) -> Self {
+        Self::Cgroup { refusal }
     }
     pub fn eof() -> Self {
         InfrastructureOutcome::WorkerCrashed {

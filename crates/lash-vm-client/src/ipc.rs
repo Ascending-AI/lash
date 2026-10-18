@@ -31,6 +31,9 @@ pub struct Worker {
     /// ceiling, and the limit a run meets past it.
     cpu_budget: Duration,
     cpu_limit: lash_vm_protocol::WorkerLimit,
+    /// The worker's own cgroup, when its host places workers in one;
+    /// removed after the worker is reaped.
+    cgroup: Option<crate::cgroup::Placement>,
 }
 
 impl Worker {
@@ -41,6 +44,13 @@ impl Worker {
     pub fn spawn(config: &PoolConfig) -> Result<Self, PoolError> {
         let (pipe, child_pipe) = UnixStream::pair().map_err(PoolError::io)?;
         let fd = child_pipe.as_raw_fd();
+        let cgroup = config
+            .cgroup
+            .as_ref()
+            .map(crate::WorkerCgroup::place)
+            .transpose()
+            .map_err(PoolError::cgroup)?;
+        let procs = cgroup.as_ref().and_then(crate::cgroup::Placement::procs);
         let mut command = Command::new(&config.entry.executable);
         command
             .args(&config.entry.args)
@@ -54,25 +64,31 @@ impl Worker {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        // SAFETY: the post-fork closure only calls async-signal-safe fcntl.
-        // child_pipe stays owned until spawn has returned. The entry closes
-        // every other descriptor immediately after exec, including stdio.
+        // SAFETY: the post-fork closure only calls async-signal-safe fcntl
+        // and write. child_pipe and the cgroup's descriptor stay owned until
+        // spawn has returned. The entry closes every other descriptor
+        // immediately after exec, including stdio.
         #[expect(unsafe_code, reason = "the one IPC descriptor must survive exec")]
         unsafe {
             command.pre_exec(move || {
                 if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
-                Ok(())
+                // The worker enters its cgroup before it execs, so all it
+                // allocates is charged there.
+                procs.map_or(Ok(()), crate::cgroup::enter)
             });
         }
         #[cfg(feature = "perf-witness")]
         lash_core_execution::perf_witness::startup::record(
             lash_core_execution::perf_witness::startup::Phase::VmSpawnStarted,
         );
-        let child = command
-            .spawn()
-            .map_err(|error| PoolError::spawn(error, &config.entry.executable))?;
+        let child = command.spawn().map_err(|error| {
+            crate::cgroup::move_refusal(&error).map_or_else(
+                || PoolError::spawn(error, &config.entry.executable),
+                PoolError::cgroup,
+            )
+        })?;
         #[cfg(feature = "perf-witness")]
         lash_core_execution::perf_witness::startup::record_subject(
             lash_core_execution::perf_witness::startup::Phase::VmSpawned,
@@ -105,6 +121,7 @@ impl Worker {
             exit_grace: config.deadlines.cancel_grace,
             cpu_budget: config.deadlines.cumulative_cpu,
             cpu_limit: config.deadlines.cpu_limit(),
+            cgroup,
         })
     }
 
@@ -205,11 +222,25 @@ impl Worker {
     /// What the end of this worker's stream is to its run. The worker sets
     /// its own CPU ceiling from the execution's CPU budget, and the kernel
     /// stops it there with `SIGXCPU`: a worker so stopped, with that budget
-    /// spent, met the run's CPU limit, which the same run meets again. Any
-    /// other end, a `SIGXCPU` lash did not cause among them, is a crash
+    /// spent, met the run's CPU limit, which the same run meets again. A
+    /// worker the kernel's OOM killer killed in the cgroup its host placed
+    /// it in met the run's memory limit, likewise (FIG-6787). Any other
+    /// end, a `SIGXCPU` lash did not cause among them, is a crash
     /// (FIG-6523).
     fn lost(&mut self) -> InfrastructureOutcome {
         let evidence = self.exit_evidence();
+        if evidence
+            == (lash_vm_protocol::SupervisorEvidence::Signalled {
+                signal: libc::SIGKILL,
+            })
+            && let Some(cgroup) = self.cgroup.as_ref().filter(|cgroup| cgroup.oom_killed())
+        {
+            return InfrastructureOutcome::WorkerLimitExceeded {
+                limit: lash_vm_protocol::WorkerLimit::Memory {
+                    bound_bytes: cgroup.memory_max_bytes(),
+                },
+            };
+        }
         if evidence
             == (lash_vm_protocol::SupervisorEvidence::Signalled {
                 signal: libc::SIGXCPU,

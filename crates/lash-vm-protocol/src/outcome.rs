@@ -264,6 +264,37 @@ pub enum PoolFault {
     UnsupportedPlatform,
     #[error("worker I/O failed with OS error {code:?}")]
     Io { code: Option<i32> },
+    /// The host's cgroup v2 subtree cannot hold the pool's workers under
+    /// the limits it configured (FIG-6787).
+    #[error("{refusal}")]
+    Cgroup { refusal: CgroupRefusal },
+}
+
+/// Why a pool cannot place its workers in the cgroup v2 subtree its host
+/// named (FIG-6787). The host's deployment, never the run's.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CgroupRefusal {
+    /// The subtree is not a cgroup v2 directory.
+    #[error("the worker cgroup subtree is not a cgroup v2 directory")]
+    NotCgroupV2,
+    /// The subtree cannot hand `controller` to the workers' cgroups.
+    #[error("the worker cgroup subtree does not delegate its {controller:?} controller")]
+    ControllerNotDelegated { controller: CgroupController },
+    /// The subtree refused a worker's cgroup, a limit in it or the worker's
+    /// move into it.
+    #[error("the worker cgroup subtree refused a worker with OS error {code:?}")]
+    Refused { code: Option<i32> },
+}
+
+/// A cgroup v2 controller a worker's limits need.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CgroupController {
+    Memory,
+    Cpu,
 }
 
 /// A parent, its worker or the pool between them broke the protocol. A fresh

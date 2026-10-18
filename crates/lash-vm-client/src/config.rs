@@ -260,6 +260,20 @@ pub struct PoolConfig {
     /// contents, per-session peak capacity, measurement and cleanup lifetime.
     /// Spools of dead parents are deleted when the next parent opens it.
     pub staging_dir: Option<std::path::PathBuf>,
+    /// Places each worker in a cgroup of its own under a subtree the host
+    /// delegates, with a resident-memory ceiling and a CPU share (FIG-6787).
+    /// `None` places none; the address-space ceiling in
+    /// [`Self::confinement`] holds either way.
+    pub cgroup: Option<crate::WorkerCgroup>,
+    /// The memory the pool may commit at once (FIG-6787): with `n` workers
+    /// running, `n` times a worker's ceiling and its page budgets, plus the
+    /// staging quota ([`Self::committed_memory`]). The pool starts no
+    /// worker that would pass it: a checkout past it waits for a worker
+    /// like any checkout past [`Self::max_workers`], and fails with the
+    /// same faults. A budget that holds no worker, or fewer than
+    /// [`Self::min_workers`], is an invalid configuration. `None` sets no
+    /// budget.
+    pub memory_budget_bytes: Option<u64>,
 }
 
 impl PoolConfig {
@@ -301,6 +315,8 @@ impl PoolConfig {
             max_restarts: 8,
             staging_quota_bytes: 1 << 30,
             staging_dir: None,
+            cgroup: None,
+            memory_budget_bytes: None,
         }
     }
 
@@ -314,6 +330,47 @@ impl PoolConfig {
         config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
         config.max_queue_bytes = 128 * 1024 * 1024;
         config
+    }
+
+    /// What one worker may hold: the `memory.max` of its cgroup when the
+    /// host places workers in one, else its address-space ceiling.
+    pub fn worker_memory_ceiling(&self) -> u64 {
+        self.cgroup
+            .as_ref()
+            .map_or(self.confinement.address_space_bytes, |cgroup| {
+                cgroup.memory_max_bytes
+            })
+    }
+
+    /// What the pool commits with `workers` workers running: each worker's
+    /// ceiling and its clean, dirty and pinned page budgets, plus the
+    /// staging quota. `None` when that does not fit in a `u64`.
+    pub fn committed_memory(&self, workers: usize) -> Option<u64> {
+        self.worker_commitment()?
+            .checked_mul(u64::try_from(workers).ok()?)?
+            .checked_add(self.staging_quota_bytes)
+    }
+
+    /// What each running worker adds to [`Self::committed_memory`].
+    fn worker_commitment(&self) -> Option<u64> {
+        let pages = self.tuning.pages;
+        self.worker_memory_ceiling()
+            .checked_add(pages.clean_bytes)?
+            .checked_add(pages.dirty_bytes)?
+            .checked_add(pages.pinned_bytes)
+    }
+
+    /// The most workers the pool runs at once: [`Self::max_workers`], or
+    /// fewer where the memory budget holds fewer.
+    pub(crate) fn worker_capacity(&self) -> usize {
+        let Some(budget) = self.memory_budget_bytes else {
+            return self.max_workers;
+        };
+        let held = budget
+            .checked_sub(self.staging_quota_bytes)
+            .zip(self.worker_commitment().filter(|worker| *worker > 0))
+            .map_or(0, |(room, worker)| room / worker);
+        usize::try_from(held).map_or(self.max_workers, |held| held.min(self.max_workers))
     }
 
     pub(crate) fn validate(&self) -> Result<(), PoolError> {
@@ -360,6 +417,14 @@ impl PoolConfig {
             || self.protocol.no_response_watchdog.is_zero()
             || largest_parser_stack
                 .is_none_or(|stack| stack >= self.confinement.address_space_bytes)
+            || self.cgroup.as_ref().is_some_and(|cgroup| {
+                cgroup.memory_max_bytes == 0
+                    || cgroup.memory_high_bytes == Some(0)
+                    || cgroup.cpu.is_some_and(|cpu| !cpu.is_valid())
+            })
+            // The budget holds at least one worker, and every worker the
+            // pool keeps started.
+            || self.worker_capacity() < self.min_workers.max(1)
         {
             return Err(PoolError::InvalidConfiguration);
         }
