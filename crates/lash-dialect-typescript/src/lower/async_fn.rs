@@ -50,6 +50,7 @@ impl Lowerer<'_> {
     pub(super) fn lower_async_function(
         &mut self,
         function: &ast::Function,
+        name: &str,
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
         let body = self.closure(function)?;
@@ -93,7 +94,7 @@ impl Lowerer<'_> {
         {
             start.convention = convention;
         }
-        Ok(self.function_token(function, closure))
+        Ok(self.function_token(function, name, closure))
     }
 
     /// `await value`. The statements of everything the source evaluated

@@ -114,7 +114,9 @@ impl Lowerer<'_> {
                     .and_then(|(_, binding)| binding.positional.clone());
                 let closure = match entry {
                     Some(entry) => self.positional_closure(function, &entry)?,
-                    None => self.lower_function(function)?,
+                    None => {
+                        self.lower_function(function, function.name.as_deref().unwrap_or_default())?
+                    }
                 };
                 self.initialise(name, closure);
             }

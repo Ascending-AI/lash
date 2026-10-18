@@ -36,25 +36,34 @@ impl Lowerer<'_> {
         }
     }
 
-    /// A function's value. Inside its own body a named function expression
-    /// is reachable by its name.
-    pub(super) fn lower_function(&mut self, function: &ast::Function) -> Lowering<Operand> {
+    /// A function's value, whose `name` is `name`. Inside its own body a
+    /// named function expression is reachable by its name.
+    pub(super) fn lower_function(
+        &mut self,
+        function: &ast::Function,
+        name: &str,
+    ) -> Lowering<Operand> {
         if function.is_async {
-            return self.lower_async_function(function, self.span);
+            return self.lower_async_function(function, name, self.span);
         }
         let closure = self.closure(function)?;
-        Ok(self.function_token(function, closure))
+        Ok(self.function_token(function, name, closure))
     }
 
     /// A function the program made, as the token a built-in function is
     /// (`builtins/mod.rs`): `("ts.function", "", name, length, closure,
     /// deleted)`. Its own `name` and `length` (ECMA-262 SetFunctionName and
-    /// SetFunctionLength) are its name, or the one named evaluation gave
-    /// it, and the count of its parameters before the first default or
+    /// SetFunctionLength) are `name`, its own or the one named evaluation
+    /// gave it, and the count of its parameters before the first default or
     /// rest. Its path is empty: `ts.identity` compares it by its closure.
     /// `deleted` is the record of the two the program has deleted, which
     /// then read Function.prototype's.
-    pub(super) fn function_token(&mut self, function: &ast::Function, closure: Operand) -> Operand {
+    pub(super) fn function_token(
+        &mut self,
+        function: &ast::Function,
+        name: &str,
+        closure: Operand,
+    ) -> Operand {
         let (closure_expr, note) = match self.take_binding_of(&closure) {
             Some((lash_kernel_doc::Rhs::Expr(expr), note)) => (expr, Some(note)),
             _ => (closure.expr(), None),
@@ -72,7 +81,7 @@ impl Lowerer<'_> {
         let token = Expr::Tuple(vec![
             text(crate::FUNCTION_TAG),
             text(""),
-            text(function.name.as_deref().unwrap_or_default()),
+            text(name),
             Expr::Literal(Literal::Float(length)),
             closure_expr,
             Expr::Record(Vec::new()),
@@ -101,11 +110,11 @@ impl Lowerer<'_> {
         if let ast::Expr::Function(function) = expression
             && function.name.is_none()
         {
-            let mut function = function.clone();
-            function.name = Some(name.to_owned());
             // An inferred display name does not create the internal binding
-            // of a named function expression.
-            self.lower_function(&function)
+            // of a named function expression. The function stays the
+            // source's own, so its spellings name the bindings the type
+            // analysis resolved.
+            self.lower_function(function, name)
         } else {
             self.lower_expr(expression)
         }
@@ -118,11 +127,11 @@ impl Lowerer<'_> {
         function: &ast::Function,
     ) -> Lowering<Operand> {
         let Some(name) = function.name.as_deref().filter(|_| !function.is_arrow) else {
-            return self.lower_function(function);
+            return self.lower_function(function, function.name.as_deref().unwrap_or_default());
         };
         self.push_scope();
         let kernel = self.declare(name, BindingKind::Function);
-        let result = self.lower_function(function).map(|closure| {
+        let result = self.lower_function(function, name).map(|closure| {
             let named = self
                 .binding_mut(name)
                 .is_some_and(|(_, binding)| binding.predeclared);
@@ -380,7 +389,11 @@ impl Lowerer<'_> {
             ty: self.facts.function(function.return_ty.as_ref()),
             ..closure
         };
-        Ok(self.function_token(function, closure))
+        Ok(self.function_token(
+            function,
+            function.name.as_deref().unwrap_or_default(),
+            closure,
+        ))
     }
 
     /// Binds a function's parameters from its argument list. A missing

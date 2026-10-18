@@ -235,6 +235,26 @@ fn a_built_in_array_methods_new_array_is_a_list() {
     );
 }
 
+/// Named evaluation gives an anonymous function its binding's name and
+/// nothing else: its parameters and the outer bindings it reads keep their
+/// types, so its body lowers the typed operation a declaration's does.
+#[test]
+fn a_named_anonymous_function_keeps_its_bindings_types() {
+    let typed = "num.add(num.to_float(a), limit)";
+    for source in [
+        "const limit = 3; function f(a: number) { return a + limit; }",
+        "const limit = 3; const f = (a: number) => a + limit;",
+        "const limit = 3; const f = (a: number) => { return a + limit; };",
+        "const limit = 3; const f = function (a: number) { return a + limit; };",
+    ] {
+        let text = main_text(source);
+        assert!(
+            text.contains(typed) && !text.contains("ts.add("),
+            "{source}:\n{text}"
+        );
+    }
+}
+
 /// A type belongs to a binding, not to its name. A parameter and an outer
 /// `const` of one name, an outer `let` and a function's own `const`, and a
 /// block's `const` under an outer one are each typed by what that binding
