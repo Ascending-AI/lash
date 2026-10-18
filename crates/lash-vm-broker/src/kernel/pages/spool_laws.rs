@@ -882,7 +882,14 @@ async fn a_warm_cache_read_after_the_lease_expired_is_refused_like_a_cold_one() 
 /// D-LEASE: an activation parked on a long tool keeps its lease: the
 /// schedule the held activation arms renews it at a third of its ttl, so a
 /// tool twice the ttl does not lose it and a read after it still answers.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+///
+/// The law drives the clock from one thread with the held loop, so it runs
+/// only while the loop is parked: a sleeper it sees armed is one the loop
+/// already waits on, never one the loop armed and is still polling. On two
+/// worker threads the clock could fire the renewal due with the tool's
+/// before the loop's poll that armed it returned, and that poll then found
+/// it due and renewed a sixth time (FIG-6792).
+#[tokio::test]
 async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
     use lash_core_execution::runtime::Clock;
     let dir = tempfile::tempdir().expect("dir");

@@ -237,8 +237,8 @@ const ISLANDS: &[(&str, &str, u32)] = &[
         64,
     ),
     (
-        "session bindings no island frame holds or that are not yet bound, left to the reference",
-        "main { let t = (1, 2) let g = absent set g = fn(n) { if num.lt(n, 1) { return t } return apply g(num.sub(n, 1)) } let a = apply g(3) let h = absent set h = fn(n) { if num.lt(n, 1) { return late } return apply h(num.sub(n, 1)) } try { let b = apply h(3) finish (a, b) } catch e { let late = 0 finish (a, e.kind, late) } }",
+        "a session binding no island frame holds, and one not yet set when an island raises on it, set again between entries",
+        "main { let t = (1, 2) let g = absent set g = fn(n) { if num.lt(n, 1) { return t } return apply g(num.sub(n, 1)) } let a = apply g(3) let late = absent let h = absent set h = fn(n) { if num.lt(n, 1) { return num.add(late, 1) } return apply h(num.sub(n, 1)) } try { let b = apply h(3) finish (a, b) } catch e { set late = 0 let c = apply h(3) finish (a, e.kind, c) } }",
         64,
     ),
 ];
@@ -805,6 +805,11 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
     let mut document =
         parse_document(&source).unwrap_or_else(|error| panic!("{name} must parse: {error}"));
     document.manifest.functions = lash_kernel_check::requirements(&document, &registry).functions;
+    // A refused program runs in no plan, and the law would compare nothing.
+    let mut admission = lash_kernel_check::Environment::new(&registry);
+    admission.effects = document.manifest.effects.clone();
+    lash_kernel_check::admit(&document, &admission)
+        .unwrap_or_else(|refusal| panic!("{name} must be admitted: {refusal:?}"));
     let mut environment = Environment::default();
     environment.bounds.call_depth = call_depth;
     environment.max_steps = 1_000_000;
