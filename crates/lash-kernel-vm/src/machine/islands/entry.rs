@@ -24,7 +24,7 @@ use super::super::project::closure_code;
 use super::super::session::Session;
 use super::super::stream::Running;
 use super::super::tasks::Occurrences;
-use super::super::{Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
+use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
 use super::{Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, held};
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
@@ -235,16 +235,10 @@ impl KernelMachine {
         if self.charged >= self.slice_end {
             return Ok(None);
         }
-        // The memory headroom guard: the island's transient holdings and
+        // The capacity headroom guard: the island's transient holdings and
         // its virtual frames with their variables fit, and nothing inside
-        // it is admitted.
-        if self.bounds.memory_meter != crate::MemoryMeter::Off
-            && self
-                .bounds
-                .memory
-                .saturating_sub(self.heap.certificate().upper.0)
-                < ISLAND_ADMITTED
-        {
+        // it is counted (FIG-6791).
+        if self.capacity_headroom() < ISLAND_ADMITTED {
             return Ok(None);
         }
         if given > MAX_ARGS {
@@ -477,7 +471,6 @@ impl KernelMachine {
         exe: &Executable,
         level: Level,
     ) -> Eval<Option<RunsOn>> {
-        self.reserve_growth(FRAME_BYTES)?;
         let mut frame = self.fresh_frame(exe, level.code)?;
         frame.slots.fresh(level.slots.len());
         frame.control = level.control;
@@ -485,7 +478,6 @@ impl KernelMachine {
             match slot {
                 SlotState::Empty => {}
                 SlotState::Value(value) => {
-                    self.reserve_growth(self.cost_of(&value))?;
                     frame.set_slot(at as u32, SlotState::Value(value));
                 }
                 cell @ SlotState::Cell(_) => frame.set_slot(at as u32, cell),
@@ -506,6 +498,7 @@ impl KernelMachine {
             }
         };
         self.task(task)?.frames.push(frame);
+        self.grown();
         self.observe(crate::observe::Event::Push {
             task,
             code: level.code,
@@ -632,6 +625,9 @@ pub(in crate::machine) struct RegionGuests<'a> {
     pub(in crate::machine) limits: KernelDataLimits,
     /// The memory bound, when memory is accounted.
     pub(in crate::machine) memory: Option<u64>,
+    /// The capacity the run's heap was sealed holding, until its first
+    /// sweep: the least the capacity meter counts (FIG-6791).
+    pub(in crate::machine) floor: u64,
     pub(in crate::machine) base: u64,
     pub(in crate::machine) call_depth: u64,
     /// The frames an island that stopped left, innermost first.
@@ -662,7 +658,7 @@ impl Guests for RegionGuests<'_> {
             return None;
         }
         if let Some(memory) = self.memory
-            && memory.saturating_sub(cx.heap.certificate().upper.0) < ISLAND_ADMITTED
+            && memory.saturating_sub(cx.arena.held().max(self.floor)) < ISLAND_ADMITTED
         {
             return None;
         }

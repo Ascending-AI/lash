@@ -48,11 +48,17 @@ use crate::compile::{
 };
 use crate::observe::ChargeTape;
 
-/// What a region may hold while it runs, admitted once at its entry
-/// (§3.5): a scalar plan's scalar pins, which net to zero at each
-/// statement's end, and the nursery an allocating plan's statements build
-/// and grow in.
-pub(super) const NURSERY: u64 = 1 << 16;
+/// The least capacity a region may grow by while it runs, admitted once at
+/// its entry against the capacity meter's headroom (§3.5, FIG-6791): the
+/// nursery an allocating plan's statements build and grow in. It is one
+/// capacity chunk.
+pub(super) const NURSERY: u64 = super::limits::CAPACITY_CHUNK;
+
+/// The most capacity a region may grow by while it runs, where the bound
+/// leaves it: what a region builds and drops is freed only once it stops,
+/// so the room bounds the garbage it keeps, and a loop whose garbage fills
+/// it stops that rarely.
+const REGION_ROOM: u64 = 16 * NURSERY;
 
 #[cfg(test)]
 mod admission_laws;
@@ -112,9 +118,6 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// The last statement the region tried was one it runs, not one it
     /// leaves: where it stopped there, a guard missed.
     missed: bool,
-    /// Whether a session binding's holding is priced: a run that accounts
-    /// memory, whose session writes admit it.
-    priced: bool,
     /// The session writes the region made.
     writes: u64,
     /// Where it stopped, an operator left its operand kind to the
@@ -200,23 +203,14 @@ impl KernelMachine {
             return Ok((None, None));
         }
         let plan = &exe.regions[region as usize];
-        // The memory headroom guard: the nursery is admitted, so no
-        // admission inside refuses.
-        if self
-            .bounds
-            .memory
-            .saturating_sub(self.heap.certificate().upper.0)
-            < NURSERY
-        {
+        // The capacity headroom guard: the nursery fits the bound, so no
+        // verdict inside refuses.
+        let room = self.capacity_headroom();
+        if room < NURSERY {
             return Ok((None, None));
         }
+        let room = room.min(REGION_ROOM);
         let memory = self.bounds.memory_meter != crate::MemoryMeter::Off;
-        // What the region holds is held as the reference's statements
-        // hold it, each in a fresh step, which has no statement credit to
-        // draw on.
-        if (plan.binds || plan.allocates) && memory && self.heap.statement_reserved() != 0 {
-            return Ok((None, None));
-        }
         // The depth guard: every site's depth check passes in this frame,
         // whose depth the region does not change.
         let frames = self
@@ -278,12 +272,18 @@ impl KernelMachine {
             observed: self.observer.is_some(),
             limits: self.limits,
             memory: memory.then_some(self.bounds.memory),
+            floor: self.capacity_floor,
             base: depth,
             call_depth: u64::from(self.bounds.call_depth),
             levels: Vec::new(),
             halt: None,
         };
         let mut arena = self.arena.borrow_mut();
+        let ceiling = if memory {
+            arena.held().saturating_add(room)
+        } else {
+            u64::MAX
+        };
         let state = self
             .tasks
             .get_mut(task.0 as usize)?
@@ -337,12 +337,11 @@ impl KernelMachine {
                 args: super::registers::Arguments::new(),
                 exe,
                 arena: &mut arena,
-                heap: &mut self.heap,
                 sites: &mut self.sites,
                 sessions: &mut *sessions,
                 limits: self.limits,
                 memory,
-                room: NURSERY,
+                ceiling,
                 transient: 0,
                 fault: None,
                 lets: Vec::new(),
@@ -362,7 +361,6 @@ impl KernelMachine {
             due: false,
             chain: Vec::new(),
             missed: false,
-            priced: memory,
             writes: 0,
             declined: false,
             progressed: false,
@@ -819,29 +817,14 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         }
     }
 
-    /// Assigns `value`, the statement's, to the slot at `at`: a scalar
-    /// plan's never grows its slot, which is the reference's to admit; an
-    /// allocating plan's holds the growth as the reference's write does.
+    /// Assigns `value`, the statement's, to the slot at `at`, which the
+    /// capacity meter counted with its frame.
     #[inline(always)]
     fn write(&mut self, value: Option<Value>, at: u32, commit: &Commit) -> Result<bool, Halt> {
         let Some(value) = value else {
             return Ok(false);
         };
-        let SlotState::Value(old) = self.frame.slot(at) else {
-            return Ok(false);
-        };
-        if !ALLOC {
-            // A scalar plan's write never grows its slot.
-            if self.cx.arena.grows(&value, old) {
-                return Ok(false);
-            }
-        } else if let (new, old) = (
-            self.cx.arena.cost_of_metered(&value),
-            self.cx.arena.cost_of_metered(old),
-        ) && (!self.fits(commit)
-            || !self.cx.fits(new.saturating_sub(old))
-            || !self.cx.hold(new.saturating_sub(old)))
-        {
+        if !matches!(self.frame.slot(at), SlotState::Value(_)) || !self.fits(commit) {
             return Ok(false);
         }
         self.frame.set_slot(at, SlotState::Value(value));
@@ -850,10 +833,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     }
 
     /// Assigns `value`, the statement's, to the session slot at `at`, which
-    /// holds a resident binding: a priced binding's write admits its
-    /// holding as the reference's session write does. One that grows it
-    /// is the reference's to admit; one that shrinks it moves the census
-    /// as the reference's does.
+    /// holds a resident binding.
     #[inline(always)]
     fn write_session(
         &mut self,
@@ -861,29 +841,13 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         at: u32,
         commit: &Commit,
     ) -> Result<bool, Halt> {
-        let (
-            Some(value),
-            Some(SessionSlot {
-                value: Some(old), ..
-            }),
-        ) = (value, self.cx.sessions.get(at as usize).copied())
+        let (Some(value), Some(SessionSlot { value: Some(_), .. })) =
+            (value, self.cx.sessions.get(at as usize).copied())
         else {
             return Ok(false);
         };
         if !self.fits(commit) {
             return Ok(false);
-        }
-        if self.priced {
-            let (before, after) = (self.cx.arena.cost_of(&old), self.cx.arena.cost_of(&value));
-            if after > before {
-                return Ok(false);
-            }
-            if after < before {
-                self.cx
-                    .heap
-                    .hold_session_binding(before, after)
-                    .map_err(super::write_halt)?;
-            }
         }
         self.writes += 1;
         self.cx.sessions[at as usize] = SessionSlot {
@@ -894,14 +858,14 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         Ok(true)
     }
 
-    /// Declares the slot at `at` with `value`, the statement's, holding its
-    /// memory as the reference's `bind` does.
+    /// Declares the slot at `at` with `value`, the statement's, as the
+    /// reference's `bind` does.
     #[inline(always)]
     fn bind(&mut self, value: Option<Value>, at: u32, commit: &Commit) -> Result<bool, Halt> {
         let Some(value) = value.filter(|value| ALLOC || scalar(value)) else {
             return Ok(false);
         };
-        if !self.fits(commit) || !self.hold(&value)? {
+        if !self.fits(commit) {
             return Ok(false);
         }
         self.frame.set_slot(at, SlotState::Value(value));
@@ -931,7 +895,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             },
             None => raw,
         };
-        if (!ALLOC && !scalar(&element)) || !self.fits(commit) || !self.hold(&element)? {
+        if (!ALLOC && !scalar(&element)) || !self.fits(commit) {
             return Ok(false);
         }
         self.commit(commit)?;
@@ -995,20 +959,6 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         for at in &body.declares {
             self.frame.set_slot(*at, SlotState::Empty);
         }
-    }
-
-    /// Holds the memory a declaration of `value` grows its variable by, as
-    /// the reference's `bind` does; `false` when it does not fit, having
-    /// held nothing, so that the reference declares it.
-    fn hold(&mut self, value: &Value) -> Result<bool, Halt> {
-        if !self.cx.memory {
-            return Ok(true);
-        }
-        let bytes = self.cx.arena.cost_of_metered(value);
-        if ALLOC {
-            return Ok(self.cx.fits(bytes) && self.cx.hold(bytes));
-        }
-        Ok(self.cx.heap.hold_growth_metered(bytes)?)
     }
 
     /// Whether an allocating plan's statement `step` may run: one whose

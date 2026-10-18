@@ -6,9 +6,9 @@ use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::arena::Reached;
-use lash_kernel_state::kernel_internals::directory::{ordinal_key, value_cost};
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::resident::{frame_values, state_values};
-use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree, Version};
+use lash_kernel_state::kernel_internals::tree::{Access, Tree, Version};
 use lash_kernel_state::paged::{EndedTask, IncomingRecord, TaskRecord, TaskStateRecord};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -543,6 +543,7 @@ impl Tasks {
         let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
+        task.frames.release_control();
         put(&mut self.rows, index, &mut task, &self.access, true)?;
         if !task.counters.dirty.is_empty() {
             self.unprojected.insert(index, task.counters);
@@ -550,31 +551,26 @@ impl Tasks {
         Ok(())
     }
 
-    /// What the task rows would cost if a projection wrote them now, and
-    /// what of it the ended tasks' retained results are, giving `out` what
-    /// they hold: an uncached task's row as it is, a cached task's state
-    /// and frames as they stand (seam I, FIG-6748).
-    pub(super) fn price(
+    /// Gives `out` what the task rows hold: an uncached task's row as it
+    /// is, a cached task's state and frames as they stand (seam I,
+    /// FIG-6748).
+    pub(super) fn reach(
         &self,
         arena: &mut lash_kernel_state::arena::Arena,
-        pricing: &mut lash_kernel_state::arena::Pricing,
+        reach: &mut lash_kernel_state::arena::Reach,
         out: &mut dyn FnMut(Reached<'_>) -> Result<(), HeapFault>,
-    ) -> Result<(u64, u64), HeapFault> {
+    ) -> Result<(), HeapFault> {
         let cached: Vec<(u64, &Task)> = self
             .cache
             .iter()
             .flatten()
             .map(|(index, task)| (*index, task.as_ref()))
             .collect();
-        let mut cost = self.rows.cost();
-        let mut retained = 0_u64;
         let mut problem = None;
         self.rows.visit(&self.access, &mut |key, record| {
             if cached.iter().any(|(index, _)| ordinal_key(*index) == key) {
-                cost -= record.cost();
                 return true;
             }
-            retained = retained.saturating_add(retained_cost(record));
             let visited = state_values(&record.state, &mut |value| out(Reached::Page(value)))
                 .and_then(|()| {
                     let mut problem = None;
@@ -594,13 +590,19 @@ impl Tasks {
             return Err(problem);
         }
         for (_, task) in cached {
-            let state = task.record.cost() - task.record.frames.cost();
-            let frames = task.frames.price(arena, pricing, out)?;
-            cost = cost.saturating_add(state).saturating_add(frames);
-            retained = retained.saturating_add(retained_cost(&task.record));
+            task.frames.reach(arena, reach, out)?;
             state_values(&task.record.state, &mut |value| out(Reached::Page(value)))?;
         }
-        Ok((cost, retained))
+        Ok(())
+    }
+    /// The bytes the capacity meter counts for the cached tasks' resident
+    /// frames (FIG-6791).
+    pub(super) fn control_bytes(&self) -> u64 {
+        self.cache
+            .iter()
+            .flatten()
+            .map(|(_, task)| task.frames.control_bytes())
+            .fold(0, u64::saturating_add)
     }
     /// The result `task` retains, if it ended and retains one.
     pub(super) fn ended_result(&self, task: TaskId) -> Result<Option<PageValue>, HeapFault> {
@@ -643,7 +645,12 @@ impl Tasks {
                     .map_err(|_| HeapFault::Malformed("task key is not an ordinal".into()))?,
             );
             let record = self.cached_task(index).map_or(&row, |task| &task.record);
-            if retained_cost(record) > 0 {
+            if record.result_retained
+                && matches!(
+                    record.state,
+                    TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_))
+                )
+            {
                 tasks.push(TaskId(index));
             }
             key = Some(next);
@@ -700,19 +707,6 @@ impl Tasks {
                 .project(&mut task.record.occurrences, &self.exe, &self.access)?;
         }
         Ok(())
-    }
-}
-
-/// The cost of the ended result `record` retains: none when it retains
-/// none.
-fn retained_cost(record: &TaskRecord) -> u64 {
-    match &record.state {
-        TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value))
-            if record.result_retained =>
-        {
-            value_cost(value)
-        }
-        _ => 0,
     }
 }
 

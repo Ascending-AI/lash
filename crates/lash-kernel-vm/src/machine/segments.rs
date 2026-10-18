@@ -92,7 +92,7 @@ pub(super) struct Yielding {
     callee: Option<Callee>,
 }
 
-impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
+impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// Stands at site `site` while its callee is offered the call: what the
     /// body's frame would hold there is the machine's.
     fn stand(&mut self, site: u32) {
@@ -297,43 +297,10 @@ impl KernelMachine {
         let (segment, code_id) = segment_of(exe, lib, &plan)?;
         let site = &segment.sites[site as usize];
         let arity = exe.lib(lib).arity;
-        // What the frame holds, held as a bound value is, while the
-        // registers still hold it. A parameter is held once, and a variable
-        // a closure shares is in its cell.
         let local = |slot: u32| {
             plan.locals[slot as usize].ok_or_else(|| fault("a segment's site binds no variable"))
         };
         let code = exe.code(code_id);
-        if self.bounds.memory_meter != crate::MemoryMeter::Off {
-            self.reserve_growth_metered(super::FRAME_BYTES)?;
-            for (index, param) in code.params.iter().enumerate() {
-                let adopted = site
-                    .bound
-                    .iter()
-                    .find(|slot| plan.locals[**slot as usize].is_some_and(|l| l.at == param.at));
-                match adopted {
-                    Some(slot) if !local(*slot)?.shared => {
-                        self.reserve_growth_metered(
-                            self.cost_of_metered(&self.regs[slots + *slot as usize]),
-                        )?;
-                    }
-                    None if !param.shared => {
-                        self.reserve_growth_metered(
-                            self.cost_of_metered(&self.regs[args + index]),
-                        )?;
-                    }
-                    _ => {}
-                }
-            }
-            for slot in &site.bound {
-                let local = local(*slot)?;
-                if !local.shared && !segment.params.contains(&local.at) {
-                    self.reserve_growth_metered(
-                        self.cost_of_metered(&self.regs[slots + *slot as usize]),
-                    )?;
-                }
-            }
-        }
         let mut frame = self.fresh_frame(exe, code_id)?;
         frame.slots.fresh(code.slots_by_at.len());
         for (index, at) in segment.params.iter().enumerate() {
@@ -415,6 +382,7 @@ impl KernelMachine {
         }
         let stmt = site.stmt;
         self.task(task)?.frames.push(frame);
+        self.grown();
         self.observe(Event::Push {
             task,
             code: code_id,
@@ -470,22 +438,10 @@ impl KernelMachine {
             .pop()?
             .ok_or_else(|| fault("a standing frame is missing"))?;
         self.refresh_charging(task)?;
-        let resumed = match (
-            self.bounds.memory_meter == crate::MemoryMeter::Off,
-            plan.shared.is_some(),
-        ) {
-            (true, true) => {
-                self.resume_plan::<false, true>(task, exe, lib, &plan, site, &frame, value)
-            }
-            (true, false) => {
-                self.resume_plan::<false, false>(task, exe, lib, &plan, site, &frame, value)
-            }
-            (false, true) => {
-                self.resume_plan::<true, true>(task, exe, lib, &plan, site, &frame, value)
-            }
-            (false, false) => {
-                self.resume_plan::<true, false>(task, exe, lib, &plan, site, &frame, value)
-            }
+        let resumed = if plan.shared.is_some() {
+            self.resume_plan::<true>(task, exe, lib, &plan, site, &frame, value)
+        } else {
+            self.resume_plan::<false>(task, exe, lib, &plan, site, &frame, value)
         };
         let result = match resumed {
             Ok(Some(result)) => result,
@@ -504,7 +460,7 @@ impl KernelMachine {
     /// standing there, with `value` the site's: what the call ends with,
     /// or `None` when the plan yielded again and its frames stand.
     #[allow(clippy::too_many_arguments)]
-    fn resume_plan<const MEMORY: bool, const SHARED: bool>(
+    fn resume_plan<const SHARED: bool>(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -605,13 +561,13 @@ impl KernelMachine {
             .as_ref()
             .map(|call| call.args.clone())
             .unwrap_or_default();
-        if MEMORY {
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.borrowed.extend(kept.iter().copied());
         }
         let charging = std::mem::replace(&mut self.charging, false);
         let paced = std::mem::replace(&mut self.paced, false);
         self.plans += 1;
-        let mut run = PlanRun::<MEMORY, SHARED> {
+        let mut run = PlanRun::<SHARED> {
             machine: self,
             task,
             exe,
@@ -648,9 +604,7 @@ impl KernelMachine {
                     }
                 }
                 // The value is in no variable until the statement uses it.
-                if MEMORY {
-                    run.machine.pins.borrowed.push(value);
-                }
+                run.machine.borrow_value(value);
                 run.machine.put(base + stood.dst as usize, value);
                 if run.halt.is_some() {
                     Err(PlanExit::Halt)

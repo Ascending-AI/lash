@@ -385,3 +385,33 @@ fn a_refusing_limiter_ends_the_run_where_no_limiter_does() {
         assert!(questions[0].0 > limit, "{which:?}");
     }
 }
+
+/// FIG-6791: the memory limiter is asked with what the run holds and the
+/// allocation that passes the limit, as the capacity meter counts them:
+/// a run holding a 1.5 MiB text that asks for 1 MiB more past a 2 MiB
+/// limit is asked with at least 2.5 MiB, and no more than one chunk past
+/// it.
+#[test]
+fn the_memory_limiter_is_asked_with_what_the_run_holds() {
+    const HELD: u64 = 3 << 19;
+    const ASKED: u64 = 1 << 20;
+    let text = format!(
+        "main {{ let s = work.repeat({HELD}) let t = work.repeat({ASKED}) return list.len([s, t]) }}"
+    );
+    let bounds = Bounds {
+        memory: 2 << 20,
+        ..ROOMY
+    };
+    let limiter = Scripted::default();
+    let (_, end) = refused(&text, bounds, Which::Memory, Some(&limiter));
+    let End::Error(RunError::Bound(exceeded)) = end else {
+        panic!("the run passes its bound: {end:?}")
+    };
+    assert_eq!((exceeded.bound, exceeded.limit), (Bound::Memory, 2 << 20));
+    let [(used, limit)] = limiter.asked()[..] else {
+        panic!("the limiter was asked once: {:?}", limiter.asked())
+    };
+    assert_eq!(limit, 2 << 20);
+    assert!(used >= HELD + ASKED, "asked with {used}");
+    assert!(used <= HELD + ASKED + (64 << 10), "asked with {used}");
+}

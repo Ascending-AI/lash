@@ -142,12 +142,9 @@ pub struct HeapRoot {
     /// The census's persisted accounting (S7).
     pub accounting: AccountingCertificate,
     pub population: super::DataOnlyCertificate,
-    /// Live-size estimate at the last collection (or first carry). Growth
-    /// above it pays for the next carry's collection, across cold opens.
-    pub collection_live: Option<LogicalBytes>,
-    /// Entity population at the same refinement or first carry. Identity
-    /// growth must also pay for cleanup when large scalar payloads dominate
-    /// the byte estimate (FIG-6750).
+    /// Entity population at the last sweep (or first carry). Identity
+    /// growth above it pays for the next carry's collection, across cold
+    /// opens (FIG-6750).
     pub collection_entities: Option<u64>,
 }
 

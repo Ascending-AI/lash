@@ -8,12 +8,7 @@ pub struct Work {
     pub tree_leaf_clones: u64,
     pub tree_index_clones: u64,
     pub tree_rows_cloned: u64,
-    pub accounting_certificate_reads: u64,
     pub accounting_additions: u64,
-    /// Runtime composite and mutable-object memory pricing passes.
-    pub arena_memory_prices: u64,
-    pub accounting_changes: u64,
-    pub accounting_reservations: u64,
     pub refinement_attempts: u64,
     pub completed_refinements: u64,
     pub completed_trace_work: u64,

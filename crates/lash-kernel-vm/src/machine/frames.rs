@@ -257,11 +257,8 @@ impl KernelMachine {
     /// The continuation a frame saves where it stands at the action nested
     /// in its statement whose site is `site`, in `phase` (`K-EVAL-008`),
     /// holding `count` roles. `role` gives the roles in semantic order, the
-    /// statement's evaluation order; each is admitted as it is given, held
-    /// as a bound value is until the frames are next published, before the
-    /// next is asked for: a refinement while the frame stands there counts
-    /// it once, as the frame's. A caller moves or copies each value as its
-    /// producer owns it. The roles go to a spent continuation's buffer.
+    /// statement's evaluation order. A caller moves or copies each value as
+    /// its producer owns it. The roles go to a spent continuation's buffer.
     pub(super) fn continuation(
         &mut self,
         site: &Suffix,
@@ -273,12 +270,8 @@ impl KernelMachine {
             0 => Vec::new(),
             _ => self.storage.roles.pop().unwrap_or_default(),
         };
-        let metered = self.bounds.memory_meter != crate::MemoryMeter::Off;
         for at in 0..count {
             let role = role(self, at);
-            if metered {
-                self.reserve_growth_metered(self.cost_of_metered(&role.value))?;
-            }
             roles.push(role);
         }
         Ok(Pending {
@@ -789,6 +782,9 @@ impl Frames {
                 &self.exe,
                 &mut self.arena.borrow_mut(),
             )?;
+            self.arena
+                .borrow_mut()
+                .grow_control(resident::frame_bytes(&frame));
             self.cache.push((index, frame));
         }
         // The top is projected at every projection point.
@@ -799,6 +795,11 @@ impl Frames {
     }
     pub(super) fn push(&mut self, frame: Box<Frame>) {
         self.invalidate_active();
+        // The capacity meter counts the frame while it is resident: its
+        // caller checks the mark (FIG-6791).
+        self.arena
+            .borrow_mut()
+            .grow_control(resident::frame_bytes(&frame));
         // The live cache owns the new call; its row is written at the next
         // projection point, and never if it returns before one.
         self.cache.push((self.len, frame));
@@ -815,6 +816,11 @@ impl Frames {
         self.last_mut()?;
         self.invalidate_active();
         let frame = self.cache.pop().map(|(_, frame)| frame);
+        if let Some(frame) = &frame {
+            self.arena
+                .borrow_mut()
+                .shrink_control(resident::frame_bytes(frame));
+        }
         self.len -= 1;
         let top = self.len.saturating_sub(1);
         self.held = self.held.min(top);
@@ -824,6 +830,7 @@ impl Frames {
     }
     pub(super) fn clear(&mut self) {
         self.invalidate_active();
+        self.release_control();
         self.rows = Tree::new(true);
         self.len = 0;
         self.cache.clear();

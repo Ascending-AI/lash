@@ -306,23 +306,13 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
 
 struct LawCensus(crate::paged::AccountingCertificate);
 impl crate::paged::AllocationCensus for LawCensus {
-    fn rebase(&mut self) {}
-    fn set_bound(&mut self, _: LogicalBytes) {}
-    fn restore(
-        c: crate::paged::AccountingCertificate,
-        _: LogicalBytes,
-    ) -> Result<Self, crate::paged::CensusFault> {
+    fn restore(c: crate::paged::AccountingCertificate) -> Result<Self, crate::paged::CensusFault> {
         Ok(Self(c))
     }
     fn certificate(&self) -> crate::paged::AccountingCertificate {
         self.0
     }
-    fn added(
-        &mut self,
-        cost: LogicalBytes,
-        entities: u64,
-    ) -> Result<(), crate::paged::CensusFault> {
-        self.changed(LogicalBytes(0), cost)?;
+    fn added(&mut self, entities: u64) -> Result<(), crate::paged::CensusFault> {
         self.0.entities = self
             .0
             .entities
@@ -330,30 +320,15 @@ impl crate::paged::AllocationCensus for LawCensus {
             .expect("test entity count");
         Ok(())
     }
-    fn changed(
-        &mut self,
-        before: LogicalBytes,
-        after: LogicalBytes,
-    ) -> Result<(), crate::paged::CensusFault> {
-        self.0.upper.0 = self
-            .0
-            .upper
-            .0
-            .checked_sub(before.0)
-            .and_then(|v| v.checked_add(after.0))
-            .expect("test cost");
-        Ok(())
-    }
-    fn reserve(&mut self, bytes: LogicalBytes) -> crate::paged::ReservationDecision {
-        crate::paged::ReservationDecision::Granted(crate::paged::LogicalPermit { bytes })
+    fn record_capacity(&mut self, capacity: u64) {
+        self.0.capacity = capacity;
     }
     fn refine(
         &mut self,
         _: &mut dyn crate::paged::CensusGraph,
         _: &crate::paged::TransientRoots<'_>,
-        _: crate::paged::PendingReservation,
-    ) -> Result<crate::paged::RefinedDecision, crate::paged::CensusFault> {
-        unreachable!("unbounded lifecycle law census")
+    ) -> Result<(), crate::paged::CensusFault> {
+        unreachable!("lifecycle law census never sweeps")
     }
 }
 
@@ -618,11 +593,7 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
         bytes: u64::MAX,
     }))
     .unwrap();
-    // Seam I keeps the old slot holdings in the baseline until collection;
-    // projection alone must still bound the current session tree.
-    assert!(heap.certificate().upper.0 >= heap.session_root().cost());
     heap.collect().unwrap();
-    assert_eq!(heap.certificate().upper.0, heap.session_root().cost());
     let root = heap.session_root().keyed_root().unwrap();
     assert!(heap.classify_carry(&root).unwrap().dropped.is_empty());
 }

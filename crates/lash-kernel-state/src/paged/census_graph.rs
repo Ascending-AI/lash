@@ -1,10 +1,10 @@
 //! The heap as the census traces it (S7): its persistent roots, its
-//! entities' costs and the identity edges their bodies name, streamed from
+//! entities and the identity edges their bodies name, streamed from
 //! directory rows and edge summaries, never from scalar payloads.
-use super::census::{CensusGraph, EntityCost, SweepSet};
-use super::directory::{Body, entity_key, ordinal_key, value_cost};
+use super::census::{CensusGraph, EntityFacts, SweepSet};
+use super::directory::{Body, entity_key, ordinal_key};
 use super::heap_impl::PagedHeap;
-use super::tree::{Access, Cell, Tree, checked_sum};
+use super::tree::{Access, Cell, Tree};
 use super::*;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::*;
@@ -12,29 +12,6 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 impl CensusGraph for PagedHeap {
-    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
-        // U prices every retained result. Exact L instead prices only results
-        // reached through handles, in task_result, so remove them here.
-        let mut retained = 0;
-        visit_tree(&self.tasks, &self.access, &mut |task| {
-            if task.result_retained
-                && let TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value)) =
-                    &task.state
-            {
-                retained = checked_sum([retained, value_cost(value)].into_iter())?;
-            }
-            Ok(())
-        })?;
-        let tasks = self.tasks.cost().checked_sub(retained).ok_or_else(|| {
-            HeapFault::Malformed("retained task results exceed the task root cost".into())
-        })?;
-        Ok(LogicalBytes(checked_sum(
-            [self.session_cost(), tasks, self.joins.cost()].into_iter(),
-        )?))
-    }
-    fn value_cost(&mut self, value: &PageValue) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(value_cost(value)))
-    }
     fn value_edges(
         &mut self,
         value: &PageValue,
@@ -59,11 +36,10 @@ impl CensusGraph for PagedHeap {
             })
         })
     }
-    fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
-        Ok(self.current_head(entity)?.map(|head| EntityCost {
-            local: LogicalBytes(head.cost()),
-            has_edges: true,
-        }))
+    fn entity_facts(&mut self, entity: EntityId) -> Result<Option<EntityFacts>, HeapFault> {
+        Ok(self
+            .current_head(entity)?
+            .map(|_| EntityFacts { has_edges: true }))
     }
     fn entity_edges(
         &mut self,
@@ -114,20 +90,18 @@ impl CensusGraph for PagedHeap {
         &mut self,
         task: TaskId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<LogicalBytes, HeapFault> {
+    ) -> Result<(), HeapFault> {
         let Some(task) = self.tasks.get(&task.0.to_be_bytes(), &self.access)? else {
-            return Ok(LogicalBytes(0));
+            return Ok(());
         };
-        let value = match &task.state {
+        match &task.state {
             TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
                 if task.result_retained =>
             {
-                v
+                self.stream_edges(v, out)
             }
-            _ => return Ok(LogicalBytes(0)),
-        };
-        self.stream_edges(value, out)?;
-        Ok(LogicalBytes(value_cost(value)))
+            _ => Ok(()),
+        }
     }
     fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault> {
         for entity in &unreachable.entities {

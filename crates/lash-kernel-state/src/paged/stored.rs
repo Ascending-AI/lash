@@ -7,17 +7,16 @@
 //! already holds by its dirty cards with [`PagedHeap::store_cards`], so a
 //! point write re-encodes one leaf and its index path.
 //!
-//! A store's accounting is the heap's own (`ObjectHead::cost`) and is not
-//! reserved again: the machine held the arena's growth
-//! ([`PagedHeap::hold_growth`]) before it made it, and the store spends
-//! that hold.
+//! A store prices nothing: the machine's capacity meter counted the
+//! arena's growth when it was made (FIG-6791). A store counts a fresh
+//! entity into the census.
 
 use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key};
 use super::heap_impl::{PagedHeap, census_fault, normal_bytes};
 use super::tree::{Cell, Tree};
 use super::working::Taken;
 use super::{HeapWriteError, NameRef, ObjectKind, SiteRef};
-use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, NormalKey, PageValue};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, NormalKey, PageValue};
 
 /// The values one card of a list holds, and the insertion sequences one
 /// card of a table spans: the granularity of the arena's dirty worklist.
@@ -48,13 +47,11 @@ pub enum StoredObject {
 pub enum StoredHead {
     List {
         len: u64,
-        cost: u64,
     },
     Table {
         kind: ObjectKind,
         len: u64,
         next: u64,
-        cost: u64,
     },
     /// A closure or a shared variable, whose head is its whole contents.
     Small(StoredObject),
@@ -98,19 +95,14 @@ impl PagedHeap {
             return Ok(None);
         };
         let access = self.pages();
-        let cost = head.cost();
         Ok(Some(match &head.body {
-            Body::List { rows, .. } => StoredHead::List {
-                len: rows.len(),
-                cost,
-            },
+            Body::List { rows, .. } => StoredHead::List { len: rows.len() },
             Body::Table {
                 kind, rows, next, ..
             } => StoredHead::Table {
                 kind: *kind,
                 len: rows.len(),
                 next: *next,
-                cost,
             },
             Body::Closure { site, captures } => {
                 let mut held = Vec::with_capacity(captures.len() as usize);
@@ -210,11 +202,7 @@ impl PagedHeap {
     ) -> Result<(), HeapWriteError> {
         let head = self.stored_head(entity, object)?;
         let taken = self.take_working(entity)?;
-        let (after, closure, tasks) = (
-            head.cost(),
-            head.kind() == ObjectKind::Closure,
-            head.task_edges(),
-        );
+        let (closure, tasks) = (head.kind() == ObjectKind::Closure, head.task_edges());
         if taken.is_some() {
             self.edit_working(entity, |current, _| {
                 *current = head;
@@ -223,7 +211,7 @@ impl PagedHeap {
         } else {
             self.insert_working(entity, head)?;
         }
-        self.settle(entity, taken, after, closure, tasks)
+        self.settle(entity, taken, closure, tasks)
     }
 
     /// Writes the dirty cards of a list or a table the heap holds into its
@@ -309,7 +297,7 @@ impl PagedHeap {
         };
         drop(base);
         let taken = self.take_working(entity)?;
-        let (after, tasks) = self.edit_working(entity, |head, access| {
+        let tasks = self.edit_working(entity, |head, access| {
             match (&mut head.body, edit) {
                 (
                     Body::List { rows, next },
@@ -359,22 +347,21 @@ impl PagedHeap {
                 }
                 _ => return Err(malformed("stored cards changed kind")),
             }
-            Ok((head.cost(), head.task_edges()))
+            Ok(head.task_edges())
         })?;
-        self.settle(entity, taken, after, false, tasks)
+        self.settle(entity, taken, false, tasks)
     }
 
     /// Settles the census and the populations after the head of `entity`
-    /// replaced the one `taken` describes with one costing `after`.
+    /// replaced the one `taken` describes.
     fn settle(
         &mut self,
         entity: EntityId,
         taken: Option<Taken>,
-        after: u64,
         closure: bool,
         tasks: u64,
     ) -> Result<(), HeapWriteError> {
-        let before = taken.as_ref().map_or(0, |taken| taken.cost);
+        let added = taken.is_none();
         let (old_closures, old_tasks) = taken
             .as_ref()
             .and_then(|taken| taken.owned)
@@ -392,18 +379,8 @@ impl PagedHeap {
             .and_then(|v| v.checked_add(tasks))
             .ok_or_else(|| malformed("task-edge population overflow"))?;
         self.header = None;
-        let credit = self.spend_held(after.saturating_sub(before));
-        if let Some(census) = &mut self.census {
-            census
-                .changed(LogicalBytes(credit), LogicalBytes(0))
-                .map_err(census_fault)?;
-            if before == 0 {
-                census.added(LogicalBytes(after), 1).map_err(census_fault)?;
-            } else {
-                census
-                    .changed(LogicalBytes(before), LogicalBytes(after))
-                    .map_err(census_fault)?;
-            }
+        if added && let Some(census) = &mut self.census {
+            census.added(1).map_err(census_fault)?;
             self.accounting = census.certificate();
         }
         if entity.family == FamilyId::PRIMARY && entity.ordinal >= self.next_ordinal() {

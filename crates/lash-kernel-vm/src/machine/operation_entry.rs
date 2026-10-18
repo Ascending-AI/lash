@@ -62,7 +62,7 @@ impl KernelMachine {
             shared.resize(function.arity, None);
             for &index in exe.shared_params(function.index) {
                 let value = self.regs[args + index];
-                shared[index] = Some(self.new_cell(value)?);
+                shared[index] = Some(self.new_cell(value));
             }
         }
         Ok(OperationEntry {

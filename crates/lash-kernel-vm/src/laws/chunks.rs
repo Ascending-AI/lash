@@ -110,11 +110,7 @@ fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
         Vec::new(),
         Box::new(counting.clone()),
         Box::new(
-            lash_kernel_state::kernel_internals::census_impl::Census::restore(
-                certificate,
-                lash_kernel_doc::heap::LogicalBytes(ROOMY.memory),
-            )
-            .unwrap(),
+            lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate).unwrap(),
         ),
         Layout::default(),
     )

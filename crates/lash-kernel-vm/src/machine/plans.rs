@@ -4,8 +4,8 @@
 //! The plan performs the body's forms through the machine's own primitives,
 //! in the body's order, and holds what the body's frame would: its operands
 //! and variables are registers above the caller's, published as execution
-//! roots, each variable held as the body binds it, and what a statement
-//! pins is released when the plan ends that statement. Its call's depth unit stays
+//! roots, and what a statement pins is released when the plan ends that
+//! statement. Its call's depth unit stays
 //! held while it runs, so a call it makes is checked one deeper, as one the
 //! body's frame makes is (`K-BND-002`). Its own forms are not charged; the
 //! formula is, when the call returns (`K-CHG-003`, `K-CHG-007`).
@@ -23,16 +23,12 @@ use super::ops::Reg;
 use super::{Eval, Halt, Interrupt, KernelMachine, fault, raise};
 use crate::compile::{Executable, LibId, PreparedPlan};
 
-/// What a statement the plan performs started from: what it pins and
-/// holds from then on is its own, released when it ends.
+/// What a statement the plan performs started from: what it pins from
+/// then on is its own, released when it ends.
 #[derive(Clone, Copy)]
-pub(super) enum Mark {
-    Unaccounted,
-    Accounted {
-        pins: usize,
-        borrowed: usize,
-        reserved: u64,
-    },
+pub(super) struct Mark {
+    pins: usize,
+    borrowed: usize,
 }
 
 /// A `for` a plan walks: its cursor, the variable that holds what it
@@ -49,7 +45,7 @@ pub(super) struct Walk {
 
 /// One running plan: the machine, the caller's arguments and the plan's
 /// registers.
-pub(super) struct PlanRun<'m, const MEMORY: bool, const SHARED: bool> {
+pub(super) struct PlanRun<'m, const SHARED: bool> {
     pub(super) machine: &'m mut KernelMachine,
     pub(super) task: TaskId,
     pub(super) exe: &'m Executable,
@@ -76,7 +72,7 @@ pub(super) struct PlanRun<'m, const MEMORY: bool, const SHARED: bool> {
     pub(super) halt: Option<Box<Halt>>,
 }
 
-impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
+impl<const SHARED: bool> PlanRun<'_, SHARED> {
     fn shared(&self, slot: u32) -> bool {
         SHARED
             && self
@@ -95,15 +91,8 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
 
     pub(super) fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
         let holding = if self.shared(slot) {
-            let allocated = self.machine.new_cell(value);
-            Value::ObjectRef(self.held(allocated)?)
+            Value::ObjectRef(self.machine.new_cell(value))
         } else {
-            if MEMORY {
-                let reserved = self
-                    .machine
-                    .reserve_growth_metered(self.machine.cost_of_metered(&value));
-                self.held(reserved)?;
-            }
             value
         };
         self.machine.put(self.slots + slot as usize, holding);
@@ -143,21 +132,8 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
             return Ok(());
         };
         let machine = &mut *self.machine;
-        if MEMORY {
-            let Mark::Accounted {
-                pins,
-                borrowed,
-                reserved,
-            } = mark
-            else {
-                return Err(fault("an accounted statement has no memory scope"));
-            };
-            machine.pins.values.truncate(pins);
-            machine.pins.borrowed.truncate(borrowed);
-            if machine.heap.statement_reserved() != reserved {
-                machine.heap.release_reserved_to(reserved)?;
-            }
-        }
+        machine.pins.values.truncate(mark.pins);
+        machine.pins.borrowed.truncate(mark.borrowed);
         let registers = self.prepared.plan.registers as usize;
         machine.regs.clear_range(self.base..self.base + registers);
         machine.heap.execution_roots_moved();
@@ -165,7 +141,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
     }
 }
 
-impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
+impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// Steps the loop on `cursor` to its next element, counting the pass
     /// it starts, or finds it exhausted.
     pub(super) fn step(&mut self, cursor: PlanCursor) -> Result<Option<Value>, PlanExit> {
@@ -229,23 +205,16 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
     pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
         let ended = self.end_statement();
         self.held(ended)?;
-        self.statement = Some(if MEMORY {
-            #[cfg(any(test, feature = "perf-witness"))]
-            crate::perf_witness::record(|work| work.memory_scopes += 1);
-            let machine = &*self.machine;
-            Mark::Accounted {
-                pins: machine.pins.values.len(),
-                borrowed: machine.pins.borrowed.len(),
-                reserved: machine.heap.statement_reserved(),
-            }
-        } else {
-            Mark::Unaccounted
+        let machine = &*self.machine;
+        self.statement = Some(Mark {
+            pins: machine.pins.values.len(),
+            borrowed: machine.pins.borrowed.len(),
         });
         Ok(())
     }
 }
 
-impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY, SHARED> {
+impl<const SHARED: bool> PlanContext for PlanRun<'_, SHARED> {
     fn begin(&mut self) -> Result<(), PlanExit> {
         self.open_statement()
     }
@@ -268,10 +237,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
                 .flatten();
             let cell = match admitted {
                 Some(cell) => cell,
-                None => {
-                    let allocated = self.machine.new_cell(value);
-                    self.held(allocated)?
-                }
+                None => self.machine.new_cell(value),
             };
             self.machine
                 .put(self.slots + slot as usize, Value::ObjectRef(cell));
@@ -314,27 +280,12 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
         if self.shared(slot) {
             let cell = self.cell(slot);
             let cell = self.held(cell)?;
-            let growth = self.machine.in_arena(|arena| arena.cell_set(cell, value));
-            let growth = self.check(growth)?;
-            return if MEMORY {
-                let grown = self.machine.grow(growth);
-                self.held(grown)
-            } else {
-                Ok(())
-            };
+            let set = self.machine.in_arena(|arena| arena.cell_set(cell, value));
+            self.check(set)?;
+            self.machine.grown();
+            return Ok(());
         }
-        let at = self.slots + slot as usize;
-        if MEMORY {
-            let growth = self
-                .machine
-                .cost_of_metered(&value)
-                .saturating_sub(self.machine.cost_of_metered(&self.machine.regs[at]));
-            if growth != 0 {
-                let reserved = self.machine.reserve_growth_metered(growth);
-                self.held(reserved)?;
-            }
-        }
-        self.machine.put(at, value);
+        self.machine.put(self.slots + slot as usize, value);
         Ok(())
     }
 
@@ -431,12 +382,8 @@ impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY,
     }
 
     fn pin(&mut self, src: u32) -> Result<(), PlanExit> {
-        if MEMORY {
-            let pinned = self.machine.pin(self.base + src as usize);
-            self.held(pinned)
-        } else {
-            Ok(())
-        }
+        let pinned = self.machine.pin(self.base + src as usize);
+        self.held(pinned)
     }
 
     fn set_field(&mut self, target: u32, field: u32, src: u32) -> Result<(), PlanExit> {
@@ -621,22 +568,6 @@ impl KernelMachine {
         args: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Option<Result<Value, Value>>> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            self.run_plan_memory::<false, SHARED>(task, exe, lib, plan, args, entry)
-        } else {
-            self.run_plan_memory::<true, SHARED>(task, exe, lib, plan, args, entry)
-        }
-    }
-
-    fn run_plan_memory<const MEMORY: bool, const SHARED: bool>(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        lib: LibId,
-        plan: &std::sync::Arc<PreparedPlan>,
-        args: Reg,
-        entry: Option<&super::operation_entry::OperationEntry>,
-    ) -> Eval<Option<Result<Value, Value>>> {
         // The call's depth unit (`K-BND-002`): an operation's admission
         // checked it; any other plan's is checked as its body's frame is at
         // its push, and a refusal here names no function.
@@ -659,7 +590,7 @@ impl KernelMachine {
         // the call is charged, or roots a task (`push_operation_frame`).
         let keep = charging || root;
         self.plans += 1;
-        let mut run = PlanRun::<MEMORY, SHARED> {
+        let mut run = PlanRun::<SHARED> {
             machine: self,
             task,
             exe,

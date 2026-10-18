@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::mem::size_of;
 
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{
-    EntityId, FamilyId, HeapFault, HostResource, Identity, LogicalBytes, PageValue,
-};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, HostResource, Identity, PageValue};
 
 use super::malformed;
-use crate::paged::{CensusFault, CensusGraph, MIN_ENTITY_COST, SweepSet, TransientRoots};
+use crate::paged::{CensusFault, CensusGraph, SweepSet, TransientRoots};
 
 const WORDS: usize = 16;
 const BLOCK_BITS: u64 = (WORDS * 64) as u64;
@@ -207,7 +205,6 @@ impl Marks {
 }
 
 pub(super) struct Proof {
-    pub reachable: LogicalBytes,
     pub entities: u64,
     marks: Marks,
 }
@@ -252,6 +249,13 @@ impl Proof {
                 graph.sweep(&unreachable)?;
             }
         }
+        // What the run changed in memory and nothing reaches is garbage the
+        // census never held: forgotten, so the run's memory frees it.
+        let mut unreached = graph.unprojected();
+        unreached.retain(|entity| !self.marks.contains(Identity::Object(*entity)));
+        if !unreached.is_empty() {
+            graph.forget(&unreached);
+        }
         Ok(self.marks.stats)
     }
 }
@@ -281,7 +285,6 @@ pub(super) fn trace(
     limits.validate()?;
     let mut marks = Marks::new(limits);
     marks.budget(0)?;
-    let mut reachable = graph.root_cost()?.0;
     let mut roots = Vec::new();
     graph.persistent_roots(&mut |value| {
         marks.tick()?;
@@ -329,16 +332,29 @@ pub(super) fn trace(
         .chain(transient.native_args)
     {
         marks.tick()?;
-        reachable = add(reachable, graph.value_cost(value)?.0)?;
         marks.edges(|out| graph.value_edges(value, out))?;
     }
     for value in transient.borrowed {
         marks.tick()?;
         marks.edges(|out| graph.value_edges(value, out))?;
     }
-    reachable = add(reachable, transient.reserved.0)?;
     for entity in transient.fresh {
         marks.mark(Identity::Object(*entity))?;
+    }
+    if !graph.retires_results() {
+        let mut after = None;
+        loop {
+            let batch = graph.ended_tasks_after(after, BATCH)?;
+            validate_batch(&batch, after)?;
+            let Some(last) = batch.last().copied() else {
+                break;
+            };
+            after = Some(last);
+            for task in batch {
+                marks.tick()?;
+                marks.mark(Identity::Task(task))?;
+            }
+        }
     }
     let mut entities = 0_u64;
     while let Some(key) = marks.work_list.pop() {
@@ -357,54 +373,33 @@ pub(super) fn trace(
                 match key.domain {
                     Domain::Family(family) => {
                         let entity = EntityId { family, ordinal };
-                        let cost = graph
-                            .entity_cost(entity)?
+                        let facts = graph
+                            .entity_facts(entity)?
                             .ok_or_else(|| malformed("root reaches absent entity"))?;
-                        if cost.local < MIN_ENTITY_COST {
-                            return Err(malformed("entity below minimum local cost"));
-                        }
-                        reachable = add(reachable, cost.local.0)?;
                         entities = entities
                             .checked_add(1)
                             .ok_or_else(|| malformed("reached entity count overflow"))?;
-                        if cost.has_edges {
+                        if facts.has_edges {
                             marks.edges(|out| graph.entity_edges(entity, out))?;
                         }
                     }
                     Domain::Task => {
-                        let cost = {
-                            let mut cost = LogicalBytes(0);
-                            marks.edges(|out| {
-                                cost = graph.task_result(TaskId(ordinal), out)?;
-                                Ok(())
-                            })?;
-                            cost
-                        };
-                        reachable = add(reachable, cost.0)?;
+                        marks.edges(|out| graph.task_result(TaskId(ordinal), out))?;
                     }
                 }
             }
         }
     }
-    Ok(Proof {
-        reachable: LogicalBytes(reachable),
-        entities,
-        marks,
-    })
+    Ok(Proof { entities, marks })
 }
 
-fn add(a: u64, b: u64) -> Result<u64, CensusFault> {
-    a.checked_add(b)
-        .ok_or_else(|| malformed("exact logical cost overflow"))
-}
-
-pub(super) fn population_cost(
+/// How many entities the census holds, each checked present.
+pub(super) fn population(
     graph: &mut dyn CensusGraph,
     limits: TraceLimits,
-) -> Result<(LogicalBytes, u64), CensusFault> {
+) -> Result<u64, CensusFault> {
     let mut marks = Marks::new(limits);
     marks.budget(0)?;
-    let mut cost = graph.root_cost()?.0;
     let mut entities = 0_u64;
     let mut after = None;
     loop {
@@ -416,31 +411,13 @@ pub(super) fn population_cost(
         after = batch.last().copied();
         for entity in batch {
             marks.tick()?;
-            let local = graph
-                .entity_cost(entity)?
-                .ok_or_else(|| malformed("census entry has no cost"))?
-                .local;
-            if local < MIN_ENTITY_COST {
-                return Err(malformed("entity below minimum local cost"));
-            }
-            cost = add(cost, local.0)?;
+            graph
+                .entity_facts(entity)?
+                .ok_or_else(|| malformed("census entry has no row"))?;
             entities = entities
                 .checked_add(1)
                 .ok_or_else(|| malformed("entity count overflow"))?;
         }
     }
-    let mut after = None;
-    loop {
-        let batch = graph.ended_tasks_after(after, BATCH)?;
-        validate_batch(&batch, after)?;
-        if batch.is_empty() {
-            break;
-        }
-        after = batch.last().copied();
-        for task in batch {
-            marks.tick()?;
-            cost = add(cost, graph.task_result(task, &mut |_| Ok(()))?.0)?;
-        }
-    }
-    Ok((LogicalBytes(cost), entities))
+    Ok(entities)
 }

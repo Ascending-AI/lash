@@ -21,8 +21,8 @@ Rulings this design implements:
 - **SAM-2**: durable ids are assigned at the projection point (§C).
 - **SAM-3**: the native ABI is whatever is truly optimal, decided on evidence
   (§F: typed views over call-scoped borrows, measured).
-- **SAM-4**: the memory counter is rebased at every seal, plus statement kill
-  sets (§I, §E).
+- **SAM-4**: every seal saves the capacity the run holds and a cold open
+  counts it, plus statement kill sets (§I, §E).
 - **FIG-6693 rulings** (2026-10-17): every library helper is charged its
   declared formula at completion (hcharge, FIG-6694, §B), and helper bodies
   compile to Rust at build time as kernel-owned execution plans (hgen,
@@ -662,37 +662,43 @@ chunks it sealed as pages and the rest as working nodes, and the next seal
 continues. Only leaves stage under dirty pressure, sealed as they are; the
 seal reads a staged leaf back and places its rows canonically.
 
-### I. The memory counter rebase at seal
+### I. The capacity meter
 
-**Contract.**
+**Contract (FIG-6791).**
 
-- **Accounted domain.** The logical holdings metric
-  (`AccountingMetric::LocalCostV1`), checked before growth at defined admission
-  points: arena installs, nursery reservations (`Nursery::reserve` against the
-  granted headroom), frame pushes, binding growth and register-window growth.
-  Reserved capacity, proxy metadata, worklists and native transient buffers
-  count.
-- **Rebase [SAM-4].** The counter is `base + young`. At every seal `base`
-  becomes the census stored in the sealed root (`AccountingCertificate.upper`)
-  and `young` becomes 0. Only objects created since the last seal are released
-  by reference count against `young`. An older object that dies stays in `base`
-  until a collection refines it. A cold open sets `base` from the root it
-  opens. Warm and cold runs therefore hold identical counters from every seal
-  onward, and K-MACH-008 holds for bound errors too.
-- **Limiters at a bound (FIG-6768).** The run carries `MemoryMeter` with its
-  bounds. Under `On`, an admission that would pass the conservative bound
-  first collects cycles and refines the census exactly, freeing what nothing
-  holds; only when the exact count with what the admission asks for still
-  does not fit does the machine ask the host's `MemoryLimiter`. Recounting is
-  not a host choice. The charge bound is decided the same way by the host's
-  `ChargeLimiter`, at the unit the reference charger crosses (§B), the
-  crossing unit charged. Both are shaped as Wasmtime's `ResourceLimiter` and
-  `epoch_deadline_callback` (wasmtime 25.0.0): `limit_reached(used, limit)`
-  answers `Grow(by)`, which raises the limit by `by` and runs on (a limit
-  still reached is asked again), or `Refuse`, the default and a segment
-  without a limiter, which ends the run with the typed bound exactly as
-  before. The ask is at an exact, deterministic point before the
-  statement's effect. An embedded host's limiters are
+- **Accounted domain.** The capacity metric (`AccountingMetric::Capacity`):
+  the arena's resident value slots at 16 bytes each (long text and bytes at
+  16 bytes a slot) and the control state of resident frames and their
+  slots. Every place storage or control grows (an install, a body or table
+  write, a decode, a frame push) moves one counter and pays one compare
+  against the capacity mark. The mark is the next 64 KiB chunk, or one byte
+  past the bound when that is nearer, so the chunk paces only the slow path
+  and a bound below one chunk is checked at the bound itself. No value is
+  priced: per-value holds, credit, refunds, reservations and `LocalCostV1`
+  are gone.
+- **Verdict points.** Growth past the bound is decided where everything the
+  run holds is a root a sweep visits: a statement's end, before the next
+  effect; a native call's answer once its value is pinned, naming the
+  native; a large-buffer reservation (`text_buffer`, regex output) with the
+  bytes it asks for. A region enters only with a nursery of one chunk of
+  headroom and an island only with its admitted headroom, so no verdict
+  falls inside either.
+- **Sweep, then limiter (FIG-6768).** A verdict past the bound first sweeps:
+  the census refinement over what the machine holds (which warms changed
+  cold objects first), cycle collection and arena release over tasks,
+  session, registers and pins, then an exact recount. The first sweep keeps
+  every retained ended-task result; only if that leaves no room does a
+  second retire the results no handle reaches. Only when the recount with
+  what the verdict asks for still does not fit does the machine ask the
+  host's `MemoryLimiter`, with `used` = what the run holds plus what it asks
+  for. Recounting is not a host choice. The charge bound is decided the same
+  way by the host's `ChargeLimiter`, at the unit the reference charger
+  crosses (§B), the crossing unit charged. Both are shaped as Wasmtime's
+  `ResourceLimiter` and `epoch_deadline_callback` (wasmtime 25.0.0):
+  `limit_reached(used, limit)` answers `Grow(by)`, which raises the limit by
+  `by` and runs on (a limit still reached is asked again), or `Refuse`, the
+  default and a segment without a limiter, which ends the run with the typed
+  bound exactly as before. An embedded host's limiters are
   `MachineOptions::{memory_limiter, charge_limiter}`; a worker asks its
   parent with one `HostReadKind::Bound` read naming the bound, what the run
   used and its limit, the same exchange a read-bound `perform` makes, when
@@ -702,39 +708,45 @@ seal reads a staged leaf back and places its rows canonically.
   continues with them whatever bounds its machine was given, so a grown
   limit survives a resume. A crash before the seal that would save a grown
   limit resumes from the seal before it, which reaches the same point and
-  asks again, with nothing observable done in between. Seals and explicit
-  checkpoints rebase as before. `Off` removes reservations, holds, arena
-  memory pricing, census work and every limiter call; its memory readout
-  is zero and its checkpoint carries an unmetered certificate. Semantic
-  value summaries, persistence and reference ownership remain active.
-  Carry collection is paced by both bytes and entity count (FIG-6750): the
-  heap header retains each last-live estimate across cold opens. It collects
-  when byte growth reaches `max(last_live_bytes, 128 KiB)` or entity growth
-  reaches `max(ceil(last_live_entities / 2), 1)`. Large immutable scalars cannot
-  starve cleanup of retired frozen families. Ordinary parks and no-op carries
+  asks again, with nothing observable done in between.
+- **Seal and reopen.** Every seal saves the capacity the run holds in the
+  certificate (`AccountingCertificate { metric, capacity, entities,
+  refinements }`); a cold open counts at least that much until its first
+  sweep recounts, so after every seal a warm run's `meters().memory` equals
+  that of a cold reopen of its root. A carried session saves capacity 0: the
+  next cell counts what it reads. `Off` removes the meter, census work and
+  every limiter call; its memory readout is zero and its checkpoint carries
+  an unmetered certificate. Semantic value summaries, persistence and
+  reference ownership remain active. Carry collection is paced by entity
+  count (FIG-6750): the heap header retains the last live estimate across
+  cold opens, and a carry collects when entity growth reaches
+  `max(ceil(last_live_entities / 2), 1)`. Ordinary parks and no-op carries
   collect nothing merely for crossing a boundary.
-  Refinement prices cold objects by their persisted summaries and resident ones
-  by their bodies, and both give the same exact live cost, so the verdict does
-  not depend on residency.
-- **Plan dependence.** The refusal point may depend on the plan, within a slack
-  of the simultaneously active transient holdings (registers, nursery buffers,
-  pins). Kill sets (§E) make register releases plan-independent.
-- **Kept:** operation depth (K-BND-002, checked before a native, opcode or
+- **What a sweep may change.** A sweep the meter sets off falls at no point
+  the run's images fix, so the first sweep changes nothing a checkpoint
+  shows: it keeps every retained ended-task result and what it names. Only
+  a second sweep, which runs where the run would otherwise ask its limiter,
+  retires unreached results.
+- **Plan and residency dependence.** The refusal point may depend on the plan
+  and on what the run holds resident (a cold reopen holds less until it
+  reads), within the declared slack (K-BND-003, K-MACH-008).
+- **Physical fidelity.** The meter counts value slots, not allocator bytes:
+  object facts, body headers, table indexes, chunk slack and allocator
+  overhead go uncounted, so a record-heavy guest's RSS is a multiple of its
+  bound. The OS ceiling (FIG-6787) is the hard physical limit.
+- **Kept:** graph membership, entity counts and sweep generations (lens-lash
+  §(d)), operation depth (K-BND-002, checked before a native, opcode or
   body), shared parameter cells, result-transfer ownership, native guards and
   infrastructure-fault classification.
 
-**Owner.** `lash-kernel-state` (`census.rs`, `publication.rs`: `hold`,
-`refine`) and `lash-kernel-vm` (`machine/ops.rs`: `reserve`, `hold`).
+**Owner.** `lash-kernel-state` (`arena`: the counters and mark; `census.rs`,
+`publication.rs`: `refine_resident`, `record_capacity`) and `lash-kernel-vm`
+(`machine/limits.rs`: the mark, the verdict, the sweep and the limiter).
 
 **Invariant.** Two plans agree up to the earlier refusal: the same host
 answers, delivery order and committed waits, and no committed effect repeats.
 After every seal, a warm run's `meters().memory` equals that of a cold reopen of
-its root (the memory verdict kend-harness separates from semantic equality).
-
-**Built by** swap 2.5, after FIG-6672. **Deletes** per-statement exact
-refinement at the collection point, `reserve_held`'s frame pricing at frame
-publication (FIG-6318), and `Pins.reservations`. FIG-6672 removes the
-operation memory reservation and native-domain narrowing.
+its root.
 
 ### J. Generated helper execution plans and resumable segments
 

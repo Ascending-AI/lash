@@ -31,8 +31,7 @@ mod census_laws;
 
 pub use census::{
     AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,
-    EntityCost, LogicalPermit, MIN_ENTITY_COST, PendingReservation, RefinedDecision,
-    ReservationDecision, SweepSet, TransientRoots,
+    EntityFacts, SweepSet, TransientRoots,
 };
 pub use family::{
     CarryClassification, CarryRoots, DataOnlyCertificate, FamilyBase, FamilyRecord, FrozenRef,

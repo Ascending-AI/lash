@@ -606,12 +606,12 @@ fn generated_callees_run_a_declined_body_once() {
 }
 
 /// K-URI-WORK (FIG-6720): one completion price bounds the synchronous
-/// delegated calls and heap bookkeeping, including work before a URI raises.
-/// The decoder traverses percent-delimited chunks: its 64 units per input
-/// unit cover calls, holding changes and reservations; 32 cover fixed work.
+/// delegated calls, including work before a URI raises. The decoder
+/// traverses percent-delimited chunks: its 64 units per input unit cover
+/// calls; 32 cover fixed work.
 #[test]
 fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
-    use lash_kernel_vm::perf_witness::{self, Profiling as _};
+    use lash_kernel_vm::perf_witness::Profiling as _;
     use std::sync::Arc;
 
     let runner = runner::Runner::new("typescript").unwrap();
@@ -681,10 +681,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     prints: Vec::new(),
                 };
                 machine.count_work();
-                perf_witness::enable_work();
                 let step = machine.run(&mut world, u64::MAX).unwrap();
-                let fixed = perf_witness::take_work().unwrap();
-                perf_witness::disable_work();
                 let Step::Ended(end) = step else {
                     panic!("a synchronous decoder ends");
                 };
@@ -719,11 +716,9 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     )
                     .sum();
                 let calls: u64 = work.natives.iter().map(|native| native.counts.calls).sum();
-                let admitted_work =
-                    calls + fixed.heap.accounting_changes + fixed.heap.accounting_reservations;
                 assert!(
-                    admitted_work <= price,
-                    "{name}, repeats={repeats}, suffix={suffix:?}: {admitted_work} calls, holding changes and reservations exceed completion price {price}"
+                    calls <= price,
+                    "{name}, repeats={repeats}, suffix={suffix:?}: {calls} calls exceed completion price {price}"
                 );
             }
         }
@@ -946,8 +941,8 @@ fn generated_scalar_templates_agree_with_their_bodies() {
 }
 
 /// FIG-6731: generated helpers retain results, charge, effects and parks
-/// with memory Off, and never create a reservation scope.
-fn memory_off_helper_plans_keep_the_corpus_without_memory_scopes(shard: usize) {
+/// with memory Off, and do no census work.
+fn memory_off_helper_plans_keep_the_corpus_without_census_work(shard: usize) {
     let cases: Vec<runner::Case> = serde_json::from_str(include_str!(
         "../../lash-dialect-typescript/tests/helper_differential/cases.json"
     ))
@@ -984,14 +979,10 @@ fn memory_off_helper_plans_keep_the_corpus_without_memory_scopes(shard: usize) {
             assert_eq!(observed, expected, "{}", case.id);
             assert_eq!(
                 (
-                    work.memory_scopes,
-                    work.heap.arena_memory_prices,
-                    work.heap.accounting_reservations,
-                    work.heap.accounting_changes,
                     work.heap.accounting_additions,
                     work.heap.refinement_attempts
                 ),
-                (0, 0, 0, 0, 0, 0),
+                (0, 0),
                 "{}",
                 case.id
             );
@@ -1004,98 +995,98 @@ fn memory_off_helper_plans_keep_the_corpus_without_memory_scopes(shard: usize) {
 
 /// FIG-6731: shard 0/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_00_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(0);
+fn memory_off_00_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(0);
 }
 
 /// FIG-6731: shard 1/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_01_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(1);
+fn memory_off_01_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(1);
 }
 
 /// FIG-6731: shard 2/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_02_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(2);
+fn memory_off_02_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(2);
 }
 
 /// FIG-6731: shard 3/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_03_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(3);
+fn memory_off_03_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(3);
 }
 
 /// FIG-6731: shard 4/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_04_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(4);
+fn memory_off_04_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(4);
 }
 
 /// FIG-6731: shard 5/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_05_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(5);
+fn memory_off_05_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(5);
 }
 
 /// FIG-6731: shard 6/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_06_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(6);
+fn memory_off_06_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(6);
 }
 
 /// FIG-6731: shard 7/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_07_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(7);
+fn memory_off_07_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(7);
 }
 
 /// FIG-6731: shard 8/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_08_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(8);
+fn memory_off_08_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(8);
 }
 
 /// FIG-6731: shard 9/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_09_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(9);
+fn memory_off_09_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(9);
 }
 
 /// FIG-6731: shard 10/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_10_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(10);
+fn memory_off_10_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(10);
 }
 
 /// FIG-6731: shard 11/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_11_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(11);
+fn memory_off_11_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(11);
 }
 
 /// FIG-6731: shard 12/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_12_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(12);
+fn memory_off_12_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(12);
 }
 
 /// FIG-6731: shard 13/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_13_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(13);
+fn memory_off_13_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(13);
 }
 
 /// FIG-6731: shard 14/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_14_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(14);
+fn memory_off_14_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(14);
 }
 
 /// FIG-6731: shard 15/16 of the unchanged helper corpus with memory Off.
 #[test]
-fn memory_off_15_helper_plans_keep_the_corpus_without_memory_scopes() {
-    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(15);
+fn memory_off_15_helper_plans_keep_the_corpus_without_census_work() {
+    memory_off_helper_plans_keep_the_corpus_without_census_work(15);
 }
 
 /// FIG-6754's actual dialect path, including nested and statement-root

@@ -34,7 +34,8 @@ pub struct Usage {
     pub reservations: Vec<Reservation>,
     /// What the call held when it returned.
     pub held: LogicalBytes,
-    /// The logical cost of the mutable objects it built.
+    /// The bytes the capacity meter counts for what it built
+    /// ([`Arena::install_bound`]).
     pub grown: u64,
     /// How many mutable objects it built.
     pub objects: usize,
@@ -151,7 +152,9 @@ impl Bench {
     }
 
     fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
-        self.arena.install(new)
+        let grown = self.arena.install_bound(&new);
+        self.arena.install(new)?;
+        Ok(grown)
     }
 
     /// Calls `native` on `args` with `room` to reserve and `counter` as its
@@ -175,9 +178,8 @@ impl Bench {
                 usage,
             };
         }
-        // The machine admits what a call built once it returns, its holds
-        // paying first: objects that outgrow the room end the run at its
-        // memory bound.
+        // The machine counts what a call built once it returns: objects
+        // that outgrow the room end the run at its memory bound.
         let answer = match answer {
             Ok(_) | Err(NativeError::Raised(_)) if usage.grown > room => Err(Retry::Room {
                 wanted: LogicalBytes(usage.grown),

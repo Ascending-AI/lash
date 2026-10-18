@@ -518,7 +518,6 @@ impl HeapLifecycle for PagedHeap {
     fn instantiate(&mut self, frozen: &FrozenRef) -> Result<PageValue, HeapWriteError> {
         let header = read_header(&self.access, frozen)?;
         let family = if frozen.summary.entities == 0 {
-            self.reserve_held(0, frozen.summary.cost.0)?;
             None
         } else {
             Some(self.register_family(*frozen)?)
@@ -630,6 +629,9 @@ impl HeapLifecycle for PagedHeap {
             self.collect()?;
         }
         self.carried_collection_estimate();
+        // A carried session holds nothing in a run's memory: the next cell
+        // counts what it reads (FIG-6791).
+        self.record_capacity(0);
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
         Ok(SessionRoot {
@@ -651,8 +653,8 @@ impl HeapLifecycle for PagedHeap {
             ));
         }
         self.set_family_base(Box::new(FrozenBase::default()));
-        // The heap-header certificate already includes this binding holding
-        // cost. Attach the admitted root without adding that cost again.
+        // The heap-header certificate already counts what the bindings
+        // name. Attach the admitted root without counting it again.
         self.session = Tree::of_keyed(&session.bindings);
         Ok(session.bindings)
     }

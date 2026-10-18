@@ -77,7 +77,7 @@ pub(super) fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     let pages = Rc::new(RefCell::new(Pages::default()));
     let mut heap = PagedHeap::fresh(Box::new(Source(Rc::clone(&pages))), EditEpoch(1));
     heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+        Census::restore(heap.certificate()).expect("census"),
     ))
     .expect("install census");
     (heap, pages)
@@ -126,7 +126,7 @@ pub(super) fn seal(heap: &mut PagedHeap) -> SealedHeap {
     .expect("complete")
 }
 pub(super) fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedHeap {
-    heap.release_statement_roots().expect("release temporaries");
+    heap.release_statement_roots();
     seal(heap);
     let mut heap = PagedHeap::open_header(
         heap.sealed_root().expect("heap header"),
@@ -135,7 +135,7 @@ pub(super) fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedH
     )
     .expect("open");
     heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+        Census::restore(heap.certificate()).expect("census"),
     ))
     .expect("install census");
     heap
@@ -765,7 +765,7 @@ fn dirty_spill_quota_failure_preserves_the_committed_root_and_typed_cause() {
     let list = heap
         .allocate_object(ObjectInit::List(vec![int(7)]))
         .expect("list");
-    heap.release_statement_roots().expect("release");
+    heap.release_statement_roots();
     seal(&mut heap);
     let committed = heap.sealed_root().expect("committed root");
     let fault = HeapFault::Exhausted {
@@ -959,20 +959,15 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
     );
 }
 
-/// SAM-4 / K-MACH-008: release-by-count refunds only young growth; after
-/// every seal a warm heap and its cold reopen retain the same baseline.
+/// K-MACH-008 (FIG-6791): every seal saves the capacity the meter counted
+/// in the certificate, and a cold reopen restores the same certificate.
 #[test]
-fn every_seal_rebases_release_by_count_to_the_cold_counter() {
+fn every_seal_saves_the_counted_capacity_and_reopens_it() {
     use crate::paged::tree::Tree;
     use lash_kernel_doc::{Name, Site, Unit};
     let (mut heap, pages) = fresh();
-    for _ in 0..3 {
-        let baseline = heap.certificate();
-        assert!(heap.hold_growth(96).unwrap());
-        heap.release_young(32).unwrap();
-        assert_eq!(heap.certificate().upper.0, baseline.upper.0 + 64);
-        // Install the live holding so projection consumes its growth
-        // credit. A tuple is an immutable value, with no entity identity.
+    for round in 1..=3_u64 {
+        heap.record_capacity(round * 96);
         let mut bindings = Tree::new(false);
         let value = PageValue::Float(lash_kernel_doc::Float::new(1.5));
         bindings
@@ -989,14 +984,9 @@ fn every_seal_rebases_release_by_count_to_the_cold_counter() {
         heap.set_session_root(bindings).unwrap();
         seal(&mut heap);
         let sealed = heap.certificate();
-        let mut cold = reopen(&mut heap, &pages);
+        assert_eq!(sealed.capacity, round * 96);
+        let cold = reopen(&mut heap, &pages);
         assert_eq!(cold.certificate(), sealed);
-        heap.release_young(64).unwrap();
-        cold.release_young(64).unwrap();
-        assert_eq!(heap.certificate(), sealed);
-        assert_eq!(cold.certificate(), sealed);
-        assert!(heap.hold_growth(48).unwrap());
-        heap.release_young(48).unwrap();
         assert_eq!(heap.certificate(), sealed);
     }
 }

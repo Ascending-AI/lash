@@ -1,8 +1,8 @@
-//! A region admits a statement's logical growth before it allocates for
-//! it (`docs/design/kernel-regions.md` §3.5): a construction its nursery
-//! cannot hold leaves the statement to the reference before its members
-//! are collected, and an operand window is no logical growth, so that no
-//! Rust layout moves where a statement misses.
+//! A region admits a statement's capacity growth before it allocates for
+//! it (`docs/design/kernel-regions.md` §3.5, FIG-6791): a construction its
+//! nursery cannot hold leaves the statement to the reference before its
+//! members are collected, and an operand window is no capacity growth, so
+//! that no Rust layout moves where a statement misses.
 
 use std::alloc::{GlobalAlloc, Layout as Allocation, System};
 use std::cell::Cell;
@@ -80,8 +80,8 @@ fn program(expression: &str) -> String {
 }
 
 /// The value node of the first statement of `embedder`'s one region, run
-/// with `room` of its nursery left and memory accounted: its answer, and
-/// what it allocated.
+/// with `room` bytes of its nursery left and memory metered: its answer,
+/// and what it allocated.
 fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
     let machine = &mut embedder.machine;
     let exe: Arc<Executable> = Arc::clone(&machine.exe);
@@ -95,18 +95,18 @@ fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
         _ => panic!("the loop's first statement binds"),
     };
     let mut arena = machine.arena.borrow_mut();
+    let ceiling = arena.held() + room;
     let mut cx = Cx {
         meter: Meter::new(false),
         charging: exe.charging(),
         args: super::super::registers::Arguments::new(),
         exe: &exe,
         arena: &mut arena,
-        heap: &mut machine.heap,
         sites: &mut machine.sites,
         sessions: &mut [],
         limits: machine.limits,
         memory: true,
-        room,
+        ceiling,
         transient: 0,
         fault: None,
         lets: Vec::new(),
@@ -136,11 +136,11 @@ fn least_room(text: &str) -> u64 {
 /// buffer of its members.
 const REFUSAL_ALLOCATION: u64 = 1024;
 
-/// FIG-6782 (the oversized-construction witness of FIG-6764): a list,
-/// set, tuple, record or map literal whose least logical cost exceeds its
-/// region's nursery leaves the statement to the reference before it
-/// collects its members. Collecting 8,192 members first allocated 128 KiB
-/// past the 64 KiB room the region admitted.
+/// FIG-6782 (the oversized-construction witness of FIG-6764), over
+/// capacity (FIG-6791): a list, set, tuple, record or map literal whose
+/// least capacity exceeds its region's nursery leaves the statement to the
+/// reference before it collects its members. Collecting 8,192 members
+/// first allocated 128 KiB past the 64 KiB room the region admitted.
 #[test]
 fn a_construction_its_nursery_cannot_hold_misses_before_it_collects_its_members() {
     let zeros = |count: usize| vec!["0"; count].join(", ");
@@ -165,7 +165,7 @@ fn a_construction_its_nursery_cannot_hold_misses_before_it_collects_its_members(
     ] {
         let mut embedder = Embedder::new(&program(&expression));
         // The map's 32 entries fit the operand window and a whole nursery:
-        // it is refused by a room short of its least cost.
+        // it is refused by a room short of its least capacity, 65 slots.
         let room = if what == "map" { 512 } else { NURSERY };
         let (answer, allocated) = first_statement(&mut embedder, room);
         assert!(answer.is_none(), "the {what} is left to the reference");

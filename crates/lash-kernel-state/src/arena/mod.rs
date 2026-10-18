@@ -47,16 +47,16 @@ mod bench;
 mod chunks;
 mod keys;
 mod ops;
-mod pricing;
+mod reach;
 mod tables;
 
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, text_key};
+use ops::composite;
 pub use ops::invalid_key;
-use ops::{composite, object_cost};
-pub use pricing::{Pricing, Reached};
+pub use reach::{Reach, Reached};
 pub use tables::{Index, Place};
 
 use std::collections::HashMap;
@@ -73,8 +73,6 @@ use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value};
 /// descriptor certifies (`TupleSummary`, `ErrorRef`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
-    /// The logical cost of its members where it is held.
-    pub cost: u64,
     /// The tuple and error nesting depth inside it, itself included
     /// (`K-VAL-034`).
     pub depth: u32,
@@ -102,8 +100,7 @@ pub struct Facts {
     /// An immutable's page form: the descriptor it was admitted from, or
     /// the one its first projection built. Projection reuses it.
     pub page: std::cell::OnceCell<PageValue>,
-    /// An immutable composite's summary; a mutable object's logical cost
-    /// in `summary.cost`, as the heap prices its head.
+    /// An immutable composite's summary.
     pub summary: Summary,
     /// A resident map's, set's or record's key index.
     pub index: Option<Box<Index>>,
@@ -126,9 +123,6 @@ pub struct Facts {
     token: u64,
     /// Invalidates process-local positions before any body or index edit.
     revision: u64,
-    /// The seal it was created after, when it was created by the run:
-    /// an object created since the last seal is young (seam I).
-    born: Option<u64>,
     mark: bool,
 }
 
@@ -227,20 +221,19 @@ pub struct Arena {
     /// collection: none means no garbage cycle formed.
     candidates: u64,
     tokens: u64,
-    /// Seals and exact refinements since the run began: what tells a
-    /// young object.
-    seals: u64,
-    unaccounted: bool,
     /// Mutable objects the run created.
     allocations: u64,
-    /// The mutable objects created since the statement began: until a
-    /// root holds one, only the arena knows it is live.
-    statement: Vec<ArenaHandle>,
-    /// The cost of the young mutable objects released since it was last
-    /// taken (seam I).
-    released_young: u64,
-    /// Values held by resident bodies, roughly: what triggers a collection.
+    /// Values held by resident bodies, each body one more, long text and
+    /// bytes one a [`VALUE_BYTES`]: what triggers a collection, and what
+    /// the capacity meter counts (FIG-6791).
     resident: u64,
+    /// The control state's bytes the capacity meter counts beside the
+    /// resident values: frames and their slots, as the machine grew them
+    /// since its last sweep recounted them.
+    control: u64,
+    /// The held bytes ([`Arena::held`]) at which the capacity meter's
+    /// slow path runs next: [`u64::MAX`] when nothing meters.
+    capacity_mark: u64,
     /// Objects with a cold chunk, at most: none means nothing needs decoding.
     colds: u64,
     collect_at: u64,
@@ -253,6 +246,10 @@ pub struct Arena {
 
 /// What a collection's roots are visited with: each value they hold.
 pub type Visit<'a> = dyn FnMut(&Value) + 'a;
+
+/// The bytes the capacity meter counts for one resident value slot: the
+/// size of a [`Value`]. Long text and bytes count one slot a 16 bytes.
+pub const VALUE_BYTES: u64 = std::mem::size_of::<Value>() as u64;
 
 /// A cycle collection is due once resident values pass this, and then each
 /// time they double.
@@ -272,6 +269,7 @@ impl Arena {
             collect_at: FIRST_COLLECTION,
             release_at: FIRST_RELEASE,
             evict_at: chunks::EVICT_AT,
+            capacity_mark: u64::MAX,
             ..Self::default()
         }
     }
@@ -285,10 +283,54 @@ impl Arena {
         }
     }
 
-    /// An arena with lifetime management but no memory-accounting age ledger.
-    pub fn without_memory_accounting(mut self) -> Self {
-        self.unaccounted = true;
-        self
+    /// The bytes the capacity meter counts the arena holding: its resident
+    /// value slots at [`VALUE_BYTES`] each, and the control state the
+    /// machine counted (FIG-6791).
+    #[inline(always)]
+    pub fn held(&self) -> u64 {
+        self.resident
+            .saturating_mul(VALUE_BYTES)
+            .saturating_add(self.control)
+    }
+
+    /// Whether what the arena holds reached the capacity mark: the meter's
+    /// one compare where storage or control grows.
+    #[inline(always)]
+    pub fn capacity_due(&self) -> bool {
+        self.held() >= self.capacity_mark
+    }
+
+    /// Where the capacity meter's slow path runs next.
+    pub fn set_capacity_mark(&mut self, mark: u64) {
+        self.capacity_mark = mark;
+    }
+
+    /// Counts `bytes` more of control state: frames and their slots.
+    #[inline(always)]
+    pub fn grow_control(&mut self, bytes: u64) {
+        self.control = self.control.saturating_add(bytes);
+    }
+
+    /// Control state the run let go of: a frame it popped or dropped from
+    /// memory.
+    pub fn shrink_control(&mut self, bytes: u64) {
+        self.control = self.control.saturating_sub(bytes);
+    }
+
+    /// The control state as a sweep recounted it.
+    pub fn recount_control(&mut self, bytes: u64) {
+        self.control = bytes;
+    }
+
+    /// Recounts the values its live bodies hold, as a sweep does after it
+    /// freed what nothing reaches: the meter counts exactly what is left.
+    pub fn recount_resident(&mut self) {
+        let objects = &self.objects;
+        self.resident = (0..objects.capacity() as u32)
+            .filter_map(|index| objects.handle_at(index))
+            .filter_map(|handle| objects.get(handle))
+            .map(body_values)
+            .fold(0, u64::saturating_add);
     }
 
     /// The bodies, as a native call borrows them.
@@ -358,26 +400,6 @@ impl Arena {
         self.allocations
     }
 
-    /// A seal or an exact refinement priced what is live: every object
-    /// created before it is old, and releasing it refunds nothing.
-    pub fn rebased(&mut self) {
-        if self.unaccounted {
-            return;
-        }
-        self.seals += 1;
-    }
-
-    /// The statement ended: what it created is held by a root or garbage.
-    pub fn statement_ended(&mut self) {
-        self.statement.clear();
-    }
-
-    /// The cost of the young mutable objects released since the last call:
-    /// what the memory counter's young part refunds (seam I).
-    pub fn take_released_young(&mut self) -> u64 {
-        std::mem::take(&mut self.released_young)
-    }
-
     /// Whether an object of the arena may have a cold chunk.
     #[inline]
     pub fn any_cold(&self) -> bool {
@@ -435,17 +457,12 @@ impl Arena {
         self.insert(body, facts)
     }
 
-    /// The facts of a mutable object the run creates: dirty, young, and
-    /// without a durable id until a projection saves it.
-    fn created(&mut self, cost: u64, index: Option<Box<Index>>) -> Facts {
+    /// The facts of a mutable object the run creates: dirty, and without
+    /// a durable id until a projection saves it.
+    fn created(&mut self, index: Option<Box<Index>>) -> Facts {
         self.allocations += 1;
         Facts {
             dirty: true,
-            born: (!self.unaccounted).then_some(self.seals),
-            summary: Summary {
-                cost,
-                ..Summary::default()
-            },
             index,
             ..Facts::default()
         }
@@ -453,17 +470,8 @@ impl Arena {
 
     /// Creates the mutable object `body`.
     fn insert_created(&mut self, body: Body) -> ArenaHandle {
-        let cost = if self.unaccounted {
-            0
-        } else {
-            object_cost(&self.objects, &self.facts, &body)
-        };
-        let facts = self.created(cost, None);
-        let handle = self.insert(body, facts);
-        if !self.unaccounted {
-            self.statement.push(handle);
-        }
-        handle
+        let facts = self.created(None);
+        self.insert(body, facts)
     }
 
     /// The one handle of durable object `entity`: the one the run already
@@ -592,43 +600,6 @@ impl Arena {
         }
     }
 
-    /// The logical cost of `value` where it is held: the heap's local
-    /// cost of its page form.
-    pub fn cost_of(&self, value: &Value) -> u64 {
-        if self.unaccounted {
-            0
-        } else {
-            self.cost_of_metered(value)
-        }
-    }
-
-    /// Whether `new` written where `old` is held costs more than `old`:
-    /// [`Arena::cost_of`] of each, with the scalar kinds priced in place.
-    #[inline]
-    pub fn grows(&self, new: &Value, old: &Value) -> bool {
-        match (new, old) {
-            (Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent, _) => false,
-            (Value::Int(new), Value::Int(old)) => {
-                !self.unaccounted && word_bytes(*new) > word_bytes(*old)
-            }
-            _ => self.cost_of(new) > self.cost_of(old),
-        }
-    }
-
-    /// Logical pricing for a caller already dispatched to the accounted stream.
-    #[inline]
-    pub fn cost_of_metered(&self, value: &Value) -> u64 {
-        local_cost(&self.objects, &self.facts, value)
-    }
-
-    fn composite_summary(&self, members: &[Value]) -> Summary {
-        if self.unaccounted {
-            composite::<false>(&self.objects, &self.facts, members)
-        } else {
-            composite::<true>(&self.objects, &self.facts, members)
-        }
-    }
-
     /// An immutable composite's summary, as its page form certifies it;
     /// the default for everything else.
     pub fn summary_of(&self, value: &Value) -> Summary {
@@ -692,7 +663,7 @@ impl Arena {
 
     /// A tuple of `members`, or `too_deep` past `depth_limit`.
     pub fn tuple(&mut self, members: Vec<Value>, depth_limit: usize) -> Result<Value, Raise> {
-        let summary = self.composite_summary(&members);
+        let summary = composite(&self.facts, &members);
         if summary.depth as usize > depth_limit {
             return Err(Raise::TooDeep);
         }
@@ -718,12 +689,7 @@ impl Arena {
 
     /// An error value of texts `kind` and `message`, and `data`.
     pub fn error_of(&mut self, kind: Value, message: Value, data: Value) -> Value {
-        let mut summary = self.composite_summary(std::slice::from_ref(&data));
-        if !self.unaccounted {
-            summary.cost = text_bytes(&self.objects, &kind)
-                .saturating_add(text_bytes(&self.objects, &message))
-                .saturating_add(local_cost(&self.objects, &self.facts, &data));
-        }
+        let summary = composite(&self.facts, std::slice::from_ref(&data));
         Value::Error(self.insert(
             Body::Error(ErrorBody {
                 kind,
@@ -737,11 +703,9 @@ impl Arena {
         ))
     }
 
-    /// Installs what a native call built, in reservation order, and gives
-    /// the logical cost of its mutable objects. None takes a durable id:
-    /// a projection that saves one gives it.
-    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
-        let mut grown = 0u64;
+    /// Installs what a native call built, in reservation order. None takes
+    /// a durable id: a projection that saves one gives it.
+    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
         for (handle, object) in &mut new {
             let handle = *handle;
             // Keep the original handle column for the ownership pass after
@@ -774,7 +738,7 @@ impl Arena {
                     (Body::Record(table), Some(index))
                 }
                 NewObject::Tuple(members) => {
-                    let summary = self.composite_summary(&members);
+                    let summary = composite(&self.facts, &members);
                     self.install_one(
                         handle,
                         Body::Tuple(Sequence {
@@ -828,12 +792,7 @@ impl Arena {
                     message,
                     data,
                 } => {
-                    let mut summary = self.composite_summary(std::slice::from_ref(&data));
-                    if !self.unaccounted {
-                        summary.cost = text_bytes(&self.objects, &kind)
-                            .saturating_add(text_bytes(&self.objects, &message))
-                            .saturating_add(local_cost(&self.objects, &self.facts, &data));
-                    }
+                    let summary = composite(&self.facts, std::slice::from_ref(&data));
                     self.install_one(
                         handle,
                         Body::Error(ErrorBody {
@@ -849,19 +808,8 @@ impl Arena {
                     continue;
                 }
             };
-            let cost = if self.unaccounted {
-                0
-            } else {
-                object_cost(&self.objects, &self.facts, &body)
-            };
-            if !self.unaccounted {
-                grown = grown.saturating_add(cost);
-            }
-            let facts = self.created(cost, index.map(Box::new));
+            let facts = self.created(index.map(Box::new));
             self.install_one(handle, body, facts);
-            if !self.unaccounted {
-                self.statement.push(handle);
-            }
         }
         // Members are counted once the whole batch is placed: an object
         // may hold one built after it in the same call.
@@ -877,7 +825,7 @@ impl Arena {
                 });
             }
         }
-        Ok(grown)
+        Ok(())
     }
 
     fn install_one(&mut self, handle: ArenaHandle, body: Body, facts: Facts) {
@@ -899,9 +847,6 @@ impl Arena {
         if self.needs_decode(handle)? && !has_cold(&body) {
             self.colds = self.colds.saturating_sub(1);
         }
-        let mutable = self.facts(handle)?.entity.is_some();
-        let cost =
-            (mutable && !self.unaccounted).then(|| object_cost(&self.objects, &self.facts, &body));
         self.facts_mut(handle)?.cold = false;
         self.hold_members(&body);
         let placeholder = std::mem::replace(
@@ -910,12 +855,10 @@ impl Arena {
                 .ok_or_else(|| malformed("a stale handle reached the machine"))?,
             body,
         );
+        self.resident = self.resident.saturating_sub(body_values(&placeholder));
         self.unhold_members(&placeholder);
         let facts = self.facts_mut(handle)?;
         facts.revision = facts.revision.saturating_add(1);
-        if let Some(cost) = cost {
-            facts.summary.cost = cost;
-        }
         if index.is_some() {
             facts.index = index;
         }
@@ -1037,6 +980,7 @@ impl Arena {
         let listed = std::mem::take(&mut self.dirty);
         let mut dirty = Vec::with_capacity(listed.len());
         for handle in listed {
+            #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.projection_visits += 1);
             if self.objects.get(handle).is_none() {
                 continue;
@@ -1079,6 +1023,7 @@ impl Arena {
         if !is_mutable(self.body(handle)?) {
             return Err(malformed("an immutable has no durable identity"));
         }
+        #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.identified += 1);
         let entity = EntityId {
             family: lash_kernel_doc::heap::FamilyId::PRIMARY,
@@ -1131,6 +1076,7 @@ impl Arena {
         let mut marked = Vec::new();
         let mut result = Ok(());
         for (_, handle) in dirty {
+            #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.projection_visits += 1);
             let mut pending = Vec::new();
             self.push_members(handle, &mut pending)?;
@@ -1151,6 +1097,7 @@ impl Arena {
         marked: &mut Vec<ArenaHandle>,
     ) -> Result<(), NativeError> {
         while let Some(handle) = pending.pop() {
+            #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.projection_visits += 1);
             let Some(body) = self.objects.get(handle) else {
                 return Err(malformed("a stale handle reached the machine"));
@@ -1273,11 +1220,6 @@ impl Arena {
             if facts.cold || has_cold(body) {
                 self.colds = self.colds.saturating_sub(1);
             }
-            // Only an object no projection saved is known dead here: a
-            // page may still name one with an id.
-            if facts.born == Some(self.seals) && facts.entity.is_none() {
-                self.released_young = self.released_young.saturating_add(facts.summary.cost);
-            }
             each_member(body, &mut |value| members.extend(value.handle()));
             if let Body::Closure { captures, .. } = body {
                 members.extend(captures.iter().copied());
@@ -1320,6 +1262,7 @@ impl Arena {
                 continue;
             }
             facts.mark = true;
+            #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.arena_marks += 1);
             each_member(body, &mut |value| pending.extend(value.handle()));
             if let Body::Closure { captures, .. } = body {
@@ -1480,52 +1423,6 @@ pub fn each_member(body: &Body, visit: &mut dyn FnMut(&Value)) {
     }
 }
 
-fn text_bytes(objects: &Objects, text: &Value) -> u64 {
-    match text {
-        Value::Text(short) | Value::Function(short) => short.as_bytes().len() as u64,
-        Value::LongText(handle) | Value::LongFunction(handle) => match objects.get(*handle) {
-            Some(Body::LongText(text) | Body::LongFunction(text)) => text.summary.utf8_bytes,
-            _ => 0,
-        },
-        _ => 0,
-    }
-}
-
-fn word_bytes(word: i64) -> u64 {
-    u64::from(64 - word.unsigned_abs().leading_zeros()).div_ceil(8)
-}
-
-/// The heap's local cost of `value`'s page form
-/// (`lash_kernel_doc::heap_values::local_cost`).
-#[inline]
-pub(crate) fn local_cost(objects: &Objects, facts: &[Facts], value: &Value) -> u64 {
-    let summary = |handle: &ArenaHandle| {
-        facts
-            .get(handle.index() as usize)
-            .map_or(0, |facts| facts.summary.cost)
-    };
-    16u64.saturating_add(match value {
-        Value::Int(word) | Value::Timestamp(word) => word_bytes(*word),
-        Value::BigInt(handle) | Value::BigTimestamp(handle) => match objects.get(*handle) {
-            Some(Body::BigInt(int) | Body::Timestamp(int)) => int.bits().div_ceil(8),
-            _ => 0,
-        },
-        Value::Text(_) | Value::Function(_) | Value::LongText(_) | Value::LongFunction(_) => {
-            text_bytes(objects, value)
-        }
-        Value::Bytes(handle) => match objects.get(*handle) {
-            Some(Body::Bytes(bytes)) => bytes.len,
-            _ => 0,
-        },
-        Value::Tuple(handle) | Value::Error(handle) => summary(handle),
-        Value::Handle(handle) => match objects.get(*handle) {
-            Some(Body::Handle(handle)) => (handle.kind.len() + handle.id.len()) as u64,
-            _ => 0,
-        },
-        _ => 0,
-    })
-}
-
 fn value_summary(facts: &[Facts], value: &Value) -> Summary {
     match value {
         Value::Tuple(handle) | Value::Error(handle) => facts
@@ -1546,5 +1443,31 @@ fn value_summary(facts: &[Facts], value: &Value) -> Summary {
             ..Summary::default()
         },
         _ => Summary::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_kernel_doc::heap::FamilyId;
+
+    /// FIG-6791: a decoded body takes its placeholder's place in what the
+    /// capacity meter counts, so the run holds what a recount finds.
+    #[test]
+    fn a_decoded_body_replaces_its_placeholder_in_the_count() {
+        let mut arena = Arena::new();
+        let entity = EntityId {
+            family: FamilyId(1),
+            ordinal: 1,
+        };
+        let handle = arena.proxy(entity, ProxyKind::List);
+        let body = Body::List(Sequence {
+            len: 2,
+            chunks: vec![Chunk::Resident(vec![Value::Null, Value::Null])],
+        });
+        arena.materialized(handle, body).unwrap();
+        let counted = arena.held();
+        arena.recount_resident();
+        assert_eq!(counted, arena.held());
     }
 }

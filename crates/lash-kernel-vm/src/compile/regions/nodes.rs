@@ -20,6 +20,7 @@ use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{NewObject, Value, ValueKind};
+use lash_kernel_state::arena::VALUE_BYTES;
 
 use super::super::expr::{self, Callee, Expr, Kind, Make};
 use super::super::{
@@ -356,16 +357,9 @@ pub(super) fn compile(
             let site = ReadSite::new(site.0, stream.layout);
             self::index(site, node(target)?, node(index)?)
         }
-        // A scalar plan's values need no pin.
-        Kind::Pin(value) if !libs.general => node(value)?,
-        // The reference's pin anchor on the value the statement made.
-        Kind::Pin(value) => {
-            let value = node(value)?;
-            Box::new(move |slots, cx| {
-                let value = value(slots, cx)?;
-                cx.pin(&value).then_some(value)
-            })
-        }
+        // The reference's pin anchor roots the value for a sweep, which no
+        // region runs.
+        Kind::Pin(value) => node(value)?,
         Kind::Let {
             local, value, body, ..
         } => declared(local.at, node(value)?, node(body)?),
@@ -388,17 +382,11 @@ fn nodes(exprs: &[Expr], node: &mut impl FnMut(&Expr) -> Option<Node>) -> Option
 }
 
 /// The compiled expression variable at frame position `at`, declared with
-/// `value` for `body`: its memory held as the reference's declaration
-/// holds it, its value what `body`'s reads of it give.
+/// `value` for `body`: its value what `body`'s reads of it give. Its slot
+/// is the frame's, counted when the frame was pushed.
 fn declared(at: u32, value: Node, body: Node) -> Node {
     Box::new(move |slots, cx| {
         let value = value(slots, cx)?;
-        if cx.memory {
-            let bytes = cx.arena.cost_of_metered(&value);
-            if !cx.fits(bytes) || !cx.hold(bytes) {
-                return None;
-            }
-        }
         cx.lets.push((at, value));
         let result = body(slots, cx);
         cx.lets.pop();
@@ -656,8 +644,7 @@ fn tuple(items: Vec<Node>) -> Node {
         let members = cx.collecting(ValueKind::Tuple, items.len(), |cx| {
             values(&items, slots, cx)
         })?;
-        let tuple = cx.arena.tuple(members, cx.limits.value_depth()).ok()?;
-        cx.pin(&tuple).then_some(tuple)
+        cx.arena.tuple(members, cx.limits.value_depth()).ok()
     })
 }
 
@@ -861,21 +848,13 @@ fn scalar_hook<const CHARGING: bool>(answer: Answer) -> Hook {
 
 /// A heap path's write to a guest object, checked as the reference's
 /// member write checks it and held until its statement commits
-/// ([`Cx::commit_write`]), its growth's bound reserved out of the room. The
+/// ([`Cx::commit_write`]), its growth's capacity reserved out of the room. The
 /// write is its operator's last evaluation and the operator its
 /// statement's (`compile::regions`), so the statement evaluates nothing
 /// after it that reads what it writes; a statement that misses drops it.
 pub(crate) struct Held {
     pub(super) write: Prepared,
     pub(super) bound: u64,
-}
-
-impl Held {
-    /// Whether `value` is the object the write changes: its cost and
-    /// size are the reference's after the write.
-    pub(super) fn changes(&self, value: &Value) -> bool {
-        value.handle() == Some(self.write.target())
-    }
 }
 
 /// A member write checked as the reference's checks it: what it writes
@@ -895,17 +874,6 @@ pub(crate) enum Prepared {
     },
     /// `key` out of `set`.
     Unset { set: ArenaHandle, key: Value },
-}
-
-impl Prepared {
-    /// The object it writes.
-    fn target(&self) -> ArenaHandle {
-        match self {
-            Self::List { list, .. } => *list,
-            Self::Table { table, .. } => *table,
-            Self::Unset { set, .. } => *set,
-        }
-    }
 }
 
 /// The compiled `check` hook `function` of an allocating plan, as the
@@ -928,9 +896,10 @@ pub(super) fn check(libs: &Libs<'_>, id: LibId) -> Option<Check> {
 }
 
 /// Writes `value` at `place` of `target`, with `index` for an index, as
-/// the reference's member write does, marking what it changes dirty and
-/// holding its growth, which the room admits first; `None`, having
-/// written nothing, where the reference raises or must decode first.
+/// the reference's member write does, marking what it changes dirty, its
+/// growth (a new member's value slots) admitted by the room first; `None`,
+/// having written nothing, where the reference raises or must decode
+/// first.
 pub(crate) fn store(
     cx: &mut Cx<'_>,
     place: &Place,
@@ -944,8 +913,8 @@ pub(crate) fn store(
 
 /// The write of `value` at `place` of `target`, with `index` for an
 /// index, checked as the reference's member write checks it, and the most
-/// its growth holds, which the room admits; `None` where the reference
-/// raises or must decode first.
+/// capacity its growth holds, which the room admits; `None` where the
+/// reference raises or must decode first.
 #[inline(always)]
 pub(super) fn prepare(
     cx: &Cx<'_>,
@@ -958,11 +927,10 @@ pub(super) fn prepare(
         (Value::List(list), Place::Index) => {
             let length = cx.arena.len(list).ok()?;
             let at = position(&index).filter(|at| *at <= length)?;
-            let bound = cx.arena.cost_of(&value);
-            if !cx.fits(bound) {
+            if !cx.fits(VALUE_BYTES) {
                 return None;
             }
-            return Some((Prepared::List { list, at, value }, bound));
+            return Some((Prepared::List { list, at, value }, VALUE_BYTES));
         }
         (Value::Record(record), Place::Field(name)) => (record, *name, value),
         (Value::Record(record), Place::Index)
@@ -989,10 +957,7 @@ pub(super) fn prepare(
         }
         _ => return None,
     };
-    let bound = cx
-        .arena
-        .cost_of(&key)
-        .saturating_add(cx.arena.cost_of(&written));
+    let bound = 2 * VALUE_BYTES;
     if cx.arena.unresolved(table, &key).ok()?.is_some() || !cx.fits(bound) {
         return None;
     }
@@ -1006,21 +971,17 @@ pub(super) fn prepare(
     ))
 }
 
-/// Makes `write`, which [`prepare`] checked, and holds its growth; `None`
-/// where the arena must decode first.
+/// Makes `write`, which [`prepare`] checked; `None` where the arena must
+/// decode first.
 #[inline(always)]
 pub(super) fn apply(cx: &mut Cx<'_>, write: Prepared) -> Option<()> {
-    let grown = match write {
-        Prepared::List { list, at, value } => cx.arena.list_set(list, at, value).ok()?,
+    match write {
+        Prepared::List { list, at, value } => cx.arena.list_set(list, at, value).ok(),
         Prepared::Table {
             table,
             key,
             written,
-        } => cx.arena.table_write(table, key, written).ok()?,
-        Prepared::Unset { set, key } => {
-            cx.arena.table_delete(set, &key).ok()?;
-            0
-        }
-    };
-    cx.hold(grown).then_some(())
+        } => cx.arena.table_write(table, key, written).ok(),
+        Prepared::Unset { set, key } => cx.arena.table_delete(set, &key).ok(),
+    }
 }

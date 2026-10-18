@@ -52,7 +52,7 @@ fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     {
         let mut heap = PagedHeap::fresh(Box::new(Source(Rc::clone(&pages))), EditEpoch(1));
         heap.set_census(Box::new(
-            Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+            Census::restore(heap.certificate()).expect("census"),
         ))
         .expect("census");
         (heap, pages)

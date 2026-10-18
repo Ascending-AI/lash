@@ -792,7 +792,6 @@ impl KernelMachine {
         if !library.is_some_and(|lib| exe.lib(lib).operation()) {
             self.check_call_depth(task)?;
         }
-        self.reserve_growth(super::FRAME_BYTES)?;
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
@@ -821,6 +820,7 @@ impl KernelMachine {
             self.frame(task)?.awaiting = Some(stmt);
         }
         self.task(task)?.frames.push(frame);
+        self.grown();
         self.observe(Event::Push {
             task,
             code: code_id,
@@ -869,8 +869,7 @@ impl KernelMachine {
         };
         for (name, local) in &code.free {
             if let Some(frozen) = saved.captures.get(name) {
-                let value =
-                    self.heap_write(|heap| heap.instantiate(frozen).map_err(super::write_halt))?;
+                let value = self.heap.instantiate(frozen).map_err(super::write_halt)?;
                 let value = self.admit_page(&value)?;
                 self.bind(task, local.at, local.shared, value)?;
             }
@@ -887,26 +886,9 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            self.bind_memory::<false>(task, at, shared, value)
-        } else {
-            self.bind_memory::<true>(task, at, shared, value)
-        }
-    }
-
-    pub(super) fn bind_memory<const MEMORY: bool>(
-        &mut self,
-        task: TaskId,
-        at: u32,
-        shared: bool,
-        value: Value,
-    ) -> Result<(), Halt> {
         let state = if shared {
-            SlotState::Cell(self.new_cell(value)?)
+            SlotState::Cell(self.new_cell(value))
         } else {
-            if MEMORY {
-                self.reserve_growth_metered(self.cost_of_metered(&value))?;
-            }
             SlotState::Value(value)
         };
         #[cfg(test)]
@@ -1068,7 +1050,7 @@ impl KernelMachine {
         let (value, failed) = match outcome {
             CommittedOutcomeRecord::Elapsed => (lash_kernel_doc::heap::PageValue::Null, false),
             CommittedOutcomeRecord::Rejected(frozen) => (
-                self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?,
+                self.heap.instantiate(&frozen).map_err(Interrupt::from)?,
                 true,
             ),
             CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
@@ -1077,8 +1059,7 @@ impl KernelMachine {
                 } else {
                     0
                 };
-                let value =
-                    self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
+                let value = self.heap.instantiate(&frozen).map_err(Interrupt::from)?;
                 if self.charging {
                     self.charge(charge)?;
                 }
@@ -1159,14 +1140,13 @@ impl KernelMachine {
                 );
             }
         };
-        let frozen =
-            self.heap_write(|heap| heap.freeze_datum(&decoded).map_err(Interrupt::from))?;
+        let frozen = self.heap.freeze_datum(&decoded).map_err(Interrupt::from)?;
         let charge = if self.charging {
             self.heap.frozen_charge(&frozen)?
         } else {
             0
         };
-        let value = self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
+        let value = self.heap.instantiate(&frozen).map_err(Interrupt::from)?;
         let value = self.admit_page(&value)?;
         if self.charging {
             self.charge(charge)?;

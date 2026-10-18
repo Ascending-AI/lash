@@ -1,86 +1,30 @@
-//! A task's frames as a resident refinement reads them (seam I,
-//! FIG-6748): what their rows would cost and hold if a projection wrote
-//! them now, read where they are. A row that holds what its frame holds is
-//! read as it is; a frame that changed since its row was written is priced
-//! by what it holds in memory, nothing projected.
+//! A task's frames as a resident sweep reads them (seam I, FIG-6748): what
+//! their rows hold, read where they are. A row that holds what its frame
+//! holds is read as it is; a frame that changed since its row was written
+//! is walked through what it holds in memory, nothing projected. The
+//! capacity meter recounts the resident frames here (FIG-6791).
 
-use lash_kernel_doc::Value;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
-use lash_kernel_state::arena::{Arena, Pricing, Reached};
+use lash_kernel_state::arena::{Arena, Reach, Reached, VALUE_BYTES};
 use lash_kernel_state::kernel_internals::resident::frame_values;
-use lash_kernel_state::kernel_internals::tree::Cell;
 use lash_kernel_state::paged::FrameRecord;
 
-use super::super::{Completion, Control, Frame, SlotState, TryPhase};
 use super::{Frames, row};
 
-impl Frame {
-    /// What the frame's row would cost if a projection wrote it now
-    /// (`FrameRecord::cost`): its bindings, what its loops walk, its
-    /// departing payloads, its call's arguments and its continuation's
-    /// roles. Where it stands costs nothing.
-    fn resident_cost(&self, arena: &Arena) -> u64 {
-        let mut cost = 64_u64;
-        let mut add = |bytes: u64| cost = cost.saturating_add(bytes);
-        for slot in &self.slots.values {
-            if let SlotState::Value(value) = slot {
-                add(arena.cost_of(value));
-            }
-        }
-        for control in &self.control {
-            match control {
-                // What it walks holds a tuple's members, nothing else.
-                Control::For { cursor, header, .. } => {
-                    for value in cursor.walked().into_iter().chain(header.held()) {
-                        if let Value::Tuple(_) = value {
-                            add(arena.summary_of(&value).cost);
-                        }
-                    }
-                }
-                Control::Try {
-                    phase:
-                        TryPhase::Finally(
-                            Completion::Return(value)
-                            | Completion::ReturnVia { value, .. }
-                            | Completion::Throw(value),
-                        ),
-                    ..
-                } => add(arena.cost_of(value)),
-                _ => {}
-            }
-        }
-        if let Some(Ok(value) | Err(value)) = &self.cleaning {
-            add(arena.cost_of(value));
-        }
-        if let Some(call) = &self.library {
-            call.args.iter().for_each(|value| add(arena.cost_of(value)));
-        }
-        if let Some(pending) = self.pending.peek() {
-            for role in &pending.roles {
-                add(arena.cost_of(&role.value));
-            }
-        }
-        cost
-    }
-}
-
 impl Frames {
-    /// What the frames' rows would cost if a projection wrote them now,
-    /// giving `out` what they hold: a row's values by their page forms,
-    /// a changed frame's through `arena`'s walk, priced in `pricing`.
-    pub(in crate::machine) fn price(
+    /// Gives `out` what the frames hold: a row's values by their page
+    /// forms, a changed frame's through `arena`'s walk.
+    pub(in crate::machine) fn reach(
         &self,
         arena: &mut Arena,
-        pricing: &mut Pricing,
+        reach: &mut Reach,
         out: &mut dyn FnMut(Reached<'_>) -> Result<(), HeapFault>,
-    ) -> Result<u64, HeapFault> {
+    ) -> Result<(), HeapFault> {
         let rows = self.rows.len();
-        let mut cost = self.rows.cost();
         // The rows a projection would write: past the stack it removes
         // them, a changed frame's it writes again.
         let mut written = vec![false; rows as usize];
         for index in self.len..rows {
-            cost -= row::<FrameRecord>(&self.rows, index, &self.access)?.cost();
             written[index as usize] = true;
         }
         let mut values = Vec::new();
@@ -89,14 +33,12 @@ impl Frames {
                 continue;
             }
             if *index < rows {
-                cost -= row::<FrameRecord>(&self.rows, *index, &self.access)?.cost();
                 written[*index as usize] = true;
             }
-            cost = cost.saturating_add(frame.resident_cost(arena));
             values.clear();
             frame.each_value(&mut |value| values.push(*value));
             for value in &values {
-                arena.price(pricing, value, out)?;
+                arena.reach(reach, value, out)?;
             }
         }
         for (index, written) in written.into_iter().enumerate() {
@@ -108,6 +50,30 @@ impl Frames {
                 out(Reached::Page(value))
             })?;
         }
-        Ok(cost)
+        Ok(())
     }
+
+    /// The bytes the capacity meter counts for the resident frames
+    /// (FIG-6791): what each added as it came into memory.
+    pub(in crate::machine) fn control_bytes(&self) -> u64 {
+        self.cache
+            .iter()
+            .map(|(_, frame)| frame_bytes(frame))
+            .fold(0, u64::saturating_add)
+    }
+
+    /// Gives back what the resident frames count, as the task they belong
+    /// to leaves memory.
+    pub(in crate::machine) fn release_control(&mut self) {
+        let bytes = self.control_bytes();
+        self.arena.borrow_mut().shrink_control(bytes);
+    }
+}
+
+/// The bytes the capacity meter counts for `frame` while it is resident:
+/// its [`FRAME_BYTES`](crate::machine::FRAME_BYTES) and its slots.
+pub(super) fn frame_bytes(frame: &super::Frame) -> u64 {
+    (frame.slots.values.len() as u64)
+        .saturating_mul(VALUE_BYTES)
+        .saturating_add(crate::machine::FRAME_BYTES)
 }

@@ -530,12 +530,6 @@ fn memory_off_removes_accounting_and_survives_a_cold_resume() {
     let work = crate::perf_witness::take_work().unwrap();
     crate::perf_witness::disable_work();
     assert_eq!(result(end), int(200));
-    assert_eq!(work.heap.arena_memory_prices, 0, "Off priced arena memory");
-    assert_eq!(
-        work.heap.accounting_reservations, 0,
-        "Off reserved census bytes"
-    );
-    assert_eq!(work.heap.accounting_changes, 0, "Off updated the census");
     assert_eq!(
         work.heap.accounting_additions, 0,
         "Off added census entities"

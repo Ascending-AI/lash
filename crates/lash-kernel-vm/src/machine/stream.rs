@@ -127,32 +127,12 @@ pub(super) struct Admitted {
     region: RegionIx,
 }
 
-/// Selected once when the run starts or opens; the interpreter's memory
-/// operations are compiled out of the unaccounted stream.
-pub(super) type Runner = fn(&mut KernelMachine, &mut dyn Host, &Running<'_>, usize) -> Eval<Ran>;
-
-pub(super) fn runner(meter: crate::MemoryMeter) -> Runner {
-    match meter {
-        crate::MemoryMeter::Off => KernelMachine::run_memory::<false>,
-        crate::MemoryMeter::On => KernelMachine::run_memory::<true>,
-    }
-}
-
 impl KernelMachine {
-    pub(super) fn run(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        pc: usize,
-    ) -> Eval<Ran> {
-        (self.memory_stream)(self, host, running, pc)
-    }
-
     /// Runs a statement's ops from `pc`. The common ops run here; the rest
     /// in [`Self::in_region`] and [`Self::run_rare`]. Every op that stands
     /// in no region closes the one it follows first; an exit inside a
     /// region commits the events before the op that left it.
-    fn run_memory<const MEMORY: bool>(
+    pub(super) fn run(
         &mut self,
         host: &mut dyn Host,
         running: &Running<'_>,
@@ -166,7 +146,7 @@ impl KernelMachine {
             pc += 1;
             match op {
                 Op::Region { region, total } => {
-                    pc = self.enter_region::<MEMORY>(running, region, total, pc)?;
+                    pc = self.enter_region(running, region, total, pc)?;
                 }
                 Op::Const { dst, c } => {
                     let value = inside!(
@@ -184,12 +164,7 @@ impl KernelMachine {
                 }
                 Op::LetBind { local, src } => {
                     let value = self.take(at(src));
-                    inside!(
-                        self,
-                        running,
-                        pc,
-                        self.bind_memory::<MEMORY>(task, local.at, false, value)
-                    );
+                    inside!(self, running, pc, self.bind(task, local.at, false, value));
                 }
                 Op::LetEnd { local } => {
                     inside!(self, running, pc, self.frame(task))
@@ -214,12 +189,7 @@ impl KernelMachine {
                 | Op::MakeRecord { .. }
                 | Op::Closure { .. }
                 | Op::Pin { .. } => {
-                    inside!(
-                        self,
-                        running,
-                        pc,
-                        self.in_region_rare::<MEMORY>(running, op)
-                    );
+                    inside!(self, running, pc, self.in_region_rare(running, op));
                 }
                 Op::Nested { act, args } => {
                     self.close_region(running.stream);
@@ -246,7 +216,7 @@ impl KernelMachine {
                         if flow == Flow::Step {
                             return Ok(Ran::Step);
                         }
-                    } else if let Some(ran) = self.run_rare::<MEMORY>(host, running, op)? {
+                    } else if let Some(ran) = self.run_rare(host, running, op)? {
                         return Ok(ran);
                     }
                 }
@@ -275,9 +245,6 @@ impl KernelMachine {
                 Op::WriteSession { name, src } => {
                     self.close_region(running.stream);
                     let value = self.take(at(src));
-                    if MEMORY {
-                        self.hold(self.cost_of_metered(&value))?;
-                    }
                     let name = &running.stream.names[name.ix()];
                     if !self.session_write(name, value, true)? {
                         return unbound(name);
@@ -299,13 +266,13 @@ impl KernelMachine {
                 Op::Bind { local, src } => {
                     self.close_region(running.stream);
                     let value = self.take(at(src));
-                    self.bind_memory::<MEMORY>(task, local.at, false, value)?;
+                    self.bind(task, local.at, false, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::WriteLocal { local, src } => {
                     self.close_region(running.stream);
                     let value = self.take(at(src));
-                    self.write_local::<MEMORY>(task, running.exe, local, value)?;
+                    self.write_local(task, running.exe, local, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::Branch { cond, then_, else_ } => {
@@ -336,7 +303,7 @@ impl KernelMachine {
                 }
                 op => {
                     self.close_region(running.stream);
-                    if let Some(ran) = self.run_rare::<MEMORY>(host, running, op)? {
+                    if let Some(ran) = self.run_rare(host, running, op)? {
                         return Ok(ran);
                     }
                 }
@@ -351,7 +318,7 @@ impl KernelMachine {
     /// (`RegionSummary::admit`); one that passes the bound replays as the
     /// reference charges it ([`Self::replay`]).
     #[inline(always)]
-    fn enter_region<const MEMORY: bool>(
+    fn enter_region(
         &mut self,
         running: &Running<'_>,
         region: RegionIx,
@@ -378,7 +345,7 @@ impl KernelMachine {
                 self.region = Some(Admitted { entry, end, region });
                 Ok(pc)
             }
-            _ => self.admit_slowly::<MEMORY>(running, region, entry, pc),
+            _ => self.admit_slowly(running, region, entry, pc),
         }
     }
 
@@ -386,7 +353,7 @@ impl KernelMachine {
     /// replays when an event passes the bound, and otherwise runs whole.
     #[cold]
     #[inline(never)]
-    fn admit_slowly<const MEMORY: bool>(
+    fn admit_slowly(
         &mut self,
         running: &Running<'_>,
         region: RegionIx,
@@ -395,7 +362,7 @@ impl KernelMachine {
     ) -> Eval<usize> {
         let table = &running.stream.regions;
         if let Some((event, crossed)) = table.crossing(region.0, entry, self.bounds.charge_limit) {
-            return self.replay::<MEMORY>(running, region, entry, event, crossed, pc);
+            return self.replay(running, region, entry, event, crossed, pc);
         }
         let end = table.commit(region.0, entry, usize::MAX);
         self.region = Some(Admitted { entry, end, region });
@@ -412,7 +379,7 @@ impl KernelMachine {
     /// event's op: whole, or up to the next event that passes the bound.
     #[cold]
     #[inline(never)]
-    fn replay<const MEMORY: bool>(
+    fn replay(
         &mut self,
         running: &Running<'_>,
         region: RegionIx,
@@ -431,7 +398,7 @@ impl KernelMachine {
             });
             for op_at in pc..stop {
                 let op = running.stream.ops[op_at];
-                if let Err(exit) = self.in_region::<MEMORY>(running, op) {
+                if let Err(exit) = self.in_region(running, op) {
                     self.leave_region(running.stream, op_at as u32);
                     return Err(exit);
                 }
@@ -507,7 +474,7 @@ impl KernelMachine {
     /// own. The common ones run here; the rest in
     /// [`Self::in_region_rare`].
     #[inline(always)]
-    fn in_region<const MEMORY: bool>(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
+    fn in_region(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
         let task = running.task;
         match op {
             Op::Const { dst, c } => {
@@ -520,7 +487,7 @@ impl KernelMachine {
             }
             Op::LetBind { local, src } => {
                 let value = self.take(at(src));
-                self.bind_memory::<MEMORY>(task, local.at, false, value)?;
+                self.bind(task, local.at, false, value)?;
             }
             Op::LetEnd { local } => {
                 self.frame(task)?.set_slot(local.at, SlotState::Empty);
@@ -533,19 +500,19 @@ impl KernelMachine {
                 };
                 self.put(at(dst), value);
             }
-            op => self.in_region_rare::<MEMORY>(running, op)?,
+            op => self.in_region_rare(running, op)?,
         }
         Ok(())
     }
 
     #[inline(never)]
-    fn in_region_rare<const MEMORY: bool>(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
+    fn in_region_rare(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         match op {
             Op::Unbound { name, .. } => unbound(&stream.names[name.ix()]),
             Op::LetBindShared { local, src } => {
                 let value = self.take(at(src));
-                Ok(self.bind_memory::<MEMORY>(task, local.at, true, value)?)
+                Ok(self.bind(task, local.at, true, value)?)
             }
             Op::Field { at: r, field } => {
                 let r = at(r);
@@ -571,12 +538,7 @@ impl KernelMachine {
                 self.put(at(dst), closure);
                 Ok(())
             }
-            Op::Pin { src } => {
-                if MEMORY {
-                    self.pin(at(src))?;
-                }
-                Ok(())
-            }
+            Op::Pin { src } => Ok(self.pin(at(src))?),
             _ => Err(fault("an op that stands in no charge region ran in one").into()),
         }
     }
@@ -584,7 +546,7 @@ impl KernelMachine {
     /// The ops [`Self::run`] leaves out of its loop: `Some` ends the
     /// range.
     #[inline(never)]
-    fn run_rare<const MEMORY: bool>(
+    fn run_rare(
         &mut self,
         host: &mut dyn Host,
         running: &Running<'_>,
@@ -629,22 +591,16 @@ impl KernelMachine {
             }
             Op::BindShared { local, src } => {
                 let value = self.take(at(src));
-                self.bind_memory::<MEMORY>(task, local.at, true, value)?;
+                self.bind(task, local.at, true, value)?;
                 Ran::Done
             }
             Op::BindSession { name, src } => {
                 let value = self.take(at(src));
-                if MEMORY {
-                    self.hold(self.cost_of_metered(&value))?;
-                }
                 self.session_write(&stream.names[name.ix()], value, false)?;
                 Ran::Done
             }
             Op::WriteUnbound { name, src } => {
-                let value = self.take(at(src));
-                if MEMORY {
-                    self.hold(self.cost_of_metered(&value))?;
-                }
+                self.take(at(src));
                 return unbound(&stream.names[name.ix()]);
             }
             Op::SetField { target, field, src } => {
@@ -856,8 +812,8 @@ impl KernelMachine {
             Arc::new(site)
         });
         let site = Arc::clone(site);
-        let (closure, cost) = self.arena.borrow_mut().new_closure(site, cells.to_vec());
-        self.grow(cost)?;
+        let closure = self.arena.borrow_mut().new_closure(site, cells.to_vec());
+        self.grown();
         Ok(closure)
     }
 
@@ -923,7 +879,7 @@ impl KernelMachine {
             SlotState::Empty => unbound(&exe.code(code).slots[local.slot as usize].name),
         }
     }
-    fn write_local<const MEMORY: bool>(
+    fn write_local(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -933,31 +889,14 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         let code = frame.code;
         match frame.slot(local.at) {
-            SlotState::Value(old) => {
-                let old = *old;
-                let growth = if MEMORY {
-                    self.cost_of_metered(&value)
-                        .saturating_sub(self.cost_of_metered(&old))
-                } else {
-                    0
-                };
-                let frame = self.frame(task)?;
-                if growth == 0 {
-                    frame.set_slot(local.at, SlotState::Value(value));
-                } else {
-                    // The slot's old holding already pays for that much.
-                    // Hold its growth before publishing or changing it.
-                    self.reserve_growth_metered(growth)?;
-                    self.frame(task)?
-                        .set_slot(local.at, SlotState::Value(value));
-                }
+            SlotState::Value(_) => {
+                self.frame(task)?
+                    .set_slot(local.at, SlotState::Value(value));
             }
             SlotState::Cell(cell) => {
                 let cell = *cell;
-                let growth = self.in_arena(|arena| arena.cell_set(cell, value))?;
-                if MEMORY {
-                    self.grow(growth)?;
-                }
+                self.in_arena(|arena| arena.cell_set(cell, value))?;
+                self.grown();
             }
             SlotState::Empty => return unbound(&exe.code(code).slots[local.slot as usize].name),
         }

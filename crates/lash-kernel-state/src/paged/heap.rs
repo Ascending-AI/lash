@@ -1,11 +1,11 @@
 //! S1: [`SemanticHeap`], the one deep module guest execution and
 //! checkpoints use.
 //!
-//! The heap owns mutation, page residency, identity and accounting behind
+//! The heap owns mutation, page residency, identity and its census behind
 //! this interface. It never lends `&mut` access to an object, a `Vec` of
 //! values or a mutating iterator: every edit is a checked operation that
-//! updates the collection path, its directory head, its logical-cost delta
-//! and its identity-edge summary together, before the edit is readable.
+//! updates the collection path, its directory head and its identity-edge
+//! summary together, before the edit is readable.
 //! It exposes values, collections and identities, never pages or digests
 //! (except [`SemanticHeap::seal`]'s root).
 //!
@@ -17,19 +17,16 @@
 //!
 //! - a guest error is a `Raised` value the operation's semantics define
 //!   (`type_error`, `index_out_of_range`, an illegal key);
-//! - a guest bound is [`HeapWriteError::Memory`], only after the census's
-//!   exact refinement refused (S7);
 //! - an infrastructure failure is a [`HeapFault`]: it ends the activation.
 
 use std::ops::Range;
 
 use super::{NameRef, SiteRef};
 use lash_kernel_doc::heap::{
-    EntityId, HeapFault, Identity, LogicalBytes, PageReader, PageRef, PageValue, TextRef, TupleRef,
+    EntityId, HeapFault, Identity, PageReader, PageRef, PageValue, TextRef, TupleRef,
 };
 pub use lash_kernel_doc::heap::{FieldName, NormalKey};
 
-use super::census::TransientRoots;
 use super::root::HeapRoot;
 use super::source::PageSource;
 
@@ -105,15 +102,6 @@ pub enum HeapWriteError {
     /// data; nothing changed.
     #[error("{kind}: {message}")]
     Raised { kind: &'static str, message: String },
-    /// The memory bound refused, after exact refinement (S7).
-    #[error("the run's memory bound refused an allocation")]
-    Memory,
-    /// The write needs an exact refinement of `bytes` and the machine has
-    /// not published the roots one would trace; nothing changed. The
-    /// machine publishes, refines and holds them, and writes again
-    /// (FIG-6318).
-    #[error("a write needs an exact refinement of {bytes} bytes over unpublished roots")]
-    NeedsPrecision { bytes: u64 },
     #[error(transparent)]
     Fault(#[from] HeapFault),
 }
@@ -165,8 +153,8 @@ pub trait SemanticHeap: PageReader {
     /// a count (`K-ITER-002`).
     fn table_passed(&self, table: EntityId, last: Option<TableCursor>) -> Result<u64, HeapFault>;
 
-    /// Allocates a fresh entity in the primary family. The census reserves
-    /// its logical cost first.
+    /// Allocates a fresh entity in the primary family, counted into the
+    /// census.
     fn allocate_object(&mut self, init: ObjectInit) -> Result<EntityId, HeapWriteError>;
     /// Writes `value` under `key`; an existing key keeps its first spelling
     /// and position (`K-KEY-003`).
@@ -203,23 +191,11 @@ pub trait SemanticHeap: PageReader {
 
     /// Every heap entity and task `value` names, through tuples and errors.
     fn edges_of(&self, value: &PageValue, out: &mut Vec<Identity>) -> Result<(), HeapFault>;
-    /// The logical cost of `value` where it is held (the local metric).
-    fn cost_of(&self, value: &PageValue) -> LogicalBytes;
     fn tuple_slice(
         &mut self,
         tuple: &TupleRef,
         range: Range<u64>,
     ) -> Result<std::sync::Arc<TupleRef>, HeapWriteError>;
-
-    /// Reserves `bytes` of logical memory for the machine (frames, roots,
-    /// a statement's temporaries). `transient` names every value the
-    /// running statement holds outside the heap, in case the census must
-    /// refine (S7).
-    fn reserve_logical(
-        &mut self,
-        bytes: LogicalBytes,
-        transient: &TransientRoots<'_>,
-    ) -> Result<(), HeapWriteError>;
 
     /// Seals every editable page, children before parents, stopping at
     /// sealed links, within `budget`; `None` when the budget ran out

@@ -19,8 +19,8 @@
 //! expression keeps its operands as its continuation's roles
 //! (`K-EVAL-008`).
 //!
-//! The operations are the member reads and writes, the charge, memory
-//! reservation and pin anchors, the library call with its charge (the one
+//! The operations are the member reads and writes, the charge anchor, the
+//! capacity meter's growth checks and the pin anchor, the library call with its charge (the one
 //! entry of every library call, inside an expression or in a frame), and
 //! the loop's iteration step, here, and action dispatch,
 //! [`KernelMachine::act`].
@@ -100,16 +100,22 @@ impl KernelMachine {
             arena.collect_cycles(&mut roots);
         }
         arena.release(&mut roots);
-        let young = if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            0
-        } else {
-            arena.take_released_young()
-        };
-        drop(arena);
-        if young > 0 {
-            self.heap.release_young(young)?;
-        }
         Ok(())
+    }
+
+    /// Frees the objects nothing the run holds as it ends (FIG-6791): the
+    /// capacity the host reads there is what the run reaches, not where
+    /// garbage was last released.
+    pub(super) fn release_garbage(&mut self) {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off {
+            return;
+        }
+        let (tasks, session) = (&self.tasks, &self.session);
+        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
+            tasks.each_value(visit);
+            session.each_value(visit);
+        };
+        self.arena.borrow_mut().release(&mut roots);
     }
 
     /// Writes `value` to register `out`, growing the registers to it.
@@ -199,17 +205,6 @@ impl KernelMachine {
         })
     }
 
-    /// The logical cost of `value` where it is held.
-    #[inline]
-    pub(super) fn cost_of(&self, value: &Value) -> u64 {
-        self.arena.borrow().cost_of(value)
-    }
-
-    #[inline]
-    pub(super) fn cost_of_metered(&self, value: &Value) -> u64 {
-        self.arena.borrow().cost_of_metered(value)
-    }
-
     /// A transient census root outside the frame that returned it.
     #[inline]
     pub(super) fn borrow_value(&mut self, value: Value) {
@@ -230,86 +225,34 @@ impl KernelMachine {
         )
     }
 
-    /// The memory anchor: holds `bytes` more memory until the statement
-    /// ends, refining exactly at the collection point when the heap is due
-    /// and ending the run when what is live does not leave room.
+    /// A verdict point with `bytes` about to be allocated: a native's
+    /// reservation, or what it built beyond what it reserved. What the
+    /// run holds and `bytes` that fit pass at once; otherwise the capacity
+    /// meter decides (FIG-6791).
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
+        if self.bounds.memory_meter == crate::MemoryMeter::Off
+            || self.capacity_held().saturating_add(bytes) <= self.bounds.memory
+        {
             return Ok(());
         }
-        self.hold(bytes)
+        self.memory_pressure(bytes)
     }
 
-    /// Admits durable control growth before a frame, binding or slot grows.
-    /// It shares the arena's growth ledger; projection transfers that credit
-    /// into saved rows, without repricing frames at each publication.
-    pub(super) fn reserve_growth(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            return Ok(());
-        }
-        self.reserve_growth_metered(bytes)
-    }
-
-    #[inline]
-    pub(super) fn reserve_growth_metered(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.hold_growth_metered(bytes)? {
-            return Ok(());
-        }
-        self.memory_pressure(bytes)?;
-        if self.heap.hold_growth_metered(bytes)? {
-            Ok(())
-        } else {
-            Err(bound(Bound::Memory, self.bounds.memory))
+    /// The capacity meter's check where the arena's storage or the run's
+    /// control state grew: one compare, the crossing it makes decided at
+    /// the run's next verdict point (FIG-6791).
+    #[inline(always)]
+    pub(super) fn grown(&mut self) {
+        if self.arena.borrow().capacity_due() {
+            self.capacity_crossed();
         }
     }
 
-    #[inline]
-    pub(super) fn hold(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.hold_metered(bytes)? {
-            return Ok(());
-        }
-        self.memory_pressure(bytes)?;
-        if self.heap.hold_metered(bytes)? {
-            Ok(())
-        } else {
-            Err(bound(Bound::Memory, self.bounds.memory))
-        }
-    }
-
-    /// The memory anchor of the arena's objects: holds `bytes` they grew
-    /// by until the heap receives them, the statement's holds paying first.
-    pub(super) fn grow(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            return Ok(());
-        }
-        if bytes == 0 {
-            return Ok(());
-        }
-        if self.heap.hold_growth_metered(bytes)? {
-            return Ok(());
-        }
-        // The objects have grown already: the refinement prices them
-        // exactly with the rest of what is live, so nothing more is
-        // pending, as a heap allocation refused before it is made.
-        self.memory_pressure(0)
-    }
-
-    /// What the bound leaves past what the census holds: the room a native
-    /// call may reserve without a refinement.
-    fn headroom(&self) -> u64 {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
-            return u64::MAX;
-        }
-        self.bounds
-            .memory
-            .saturating_sub(self.heap.certificate().upper.0)
-    }
-
-    /// Installs what `new` built, and gives their logical cost. Its mutable
-    /// objects take durable ids when a projection saves them.
-    fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, Halt> {
+    /// Installs what `new` built. Its mutable objects take durable ids
+    /// when a projection saves them.
+    fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<(), Halt> {
         if new.is_empty() {
-            return Ok(0);
+            return Ok(());
         }
         self.arena
             .borrow_mut()
@@ -317,7 +260,7 @@ impl KernelMachine {
             .map_err(|error| fault(&error.to_string()))
     }
 
-    /// Allocates `object` outside a native call, and holds its growth.
+    /// Allocates `object` outside a native call, counted.
     pub(super) fn new_object(&mut self, object: NewObject) -> Result<Value, Halt> {
         let (value, new) = {
             let arena = self.arena.borrow();
@@ -325,21 +268,20 @@ impl KernelMachine {
             let value = nursery.allocate(object);
             (value, nursery.into_new())
         };
-        let grown = self.install(new)?;
-        self.grow(grown)?;
+        self.install(new)?;
+        self.grown();
         Ok(value)
     }
 
-    /// A fresh shared variable holding `value`, its growth held.
-    pub(super) fn new_cell(&mut self, value: Value) -> Result<ArenaHandle, Halt> {
-        let (cell, cost) = self.arena.borrow_mut().new_cell(value);
-        self.grow(cost)?;
-        Ok(cell)
+    /// A fresh shared variable holding `value`, counted.
+    pub(super) fn new_cell(&mut self, value: Value) -> ArenaHandle {
+        let cell = self.arena.borrow_mut().new_cell(value);
+        self.grown();
+        cell
     }
 
     /// The pin anchor: keeps the value in register `r`, which the
-    /// statement made, live until the statement ends, and reserves its
-    /// bytes.
+    /// statement made, a root of a sweep until the statement ends.
     #[inline(always)]
     pub(super) fn pin(&mut self, r: Reg) -> Result<(), Halt> {
         let value = self.regs[r];
@@ -349,18 +291,12 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        if self.bounds.memory_meter == crate::MemoryMeter::Off {
+        // Immediates own no arena storage: no sweep can free them.
+        if self.bounds.memory_meter == crate::MemoryMeter::Off || super::Pins::scalar(value) {
             return Ok(());
         }
-        // Immediates own no arena storage and their register slot is
-        // already admitted. Holding a page-value shell until statement
-        // end would reserve and release bytes that were never allocated.
-        if super::Pins::scalar(value) {
-            return Ok(());
-        }
-        let bytes = self.arena.borrow().cost_of(value);
         self.pins.root(value);
-        self.reserve(bytes)
+        Ok(())
     }
 
     /// Reads field `field` of the record or the error in `target` into
@@ -502,13 +438,13 @@ impl KernelMachine {
         let value = self.take(value);
         let name = self.field_name(field);
         self.resolve(record, &name)?;
-        let growth = self.in_arena(|arena| arena.table_write(record, name, value))?;
-        self.grow(growth)?;
+        self.in_arena(|arena| arena.table_write(record, name, value))?;
+        self.grown();
         Ok(())
     }
 
     pub(super) fn write_index(&mut self, target: Reg, index: Reg, value: Reg) -> Eval<()> {
-        let growth = match self.regs[target] {
+        match self.regs[target] {
             Value::List(list) => {
                 let length = self.in_arena(|arena| arena.len(list))?;
                 let position =
@@ -554,7 +490,6 @@ impl KernelMachine {
                     self.in_arena(|arena| arena.table_write(set, member, Value::Absent))?
                 } else {
                     self.in_arena(|arena| arena.table_delete(set, &member))?;
-                    0
                 }
             }
             _ => {
@@ -563,8 +498,8 @@ impl KernelMachine {
                     "only a list, a record, a map or a set is assigned by index",
                 );
             }
-        };
-        self.grow(growth)?;
+        }
+        self.grown();
         Ok(())
     }
 
@@ -939,7 +874,7 @@ impl KernelMachine {
                 let mut granted = 0u64;
                 let mut spent;
                 let answer = loop {
-                    let room = granted.max(self.headroom());
+                    let room = granted.max(self.capacity_headroom());
                     let mut counter = WorkCounter::new(limit);
                     let (answer, built) = {
                         let arena = self.arena.borrow();
@@ -986,8 +921,7 @@ impl KernelMachine {
                         answer => {
                             if let Some((held, new)) = built {
                                 self.reserve(held.saturating_sub(granted))?;
-                                let grown = self.install(new)?;
-                                self.grow(grown)?;
+                                self.install(new)?;
                             }
                             break answer;
                         }
@@ -1006,7 +940,11 @@ impl KernelMachine {
                                 ),
                             ))
                         } else {
+                            // What the call built is counted before its
+                            // value is published: pinned, it is a root, and
+                            // the meter decides here, in the call.
                             self.pin_value(&value)?;
+                            self.capacity_check()?;
                             Ok(value)
                         }
                     }

@@ -1,120 +1,85 @@
-//! S7: the memory census.
+//! S7: the allocation census.
 //!
 //! The directory is an allocation census, not a liveness claim: it may hold
-//! entities no root reaches. The census keeps U, a certified upper bound of
-//! the logical cost the census and the current roots hold. A reservation
-//! that fits U is granted at once, because the reachable cost L satisfies
-//! L <= U. One that does not fit pauses mutation and refines: an exact
-//! trace from the actual current roots, transient ones included, over the
-//! pages' edge and cost summaries (never payload bytes), sweeps what it
-//! did not reach and decides again. Only that exact decision can refuse
-//! with `Bound::Memory`.
+//! entities no root reaches. The census counts its entities and how many
+//! sweeps it has completed. A sweep pauses mutation and traces from the
+//! actual current roots, transient ones included, over the pages' edge
+//! summaries (never payload bytes), and removes what it did not reach.
+//!
+//! The census prices nothing: memory is metered by the machine's capacity
+//! meter, which counts the arena storage and control state a run holds
+//! (FIG-6791). A sweep is what the meter runs before it decides at the
+//! memory bound, and the sweep generation is what the machine reloads its
+//! swept task roots on.
 //!
 //! No collection runs to park, resume or release a worker; no in-progress
-//! trace is ever persisted; there is no concurrent collector. Retained
-//! garbage stays bounded by the guest limit because every accepted
-//! allocation leaves U within it and every census entity costs at least
-//! [`MIN_ENTITY_COST`].
+//! trace is ever persisted; there is no concurrent collector.
 
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, LogicalBytes, PageValue};
+use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
 
-/// The least logical cost of any census entity: an object's header. It
-/// bounds how many entities a bounded U can retain.
-pub const MIN_ENTITY_COST: LogicalBytes = LogicalBytes(32);
-
-/// The memory metric a certificate is computed under. Changing a constant
-/// or a pricing rule is a new metric, never a silent reinterpretation.
+/// What a certificate's capacity counts. Changing what the meter counts is
+/// a new metric, never a silent reinterpretation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AccountingMetric {
-    /// The 1.0 local-cost metric: each entity its header and the values it
-    /// holds at their holding locations, shared entities once by identity,
-    /// inline immutable values per holding location (`K-BND-003`).
-    LocalCostV1,
-    /// The heap was written without a memory meter.
+    /// The 1.0 capacity meter (FIG-6791): resident arena value slots at 16
+    /// bytes each, with long text and bytes at 16 bytes a slot, and the
+    /// control state's frames and their slots.
+    Capacity,
+    /// The heap was written without a memory meter: no census holds its
+    /// entities.
     Unmetered,
 }
 
-/// The census's persisted accounting, in the heap root. U is labelled an
-/// upper bound: it is never exact live bytes.
+/// The census's persisted accounting, in the heap root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountingCertificate {
     pub metric: AccountingMetric,
-    /// U: the census's local costs plus the persistent roots' costs.
-    pub upper: LogicalBytes,
+    /// The bytes the capacity meter counted the run holding when it was
+    /// last sealed: what a run opened from this heap holds until its first
+    /// sweep recounts.
+    pub capacity: u64,
     /// How many entities the census holds.
     pub entities: u64,
-    /// The number of exact refinements this heap has completed; it changes
-    /// nothing a guest observes.
+    /// The number of sweeps this heap has completed: the generation a
+    /// machine reloads its swept task roots on. It changes nothing a guest
+    /// observes.
     pub refinements: u64,
 }
 
 impl AccountingCertificate {
-    /// A fresh heap's accounting: nothing allocated, nothing refined.
+    /// A fresh heap's accounting: nothing allocated, nothing swept.
     pub const FRESH: Self = Self {
-        metric: AccountingMetric::LocalCostV1,
-        upper: LogicalBytes(0),
+        metric: AccountingMetric::Capacity,
+        capacity: 0,
         entities: 0,
         refinements: 0,
     };
 }
 
-/// One entity's accounting facts, from its directory row: what a trace
-/// reads instead of its body.
+/// One entity's census facts, from its directory row: what a trace reads
+/// instead of its body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EntityCost {
-    pub local: LogicalBytes,
+pub struct EntityFacts {
     /// Whether the entity's body names any entity or task.
     pub has_edges: bool,
 }
 
-/// A granted reservation, drawn on by the allocation it was made for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LogicalPermit {
-    pub bytes: LogicalBytes,
-}
-
-/// A reservation U alone could not grant: it waits for refinement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PendingReservation {
-    pub bytes: LogicalBytes,
-    /// `U + bytes` overflowed: the conservative sum proves nothing.
-    pub overflowed: bool,
-}
-
-/// What a reservation's first check decides.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReservationDecision {
-    Granted(LogicalPermit),
-    NeedsPrecision(PendingReservation),
-}
-
-/// What exact refinement decides.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RefinedDecision {
-    Granted(LogicalPermit),
-    /// The exact reachable cost plus the reservation exceeds the bound:
-    /// the caller raises `Bound::Memory`.
-    Refused {
-        reachable: LogicalBytes,
-    },
-}
-
-/// Why the census could not decide. Neither variant is a guest bound.
+/// Why the census could not sweep. Neither variant is a guest bound.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum CensusFault {
     /// A trace's host work or residency ran out, or a page faulted: an
     /// infrastructure outcome; the guest proceeds from its last root.
     #[error(transparent)]
     Heap(#[from] HeapFault),
-    /// An admitted certificate's arithmetic is inconsistent.
+    /// An admitted certificate is inconsistent.
     #[error("the accounting certificate is malformed: {0}")]
     Malformed(String),
 }
 
 /// Every value the running statement holds outside the heap's persistent
-/// roots: registers, pinned values, a native call's arguments, fresh
-/// allocations not yet stored, and outstanding reservations.
+/// roots: registers, pinned values, a native call's arguments and fresh
+/// allocations not yet stored.
 #[derive(Clone, Copy, Debug)]
 pub struct TransientRoots<'a> {
     /// Reachability during an ownership transfer, with no new allocation.
@@ -123,7 +88,6 @@ pub struct TransientRoots<'a> {
     pub pinned: &'a [PageValue],
     pub native_args: &'a [PageValue],
     pub fresh: &'a [EntityId],
-    pub reserved: LogicalBytes,
 }
 
 /// The proved-unreachable portion of a quiescent census. Result payloads
@@ -139,11 +103,6 @@ pub struct SweepSet {
 ///
 /// Implemented by the paged heap (layer hp-heap, FIG-6188).
 pub trait CensusGraph {
-    /// Persistent root/control holding costs, excluding entity referents
-    /// and ended-task results. Validated page summaries supply this total.
-    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault>;
-    /// The local holding cost of a transient value under LocalCostV1.
-    fn value_cost(&mut self, value: &PageValue) -> Result<LogicalBytes, HeapFault>;
     /// Identity edges at any immutable nesting depth, including paged
     /// tuples, read from summaries without assembling scalar payloads.
     fn value_edges(
@@ -158,8 +117,8 @@ pub trait CensusGraph {
         &mut self,
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
-    /// An entity's cost facts; `None` when the census does not hold it.
-    fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault>;
+    /// An entity's census facts; `None` when the census does not hold it.
+    fn entity_facts(&mut self, entity: EntityId) -> Result<Option<EntityFacts>, HeapFault>;
     /// Every identity an entity's body names, from its edge summary pages:
     /// never its payload bytes.
     fn entity_edges(
@@ -167,15 +126,14 @@ pub trait CensusGraph {
         entity: EntityId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
-    /// What an ended task's result names and costs, when a handle reaches
-    /// the task.
+    /// What an ended task's result names, when a handle reaches the task.
     fn task_result(
         &mut self,
         task: TaskId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<LogicalBytes, HeapFault>;
-    /// Removes `entities` from the census, updating directory paths, family
-    /// membership and cost aggregates. Never called with a reached entity.
+    ) -> Result<(), HeapFault>;
+    /// Removes `entities` from the census, updating directory paths and
+    /// family membership. Never called with a reached entity.
     fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault>;
     /// Every entity the census holds, ascending, after `after`.
     fn census_after(
@@ -189,41 +147,47 @@ pub trait CensusGraph {
         after: Option<TaskId>,
         limit: usize,
     ) -> Result<Vec<TaskId>, HeapFault>;
+    /// Whether a sweep of this graph retires the results of the ended
+    /// tasks nothing reaches. A graph that does not keeps every retained
+    /// result, and what it names, as a root: a sweep the run's capacity
+    /// set off, at no point the run's images fix, changes nothing they
+    /// show (K-MACH-008, FIG-6791).
+    fn retires_results(&self) -> bool {
+        true
+    }
+    /// The entities a run changed in memory since it last projected them,
+    /// or gave ids and never projected, ascending: the census does not
+    /// hold what they are now. A graph with nothing unprojected has none.
+    fn unprojected(&mut self) -> Vec<EntityId> {
+        Vec::new()
+    }
+    /// Forgets the changes to `entities`, which nothing reaches: no
+    /// projection writes them, and the run's memory frees them.
+    fn forget(&mut self, entities: &[EntityId]) {
+        let _ = entities;
+    }
 }
 
-/// The census and its policy.
+/// The census.
 ///
 /// Implemented by the accounting layer (hp-memory, FIG-6189); the paged
-/// heap holds one and calls it on every allocation and edit.
+/// heap holds one and calls it on every allocation.
 pub trait AllocationCensus {
-    /// The census as an admitted root restores it: U is never recomputed
-    /// from resident pages and never reset.
-    fn restore(
-        certificate: AccountingCertificate,
-        bound: LogicalBytes,
-    ) -> Result<Self, CensusFault>
+    /// The census as an admitted root restores it: nothing is recounted
+    /// from resident pages.
+    fn restore(certificate: AccountingCertificate) -> Result<Self, CensusFault>
     where
         Self: Sized;
     fn certificate(&self) -> AccountingCertificate;
-    /// Makes the current certified upper bound the sealed baseline. It
-    /// traverses nothing and changes no persisted accounting or guest meter.
-    fn rebase(&mut self);
     /// Records newly allocated census entities in one checked operation.
-    /// Lazy families pass their validated whole cost and occurrence count.
-    fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault>;
-    /// Records a local cost delta. Growth is young; a decrease refunds at
-    /// most young bytes. The sealed baseline is retained until refinement.
-    /// Dropping a reference never subtracts an old referent.
-    fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault>;
-    /// The first, conservative check: checked `U + bytes <= bound`.
-    fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision;
-    /// Holds the census to `bound` from here on: the run's memory limiter
-    /// grew it (FIG-6768). It changes no accounting.
-    fn set_bound(&mut self, bound: LogicalBytes);
-    /// Exact refinement: freezes mutation, traces from `graph`'s
-    /// persistent roots and `transient`, sweeps the unreached, replaces U
-    /// by the exact total and decides `pending` again. It charges no guest
-    /// work and re-executes nothing.
+    /// Lazy families pass their occurrence count.
+    fn added(&mut self, entities: u64) -> Result<(), CensusFault>;
+    /// Records the capacity the run holds as a seal writes it.
+    fn record_capacity(&mut self, capacity: u64);
+    /// A sweep: freezes mutation, traces from `graph`'s persistent roots
+    /// and `transient`, removes the unreached, recounts the entities and
+    /// advances the sweep generation. It charges no guest work, decides
+    /// nothing a guest observes and re-executes nothing.
     ///
     /// # Errors
     ///
@@ -232,6 +196,5 @@ pub trait AllocationCensus {
         &mut self,
         graph: &mut dyn CensusGraph,
         transient: &TransientRoots<'_>,
-        pending: PendingReservation,
-    ) -> Result<RefinedDecision, CensusFault>;
+    ) -> Result<(), CensusFault>;
 }

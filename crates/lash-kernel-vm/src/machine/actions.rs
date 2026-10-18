@@ -834,10 +834,7 @@ impl KernelMachine {
             lash_kernel_state::AdmittedRequest::Sleep { .. } => WaitKindRecord::Sleep,
         };
         let datum = Datum::Bytes(lash_kernel_doc::Bytes::new(encode_body(&request)));
-        let frozen = self
-            .heap
-            .freeze_datum(&datum)
-            .map_err(|error| self.heap_halt(error))?;
+        let frozen = self.heap.freeze_datum(&datum).map_err(super::write_halt)?;
         self.waits.write(
             ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait)),
             WaitRecord {

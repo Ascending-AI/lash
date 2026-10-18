@@ -1,7 +1,7 @@
-//! A region's context (`docs/design/kernel-regions.md` §3.5): the census
-//! and admission a region's compiled statements read, build and hold with,
-//! as the reference's anchors hold and reserve what its statements make,
-//! and the heap paths of a template whose body a region runs. A write the
+//! A region's context (`docs/design/kernel-regions.md` §3.5): the capacity
+//! a region's compiled statements read and build within, admitted at its
+//! entry against the capacity meter's headroom (FIG-6791), and the heap
+//! paths of a template whose body a region runs. A write the
 //! heap paths make to a guest object is held until its statement commits
 //! ([`Held`]): a statement that misses drops it, having written nothing.
 
@@ -14,15 +14,12 @@ use lash_kernel_doc::{
     Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, Value, ValueKind, WorkCounter,
 };
 use lash_kernel_state::arena::Arena;
-use lash_kernel_state::kernel_internals::PagedHeap;
 
 use super::super::{
     Charge, Executable, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
 };
 use super::GuestCall;
-use super::nodes::{
-    Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index, scalar,
-};
+use super::nodes::{Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index};
 use crate::machine::Occurrences;
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
@@ -43,10 +40,9 @@ pub(crate) trait Guests {
     ) -> Option<Value>;
 }
 
-/// What a region's statements read, build and hold with: the meter of
-/// the running statement, the executable's libraries, the arena, the
-/// heap's census, the machine's property caches and the region's session
-/// slots.
+/// What a region's statements read and build with: the meter of the
+/// running statement, the executable's libraries, the arena, the
+/// machine's property caches and the region's session slots.
 pub(crate) struct Cx<'a> {
     pub(crate) meter: Meter,
     /// Whether the run is charged: a paced one measures no formula, and
@@ -55,21 +51,20 @@ pub(crate) struct Cx<'a> {
     pub(crate) args: Arguments,
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
-    pub(crate) heap: &'a mut PagedHeap,
     pub(crate) sites: &'a mut SiteCaches,
     /// The session bindings the plan names, by [`super::LoopPlan::sessions`]
     /// index.
     pub(crate) sessions: &'a mut [SessionSlot],
     pub(crate) limits: KernelDataLimits,
-    /// Whether memory is accounted (`MemoryMeter` not off).
+    /// Whether memory is metered (`MemoryMeter` not off).
     pub(crate) memory: bool,
-    /// The room the nursery admitted at the region's entry still has: the
-    /// growth the region may hold before it exits (§3.5).
-    pub(crate) room: u64,
-    /// What the running statement reserves until it ends, out of the
-    /// room: its pins and its native calls' work, as the reference's
-    /// statement credit; while a construction collects its members, the
-    /// least it will hold; and the bound of the write it holds.
+    /// The capacity the arena may hold before the region exits: what it
+    /// held at the region's entry and the nursery the capacity meter's
+    /// headroom admitted there (§3.5). Within it no verdict refuses.
+    pub(crate) ceiling: u64,
+    /// What the running statement sets aside of the room until it ends:
+    /// its native calls' work; while a construction collects its members,
+    /// the least it will hold; and the bound of the write it holds.
     pub(crate) transient: u64,
     /// The fault a node met, which ends the run: a miss is no fault.
     pub(crate) fault: Option<HeapFault>,
@@ -122,10 +117,11 @@ impl Cx<'_> {
     }
 
     /// Collects the members of a new `kind` of `members` members with the
-    /// least it will hold set aside of the room, so that what is admitted
-    /// while they are collected leaves room for it; `None` before anything
-    /// is collected where the room does not admit that least, which leaves
-    /// the statement to the reference.
+    /// least capacity it will hold set aside of the room, so that what is
+    /// built while they are collected leaves room for it; `None` before
+    /// anything is collected where the room does not admit that least,
+    /// which leaves the statement to the reference, whose verdict decides
+    /// (FIG-6791).
     pub(super) fn collecting<T>(
         &mut self,
         kind: ValueKind,
@@ -146,10 +142,13 @@ impl Cx<'_> {
         collected
     }
 
-    /// The room the running statement may still take.
+    /// The room the running statement may still take: what the arena may
+    /// grow by before the ceiling, less what the statement set aside.
     #[inline]
     fn free(&self) -> u64 {
-        self.room.saturating_sub(self.transient)
+        self.ceiling
+            .saturating_sub(self.arena.held())
+            .saturating_sub(self.transient)
     }
 
     /// Applies the write the committing statement holds, if any, as the
@@ -166,95 +165,41 @@ impl Cx<'_> {
         }
     }
 
-    /// Whether `bytes` of growth fit the room, so that holding them after
-    /// they are made cannot refuse.
+    /// Whether `bytes` of capacity fit the room, so that holding them after
+    /// they are made passes the bound.
     #[inline]
     pub(crate) fn fits(&self, bytes: u64) -> bool {
         !self.memory || bytes <= self.free()
     }
 
-    /// Holds `bytes` of growth the room admitted (`fits`), as the
-    /// reference's growth anchor holds it; `false` with a fault when the
-    /// census refuses what the room admitted.
-    pub(crate) fn hold(&mut self, bytes: u64) -> bool {
-        if !self.memory || bytes == 0 {
-            return true;
-        }
-        match self.heap.hold_growth_metered(bytes) {
-            Ok(true) => {
-                self.room = self.room.saturating_sub(bytes);
-                true
-            }
-            Ok(false) => {
-                self.fault = Some(HeapFault::Malformed(
-                    "the census refused growth a region's nursery admitted".into(),
-                ));
-                false
-            }
-            Err(fault) => {
-                self.fault = Some(fault);
-                false
-            }
-        }
-    }
-
-    /// Reserves `bytes` until the statement ends, as the reference's
-    /// memory anchor reserves them: statement credit, which the
-    /// statement's growth spends first; `false` where the room does not
-    /// admit them, or with a fault where the census refuses what it did.
+    /// Sets `bytes` aside until the statement ends, as the reference's
+    /// native call reserves its work; `false` where the room does not
+    /// admit them.
     fn reserve(&mut self, bytes: u64) -> bool {
-        if !self.memory || bytes == 0 {
-            return true;
-        }
-        if bytes > self.free() {
+        if !self.fits(bytes) {
             return false;
         }
-        match self.heap.hold_metered(bytes) {
-            Ok(true) => {
-                self.transient += bytes;
-                true
-            }
-            Ok(false) => {
-                self.fault = Some(HeapFault::Malformed(
-                    "the census refused a reservation a region's nursery admitted".into(),
-                ));
-                false
-            }
-            Err(fault) => {
-                self.fault = Some(fault);
-                false
-            }
+        if self.memory {
+            self.transient += bytes;
         }
+        true
     }
 
-    /// The reference's pin anchor: a value other than a scalar the
-    /// statement still uses is reserved at its cost until it ends.
-    pub(super) fn pin(&mut self, value: &Value) -> bool {
-        scalar(value) || self.reserve(self.arena.cost_of(value))
-    }
-
-    /// The statement ended, as the reference's step ends it: its
-    /// reservations are released, what it made is held by a root or
-    /// garbage (its kill set), and the arena is at a statement boundary.
+    /// The statement ended, as the reference's step ends it: what it set
+    /// aside is released and the arena is at a statement boundary. A region
+    /// publishes no statement roots, so it has none to release.
     pub(crate) fn statement_ended(&mut self) {
         self.transient = 0;
-        if self.memory
-            && let Err(fault) = self.heap.release_statement_roots()
-        {
-            self.fault = Some(fault);
-        }
-        self.arena.statement_ended();
         self.arena.statement_boundary();
     }
 
-    /// Installs what a nursery built and holds its growth, which
-    /// [`Self::admitted`] admitted.
+    /// Installs what a nursery built, which [`Self::admitted`] admitted.
     fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Option<()> {
         if new.is_empty() {
             return Some(());
         }
         match self.arena.install(new) {
-            Ok(grown) => self.hold(grown).then_some(()),
+            Ok(()) => Some(()),
             Err(error) => {
                 self.fault = Some(HeapFault::Malformed(error.to_string()));
                 None
@@ -313,8 +258,8 @@ impl Cx<'_> {
 
     /// The general call of native `function` on `args`, one per
     /// parameter, uncharged, as a helper body's own call is: what it built
-    /// installed, its work and its value reserved until the statement
-    /// ends; a miss when it raises, declines or asks again.
+    /// installed, its work set aside until the statement ends; a miss when
+    /// it raises, declines, asks again or builds past the room.
     fn answered(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let LibRun::Native { native, .. } = &function.run else {
             return None;
@@ -350,9 +295,7 @@ impl Cx<'_> {
             return None;
         }
         self.install(new)?;
-        if self.arena.summary_of(&value).depth as usize > self.limits.value_depth()
-            || !self.pin(&value)
-        {
+        if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
             return None;
         }
         Some(value)
@@ -388,26 +331,12 @@ impl Cx<'_> {
                         self.declined = declined;
                         return None;
                     }
-                    // What the path's plan variables grew by is held, its
-                    // reservation the credit the growth spends.
-                    let bound = paths.bound;
-                    if !self.hold(bound) {
-                        return None;
-                    }
                     value?.into()
                 }
                 None => return self.native(function, args),
             },
         };
         let value = answer.value;
-        // A value the held write changes is pinned at its cost after the
-        // write, which the reference's pin anchor reserves.
-        if !scalar(&value)
-            && (self.held.as_ref().is_some_and(|held| held.changes(&value))
-                || !self.reserve(self.arena.cost_of(&value)))
-        {
-            return None;
-        }
         if !self.charging {
             return Some(value);
         }
@@ -478,11 +407,9 @@ const HEAP_ARITY: usize = 8;
 /// by the template's resolved callees, a body-run helper's answered by its
 /// entry, `level` helpers below the operator's. A form that declines
 /// after the arena grew spoils the paths: what it built would outlive a
-/// later alternative, so the statement misses. `bound` is what the running
-/// path's plan variables grew by, reserved until the statement ends; what a
-/// declined path reserved is released to `mark`, the statement's credit and
-/// the region's reservations where the paths began, and the write it held
-/// is dropped. `built` is whether a call answered an object, or a tuple or
+/// later alternative, so the statement misses. What a declined path set
+/// aside is released to `mark`, the statement's where the paths began, and
+/// the write it held is dropped. `built` is whether a call answered an object, or a tuple or
 /// a store was made. Once a write is held, every further form declines: it
 /// is a path's last, and a caller's path reads nothing after it.
 struct HeapCx<'c, 'a> {
@@ -491,15 +418,14 @@ struct HeapCx<'c, 'a> {
     level: u32,
     spoiled: bool,
     built: bool,
-    bound: u64,
-    mark: (u64, u64),
+    mark: u64,
     /// Whether a write was held where the paths began.
     held: bool,
 }
 
 impl<'c, 'a> HeapCx<'c, 'a> {
     fn new(cx: &'c mut Cx<'a>, callees: &'c [LibId], level: u32) -> Self {
-        let mark = (cx.heap.statement_reserved(), cx.transient);
+        let mark = cx.transient;
         let held = cx.held.is_some();
         Self {
             cx,
@@ -507,32 +433,25 @@ impl<'c, 'a> HeapCx<'c, 'a> {
             level,
             spoiled: false,
             built: false,
-            bound: 0,
             mark,
             held,
         }
     }
 
-    /// What the paths reserved is released and what they wrote dropped: a
-    /// declined path changed nothing a run sees.
+    /// What the paths set aside is released and what they wrote dropped:
+    /// a declined path changed nothing a run sees.
     fn release(&mut self) {
         if !self.held {
             self.cx.held = None;
         }
-        if !self.cx.memory {
-            return;
-        }
-        if let Err(fault) = self.cx.heap.release_reserved_to(self.mark.0) {
-            self.cx.fault = Some(fault);
-        }
-        self.cx.transient = self.mark.1;
+        self.cx.transient = self.mark;
     }
 
     /// `form`'s value, the paths spoiled where it declines after growth.
     fn grown<T>(&mut self, form: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
-        let room = self.cx.room;
+        let held = self.cx.arena.held();
         let value = form(self);
-        self.spoiled |= value.is_none() && self.cx.room != room;
+        self.spoiled |= value.is_none() && self.cx.arena.held() != held;
         value
     }
 
@@ -552,12 +471,11 @@ impl<'c, 'a> HeapCx<'c, 'a> {
                     paths.release();
                     return None;
                 };
-                self.bound += paths.bound;
                 value
             }
             None => return None,
         };
-        self.cx.pin(&value).then_some(value)
+        Some(value)
     }
 }
 
@@ -591,27 +509,14 @@ impl TemplateHeap for HeapCx<'_, '_> {
         value
     }
 
-    fn bind(&mut self, value: Value, previous: Option<Value>) -> Option<()> {
-        if self.cx.held.is_some() {
-            return None;
-        }
-        if !self.cx.memory {
-            return Some(());
-        }
-        let arena = &*self.cx.arena;
-        let grows = arena
-            .cost_of_metered(&value)
-            .saturating_sub(previous.map_or(0, |previous| arena.cost_of_metered(&previous)));
-        if !self.cx.reserve(grows) {
-            return None;
-        }
-        self.bound += grows;
-        Some(())
+    fn bind(&mut self, _value: Value, _previous: Option<Value>) -> Option<()> {
+        // A plan variable is a register: the capacity meter counts no
+        // value it holds again.
+        self.cx.held.is_none().then_some(())
     }
 
     fn path(&mut self) {
         self.release();
-        self.bound = 0;
     }
 
     fn index(&mut self, target: Value, index: Value) -> Option<Value> {
@@ -643,11 +548,10 @@ impl TemplateHeap for HeapCx<'_, '_> {
         }
         self.grown(|paths| {
             let cx = &mut *paths.cx;
-            let tuple = cx
-                .arena
-                .tuple(items.to_vec(), cx.limits.value_depth())
-                .ok()?;
-            cx.pin(&tuple).then_some(tuple)
+            if !cx.fits(cx.arena.construction_floor(ValueKind::Tuple, items.len())) {
+                return None;
+            }
+            cx.arena.tuple(items.to_vec(), cx.limits.value_depth()).ok()
         })
         .inspect(|_| self.built = true)
     }

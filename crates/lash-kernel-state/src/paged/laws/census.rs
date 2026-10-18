@@ -1,15 +1,13 @@
-//! S7 laws: certified U and checked arithmetic.
+//! S7 laws: the census counts its entities and sweeps what nothing reaches.
 use crate::paged::census::*;
 use crate::paged::census_impl::Census;
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity, LogicalBytes, PageValue};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity, PageValue};
 
-fn certificate(upper: u64, entities: u64) -> AccountingCertificate {
+fn certificate(entities: u64) -> AccountingCertificate {
     AccountingCertificate {
-        metric: AccountingMetric::LocalCostV1,
-        upper: LogicalBytes(upper),
         entities,
-        refinements: 0,
+        ..AccountingCertificate::FRESH
     }
 }
 fn empty() -> TransientRoots<'static> {
@@ -19,7 +17,6 @@ fn empty() -> TransientRoots<'static> {
         pinned: &[],
         native_args: &[],
         fresh: &[],
-        reserved: LogicalBytes(0),
     }
 }
 fn entity() -> EntityId {
@@ -30,16 +27,9 @@ fn entity() -> EntityId {
 }
 struct Graph {
     roots: Vec<PageValue>,
-    cost: u64,
     present: bool,
 }
 impl CensusGraph for Graph {
-    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(self.roots.len() as u64 * 16))
-    }
-    fn value_cost(&mut self, _: &PageValue) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(16))
-    }
     fn value_edges(
         &mut self,
         v: &PageValue,
@@ -56,11 +46,8 @@ impl CensusGraph for Graph {
     ) -> Result<(), HeapFault> {
         self.roots.iter().try_for_each(visit)
     }
-    fn entity_cost(&mut self, _: EntityId) -> Result<Option<EntityCost>, HeapFault> {
-        Ok(self.present.then_some(EntityCost {
-            local: LogicalBytes(self.cost),
-            has_edges: false,
-        }))
+    fn entity_facts(&mut self, _: EntityId) -> Result<Option<EntityFacts>, HeapFault> {
+        Ok(self.present.then_some(EntityFacts { has_edges: false }))
     }
     fn entity_edges(
         &mut self,
@@ -73,8 +60,8 @@ impl CensusGraph for Graph {
         &mut self,
         _: TaskId,
         _: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(0))
+    ) -> Result<(), HeapFault> {
+        Ok(())
     }
     fn census_after(
         &mut self,
@@ -98,74 +85,26 @@ impl CensusGraph for Graph {
     }
 }
 
-/// RESULT-TRANSFER: an existing allocation remains reachable during handoff,
-/// without pricing a second allocation for the transfer root itself.
+/// RESULT-TRANSFER: an existing allocation remains reachable during
+/// handoff: a sweep keeps what a transfer root reaches, and removes it once
+/// nothing does.
 #[test]
-fn transfer_roots_keep_referents_without_another_allocation() {
+fn transfer_roots_keep_referents_through_a_sweep() {
     let mut graph = Graph {
         roots: vec![],
-        cost: 32,
         present: true,
     };
-    let mut census = Census::restore(certificate(32, 1), LogicalBytes(32)).unwrap();
+    let mut census = Census::restore(certificate(1)).unwrap();
     let value = [PageValue::List(entity())];
     let roots = TransientRoots {
         borrowed: &value,
         ..empty()
     };
-    let pending = PendingReservation {
-        bytes: LogicalBytes(0),
-        overflowed: false,
-    };
-    assert!(matches!(
-        census.refine(&mut graph, &roots, pending).unwrap(),
-        RefinedDecision::Granted(_)
-    ));
-    assert_eq!(census.certificate().upper, LogicalBytes(32));
+    census.refine(&mut graph, &roots).unwrap();
+    assert_eq!(census.certificate().entities, 1);
     assert!(graph.present);
-    census.refine(&mut graph, &empty(), pending).unwrap();
-    assert_eq!(census.certificate().upper, LogicalBytes(0));
+    census.refine(&mut graph, &empty()).unwrap();
+    assert_eq!(census.certificate().entities, 0);
+    assert_eq!(census.certificate().refinements, 2);
     assert!(!graph.present);
-}
-
-/// SAM-4 / K-BND-003: a cold root is the accounting baseline. Releases
-/// cannot refund its objects; only growth since that baseline is young.
-#[test]
-fn releases_never_refund_the_sealed_baseline() {
-    let mut census = Census::restore(certificate(128, 0), LogicalBytes(512)).unwrap();
-    census.changed(LogicalBytes(64), LogicalBytes(0)).unwrap();
-    assert_eq!(census.certificate().upper, LogicalBytes(128));
-    census.changed(LogicalBytes(0), LogicalBytes(48)).unwrap();
-    assert_eq!(census.certificate().upper, LogicalBytes(176));
-    census.changed(LogicalBytes(48), LogicalBytes(0)).unwrap();
-    assert_eq!(census.certificate().upper, LogicalBytes(128));
-}
-
-/// SAM-4: a seal promotes young holdings without changing their total;
-/// precision alone can reclaim the old baseline.
-#[test]
-fn sealing_promotes_young_cost_without_a_trace() {
-    let mut census = Census::restore(certificate(128, 0), LogicalBytes(512)).unwrap();
-    census.changed(LogicalBytes(0), LogicalBytes(64)).unwrap();
-    let before = census.certificate();
-    census.rebase();
-    assert_eq!(census.certificate(), before);
-    census.changed(LogicalBytes(64), LogicalBytes(0)).unwrap();
-    assert_eq!(census.certificate(), before);
-    let mut graph = Graph {
-        roots: vec![],
-        cost: 0,
-        present: false,
-    };
-    census
-        .refine(
-            &mut graph,
-            &empty(),
-            PendingReservation {
-                bytes: LogicalBytes(0),
-                overflowed: false,
-            },
-        )
-        .unwrap();
-    assert_eq!(census.certificate().upper, LogicalBytes(0));
 }

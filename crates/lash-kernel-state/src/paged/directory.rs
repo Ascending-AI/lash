@@ -879,9 +879,6 @@ impl PagedHeap {
         if frozen.summary.entities == 0 {
             return Ok(family);
         }
-        let credit = self.holdings.credit(frozen.summary.cost.0);
-        self.admit(frozen.summary.cost.0 - credit, &[])?;
-        self.holdings.spend(credit);
         let mut membership = Tree::new(false);
         if frozen.summary.entities != 0 {
             membership.write(
@@ -909,10 +906,7 @@ impl PagedHeap {
         };
         if let Some(census) = self.census.as_mut() {
             census
-                .changed(LogicalBytes(credit), LogicalBytes(0))
-                .map_err(census_fault)?;
-            census
-                .added(frozen.summary.cost, frozen.summary.entities)
+                .added(frozen.summary.entities)
                 .map_err(census_fault)?;
             self.accounting = census.certificate();
         }

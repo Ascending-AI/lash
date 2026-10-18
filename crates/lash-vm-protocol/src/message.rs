@@ -668,10 +668,7 @@ pub struct WorkerWork {
     pub tree_leaf_clones: u64,
     pub tree_index_clones: u64,
     pub tree_rows_cloned: u64,
-    pub accounting_certificate_reads: u64,
     pub accounting_additions: u64,
-    pub accounting_changes: u64,
-    pub accounting_reservations: u64,
     pub refinement_attempts: u64,
     pub completed_refinements: u64,
     pub completed_trace_work: u64,
@@ -706,10 +703,7 @@ impl WorkerWork {
         self.tree_leaf_clones += next.tree_leaf_clones;
         self.tree_index_clones += next.tree_index_clones;
         self.tree_rows_cloned += next.tree_rows_cloned;
-        self.accounting_certificate_reads += next.accounting_certificate_reads;
         self.accounting_additions += next.accounting_additions;
-        self.accounting_changes += next.accounting_changes;
-        self.accounting_reservations += next.accounting_reservations;
         self.refinement_attempts += next.refinement_attempts;
         self.completed_refinements += next.completed_refinements;
         self.completed_trace_work += next.completed_trace_work;

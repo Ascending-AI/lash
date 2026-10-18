@@ -1,6 +1,6 @@
 //! The identity-addressed paged semantic heap. Collection edits update one
 //! bounded path and replace its directory head; no mutable container escapes.
-use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key, value_cost};
+use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key};
 use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
 use lash_kernel_doc::Integer;
@@ -36,15 +36,9 @@ pub struct PagedHeap {
     pub(super) header: Option<PageRef>,
     /// The accounting and population `header` records: a header sealed
     /// before either changed is not this heap's (FIG-6318).
-    header_state: Option<(
-        AccountingCertificate,
-        DataOnlyCertificate,
-        Option<LogicalBytes>,
-        Option<u64>,
-    )>,
+    header_state: Option<(AccountingCertificate, DataOnlyCertificate, Option<u64>)>,
     pub(super) accounting: AccountingCertificate,
     pub(super) population: DataOnlyCertificate,
-    pub(super) collection_live: Option<LogicalBytes>,
     pub(super) collection_entities: Option<u64>,
     pub(super) family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
@@ -127,15 +121,9 @@ impl PagedHeap {
             next_family: root.next_family,
             epoch,
             header: Some(page),
-            header_state: Some((
-                root.accounting,
-                root.population,
-                root.collection_live,
-                root.collection_entities,
-            )),
+            header_state: Some((root.accounting, root.population, root.collection_entities)),
             accounting: root.accounting,
             population: root.population,
-            collection_live: root.collection_live,
             collection_entities: root.collection_entities,
             family_base: RefCell::new(None),
             census: None,
@@ -157,7 +145,6 @@ impl PagedHeap {
             metric: super::AccountingMetric::Unmetered,
             ..AccountingCertificate::FRESH
         };
-        self.collection_live = None;
         self.collection_entities = None;
         self.header = None;
     }
@@ -177,10 +164,16 @@ impl PagedHeap {
         self.census = Some(census);
         Ok(())
     }
-    /// Holds the installed census to a memory bound its run's limiter grew.
-    pub fn set_memory_bound(&mut self, bytes: u64) {
-        if let Some(census) = self.census.as_mut() {
-            census.set_bound(LogicalBytes(bytes));
+    /// Records the capacity the run holds in the certificate the next seal
+    /// writes (FIG-6791).
+    pub fn record_capacity(&mut self, capacity: u64) {
+        let Some(census) = self.census.as_mut() else {
+            return;
+        };
+        if self.accounting.capacity != capacity {
+            census.record_capacity(capacity);
+            self.accounting = census.certificate();
+            self.header = None;
         }
     }
     /// The page port the machine's own record trees read and edit through:
@@ -239,7 +232,6 @@ impl PagedHeap {
             next_family: self.next_family,
             accounting: self.accounting,
             population: self.population,
-            collection_live: self.collection_live,
             collection_entities: self.collection_entities,
         })
     }
@@ -265,106 +257,38 @@ impl PagedHeap {
             _ => Err(raised("type_error", "the object has another kind")),
         }
     }
-    /// Reserve before the edit changes the working head, so a memory
-    /// refusal leaves it unchanged and nested trees retain unique ownership.
+    /// Changes the working head of `entity`, counting it into the census
+    /// when it is new.
     fn change_head(
         &mut self,
         entity: EntityId,
-        after: u64,
         closure: bool,
         tasks: u64,
         edit: impl FnOnce(&mut Self) -> Result<(), HeapFault>,
     ) -> Result<(), HeapWriteError> {
         let taken = self.take_working(entity)?;
-        let before = taken.as_ref().map_or(0, |taken| taken.cost);
+        let added = taken.is_none();
         let (old_closures, old_tasks) = taken
             .and_then(|taken| taken.owned)
             .map_or((0, 0), |(closure, tasks)| (u64::from(closure), tasks));
-        if self.unmetered() {
-            self.population.closure_entities = self
-                .population
-                .closure_entities
-                .checked_sub(old_closures)
-                .and_then(|v| v.checked_add(closure as u64))
-                .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
-            self.population.task_edges = self
-                .population
-                .task_edges
-                .checked_sub(old_tasks)
-                .and_then(|v| v.checked_add(tasks))
-                .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
-            edit(self)?;
-            self.header = None;
-            return Ok(());
-        }
-        let mut census = self
-            .census
-            .take()
-            .ok_or_else(|| HeapFault::Malformed("edit has no census".into()))?;
-        let credit = self.holdings.credit(after.saturating_sub(before));
-        let decision = census.reserve(LogicalBytes(
-            after.saturating_sub(before).saturating_sub(credit),
-        ));
-        if let ReservationDecision::NeedsPrecision(pending) = &decision
-            && let Some(refusal) = self.refuses_precision(pending.bytes.0)
-        {
-            self.census = Some(census);
-            return Err(refusal);
-        }
-        let result = (|| {
-            census
-                .changed(LogicalBytes(credit), LogicalBytes(0))
-                .map_err(census_fault)?;
-            self.holdings.spend(credit);
-            self.population.closure_entities = self
-                .population
-                .closure_entities
-                .checked_sub(old_closures)
-                .and_then(|v| v.checked_add(closure as u64))
-                .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
-            self.population.task_edges = self
-                .population
-                .task_edges
-                .checked_sub(old_tasks)
-                .and_then(|v| v.checked_add(tasks))
-                .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
-            edit(self)?;
-            self.header = None;
-            if matches!(decision, ReservationDecision::NeedsPrecision(_)) {
-                return self.refine_installed(&mut *census, &[entity], 0);
-            }
-            if before == 0 {
-                census.added(LogicalBytes(after), 1).map_err(census_fault)?;
-            } else {
-                census
-                    .changed(LogicalBytes(before), LogicalBytes(after))
-                    .map_err(census_fault)?;
-            }
-            Ok(())
-        })();
-        self.accounting = census.certificate();
-        self.census = Some(census);
-        result
-    }
-    /// Reserves `values` values and `bytes` bytes held outside any entity
-    /// (an instantiated frozen datum's payload), as the machine's other
-    /// holdings are (`K-BND-003`).
-    pub(super) fn reserve_held(&mut self, values: u64, bytes: u64) -> Result<(), HeapWriteError> {
-        if self.unmetered() {
-            return Ok(());
-        }
-        let bytes = values
-            .checked_mul(16)
-            .and_then(|v| v.checked_add(bytes))
-            .ok_or_else(|| HeapFault::Malformed("a reservation overflows".into()))?;
-        self.admit(bytes, &[])?;
-        if let Some(census) = &mut self.census {
-            census
-                .changed(LogicalBytes(0), LogicalBytes(bytes))
-                .map_err(census_fault)?;
+        self.population.closure_entities = self
+            .population
+            .closure_entities
+            .checked_sub(old_closures)
+            .and_then(|v| v.checked_add(closure as u64))
+            .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
+        self.population.task_edges = self
+            .population
+            .task_edges
+            .checked_sub(old_tasks)
+            .and_then(|v| v.checked_add(tasks))
+            .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
+        edit(self)?;
+        self.header = None;
+        if added && let Some(census) = &mut self.census {
+            census.added(1).map_err(census_fault)?;
             self.accounting = census.certificate();
         }
-        self.holdings.reserve(bytes)?;
         Ok(())
     }
     fn prepare_object(&mut self, init: ObjectInit) -> Result<ObjectProposal, HeapWriteError> {
@@ -420,7 +344,6 @@ impl PagedHeap {
             .ok_or_else(|| HeapFault::Malformed("identity ordinal overflow".into()))?;
         self.change_head(
             id,
-            head.cost(),
             head.kind() == ObjectKind::Closure,
             head.task_edges(),
             |heap| {
@@ -596,7 +519,6 @@ impl SemanticHeap for PagedHeap {
             epoch,
             header: None,
             header_state: None,
-            collection_live: None,
             collection_entities: None,
             population: DataOnlyCertificate {
                 closure_entities: 0,
@@ -630,7 +552,6 @@ impl SemanticHeap for PagedHeap {
             header_state: None,
             accounting: root.accounting,
             population: root.population,
-            collection_live: root.collection_live,
             collection_entities: root.collection_entities,
             family_base: RefCell::new(None),
             census: None,
@@ -730,29 +651,21 @@ impl SemanticHeap for PagedHeap {
         let Some(head) = self.current_head(table)? else {
             return Err(raised("type_error", "expected a table"));
         };
-        let Body::Table {
-            kind, lookup, rows, ..
-        } = &head.body
-        else {
+        let Body::Table { lookup, rows, .. } = &head.body else {
             return Err(raised("type_error", "expected a table"));
         };
         let Some(Ordinal(ordinal)) = lookup.get(&normal, &self.access)? else {
             return Ok(());
         };
         let entry = rows.get(&ordinal.to_be_bytes(), &self.access)?;
-        let (cost, len, tasks) = match &entry {
-            Some(entry) => (
-                rows.cost().checked_sub(entry.cost()),
-                rows.len() - 1,
-                rows.task_edges().checked_sub(entry.task_edges()),
-            ),
-            None => (Some(rows.cost()), rows.len(), Some(rows.task_edges())),
+        let tasks = match &entry {
+            Some(entry) => rows.task_edges().checked_sub(entry.task_edges()),
+            None => Some(rows.task_edges()),
         };
-        let fault = || HeapFault::Malformed("logical aggregate overflow".into());
-        let after = table_cost(*kind, cost.ok_or_else(fault)?, len);
-        let tasks = tasks.ok_or_else(fault)?;
+        let tasks =
+            tasks.ok_or_else(|| HeapFault::Malformed("task-edge aggregate overflow".into()))?;
         drop(head);
-        self.change_head(table, after, false, tasks, |heap| {
+        self.change_head(table, false, tasks, |heap| {
             heap.edit_working(table, |head, access| {
                 let Body::Table { lookup, rows, .. } = &mut head.body else {
                     unreachable!("required table")
@@ -794,9 +707,8 @@ impl SemanticHeap for PagedHeap {
     ) -> Result<(), HeapWriteError> {
         self.required(variable, ObjectKind::Variable)?;
         let value = self.canonical(value)?;
-        let after = census::MIN_ENTITY_COST.0.saturating_add(value_cost(&value));
         let tasks = value.task_edges();
-        self.change_head(variable, after, false, tasks, |heap| {
+        self.change_head(variable, false, tasks, |heap| {
             heap.edit_working(variable, |head, _| {
                 head.body = Body::Variable(value);
                 head.family = variable.family;
@@ -823,9 +735,6 @@ impl SemanticHeap for PagedHeap {
         }
         Ok(())
     }
-    fn cost_of(&self, value: &PageValue) -> LogicalBytes {
-        LogicalBytes(value_cost(value))
-    }
     fn tuple_slice(
         &mut self,
         tuple: &TupleRef,
@@ -843,51 +752,11 @@ impl SemanticHeap for PagedHeap {
         }
         self.tuple(values)
     }
-    fn reserve_logical(
-        &mut self,
-        bytes: LogicalBytes,
-        transient: &TransientRoots<'_>,
-    ) -> Result<(), HeapWriteError> {
-        let Some(mut census) = self.census.take() else {
-            return Err(
-                HeapFault::Malformed("the machine has not installed its census".into()).into(),
-            );
-        };
-        let result = match census.reserve(bytes) {
-            ReservationDecision::Granted(_) => Ok(()),
-            ReservationDecision::NeedsPrecision(pending) => {
-                match census.refine(self, transient, pending) {
-                    Ok(decision) => {
-                        self.holdings.projected();
-                        self.collection_live = Some(census.certificate().upper);
-                        self.collection_entities = Some(census.certificate().entities);
-                        match decision {
-                            RefinedDecision::Granted(_) => Ok(()),
-                            RefinedDecision::Refused { .. } => Err(HeapWriteError::Memory),
-                        }
-                    }
-                    Err(error) => Err(HeapWriteError::Fault(census_fault(error))),
-                }
-            }
-        };
-        self.accounting = census.certificate();
-        self.census = Some(census);
-        result
-    }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
-        self.settle_growth()?;
         if self.header.is_some()
             && self.header_state
-                == Some((
-                    self.accounting,
-                    self.population,
-                    self.collection_live,
-                    self.collection_entities,
-                ))
+                == Some((self.accounting, self.population, self.collection_entities))
         {
-            if let Some(census) = &mut self.census {
-                census.rebase();
-            }
             return Ok(Some(SealedHeap {
                 root: self.heap_root()?,
                 sealed_pages: 0,
@@ -914,20 +783,12 @@ impl SemanticHeap for PagedHeap {
             return Ok(None);
         }
         self.header = Some(self.access.seal(PageKind::KEYED_LEAF, tokens, children)?);
-        self.header_state = Some((
-            root.accounting,
-            root.population,
-            root.collection_live,
-            root.collection_entities,
-        ));
+        self.header_state = Some((root.accounting, root.population, root.collection_entities));
         self.epoch.0 = self
             .epoch
             .0
             .checked_add(1)
             .ok_or_else(|| HeapFault::Malformed("edit epoch overflow".into()))?;
-        if let Some(census) = &mut self.census {
-            census.rebase();
-        }
         Ok(Some(SealedHeap {
             root,
             sealed_pages: work.pages,
@@ -964,8 +825,8 @@ impl PagedHeap {
         else {
             unreachable!("required table")
         };
-        let fault = || HeapFault::Malformed("logical aggregate overflow".into());
-        let (slot, entry, cost, len, tasks) = match lookup.get(&normal, &self.access)? {
+        let fault = || HeapFault::Malformed("task-edge aggregate overflow".into());
+        let (slot, entry, tasks) = match lookup.get(&normal, &self.access)? {
             Some(Ordinal(ordinal)) => {
                 let old = rows
                     .get(&ordinal.to_be_bytes(), &self.access)?
@@ -974,32 +835,26 @@ impl PagedHeap {
                     key: old.key.clone(),
                     value,
                 };
-                let cost = rows
-                    .cost()
-                    .checked_sub(old.cost())
-                    .and_then(|cost| cost.checked_add(entry.cost()))
-                    .ok_or_else(fault)?;
                 let tasks = rows
                     .task_edges()
                     .checked_sub(old.task_edges())
                     .and_then(|tasks| tasks.checked_add(entry.task_edges()))
                     .ok_or_else(fault)?;
-                (Some(ordinal), entry, cost, rows.len(), tasks)
+                (Some(ordinal), entry, tasks)
             }
             None => {
                 next.checked_add(1)
                     .ok_or_else(|| HeapFault::Malformed("table ordinal overflow".into()))?;
                 let entry = Entry { key, value };
-                let cost = rows.cost().checked_add(entry.cost()).ok_or_else(fault)?;
                 let tasks = rows
                     .task_edges()
                     .checked_add(entry.task_edges())
                     .ok_or_else(fault)?;
-                (None, entry, cost, rows.len() + 1, tasks)
+                (None, entry, tasks)
             }
         };
         drop(head);
-        self.change_head(table, table_cost(kind, cost, len), false, tasks, |heap| {
+        self.change_head(table, false, tasks, |heap| {
             heap.edit_working(table, |head, access| {
                 let Body::Table {
                     lookup, rows, next, ..
@@ -1019,14 +874,6 @@ impl PagedHeap {
             })
         })
     }
-}
-/// What a table head costs once its rows cost `rows` (the cost
-/// `ObjectHead::cost` gives).
-fn table_cost(kind: ObjectKind, rows: u64, len: u64) -> u64 {
-    32u64.saturating_add(match kind {
-        ObjectKind::Record => rows.saturating_sub(len * 16),
-        _ => rows,
-    })
 }
 impl PagedHeap {
     /// Reads a record field using an optional insertion-position hint.

@@ -90,13 +90,13 @@ impl Session {
             None => PagedHeap::fresh(Box::new(self.source.clone()), EditEpoch(1)),
         }
     }
-    fn census(&self, bound: u64) -> Box<Census> {
-        Box::new(Census::restore(self.heap().certificate(), LogicalBytes(bound)).unwrap())
+    fn census(&self) -> Box<Census> {
+        Box::new(Census::restore(self.heap().certificate()).unwrap())
     }
     pub(crate) fn seeded(values: impl IntoIterator<Item = (Name, Datum)>) -> Self {
         let mut session = Self::default();
         let mut heap = session.heap();
-        heap.set_census(session.census(1 << 30)).unwrap();
+        heap.set_census(session.census()).unwrap();
         let mut table = Tree::new(false);
         for (name, datum) in values {
             let value = decode(&mut heap, datum);

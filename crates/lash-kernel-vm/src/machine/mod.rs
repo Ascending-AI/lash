@@ -65,7 +65,7 @@ use project::SharedArena;
 use session::{keyed, open_tree};
 pub(crate) use tasks::Occurrences;
 
-/// What a frame is accounted before its variables.
+/// The bytes the capacity meter counts for a frame before its slots.
 const FRAME_BYTES: u64 = 64;
 /// What ends a run from inside a statement.
 /// Rare payloads are boxed so successful frame lookups carry a small result.
@@ -79,7 +79,6 @@ pub(crate) enum Halt {
     /// The host failed a read-bound `perform` (`K-EFF-012`).
     Host(crate::interface::HostFault),
     Heap(Box<HeapFault>),
-    Memory,
 }
 
 impl Halt {
@@ -367,7 +366,10 @@ pub struct KernelMachine {
     document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
-    memory_stream: stream::Runner,
+    /// What the run's heap was sealed holding, as its certificate records
+    /// it: the capacity meter counts the run holding at least this until
+    /// its first sweep recounts (FIG-6791).
+    capacity_floor: u64,
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,
@@ -530,12 +532,6 @@ impl KernelMachine {
     #[cfg(test)]
     pub(crate) fn wait_count(&self) -> u64 {
         self.waits.len()
-    }
-    fn heap_halt(&self, error: HeapWriteError) -> Halt {
-        match error {
-            HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
-            other => write_halt(other),
-        }
     }
 }
 
@@ -720,7 +716,6 @@ impl KernelMachine {
                 lash_kernel_state::paged::StatementRoots {
                     registers: &registers,
                     pinned: &pinned,
-                    pinned_bytes: 0,
                     borrowed: &borrowed,
                 },
                 || {
@@ -731,10 +726,7 @@ impl KernelMachine {
                     }
                 },
             )
-            .map_err(|error| match error {
-                HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
-                other => write_halt(other),
-            })?;
+            .map_err(write_halt)?;
         Ok(self.reconcile_sweep()?)
     }
 
@@ -779,10 +771,7 @@ impl KernelMachine {
     pub(super) fn flush_arena(&mut self) -> Result<(), Halt> {
         let exe = Arc::clone(&self.exe);
         let mut arena = self.arena.borrow_mut();
-        project::flush(&mut arena, &mut self.heap, &exe).map_err(|error| match error {
-            HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
-            other => write_halt(other),
-        })
+        project::flush(&mut arena, &mut self.heap, &exe).map_err(write_halt)
     }
 
     /// The value a refusal raises: its error, built in the arena.
@@ -966,37 +955,7 @@ impl KernelMachine {
         let Boundary::Collect = hook(at);
         self.publish_holdings().map_err(machine_error)?;
         self.heap.collect().map_err(MachineError::Heap)?;
-        self.arena.borrow_mut().rebased();
         self.reconcile_sweep().map_err(MachineError::Heap)
-    }
-
-    /// Makes a heap write. One that needs an exact refinement while the
-    /// run's roots are unpublished refuses before it changes anything; the
-    /// run refines at its collection point and makes the write again,
-    /// which the refinement left room for (FIG-6318).
-    pub(super) fn heap_write<T, E: From<Halt>>(
-        &mut self,
-        mut write: impl FnMut(&mut PagedHeap) -> Result<T, E>,
-    ) -> Result<T, E> {
-        self.heap.take_refusal();
-        match write(&mut self.heap) {
-            Err(error) => match self.heap.take_refusal() {
-                Some(bytes) => {
-                    self.memory_pressure(bytes)?;
-                    let again = write(&mut self.heap);
-                    // The collection point refines over what the run holds
-                    // in memory, not over installed roots, so the write
-                    // refuses for precision again when the room it left is
-                    // not enough.
-                    if again.is_err() && self.heap.take_refusal().is_some() {
-                        return Err(E::from(bound(Bound::Memory, self.bounds.memory)));
-                    }
-                    again
-                }
-                None => Err(error),
-            },
-            done => done,
-        }
     }
 
     /// The end a halt outside a step gives the run: a bound ends it as the
@@ -1004,11 +963,6 @@ impl KernelMachine {
     fn ended_by(&mut self, halt: Halt) -> Result<Step, MachineError> {
         match halt {
             Halt::Bound(exceeded) => Ok(self.finish_with(End::Error(RunError::Bound(*exceeded)))),
-            Halt::Memory => Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
-                bound: Bound::Memory,
-                limit: self.bounds.memory,
-                function: None,
-            })))),
             other => Err(machine_error(other)),
         }
     }
@@ -1023,7 +977,6 @@ impl KernelMachine {
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
         }
-        self.arena.borrow_mut().statement_ended();
         self.tasks.protect(None);
         result
     }
@@ -1271,6 +1224,7 @@ impl KernelMachine {
     }
 
     fn finish_with(&mut self, end: End) -> Step {
+        self.release_garbage();
         self.ended = true;
         Step::Ended(end)
     }
@@ -1337,13 +1291,6 @@ impl KernelMachine {
                     return Ok(self.finish_with(End::Error(RunError::Bound(*exceeded))));
                 }
                 Err(Halt::Heap(error)) => return Err(MachineError::Heap(*error)),
-                Err(Halt::Memory) => {
-                    return Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
-                        bound: Bound::Memory,
-                        limit: self.bounds.memory,
-                        function: None,
-                    }))));
-                }
                 Err(Halt::Finish(result)) => {
                     return match self.conclude(Some(task), Ending::Finished(*result)) {
                         Ok(end) => Ok(self.finish_with(end)),
@@ -1357,10 +1304,15 @@ impl KernelMachine {
                     };
                 }
             }
-            self.heap
-                .release_statement_roots()
-                .map_err(MachineError::Heap)?;
+            self.heap.release_statement_roots();
             self.collect_arena().map_err(machine_error)?;
+            // The capacity meter's verdict point at a statement's end
+            // (FIG-6791): what the run holds is in its tasks and session,
+            // so a crossing the statement made is decided before the next
+            // statement's effect.
+            if let Err(halt) = self.capacity_check() {
+                return self.ended_by(halt);
+            }
             #[cfg(test)]
             self.at_boundary()?;
             if let Some(end) = self.end.take() {
@@ -1385,16 +1337,10 @@ impl KernelMachine {
 /// The halt a heap write's error gives a run.
 fn write_halt(error: HeapWriteError) -> Halt {
     match error {
-        HeapWriteError::Memory => Halt::Memory,
         HeapWriteError::Fault(error) => Halt::from(error),
         HeapWriteError::Raised { kind, message } => {
             Halt::Fault(format!("an allocation returned {kind}: {message}"))
         }
-        // Every write a run makes goes through `heap_write`, which retries
-        // a refused one.
-        HeapWriteError::NeedsPrecision { bytes } => Halt::from(HeapFault::Malformed(format!(
-            "a write refused for a refinement of {bytes} bytes outside the write wrapper"
-        ))),
     }
 }
 

@@ -267,7 +267,6 @@ pub(crate) fn admit(
         }
         PageValue::Tuple(tuple) => {
             let summary = Summary {
-                cost: tuple.summary.cost.0,
                 depth: tuple.summary.depth,
                 task_edges: tuple.summary.task_edges,
                 has_edges: tuple.summary.has_edges,
@@ -309,7 +308,6 @@ pub(crate) fn admit(
                     data,
                 }),
                 Summary {
-                    cost: error.cost.0,
                     depth: error.depth,
                     task_edges: error.task_edges,
                     has_edges: error.has_edges,
@@ -465,10 +463,10 @@ fn open(
         .ok_or_else(|| malformed("a proxy names no object of the heap"))?;
     let chunk = Sequence::CHUNK as u64;
     let (body, sequences) = match head {
-        StoredHead::List { len, cost } if len > chunk => {
-            return arena.open_list(handle, len, cost).map_err(arena_fault);
+        StoredHead::List { len } if len > chunk => {
+            return arena.open_list(handle, len).map_err(arena_fault);
         }
-        StoredHead::List { len, .. } => {
+        StoredHead::List { len } => {
             let values = heap
                 .read_list_rows(entity, 0, len)?
                 .iter()
@@ -482,12 +480,7 @@ fn open(
                 None,
             )
         }
-        StoredHead::Table {
-            kind,
-            len,
-            next,
-            cost,
-        } if len > chunk => {
+        StoredHead::Table { kind, len, next } if len > chunk => {
             let kind = match kind {
                 ObjectKind::Map => ProxyKind::Map,
                 ObjectKind::Set => ProxyKind::Set,
@@ -495,12 +488,10 @@ fn open(
                 _ => return Err(malformed("a table of another kind")),
             };
             return arena
-                .open_table(handle, kind, len, next, cost)
+                .open_table(handle, kind, len, next)
                 .map_err(arena_fault);
         }
-        StoredHead::Table {
-            kind, len, next, ..
-        } => {
+        StoredHead::Table { kind, len, next } => {
             let entries = heap.read_table_rows(entity, 0, next)?;
             if entries.len() as u64 != len {
                 return Err(malformed("a table's rows disagree with its length"));

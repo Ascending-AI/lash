@@ -62,14 +62,9 @@ pub(crate) fn start(
         heap.without_memory_accounting();
     }
     let access = heap.pages().clone();
-    let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
-        let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
-        if bounds.memory_meter == crate::MemoryMeter::Off {
-            arena.without_memory_accounting()
-        } else {
-            arena
-        }
-    }));
+    let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
+        lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
+    ));
     let mut machine = KernelMachine {
         release: program.release,
         owner: start.owner,
@@ -79,7 +74,7 @@ pub(crate) fn start(
         document: None,
         exe: Arc::clone(&exe),
         bounds,
-        memory_stream: super::stream::runner(bounds.memory_meter),
+        capacity_floor: 0,
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
@@ -125,6 +120,7 @@ pub(crate) fn start(
         #[cfg(test)]
         boundaries: 0,
     };
+    machine.capacity_counted();
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,
@@ -220,7 +216,7 @@ pub(crate) fn start(
     machine
         .publish_roots()
         .map_err(|error| start_interrupt("the start", error.into()))?;
-    machine.heap.release_statement_roots()?;
+    machine.heap.release_statement_roots();
     Ok(machine)
 }
 /// The session bindings a cell read or wrote, by binding key: arena values
@@ -275,21 +271,20 @@ impl Session {
         written
     }
 
-    /// The bindings written since the last projection point, by key, with
-    /// what each one's slot would cost holding its value, giving `out`
-    /// what the values reach (seam I, FIG-6748).
-    pub(super) fn price(
+    /// The keys of the bindings written since the last projection point,
+    /// giving `out` what their values reach (seam I, FIG-6748).
+    pub(super) fn reach(
         &self,
         arena: &mut lash_kernel_state::arena::Arena,
-        pricing: &mut lash_kernel_state::arena::Pricing,
+        reach: &mut lash_kernel_state::arena::Reach,
         out: &mut dyn FnMut(lash_kernel_state::arena::Reached<'_>) -> Result<(), HeapFault>,
-    ) -> Result<Vec<(Vec<u8>, u64)>, HeapFault> {
-        let mut priced = Vec::new();
+    ) -> Result<Vec<Vec<u8>>, HeapFault> {
+        let mut written = Vec::new();
         for (key, bound) in self.written() {
-            priced.push((key.to_vec(), arena.cost_of(&bound.value)));
-            arena.price(pricing, &bound.value, out)?;
+            written.push(key.to_vec());
+            arena.reach(reach, &bound.value, out)?;
         }
-        Ok(priced)
+        Ok(written)
     }
 }
 
@@ -414,17 +409,17 @@ impl KernelMachine {
             name,
             value,
         )
-        .map_err(|error| self.heap_halt(error))
+        .map_err(super::write_halt)
     }
 
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
         if let Some(bound) = self.session.bindings.get(&name.key) {
             return Ok(Some(bound.value));
         }
-        let bound = self.heap_write(|heap| {
-            heap.load_session_bound_at(&name.key)
-                .map_err(super::write_halt)
-        })?;
+        let bound = self
+            .heap
+            .load_session_bound_at(&name.key)
+            .map_err(super::write_halt)?;
         Ok(match bound {
             None => None,
             Some(BoundRecord::Value(page)) => {
@@ -456,44 +451,24 @@ impl KernelMachine {
     /// Binds `name` to `value`, the arena value, until the next projection
     /// point gives it its page form (seam C): a declaration, or an
     /// assignment when `existing`, which is refused for a name neither the
-    /// cell nor its session binds. The binding's holding is admitted
-    /// here, as the slot's write would.
+    /// cell nor its session binds.
     pub(super) fn session_write(
         &mut self,
         name: &BindingName,
         value: Value,
         existing: bool,
     ) -> Result<bool, Halt> {
-        // The run holds what its bindings grow by, unless it keeps no
-        // memory accounting.
-        let priced = self.bounds.memory_meter != crate::MemoryMeter::Off;
-        let before = match self.session.bindings.get(&name.key) {
-            Some(bound) => priced.then(|| self.cost_of(&bound.value)),
-            // A first write of a name reads its slot: what it held, and
-            // whether the session binds it at all.
-            None if priced || existing => {
-                let bound = self.heap_write(|heap| {
-                    heap.load_session_bound_at(&name.key)
-                        .map_err(super::write_halt)
-                })?;
-                if existing && bound.is_none() {
-                    return Ok(false);
-                }
-                Some(match bound {
-                    Some(BoundRecord::Value(page)) => {
-                        lash_kernel_state::kernel_internals::directory::value_cost(&page)
-                    }
-                    Some(BoundRecord::Shared(_)) | None => 0,
-                })
-            }
-            None => None,
-        };
-        if priced {
-            let (before, after) = (before.unwrap_or(0), self.cost_of(&value));
-            self.heap_write(|heap| {
-                heap.hold_session_binding(before, after)
-                    .map_err(super::write_halt)
-            })?;
+        // A first assignment of a name reads its slot: whether the session
+        // binds it at all.
+        if existing
+            && !self.session.bindings.contains_key(&name.key)
+            && self
+                .heap
+                .load_session_bound_at(&name.key)
+                .map_err(super::write_halt)?
+                .is_none()
+        {
+            return Ok(false);
         }
         let written = Some(self.session.writes);
         self.session.writes += 1;
@@ -546,8 +521,7 @@ impl KernelMachine {
     }
 
     /// Gives the session bindings written since the last projection point
-    /// their page forms in the heap's slots. The run admitted each one's
-    /// holding as it wrote it.
+    /// their page forms in the heap's slots.
     pub(super) fn project_session(&mut self) -> Result<(), Halt> {
         let written: Vec<(Arc<[u8]>, Name, Value)> = self
             .session
@@ -560,7 +534,7 @@ impl KernelMachine {
             let record = self.binding_record(&name, page)?;
             self.heap
                 .project_session_binding(&key, record)
-                .map_err(|error| self.heap_halt(error))?;
+                .map_err(super::write_halt)?;
             if let Some(bound) = self.session.bindings.get_mut(&key) {
                 bound.written = None;
             }
@@ -577,7 +551,6 @@ impl KernelMachine {
             });
         }
         self.publish_roots()?;
-        self.heap.release_statement_holds()?;
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
         if !self.host.is_empty() {
@@ -598,7 +571,7 @@ impl KernelMachine {
             }
             self.heap
                 .set_session_root(bindings)
-                .map_err(|error| self.heap_halt(error))?;
+                .map_err(super::write_halt)?;
         }
         // Lifecycle roots name sealed trees. A cell may finish before its
         // first park, so its session still has only transient pages here.
@@ -647,7 +620,7 @@ impl KernelMachine {
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {
-            Some(start_census(&mut *source, &start, bounds.memory)?)
+            Some(start_census(&mut *source, &start)?)
         };
         self::start(
             program,
@@ -676,7 +649,7 @@ impl KernelMachine {
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {
-            Some(start_census(&mut *source, &start, bounds.memory)?)
+            Some(start_census(&mut *source, &start)?)
         };
         self::start(
             program,
@@ -739,34 +712,28 @@ impl From<AccountingFault> for crate::paged::OpenError {
 }
 
 /// The census a run holds: over the heap whose header is `heap`, a fresh
-/// heap's when none, held to the run's memory bound. Reads the header page
-/// through `source`.
+/// heap's when none. Reads the header page through `source`.
 pub(crate) fn restored_census(
     source: &mut dyn PageSource,
     heap: Option<lash_kernel_doc::heap::PageRef>,
-    memory: u64,
 ) -> Result<Box<dyn AllocationCensus>, AccountingFault> {
     use lash_kernel_state::paged::{AccountingCertificate, CensusFault, heap_accounting};
     let accounting = match heap {
         Some(heap) => heap_accounting(source, heap).map_err(AccountingFault::Heap)?,
         None => AccountingCertificate::FRESH,
     };
-    lash_kernel_state::kernel_internals::census_impl::Census::restore(
-        accounting,
-        lash_kernel_doc::heap::LogicalBytes(memory),
-    )
-    .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
-    .map_err(|fault| match fault {
-        CensusFault::Heap(fault) => AccountingFault::Heap(fault),
-        CensusFault::Malformed(problem) => AccountingFault::Malformed(problem),
-    })
+    lash_kernel_state::kernel_internals::census_impl::Census::restore(accounting)
+        .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
+        .map_err(|fault| match fault {
+            CensusFault::Heap(fault) => AccountingFault::Heap(fault),
+            CensusFault::Malformed(problem) => AccountingFault::Malformed(problem),
+        })
 }
 
 /// A starting run's census: over its session's heap, or a fresh one.
 pub(crate) fn start_census(
     source: &mut dyn PageSource,
     start: &CellStart,
-    memory: u64,
 ) -> Result<Box<dyn AllocationCensus>, AccountingFault> {
     restored_census(
         source,
@@ -774,7 +741,6 @@ pub(crate) fn start_census(
             .session
             .as_ref()
             .map(lash_kernel_state::kernel_internals::session_heap),
-        memory,
     )
 }
 

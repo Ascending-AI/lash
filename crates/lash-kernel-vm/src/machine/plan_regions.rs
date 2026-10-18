@@ -28,10 +28,10 @@ use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
 use super::plans::PlanRun;
 use crate::compile::plan_regions::{Block, Node, NodeKind, Step};
 
-/// The headroom past which a hole test need not hold the tuple it
-/// compares with: an empty tuple costs a value's 16 bytes, so the plan's
-/// hold of it is granted, and released by its statement's end, wherever
-/// at least this much is left.
+/// The capacity headroom past which a hole test need not build the tuple
+/// it compares with: an empty tuple holds one value's 16 bytes, so the
+/// plan's build of it passes the bound wherever at least this much is
+/// left (FIG-6791).
 const UNIT_HOLD: u64 = 1 << 10;
 
 /// How a pass through a block ended.
@@ -42,7 +42,7 @@ enum Went {
     Broke,
 }
 
-impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
+impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// Runs the loop on `cursor` as region `region` of the plan, entered at
     /// the plan's step of it, the test's units charged: `false` when the
     /// loop is done, as the plan's step and its `break` leave it.
@@ -152,7 +152,7 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
                 // is a tuple of no members; a tuple not resident is
                 // compared as the plan compares it, which warms it.
                 let empty = match self.machine.regs[self.base + value.reg as usize] {
-                    _ if MEMORY && self.headroom() < UNIT_HOLD => None,
+                    _ if self.machine.capacity_headroom() < UNIT_HOLD => None,
                     Value::Tuple(tuple) => self
                         .machine
                         .arena
@@ -192,14 +192,6 @@ impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
             }
         }
         Ok(())
-    }
-
-    /// What the memory bound leaves past what the census holds.
-    fn headroom(&self) -> u64 {
-        self.machine
-            .bounds
-            .memory
-            .saturating_sub(self.machine.heap.certificate().upper.0)
     }
 
     #[cold]

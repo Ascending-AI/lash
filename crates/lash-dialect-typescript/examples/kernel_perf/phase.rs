@@ -50,7 +50,6 @@ pub(super) fn phase_counts(counts: lash_kernel_vm::perf_witness::Work) -> Json {
     json!({
         "vm_steps": counts.vm_steps,
         "root_publishes": counts.root_publishes,
-        "memory_scopes": counts.memory_scopes,
         "task_resolutions": counts.task_resolutions,
         "frame_resolutions": counts.frame_resolutions,
         "register_slots_initialized": counts.register_slots_initialized,

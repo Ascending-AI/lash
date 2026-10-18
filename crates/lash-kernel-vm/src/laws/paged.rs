@@ -2,7 +2,7 @@
 use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
 use lash_kernel_doc::graph_tokens::encode_body;
-use lash_kernel_doc::heap::{LogicalBytes, PageValue};
+use lash_kernel_doc::heap::PageValue;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
@@ -38,10 +38,8 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
             "entry f(x: Int) -> Any fn f(x) { let v = perform echo(x) as Any return v } main { let v = perform echo(7) as Any return v }",
         );
         let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
-        heap.set_census(Box::new(
-            Census::restore(heap.certificate(), LogicalBytes(1 << 30)).unwrap(),
-        ))
-        .unwrap();
+        heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
+            .unwrap();
         // The VM preserves host-validated immutable pins without interpreting
         // their payload. Use a real frozen page and the canonical function table.
         let pin = heap.freeze_datum(&Datum::Null).unwrap().root;
@@ -88,9 +86,7 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
             },
             crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
-            Box::new(
-                Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
-            ),
+            Box::new(Census::restore(certificate).unwrap()),
         )
         .unwrap();
         assert!(matches!(embedder.run(), Step::Parked(_)));
@@ -152,13 +148,7 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
         &prior,
         Vec::new(),
         Box::new(embedder.source.clone()),
-        Box::new(
-            Census::restore(
-                old_heap.certificate(),
-                LogicalBytes(Setup::default().bounds.memory),
-            )
-            .unwrap(),
-        ),
+        Box::new(Census::restore(old_heap.certificate()).unwrap()),
         crate::compile::Layout::default(),
     )
     .unwrap();
@@ -365,7 +355,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
             start,
             crate::compile::Layout::default(),
             Box::new(Lost),
-            census(ROOMY.memory)
+            census()
         ),
         Err(StartError::Heap(HeapFault::LeaseLost))
     ));
@@ -449,9 +439,7 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
             },
             crate::compile::Layout::default(),
             Box::new(next.source.clone()),
-            Box::new(
-                Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
-            ),
+            Box::new(Census::restore(certificate).unwrap()),
         )
         .unwrap();
         assert!(matches!(next.run(), Step::Parked(_)));
@@ -538,7 +526,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
             },
             crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
-            census(ROOMY.memory),
+            census(),
         );
         if let Some(actual) = refused_size {
             assert!(
@@ -618,10 +606,8 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let original = snapshot(&root);
     let mut heap =
         PagedHeap::open_header(root.heap, Box::new(run.source.clone()), EditEpoch(20)).unwrap();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(64 << 20)).unwrap(),
-    ))
-    .unwrap();
+    heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
+        .unwrap();
     heap.allocate_object(ObjectInit::List(vec![PageValue::Bool(false)]))
         .unwrap();
     heap.seal(SealBudget {

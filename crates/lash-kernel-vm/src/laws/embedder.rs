@@ -493,7 +493,7 @@ impl Embedder {
             setup.start,
             setup.layout,
             Box::new(source.clone()),
-            census(setup.bounds.memory),
+            census(),
         )?;
         Ok(Self {
             machine,
@@ -568,11 +568,8 @@ impl Embedder {
             .try_checkpoint()
             .map_err(|error| format!("{error:?}"))?;
         let (program, library) = self.program(native_twice);
-        let census = lash_kernel_state::kernel_internals::census_impl::Census::restore(
-            certificate,
-            LogicalBytes(self.bounds.memory),
-        )
-        .map_err(|error| format!("{error:?}"))?;
+        let census = lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate)
+            .map_err(|error| format!("{error:?}"))?;
         self.machine = crate::KernelMachine::open_with_census(
             program,
             self.bounds,
@@ -628,11 +625,8 @@ impl Embedder {
             Vec::new(),
             Box::new(self.source.clone()),
             Box::new(
-                lash_kernel_state::kernel_internals::census_impl::Census::restore(
-                    certificate,
-                    LogicalBytes(self.bounds.memory),
-                )
-                .unwrap(),
+                lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate)
+                    .unwrap(),
             ),
             layout,
         )
@@ -753,19 +747,8 @@ impl PageSource for Source {
         Ok(page)
     }
 }
-pub(crate) fn census(bound: u64) -> Box<dyn AllocationCensus> {
-    Box::new(
-        Census::restore(
-            AccountingCertificate {
-                metric: AccountingMetric::LocalCostV1,
-                upper: LogicalBytes(0),
-                entities: 0,
-                refinements: 0,
-            },
-            LogicalBytes(bound),
-        )
-        .unwrap(),
-    )
+pub(crate) fn census() -> Box<dyn AllocationCensus> {
+    Box::new(Census::restore(AccountingCertificate::FRESH).unwrap())
 }
 pub(crate) fn start_machine(
     program: Program,
@@ -778,6 +761,6 @@ pub(crate) fn start_machine(
         start,
         crate::compile::Layout::default(),
         Box::new(Source::default()),
-        census(bounds.memory),
+        census(),
     )
 }

@@ -54,9 +54,7 @@ pub mod kernel_internals {
         pub use crate::paged::tree::*;
     }
     pub mod resident {
-        pub use crate::paged::resident::{
-            Priced, ResidentRoots, Traced, frame_values, state_values,
-        };
+        pub use crate::paged::resident::{ResidentRoots, Walked, frame_values, state_values};
     }
     pub use crate::paged::heap_impl::PagedHeap;
     pub use crate::paged::stored::{

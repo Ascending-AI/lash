@@ -517,13 +517,9 @@ fn memory_off_preserves_the_corpus_without_census_work() {
             assert_eq!(
                 (
                     work.heap.accounting_additions,
-                    work.heap.accounting_changes,
-                    work.heap.accounting_reservations,
                     work.heap.refinement_attempts,
-                    work.heap.arena_memory_prices,
-                    work.memory_scopes
                 ),
-                (0, 0, 0, 0, 0, 0),
+                (0, 0),
                 "{} {}",
                 shard.rule,
                 case.name

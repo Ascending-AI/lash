@@ -10,8 +10,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::heap::PageValue;
-use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
@@ -41,10 +41,6 @@ pub struct SessionEditor {
     changed: bool,
 }
 
-/// The most a host's edit may hold of the heap, in logical bytes: the
-/// census bounds what an edit adds, never what the session already holds.
-const EDIT_BOUND: LogicalBytes = LogicalBytes(u64::MAX >> 2);
-
 impl SessionEditor {
     /// The session `session` carries, read through `source`; an empty one
     /// for `None`.
@@ -64,7 +60,7 @@ impl SessionEditor {
             )?,
             None => PagedHeap::fresh(source, EditEpoch(0)),
         };
-        let census = Census::restore(heap.certificate(), EDIT_BOUND)
+        let census = Census::restore(heap.certificate())
             .map_err(|fault| HeapFault::Malformed(format!("the session's census: {fault}")))?;
         heap.set_census(Box::new(census))?;
         heap.set_family_base(Box::new(FrozenBase::default()));

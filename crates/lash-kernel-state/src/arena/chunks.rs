@@ -73,14 +73,9 @@ impl Arena {
         Ok(())
     }
 
-    /// Opens a proxy's head as a large list of `len` values costing `cost`:
-    /// one cold chunk per [`Sequence::CHUNK`] positions.
-    pub fn open_list(
-        &mut self,
-        handle: ArenaHandle,
-        len: u64,
-        cost: u64,
-    ) -> Result<(), NativeError> {
+    /// Opens a proxy's head as a large list of `len` values: one cold chunk
+    /// per [`Sequence::CHUNK`] positions.
+    pub fn open_list(&mut self, handle: ArenaHandle, len: u64) -> Result<(), NativeError> {
         let width = Sequence::CHUNK as u64;
         let chunks = (0..len.div_ceil(width))
             .map(|chunk| cold(width.min(len - chunk * width)))
@@ -88,20 +83,18 @@ impl Arena {
         let (body, facts) = self.parts_mut(handle)?;
         *body = Body::List(Sequence { len, chunks });
         facts.cold = false;
-        facts.summary.cost = cost;
         Ok(())
     }
 
     /// Opens a proxy's head as a large table of `kind` (a map, a set or a
-    /// record) with `len` entries below sequence `next`, costing `cost`:
-    /// chunks spanning equal ranges of sequences, each cold.
+    /// record) with `len` entries below sequence `next`: chunks spanning
+    /// equal ranges of sequences, each cold.
     pub fn open_table(
         &mut self,
         handle: ArenaHandle,
         kind: ProxyKind,
         len: u64,
         next: u64,
-        cost: u64,
     ) -> Result<(), NativeError> {
         let width = tables::width(len, next);
         let count = next.div_ceil(width) as usize;
@@ -118,7 +111,6 @@ impl Arena {
         let (held, facts) = self.parts_mut(handle)?;
         *held = body;
         facts.cold = false;
-        facts.summary.cost = cost;
         facts.index = Some(Box::new(Index::chunked(width, count, next)));
         Ok(())
     }

@@ -54,10 +54,9 @@ struct Working {
     used: Counter<u64>,
 }
 
-/// What an edit replaces: the current head's cost and, when the entity owns
-/// a directory row (written or pending), that row's populations.
+/// What an edit replaces: when the entity owns a directory row (written or
+/// pending), that row's populations.
 pub(super) struct Taken {
-    pub cost: u64,
     pub owned: Option<(bool, u64)>,
 }
 
@@ -196,7 +195,6 @@ impl PagedHeap {
         let entry = &working.heads[&entity];
         working.touch(entry);
         Ok(Some(Taken {
-            cost: entry.head.cost(),
             owned: (entry.stored || entry.dirty).then(|| {
                 (
                     entry.head.kind() == ObjectKind::Closure,

@@ -314,7 +314,7 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
         start,
         layout,
         Box::new(Source::default()),
-        census(bounds.memory),
+        census(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
     match machine.run(&mut World::default(), u64::MAX) {

@@ -189,15 +189,16 @@ impl Machine for KernelMachine {
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         let sealed = self.seal_projection(budget)?;
         self.projecting = sealed.is_none();
-        if sealed.is_some() {
-            self.arena.borrow_mut().rebased();
-        }
         Ok(sealed)
     }
     fn meters(&self) -> Meters {
         Meters {
             charged: (self.bounds.charge == crate::Charge::Exact).then_some(self.charged),
-            memory: self.heap.certificate().upper.0,
+            memory: if self.bounds.memory_meter == crate::MemoryMeter::Off {
+                0
+            } else {
+                self.capacity_held()
+            },
             live_tasks: self.live_tasks,
         }
     }
@@ -228,11 +229,7 @@ impl KernelMachine {
     ) -> Result<Self, OpenError> {
         let census = match root.limits.memory {
             None => None,
-            Some(memory) => Some(session::restored_census(
-                &mut *source,
-                Some(root.heap),
-                memory,
-            )?),
+            Some(_) => Some(session::restored_census(&mut *source, Some(root.heap))?),
         };
         Self::open_with_optional_census(program, bounds, root, admissions, source, census, layout)
     }
@@ -322,7 +319,6 @@ impl KernelMachine {
                 problem: "metered open has no census".into(),
             })?)
             .map_err(OpenError::Heap)?;
-            heap.set_memory_bound(bounds.memory);
         }
         heap.set_family_base(Box::new(
             lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
@@ -330,15 +326,17 @@ impl KernelMachine {
         heap.restore_execution_roots(root);
         let access = heap.pages().clone();
         let census_refinements = heap.certificate().refinements;
-        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
-            let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
-            if bounds.memory_meter == crate::MemoryMeter::Off {
-                arena.without_memory_accounting()
-            } else {
-                arena
-            }
-        }));
-        Ok(Self {
+        // What the run held when it was sealed, as the capacity meter
+        // counted it: the run holds at least that until it sweeps.
+        let capacity_floor = if bounds.memory_meter == crate::MemoryMeter::Off {
+            0
+        } else {
+            heap.certificate().capacity
+        };
+        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
+            lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
+        ));
+        let mut machine = Self {
             release: root.release,
             owner: root.owner,
             document: Some(root.document),
@@ -347,7 +345,7 @@ impl KernelMachine {
             program,
             exe: Arc::clone(&exe),
             bounds,
-            memory_stream: super::stream::runner(bounds.memory_meter),
+            capacity_floor,
             limits,
             tasks: tasks::Tasks::open(
                 heap.task_root().clone(),
@@ -397,7 +395,9 @@ impl KernelMachine {
             boundaries: 0,
             save: None,
             limiters: Limiters::default(),
-        })
+        };
+        machine.capacity_counted();
+        Ok(machine)
     }
 }
 
@@ -470,6 +470,13 @@ impl KernelMachine {
         // Reserve the maximum bounded root before giving the rest to the heap.
         if !work.take(4096 + 128) {
             return Ok(None);
+        }
+        // The certificate records what the capacity meter counts the run
+        // holding, which a run opened from this seal holds until it sweeps
+        // (FIG-6791). Sealing changes nothing the running meter counts.
+        if self.bounds.memory_meter != crate::MemoryMeter::Off {
+            let held = self.capacity_held();
+            self.heap.record_capacity(held);
         }
         if self
             .heap
