@@ -180,7 +180,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
     Ok(())
 }
 
-/// A start of the ingress engine owned by `session`, declaring `payload`.
+/// A start owned by `session` that stays live until the law cancels it.
 fn engine_start_for(
     session: &SessionId,
     payload: serde_json::Value,
@@ -188,12 +188,8 @@ fn engine_start_for(
     lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
         lash_execution_contracts::tool_intent::StartProcessIntent {
             owner: crate::RuntimeOwner::Session(session.clone()),
-            declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
-                INGRESS_ENGINE_KIND,
+            declaration: lash_execution_contracts::testing::held_engine_declaration(
                 payload,
-                lash_execution_contracts::testing::declared_launch_for_testing(
-                    lash_execution_contracts::testing::fixture_engine_launch(),
-                ),
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::Lifetime::Detached,
             ),
@@ -299,7 +295,7 @@ async fn settled_tool_intent_payloads_follow_session_retention() -> Result<()> {
             crate::tests::host::send::scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
             mock_llm_profile_spec(),
         )
-        .plugin(Arc::new(IngressAdmissionEngineFactory { defaults: None }))
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .build(crate::tests::host::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(

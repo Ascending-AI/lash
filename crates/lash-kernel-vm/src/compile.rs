@@ -342,9 +342,6 @@ pub(crate) struct Executable {
     document: Arc<Document>,
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
-    /// This executable's process-local identity, which the code a closure
-    /// last ran under it is cached by (`arena::LocalCode`).
-    local: u64,
 }
 
 /// Immutable document tables, independent of any run or owning document.
@@ -579,10 +576,13 @@ impl Executable {
         }
     }
 
-    /// The process-local identity that names this executable's code
-    /// numbering, unique among the executables the process prepares.
+    /// The identity of this live executable's code numbering. Every executable
+    /// is allocated in an Arc, and the machine and its task storage retain it
+    /// for the arena's whole lifetime. Closure code caches never leave that
+    /// arena or reach pages, so an address cannot be reused while a cache
+    /// could still name it. No process-wide identity allocator is needed.
     pub(crate) fn local(&self) -> u64 {
-        self.local
+        std::ptr::from_ref(self).addr() as u64
     }
 
     /// The function body or closure body whose site is `site`.

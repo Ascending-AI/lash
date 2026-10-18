@@ -93,12 +93,13 @@ pub struct RlmProtocolPluginConfig {
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
     /// Whether a cell's run can be saved. Durable unless the host states
-    /// otherwise; see [`lash_vm_client::Durability`].
+    /// otherwise; see [`super::Durability`].
     #[serde(
         default,
-        skip_serializing_if = "lash_vm_client::Durability::is_durable"
+        with = "super::config_types::DurabilityWire",
+        skip_serializing_if = "super::config_types::is_durable"
     )]
-    pub durability: lash_vm_client::Durability,
+    pub durability: super::Durability,
     pub on_memory_limit: MemoryLimit,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
@@ -136,9 +137,10 @@ pub struct RlmRecordedBehaviour {
     /// resume of the session keeps.
     #[serde(
         default,
-        skip_serializing_if = "lash_vm_client::Durability::is_durable"
+        with = "super::config_types::DurabilityWire",
+        skip_serializing_if = "super::config_types::is_durable"
     )]
-    pub durability: lash_vm_client::Durability,
+    pub durability: super::Durability,
     pub on_memory_limit: MemoryLimit,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
@@ -184,7 +186,7 @@ pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = Un
     memory_limit: M,
     on_memory_limit: MemoryLimit,
     channel: C,
-    durability: lash_vm_client::Durability,
+    durability: super::Durability,
 }
 
 impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
@@ -250,7 +252,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
     /// when it makes no recorded effect and carries no session; otherwise
     /// it is refused with [`lash_vm_client::RunRefusal::Ephemeral`].
     #[must_use]
-    pub fn durability(mut self, durability: lash_vm_client::Durability) -> Self {
+    pub fn durability(mut self, durability: super::Durability) -> Self {
         self.durability = durability;
         self
     }
@@ -302,7 +304,7 @@ impl RlmProtocolPluginConfig {
             memory_limit: UnsetBound,
             on_memory_limit: MemoryLimit::Recount,
             channel: UnsetChannel,
-            durability: lash_vm_client::Durability::Durable,
+            durability: super::Durability::Durable,
         }
     }
 

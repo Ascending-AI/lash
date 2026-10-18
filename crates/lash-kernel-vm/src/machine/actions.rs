@@ -1369,9 +1369,14 @@ mod laws {
         assert_eq!(cached(&run), None);
         assert_eq!(called(&mut run), f);
         assert_eq!(cached(&run), Some(found));
-        // Another executable numbers `g`'s body as this one numbers `f`'s.
+        // A separately allocated executable has its own code numbering,
+        // even when both machines hold the same source.
+        let other = Embedder::new(
+            "main { let f = fn() { return 1 } let g = fn() { return 2 } return null }",
+        );
+        assert_ne!(exe.local(), other.machine.exe.local());
         let elsewhere = LocalCode {
-            executable: exe.local() + 1,
+            executable: other.machine.exe.local(),
             code: g.0,
         };
         run.machine

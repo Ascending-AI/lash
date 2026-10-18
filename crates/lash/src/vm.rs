@@ -7,6 +7,10 @@
 //! A run executes in a worker process that hosts one kernel machine. The
 //! worker registers every library function when it starts; a document names
 //! functions by identity and carries none.
+//!
+//! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryLimit,
+//! Durability}`. A worker's [`RunBounds`] carries their wire mirrors,
+//! [`RunCharge`], [`RunMemoryLimit`] and [`RunDurability`].
 
 /// One shared pool for Code mode cells, process bodies, and pure language work.
 ///
@@ -98,14 +102,14 @@ pub use crate::kernel_migration::{
 };
 pub use lash_protocol_types::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
-    BootstrapFault, Charge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit,
-    DiskSpool, Durability, EffectPhase, EffectPhases, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal, HeapFault, HostReadKind,
-    InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal, MemoryLimit, OwnerEpoch, PageRefusal,
-    PayloadKind, PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds,
-    ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal,
-    SequenceFault, SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit, WorkerWork,
+    BootstrapFault, Charge as RunCharge, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail,
+    DetailLimit, DiskSpool, Durability as RunDurability, EffectPhase, EffectPhases, Exchange,
+    ExecutionClass, ExecutionLease, ExecutionReceipt, FrameEpoch, FrameTraffic, HeaderRefusal,
+    HeapFault, HostReadKind, InfrastructureOutcome, IpcTraffic, KernelRestoreRefusal,
+    MemoryLimit as RunMemoryLimit, OwnerEpoch, PageRefusal, PayloadKind, PoolCounters, PoolError,
+    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
+    RunInput, RunMeters, RunRefusal, SequenceFault, SpoolRoot, SupervisorEvidence,
+    TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

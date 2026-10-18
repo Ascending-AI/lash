@@ -1,7 +1,23 @@
-pub use lash_kernel_vm::Charge;
+pub use lash_kernel_vm::{Charge, Durability};
 use std::num::NonZeroU64;
 
 pub use lash_kernel_vm::MemoryLimit;
+
+// Keep the existing recorded spelling while the builder takes the kernel policy.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(
+    remote = "Durability",
+    rename = "Durability",
+    rename_all = "snake_case"
+)]
+pub(super) enum DurabilityWire {
+    Durable,
+    Ephemeral,
+}
+
+pub(super) fn is_durable(policy: &Durability) -> bool {
+    matches!(policy, Durability::Durable)
+}
 
 /// Serialized shape shared by every execution bound: an explicit finite limit
 /// or an explicit opt-out. Bounds are distinct Rust types so that an
@@ -155,7 +171,7 @@ pub struct ExecutionBounds {
     pub charge: Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub durability: lash_vm_client::Durability,
+    pub durability: Durability,
     pub on_memory_limit: MemoryLimit,
 }
 
@@ -165,7 +181,7 @@ impl ExecutionBounds {
             charge: Charge::Exact,
             instruction_limit,
             memory_limit,
-            durability: lash_vm_client::Durability::Durable,
+            durability: Durability::Durable,
             on_memory_limit: MemoryLimit::Recount,
         }
     }
@@ -180,7 +196,7 @@ impl ExecutionBounds {
         self
     }
 
-    pub const fn with_durability(mut self, durability: lash_vm_client::Durability) -> Self {
+    pub const fn with_durability(mut self, durability: Durability) -> Self {
         self.durability = durability;
         self
     }
@@ -199,6 +215,44 @@ impl ExecutionBounds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 1.0-BASELINE: kernel policy ownership keeps the existing config encoding,
+    /// including the omitted durable default, on creation and recorded reopen.
+    #[test]
+    fn a_recorded_durability_policy_keeps_its_existing_encoding() {
+        for (policy, encoded) in [
+            (Durability::Durable, None),
+            (Durability::Ephemeral, Some(serde_json::json!("ephemeral"))),
+        ] {
+            let config = crate::RlmProtocolPluginConfig::standard()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(InstructionBound::unbounded())
+                .memory_limit(MemoryBound::unbounded())
+                .durability(policy)
+                .build();
+            let value = serde_json::to_value(&config).expect("config encodes");
+            assert_eq!(value.get("durability"), encoded.as_ref());
+            let restored: crate::RlmProtocolPluginConfig =
+                serde_json::from_value(value).expect("existing config decodes");
+            assert_eq!(restored.execution_bounds().durability, policy);
+            let recorded = config
+                .recorded_behaviour(&crate::CellDialect::typescript())
+                .expect("the shipped presenter admits its config");
+            let value = serde_json::to_value(&recorded).expect("recorded config encodes");
+            assert_eq!(value.get("durability"), encoded.as_ref());
+            let reopened: crate::RlmRecordedBehaviour =
+                serde_json::from_value(value).expect("existing recorded config decodes");
+            assert_eq!(reopened.durability, policy);
+        }
+        // Serde's enum name is also observable to name-sensitive formats
+        // and to deserializers reporting an invalid value.
+        let invalid = || serde::de::value::BoolDeserializer::<serde::de::value::Error>::new(false);
+        let baseline = <lash_vm_client::Durability as serde::Deserialize>::deserialize(invalid())
+            .expect_err("a boolean is not a durability policy");
+        let restored = DurabilityWire::deserialize(invalid())
+            .expect_err("the kernel policy rejects the same invalid value");
+        assert_eq!(restored.to_string(), baseline.to_string());
+    }
 
     #[test]
     fn every_finite_bound_rejects_zero() {

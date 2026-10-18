@@ -27,6 +27,11 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+#[cfg(feature = "rlm")]
+use lash::rlm::{Charge as _, Durability as _, MemoryLimit as _};
+#[cfg(feature = "codemode")]
+use lash::vm::{RunCharge as _, RunDurability as _, RunMemoryLimit as _};
+
 use lash::Backend as _;
 use lash::LlmProfileConfig as _;
 use lash::LlmProfileKey as _;

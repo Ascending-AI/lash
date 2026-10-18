@@ -124,12 +124,16 @@ async fn a_provider_gets_one_terminal_per_attempt_and_both_cancellation_waits_ar
         let returned = Arc::new(Mutex::new(Vec::new()));
         let abandoned = Arc::new(Mutex::new(Vec::new()));
         let cancellation_seen = Arc::new(AtomicUsize::new(0));
+        let mut reliability = ProviderReliability::default()
+            .max_attempts(Some(2))
+            .base_delay_ms(0)
+            .max_delay_ms(0);
+        // The second retry-deadline attempt must start inside its remaining
+        // 300 ms. Random retry jitter would test another schedule entirely.
+        reliability.retry.jitter_ms = 0;
         let provider = CountedProvider {
             options: ProviderOptions {
-                reliability: ProviderReliability::default()
-                    .max_attempts(Some(2))
-                    .base_delay_ms(0)
-                    .max_delay_ms(0),
+                reliability,
                 ..Default::default()
             },
             mode,
