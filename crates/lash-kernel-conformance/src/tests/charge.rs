@@ -102,7 +102,7 @@ fn expanded_positions(tape: &[Weight]) -> Vec<usize> {
 
 /// The bounds that tell a program's events apart, up to `limit`: for each
 /// event, the least bound it passes and the greatest, and the whole charge.
-fn sweep(program: &[Weight], limit: u64) -> Vec<u64> {
+pub(super) fn sweep(program: &[Weight], limit: u64) -> Vec<u64> {
     let mut bounds = Vec::new();
     let mut charged = 0_u64;
     for weight in program {

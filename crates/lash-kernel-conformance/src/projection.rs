@@ -169,6 +169,40 @@ pub(crate) fn fault(error: impl std::fmt::Display) -> HarnessError {
     HarnessError(error.to_string())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The charge tape every plan's machine records to while a law runs
+    /// [`taped`]: what it starts and what it opens alike.
+    static TAPE: std::cell::RefCell<Option<lash_kernel_vm::ChargeTape>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `run` with every plan's machine recording its charges, and gives
+/// what it answered and the charges in order.
+#[cfg(test)]
+pub(crate) fn taped<T>(run: impl FnOnce() -> T) -> (T, Vec<lash_kernel_exec::charge::Weight>) {
+    let tape = lash_kernel_vm::ChargeTape::new();
+    TAPE.with(|held| *held.borrow_mut() = Some(tape.clone()));
+    let answered = run();
+    TAPE.with(|held| *held.borrow_mut() = None);
+    (answered, tape.steps())
+}
+
+#[cfg(test)]
+fn recorded(mut machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMachine {
+    TAPE.with(|held| {
+        if let Some(tape) = held.borrow().as_ref() {
+            machine.record_charges(tape.clone());
+        }
+    });
+    machine
+}
+
+#[cfg(not(test))]
+fn recorded(machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMachine {
+    machine
+}
+
 /// Test plans differ only in kernel layout; no second execution engine.
 pub(crate) struct Plan<const L: u64>(lash_kernel_vm::KernelMachine);
 impl<const L: u64> Plan<L> {
@@ -191,7 +225,7 @@ impl<const L: u64> Machine for Plan<L> {
             lash_kernel_vm::kernel_internals::Layout(L),
             source,
         )
-        .map(Self)
+        .map(|machine| Self(recorded(machine)))
     }
     fn open(
         program: Program,
@@ -208,7 +242,7 @@ impl<const L: u64> Machine for Plan<L> {
             source,
             lash_kernel_vm::kernel_internals::Layout(L),
         )
-        .map(Self)
+        .map(|machine| Self(recorded(machine)))
     }
     fn set_options(&mut self, options: lash_kernel_vm::MachineOptions) {
         self.0.set_options(options);

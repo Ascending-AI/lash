@@ -350,6 +350,7 @@ impl Compiler<'_> {
                     body: self.child(1, |c| c.block(body, &[]).0),
                     else_block: (!else_block.is_empty())
                         .then(|| self.child(2, |c| c.block(else_block, &[]).0)),
+                    region: None,
                 }
             }
             doc::Stmt::Break => {

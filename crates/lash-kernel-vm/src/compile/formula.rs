@@ -338,23 +338,107 @@ impl Plan {
 /// size 0, and a formula that measures only scalar sizes is closed over
 /// sizes 1 and 2, including zero and nonzero small integers.
 pub(crate) struct Fast {
-    /// Completion units indexed by the prepared guard's scalar size mask.
-    scalar: Option<Box<[u64; 16]>>,
+    /// The formula over scalar sizes; for a formula that measures a
+    /// magnitude or has more than three parameters, nothing.
+    scalar: Option<ScalarTable>,
     /// The formula as it computes for values that hold nothing
     /// ([`doc::Formula::shallow`]).
     shallow: Plan,
-    /// What `shallow` computes when every value it measures has size 1; for
-    /// a formula that measures a magnitude, nothing.
-    unit: Option<u64>,
-    /// Every combination of measured sizes 1 and 2. Zero small integers
-    /// have size 1; nonzero small integers have size 2 (K-CHG-004).
-    small: Option<Box<[u64]>>,
     /// The values the formula measures by deep size: `shallow` holds when
     /// none of them holds another value.
     deep: Box<[Source]>,
     /// The values the formula measures by nested size: `shallow` holds when
     /// none of them is a tuple or an error.
     nested: Box<[Source]>,
+}
+
+/// The one scalar charge table (K-CHG-004): a formula's completion units
+/// for every combination of scalar sizes 1 and 2 of its arguments and
+/// result, a zero small integer having size 1 and a nonzero one size 2,
+/// with deep sizes as sizes and nested sizes 0. A prepared guard's
+/// certified sizes, the general call's classification of its values and a
+/// region's charge of the same call all index it, so each charges what the
+/// formula charges, by construction (`docs/design/kernel-regions.md`
+/// §3.1).
+#[derive(Clone)]
+pub(crate) struct ScalarTable {
+    /// The units by size mask: bit `i` for argument `i`, bit 3 for the
+    /// result, set for size 2.
+    units: Box<[u64; 16]>,
+    /// The values the formula measures, which a classification reads.
+    measured: Box<[Source]>,
+}
+
+/// A size mask's bit for `source`, which measures 0 when it is nothing.
+fn size_bit(source: Source) -> Option<usize> {
+    match source {
+        Source::Arg(index) => Some(index),
+        Source::Result => Some(3),
+        Source::Nothing => None,
+    }
+}
+
+impl ScalarTable {
+    /// The table of `charge` for a function of `params`.
+    fn of(charge: &Plan, params: &[doc::Param]) -> Option<Self> {
+        if params.len() > 3
+            || charge
+                .measurements
+                .iter()
+                .any(|(_, kind)| *kind == doc::Measure::Magnitude)
+        {
+            return None;
+        }
+        let units = Box::new(std::array::from_fn(|mask| {
+            charge.evaluate(|source, kind| {
+                if kind == doc::Measure::NestedSize {
+                    return 0;
+                }
+                match size_bit(source) {
+                    Some(bit) => 1 + ((mask >> bit) & 1) as u64,
+                    None => 0,
+                }
+            })
+        }));
+        let mut measured: Vec<Source> = charge
+            .measurements
+            .iter()
+            .map(|(source, _)| *source)
+            .filter(|source| *source != Source::Nothing)
+            .collect();
+        measured.dedup();
+        Some(Self {
+            units,
+            measured: measured.into(),
+        })
+    }
+
+    /// The units of the scalar sizes `mask` states.
+    #[inline(always)]
+    pub(crate) fn units(&self, mask: u8) -> Option<u64> {
+        self.units.get(usize::from(mask)).copied()
+    }
+
+    /// The size mask of a call whose measured values `value` gives, or
+    /// `None` when one of them is not a small integer or a value of size 1.
+    #[inline(always)]
+    pub(crate) fn classify<'v>(&self, value: impl Fn(&Source) -> Option<&'v Value>) -> Option<u8> {
+        let mut mask = 0_u8;
+        for source in &self.measured {
+            match value(source) {
+                Some(Value::Int(0)) => {}
+                Some(Value::Int(_)) => mask |= 1 << size_bit(*source)?,
+                Some(value) if size_one(value) => {}
+                _ => return None,
+            }
+        }
+        Some(mask)
+    }
+
+    /// The most any call charges.
+    pub(crate) fn max(&self) -> u64 {
+        self.units.iter().copied().max().unwrap_or(0)
+    }
 }
 
 /// How a call the fast path answered is charged: an amount known when the
@@ -367,27 +451,6 @@ pub(crate) enum Charge<'p> {
 impl Fast {
     pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param], charge: &Plan) -> Self {
         let shallow = Plan::prepare(formula, params, true);
-        let unit = shallow
-            .measurements
-            .iter()
-            .all(|(_, measure)| *measure == doc::Measure::Size)
-            .then(|| shallow.evaluate(|_, _| 1));
-        let small =
-            (unit.is_some() && shallow.measurements.len() <= KEPT_MEASUREMENTS).then(|| {
-                (0..(1usize << shallow.measurements.len()))
-                    .map(|mask| {
-                        shallow.evaluate(|source, _| {
-                            let index = shallow
-                                .measurements
-                                .iter()
-                                .position(|(held, _)| *held == source)
-                                .unwrap_or(0);
-                            1 + ((mask >> index) & 1) as u64
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice()
-            });
         let measured = |kind: doc::Measure| -> Box<[Source]> {
             charge
                 .measurements
@@ -396,30 +459,8 @@ impl Fast {
                 .map(|(source, _)| *source)
                 .collect()
         };
-        let scalar = (params.len() <= 3
-            && charge
-                .measurements
-                .iter()
-                .all(|(_, kind)| *kind != doc::Measure::Magnitude))
-        .then(|| {
-            Box::new(std::array::from_fn(|mask| {
-                charge.evaluate(|source, kind| {
-                    if kind == doc::Measure::NestedSize {
-                        return 0;
-                    }
-                    let bit = match source {
-                        Source::Arg(index) => index,
-                        Source::Result => 3,
-                        Source::Nothing => return 0,
-                    };
-                    1 + ((mask >> bit) & 1) as u64
-                })
-            }))
-        });
         Self {
-            scalar,
-            unit,
-            small,
+            scalar: ScalarTable::of(charge, params),
             deep: measured(doc::Measure::DeepSize),
             nested: measured(doc::Measure::NestedSize),
             shallow,
@@ -430,7 +471,12 @@ impl Fast {
     /// Formulas measuring magnitude retain the general fallback.
     #[inline]
     pub(crate) fn scalar_units(&self, mask: u8) -> Option<u64> {
-        self.scalar.as_ref()?.get(usize::from(mask)).copied()
+        self.scalar.as_ref()?.units(mask)
+    }
+
+    /// The scalar charge table, when the formula has one.
+    pub(crate) fn scalar(&self) -> Option<&ScalarTable> {
+        self.scalar.as_ref()
     }
 
     /// How to charge a call with `args` that returned `result`: what
@@ -460,29 +506,13 @@ impl Fast {
         {
             return Charge::Plan(charge);
         }
-        if let Some(small) = &self.small {
-            let mut mask = 0usize;
-            for (index, (source, _)) in self.shallow.measurements.iter().enumerate() {
-                match value(source) {
-                    Some(Value::Int(0)) => {}
-                    Some(Value::Int(_)) => mask |= 1 << index,
-                    Some(value) if size_one(value) => {}
-                    _ => return Charge::Plan(&self.shallow),
-                }
-            }
-            return Charge::Units(small[mask]);
-        }
-        match self.unit {
-            Some(unit)
-                if self
-                    .shallow
-                    .measurements
-                    .iter()
-                    .all(|(source, _)| value(source).is_some_and(size_one)) =>
-            {
-                Charge::Units(unit)
-            }
-            _ => Charge::Plan(&self.shallow),
+        match self
+            .scalar
+            .as_ref()
+            .and_then(|table| table.units(table.classify(value)?))
+        {
+            Some(units) => Charge::Units(units),
+            None => Charge::Plan(&self.shallow),
         }
     }
 }

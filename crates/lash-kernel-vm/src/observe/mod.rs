@@ -214,6 +214,12 @@ impl Observer {
         }
     }
 
+    /// Whether a charge tape is all that observes: the one observer a
+    /// region records for (`docs/design/kernel-regions.md` §1).
+    pub(crate) fn only_charges(&self) -> bool {
+        self.path.is_none() && self.work.is_none() && self.context.is_none()
+    }
+
     #[inline(never)]
     pub(crate) fn on(&mut self, event: Event, charged: u64, allocated: u64) {
         if let Some(work) = &mut self.work {

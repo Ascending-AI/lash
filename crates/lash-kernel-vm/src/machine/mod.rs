@@ -24,6 +24,7 @@ mod plans;
 pub(crate) mod project;
 mod queue;
 mod refine;
+mod regions;
 mod registers;
 mod segments;
 mod session;
@@ -233,7 +234,7 @@ enum Completion {
 }
 
 #[derive(Clone, Debug)]
-enum SlotState {
+pub(crate) enum SlotState {
     Empty,
     Value(Value),
     /// A variable a closure shares: the arena cell that holds it.

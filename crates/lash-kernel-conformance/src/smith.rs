@@ -12,6 +12,8 @@ use lash_kernel_doc::{Document, FunctionRegistry, Name, parse_document};
 use lash_kernel_vm::{Bounds, PreparedLibrary};
 
 mod runner;
+#[cfg(test)]
+pub(crate) use runner::plans_agree;
 pub use runner::{HostCall, Observation, check_interpreter, compare};
 
 /// A program and its environment script. The bytes also choose resource
@@ -191,7 +193,7 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// K-MACH-008 and K-TASK-024, including a child asking after its spawner.
@@ -205,7 +207,7 @@ mod tests {
             "kernel-smith slice agreement: executed=64 scheduled/max/every-statement plans=0/3 warm/cold"
         );
     }
-    fn seeds() -> impl Iterator<Item = (u64, Smith)> {
+    pub(crate) fn seeds() -> impl Iterator<Item = (u64, Smith)> {
         (0..64u64).map(|seed| {
             let mut state = seed + 1;
             let bytes: Vec<u8> = (0..512)

@@ -66,8 +66,8 @@ impl LibraryTables {
                 .collect::<Vec<_>>();
             let no_bindings = NO_BINDINGS;
             let mut compiler = Compiler::new(
-                prepared.layout,
-                Shuffler(prepared.layout.0),
+                prepared.layout.shape(),
+                Shuffler(prepared.layout.shape().0),
                 Resolve {
                     lib_of: &prepared.lib_of,
                     listed: None,
@@ -234,9 +234,10 @@ impl PreparedLibrary {
 
     pub(super) fn with_layout_and_charge(
         registry: Arc<FunctionRegistry>,
-        layout: Layout,
+        stated: Layout,
         charge: crate::Charge,
     ) -> Self {
+        let layout = stated.shape();
         let mut functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
         Shuffler(layout.0).shuffle(layout, &mut functions);
         let lib_of = functions
@@ -308,7 +309,7 @@ impl PreparedLibrary {
             charge,
             alternative: Default::default(),
             registry,
-            layout,
+            layout: stated,
             tables,
             functions,
             libs: Vec::new(),
@@ -434,7 +435,7 @@ impl Prepared {
             plan,
             registered.definition(),
             &self.lib_of,
-            self.layout,
+            self.layout.shape(),
             CodeId(slot.base.codes),
             tables,
             &mut sites,

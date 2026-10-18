@@ -462,6 +462,14 @@ impl KernelMachine {
             }
             Some(Control::While { stmt, .. }) => {
                 let running = Running::new(task, exe, *stmt);
+                if let Form::While {
+                    region: Some(region),
+                    ..
+                } = running.stmt.form
+                    && let Some(flow) = self.loop_region(task, exe, region)?
+                {
+                    return Ok(flow);
+                }
                 if !self.ran.is_empty()
                     && let Some(statement) = running.stmt.ordinal
                     && let Some(ordinal) = exe.condition_ordinals.get(&statement.get())

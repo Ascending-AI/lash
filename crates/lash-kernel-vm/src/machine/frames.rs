@@ -256,6 +256,11 @@ impl Frame {
         &self.slots.values[at as usize]
     }
 
+    /// Every variable's state, by its place in the frame.
+    pub(super) fn slot_states(&self) -> &[SlotState] {
+        &self.slots.values
+    }
+
     pub(super) fn set_slot(&mut self, at: u32, value: SlotState) {
         let at = at as usize;
         self.slots.values[at] = value;

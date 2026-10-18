@@ -487,3 +487,52 @@ fn semantic_end(mut end: lash_kernel_vm::End) -> lash_kernel_vm::End {
     }
     end
 }
+
+/// PLAN-INDEP of regions on `smith` under `slices`
+/// (`docs/design/kernel-regions.md` §3.3): plans `A` and `B` make the same
+/// run and charge program, and each resumes the other's images at every
+/// slice and park. Gives the run's charge under `A`.
+#[cfg(test)]
+pub(crate) fn plans_agree<const A: u64, const B: u64>(
+    smith: &Smith,
+    slices: &[u64],
+) -> Result<u64, HarnessError> {
+    use crate::projection::{Plan, taped};
+    use lash_kernel_vm::kernel_internals::Layout;
+    let projector = |layout: u64, imports| Projector {
+        imports,
+        layout: Layout(layout),
+        ..Projector::default()
+    };
+    let (mut a_images, mut b_images) = (projector(A, None), projector(B, None));
+    let (a, a_tape) = taped(|| observe::<Plan<A>>(smith, slices, &mut a_images));
+    let (b, b_tape) = taped(|| observe::<Plan<B>>(smith, slices, &mut b_images));
+    let (a, b) = (a?, b?);
+    let expanded = |tape: &[lash_kernel_exec::charge::Weight]| {
+        lash_kernel_exec::charge::Weight::expand(tape.iter().copied())
+    };
+    if !agree(&a, &b)
+        || a_images.terminal != b_images.terminal
+        || (!memory(&a) && !memory(&b) && expanded(&a_tape) != expanded(&b_tape))
+    {
+        return Err(fault(format!("plans disagree:\n{a:#?}\n{b:#?}")));
+    }
+    let mut b_resuming = projector(B, Some(&a_images.images));
+    let resumed = observe::<Plan<B>>(smith, slices, &mut b_resuming)?;
+    if !agree(&a, &resumed) || a_images.terminal != b_resuming.terminal {
+        return Err(fault(format!(
+            "B resuming A's images:\n{a:#?}\n{resumed:#?}"
+        )));
+    }
+    let mut a_resuming = projector(A, Some(&b_images.images));
+    let resumed = observe::<Plan<A>>(smith, slices, &mut a_resuming)?;
+    if !agree(&b, &resumed) || b_images.terminal != a_resuming.terminal {
+        return Err(fault(format!(
+            "A resuming B's images:\n{b:#?}\n{resumed:#?}"
+        )));
+    }
+    Ok(match &a {
+        Execution::Ran(rows) => rows.last().and_then(|row| row.meters.charged).unwrap_or(0),
+        Execution::Refused(_) => 0,
+    })
+}

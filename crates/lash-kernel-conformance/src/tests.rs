@@ -12,6 +12,7 @@ mod contract_cases;
 mod charge;
 mod ephemeral;
 mod protocol;
+mod regions;
 
 // These three owning-library shards fill rules this corpus does not own.
 const LIBRARY_CORPUS_FILES: &[(&str, &str)] = &[
