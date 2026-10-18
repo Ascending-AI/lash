@@ -448,9 +448,13 @@ impl KernelMachine {
                 self.resolve_normal(record, &field.key)?;
                 let slot = field.site.and_then(|site| self.sites.slot(site));
                 let (value, found) = self.in_arena(|arena| {
-                    crate::compile::find_property(arena, record, slot, &field.name, || {
-                        Ok(field.key.clone())
-                    })
+                    crate::compile::find_property(
+                        arena,
+                        record,
+                        slot,
+                        field.name.as_bytes(),
+                        || Ok(field.key.clone()),
+                    )
                 })?;
                 if let Some(site) = field.site
                     && found != slot
@@ -517,7 +521,10 @@ impl KernelMachine {
                 };
                 let slot = self.sites.slot(site);
                 let (found, at) = self.in_arena(|arena| {
-                    let name = arena.semantics().text(&index)?;
+                    let name = match &index {
+                        Value::Text(short) => short.as_bytes(),
+                        _ => arena.semantics().text(&index)?.as_bytes(),
+                    };
                     crate::compile::find_property(arena, record, slot, name, || arena.key(&index))
                 })?;
                 if at != slot {

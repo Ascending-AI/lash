@@ -124,6 +124,8 @@ pub struct Facts {
     /// What a ref to it is keyed by while it is resident: process-local,
     /// never persisted, independent of where the arena put it.
     token: u64,
+    /// Invalidates process-local positions before any body or index edit.
+    revision: u64,
     /// The seal it was created after, when it was created by the run:
     /// an object created since the last seal is young (seam I).
     born: Option<u64>,
@@ -209,6 +211,7 @@ pub struct Chilled {
 #[derive(Debug, Default)]
 pub struct Arena {
     objects: Objects,
+    keys: keys::KeyCache,
     facts: Vec<Facts>,
     /// The one handle of each durable object the run has seen.
     entities: HashMap<EntityId, ArenaHandle>,
@@ -298,7 +301,7 @@ impl Arena {
     /// [`lash_kernel_doc::Args`] and the machine's own equality and keys use.
     #[inline]
     pub fn semantics(&self) -> ArenaSemantics<'_> {
-        ArenaSemantics::new(&self.objects, &self.facts)
+        ArenaSemantics::new(&self.objects, &self.facts, &self.keys)
     }
 
     #[inline]
@@ -341,6 +344,7 @@ impl Arena {
             .objects
             .get_mut(handle)
             .ok_or_else(|| malformed("a stale handle reached the machine"))?;
+        facts.revision = facts.revision.saturating_add(1);
         Ok((body, facts))
     }
 
@@ -895,6 +899,7 @@ impl Arena {
         );
         self.unhold_members(&placeholder);
         let facts = self.facts_mut(handle)?;
+        facts.revision = facts.revision.saturating_add(1);
         if let Some(cost) = cost {
             facts.summary.cost = cost;
         }

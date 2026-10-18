@@ -53,7 +53,7 @@ mod scopes;
 mod templates;
 pub(crate) use templates::Entry;
 pub(crate) mod segments;
-pub(crate) use reads::{Field, ReadSite, find as find_property};
+pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{

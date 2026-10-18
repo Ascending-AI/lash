@@ -6104,6 +6104,10 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "default",
+        "std",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },

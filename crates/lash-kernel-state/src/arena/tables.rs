@@ -14,7 +14,7 @@
 //! present ones with their sequence, absent ones as absent. A key it does
 //! not know is answered by decoding the table's cold chunks.
 
-use std::collections::{HashMap, HashSet};
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Table};
 use lash_kernel_doc::heap::NormalKey;
@@ -97,7 +97,7 @@ impl Index {
     /// Whether the index must ask the heap's key index for `key`: the
     /// table has a cold chunk and the index does not know the key.
     pub fn unknown(&self, key: &NormalKey, cold: bool) -> bool {
-        matches!(self.known(key, cold), Known::Unknown)
+        cold && matches!(self.known(key, true), Known::Unknown)
     }
 
     /// Records what the heap's key index holds for `key`.
@@ -464,6 +464,16 @@ impl super::Arena {
             return Ok(None);
         };
         Ok(Some((place, pair(table, place)?[1])))
+    }
+
+    /// A process-local object identity and body revision. Every mutable body
+    /// borrow invalidates it, including changes of kind, chunk layout and key
+    /// positions. Saturation disables caching rather than reusing a revision.
+    #[inline]
+    pub fn table_version(&self, handle: ArenaHandle) -> Result<Option<(u64, u64)>, NativeError> {
+        self.table_view(handle)?;
+        let facts = self.facts(handle)?;
+        Ok((facts.revision != u64::MAX).then_some((facts.token, facts.revision)))
     }
 
     /// The entry at `place`, if the table holds one there: what a read

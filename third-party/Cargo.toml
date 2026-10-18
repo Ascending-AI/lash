@@ -684,7 +684,7 @@ features = []
 package = "foldhash"
 version = "=0.2.0"
 default-features = false
-features = []
+features = ["default", "std"]
 
 [dependencies.p0113]
 package = "form_urlencoded"

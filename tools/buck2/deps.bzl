@@ -1482,6 +1482,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
+            "foldhash": "//third-party/rust:p0112",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",

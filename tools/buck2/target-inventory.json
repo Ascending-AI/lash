@@ -89623,6 +89623,7 @@
         "synthetic-next"
       ],
       "dependencies": [
+        "foldhash",
         "lash-kernel-doc",
         "schemars",
         "serde",

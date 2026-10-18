@@ -864,7 +864,7 @@ fn field(field: &super::super::Field, target: Node) -> Node {
             }
             let slot = site.and_then(|site| cx.sites.slot(site));
             let (value, found) =
-                find_property(cx.arena, record, slot, &name, || Ok(key.clone())).ok()?;
+                find_property(cx.arena, record, slot, name.as_bytes(), || Ok(key.clone())).ok()?;
             if let Some(site) = site
                 && found != slot
             {
@@ -925,7 +925,10 @@ fn index(site: Option<ReadSite>, target: Node, index: Node) -> Node {
                     );
                 };
                 let slot = cx.sites.slot(site);
-                let name = arena.semantics().text(&index).ok()?;
+                let name = match &index {
+                    Value::Text(short) => short.as_bytes(),
+                    _ => arena.semantics().text(&index).ok()?.as_bytes(),
+                };
                 let (found, at) =
                     find_property(arena, record, slot, name, || arena.key(&index)).ok()?;
                 if at != slot {

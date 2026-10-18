@@ -428,6 +428,11 @@ impl Arena {
         key: &Value,
     ) -> Result<Option<NormalKey>, NativeError> {
         self.warm(handle)?;
+        if let Body::Map(table) | Body::Set(table) | Body::Record(table) = self.body(handle)?
+            && first_cold(&table.chunks).is_none()
+        {
+            return Ok(None);
+        }
         let normal = self.key(key)?;
         Ok(self.unresolved_normal(handle, &normal)?.then_some(normal))
     }

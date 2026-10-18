@@ -10,7 +10,6 @@ use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LocalCode, Objects, Seque
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
-use super::keys::normal_key;
 use super::{Arena, CARD, Facts, Summary, local_cost, malformed, value_summary};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
@@ -275,7 +274,7 @@ impl Arena {
 
     /// The normal form of a key, refusing a value that is no legal key.
     pub fn key(&self, key: &Value) -> Result<NormalKey, NativeError> {
-        normal_key(&self.objects, &self.facts, key)?.ok_or_else(invalid_key)
+        self.semantics().normal_key(key)?.ok_or_else(invalid_key)
     }
 
     /// The row cost of an entry of the table `handle`: a record's field
@@ -304,8 +303,7 @@ impl Arena {
         key: &Value,
     ) -> Result<Option<Value>, NativeError> {
         self.warm(handle)?;
-        let normal = self.key(key)?;
-        Ok(self.table_find(handle, &normal)?.map(|(_, value)| value))
+        Ok(self.semantics().table_get(handle, key)?.copied())
     }
 
     /// Writes `value` under `key` of the table `handle`: an existing key

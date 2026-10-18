@@ -2,39 +2,34 @@
 //! site's slot, kept only while this machine lives. A restored machine
 //! starts with every site empty.
 
-use crate::compile::ReadSite;
+use crate::compile::{PropertySlot, ReadSite};
 
-/// Each site's cached slot plus one; zero is a site with none.
+/// Each site's guarded short key and position.
 #[derive(Default)]
-pub(crate) struct SiteCaches(Vec<u32>);
+pub(crate) struct SiteCaches(Vec<Option<PropertySlot>>);
 
 impl SiteCaches {
     /// The slot `site` last found its property at.
     #[inline]
-    pub(crate) fn slot(&self, site: ReadSite) -> Option<usize> {
+    pub(crate) fn slot(&self, site: ReadSite) -> Option<PropertySlot> {
         if site.missing {
             return None;
         }
-        let slot = *self.0.get(site.at.ix())?;
-        slot.checked_sub(1).map(|slot| slot as usize)
+        self.0.get(site.at.ix()).copied().flatten()
     }
 
     /// Keeps the slot `site` found its property at, or none.
     #[inline]
-    pub(crate) fn keep(&mut self, site: ReadSite, slot: Option<usize>) {
+    pub(crate) fn keep(&mut self, site: ReadSite, slot: Option<PropertySlot>) {
         if site.missing {
             return;
         }
-        let slot = slot
-            .and_then(|slot| u32::try_from(slot).ok())
-            .and_then(|slot| slot.checked_add(1))
-            .unwrap_or(0);
         let at = site.at.ix();
         if at >= self.0.len() {
-            if slot == 0 {
+            if slot.is_none() {
                 return;
             }
-            self.0.resize(at + 1, 0);
+            self.0.resize(at + 1, None);
         }
         self.0[at] = slot;
     }

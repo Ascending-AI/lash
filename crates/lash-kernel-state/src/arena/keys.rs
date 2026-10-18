@@ -9,15 +9,49 @@
 //! chunk 0 once every chunk is resident, and the machine joins it into one
 //! chunk.
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::hash::BuildHasher;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Sequence, Table};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Sequence, ShortText, Table};
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
 use lash_kernel_doc::heap::{Identity, NormalKey};
 use lash_kernel_doc::heap_values::{integral_float, key_digest};
 use lash_kernel_doc::{Integer, KernelDataLimits, NativeError, Retry, Semantics, Timestamp, Value};
 
 use super::Facts;
+
+/// Bounded, process-local normalized short keys. Colliding cache slots compare
+/// the complete short text; a miss replaces the slot, never aliases its key.
+#[derive(Debug, Default)]
+pub(super) struct KeyCache {
+    slots: RefCell<Vec<Option<(ShortText, NormalKey)>>>,
+    hash: foldhash::fast::RandomState,
+}
+
+impl KeyCache {
+    fn with<R>(
+        &self,
+        objects: &Objects,
+        facts: &[Facts],
+        value: &Value,
+        read: impl FnOnce(Option<&NormalKey>) -> Result<R, NativeError>,
+    ) -> Result<R, NativeError> {
+        let Value::Text(short) = value else {
+            return read(normal_key(objects, facts, value)?.as_ref());
+        };
+        const SLOTS: usize = 64;
+        let at = self.hash.hash_one(short.as_bytes()) as usize % SLOTS;
+        let mut slots = self.slots.borrow_mut();
+        if slots.is_empty() {
+            slots.resize_with(SLOTS, || None);
+        }
+        if !slots[at].as_ref().is_some_and(|(key, _)| key == short) {
+            slots[at] = Some((*short, text_key(short.as_str())));
+        }
+        read(slots[at].as_ref().map(|(_, normal)| normal))
+    }
+}
 
 fn body(objects: &Objects, handle: ArenaHandle) -> Result<&Body, NativeError> {
     objects
@@ -388,13 +422,15 @@ pub struct ArenaSemantics<'a> {
     objects: &'a Objects,
     facts: &'a [Facts],
     limits: KernelDataLimits,
+    keys: &'a KeyCache,
 }
 
 impl<'a> ArenaSemantics<'a> {
-    pub(super) fn new(objects: &'a Objects, facts: &'a [Facts]) -> Self {
+    pub(super) fn new(objects: &'a Objects, facts: &'a [Facts], keys: &'a KeyCache) -> Self {
         Self {
             objects,
             facts,
+            keys,
             limits: KernelDataLimits::standard(),
         }
     }
@@ -406,7 +442,12 @@ impl<'a> ArenaSemantics<'a> {
 
     /// `value`'s normal form, or `None` when it is no legal key.
     pub fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, NativeError> {
-        normal_key(self.objects, self.facts, value)
+        self.keys.with(
+            self.objects,
+            self.facts,
+            value,
+            |normal| Ok(normal.cloned()),
+        )
     }
 
     /// A text's or a function name's UTF-8, whole.
@@ -439,6 +480,19 @@ impl<'a> ArenaSemantics<'a> {
         Ok(table(self.objects, handle)?.1)
     }
 
+    /// A machine table read refuses an illegal key; native lookup instead
+    /// answers absent for one. Both borrow the cached normal form.
+    pub(super) fn table_get(
+        &self,
+        table: ArenaHandle,
+        key: &Value,
+    ) -> Result<Option<&'a Value>, NativeError> {
+        self.keys.with(self.objects, self.facts, key, |normal| {
+            let normal = normal.ok_or_else(super::ops::invalid_key)?;
+            lookup(self.objects, self.facts, table, normal)
+        })
+    }
+
     /// The value a resident table holds under normal form `normal`.
     pub fn find(
         &self,
@@ -455,24 +509,21 @@ impl Semantics for ArenaSemantics<'_> {
     }
 
     fn check_key(&self, key: &Value) -> Result<(), NativeError> {
-        match normal_key(self.objects, self.facts, key)? {
-            Some(_) => Ok(()),
-            None => Err(NativeError::refused(
-                "invalid_key",
-                "a key is null, a bool, a number, a text, bytes, a timestamp, a ref, or a tuple of these",
-            )),
-        }
+        self.keys.with(self.objects, self.facts, key, |normal| {
+            normal.map(|_| ()).ok_or_else(super::ops::invalid_key)
+        })
     }
 
     fn lookup(&self, table: ArenaHandle, key: &Value) -> Result<Option<&Value>, NativeError> {
-        match normal_key(self.objects, self.facts, key)? {
-            Some(normal) => lookup(self.objects, self.facts, table, &normal),
-            None => Ok(None),
-        }
+        self.keys
+            .with(self.objects, self.facts, key, |normal| match normal {
+                Some(normal) => lookup(self.objects, self.facts, table, normal),
+                None => Ok(None),
+            })
     }
 
     fn normal_key(&self, key: &Value) -> Result<Option<NormalKey>, NativeError> {
-        normal_key(self.objects, self.facts, key)
+        self.normal_key(key)
     }
 
     fn depth(&self, value: &Value) -> u32 {
@@ -481,5 +532,33 @@ impl Semantics for ArenaSemantics<'_> {
 
     fn limits(&self) -> KernelDataLimits {
         self.limits
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// K-KEY-002: a bounded normalization cache collision never aliases keys.
+    /// The cache must agree with the canonical grammar, including UTF-8 and
+    /// every inline text length, after more distinct keys than cache slots.
+    #[test]
+    fn normalized_short_key_cache_checks_full_keys_on_collisions() {
+        let objects = Objects::default();
+        let cache = KeyCache::default();
+        let names: Vec<_> = (0..256)
+            .map(|i| format!("clé{i}"))
+            .chain((0..=ShortText::MAX).map(|len| "x".repeat(len)))
+            .collect();
+        for name in names.iter().chain(names.iter().rev()) {
+            let value = Value::Text(ShortText::new(name).unwrap());
+            let expected = normal_key(&objects, &[], &value).unwrap();
+            cache
+                .with(&objects, &[], &value, |actual| {
+                    assert_eq!(actual, expected.as_ref(), "{name}");
+                    Ok(())
+                })
+                .unwrap();
+        }
     }
 }

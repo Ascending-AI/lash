@@ -3332,6 +3332,7 @@ dependencies = [
 name = "lash-kernel-state"
 version = "0.0.0-dev"
 dependencies = [
+ "foldhash 0.2.0",
  "lash-kernel-doc",
  "schemars",
  "serde",
