@@ -518,6 +518,29 @@ fn regions_on_and_off_agree(shard: usize) {
         check(&on, &off, &case, &mut counts, &mut failures);
     }
     counts.report(shard, "region-programs", began);
+    // FIG-6754: actual Python invokes preserve their atom/action charge,
+    // occurrences and continuations, including declines and zero division.
+    // Assign each extra program once, like the existing program families.
+    for (index, (lowered, program)) in crate::helper_plans::python_region_programs()
+        .into_iter()
+        .enumerate()
+    {
+        if index % SHARDS != shard {
+            continue;
+        }
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        assert!(formed(&on, &case) > 0, "{}", case.name);
+        assert_eq!(formed(&off, &case), 0);
+        for call_depth in [1, 2, 3, 4, 16] {
+            case.environment.bounds.call_depth = call_depth;
+            check(&on, &off, &case, &mut counts, &mut failures);
+        }
+    }
+    counts.report(shard, "python-invokes", began);
     for (index, case) in super::corpus_shards()
         .iter()
         .flat_map(|shard| &shard.cases)

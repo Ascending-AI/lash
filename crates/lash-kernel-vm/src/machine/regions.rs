@@ -38,8 +38,9 @@ enum Went {
 }
 
 /// One region's run over its frame: what it charges, records and holds.
-struct Run<'a> {
+struct Run<'a, const INVOKES: bool> {
     frame: &'a mut Frame,
+    counters: Option<&'a mut super::tasks::Occurrences>,
     arena: &'a Arena,
     heap: &'a mut PagedHeap,
     /// Whether variables' memory is held (`MemoryLimit` not off).
@@ -62,12 +63,29 @@ impl KernelMachine {
     pub(super) fn loop_region(
         &mut self,
         task: TaskId,
+        host: &dyn crate::Host,
+        exe: &Executable,
+        region: u32,
+    ) -> Result<Option<Flow>, Halt> {
+        if exe.regions[region as usize].calls.is_empty() {
+            self.run_loop_region::<false>(task, host, exe, region)
+        } else {
+            self.run_loop_region::<true>(task, host, exe, region)
+        }
+    }
+
+    /// Specialize occurrence bookkeeping away for regions with no invokes.
+    fn run_loop_region<const INVOKES: bool>(
+        &mut self,
+        task: TaskId,
+        host: &dyn crate::Host,
         exe: &Executable,
         region: u32,
     ) -> Result<Option<Flow>, Halt> {
         // The environment guard: nothing observes the run but a charge
         // tape, which the region records.
         if !self.charging
+            || host.observes_sites()
             || !self.ran.is_empty()
             || self.steps.verify
             || self
@@ -121,14 +139,13 @@ impl KernelMachine {
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
         let (bound, slice_end) = (self.bounds.charge_limit, self.slice_end);
+        let durable = self.durable();
         let arena = self.arena.borrow();
-        let frame = self
+        let state = self
             .tasks
             .get_mut(task.0 as usize)?
-            .ok_or_else(|| fault("no task"))?
-            .frames
-            .last_mut()?
-            .ok_or_else(|| fault("no frame"))?;
+            .ok_or_else(|| fault("no task"))?;
+        let frame = state.frames.last_mut()?.ok_or_else(|| fault("no frame"))?;
         // What a `for` walks, from where; the cursor of a `while` is none.
         let walk = match (&compiled.head, frame.control.last()) {
             (CompiledHead::While { .. }, Some(Control::While { .. })) => None,
@@ -144,8 +161,9 @@ impl KernelMachine {
             ) => Some((cursor.walked(), *items, *position)),
             _ => return Ok(None),
         };
-        let mut run = Run {
+        let mut run = Run::<INVOKES> {
             frame,
+            counters: (INVOKES && durable).then_some(&mut state.counters),
             arena: &arena,
             heap: &mut self.heap,
             memory,
@@ -172,13 +190,16 @@ impl KernelMachine {
             run.meter.reset();
             match (&compiled.head, walk) {
                 (CompiledHead::While { test, commit }, _) => {
+                    if !run.ready(commit) {
+                        break;
+                    }
                     if !matches!(
                         test(run.frame.slot_states(), &mut run.meter),
                         Some(Value::Bool(true))
                     ) {
                         break;
                     }
-                    run.commit(commit);
+                    run.commit(commit)?;
                 }
                 (
                     CompiledHead::For {
@@ -205,7 +226,7 @@ impl KernelMachine {
                     if !scalar(&element) || !run.hold(&element)? {
                         break;
                     }
-                    run.commit(commit);
+                    run.commit(commit)?;
                     stepped += 1;
                     run.frame.set_slot(*binding, SlotState::Value(element));
                 }
@@ -258,7 +279,7 @@ struct Stack<'p> {
     nexts: [usize; NESTING + 1],
 }
 
-impl Run<'_> {
+impl<const INVOKES: bool> Run<'_, INVOKES> {
     /// Runs one pass through the loop's body, `stack`'s first block,
     /// entering the `if` arms it takes.
     #[inline(always)]
@@ -281,6 +302,9 @@ impl Run<'_> {
             self.meter.reset();
             match step {
                 CompiledStep::Write { value, at, commit } => {
+                    if !self.ready(commit) {
+                        return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
+                    }
                     let Some(value) = value(self.frame.slot_states(), &mut self.meter) else {
                         return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
                     };
@@ -292,9 +316,12 @@ impl Run<'_> {
                         _ => return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index)),
                     }
                     self.frame.set_slot(*at, SlotState::Value(value));
-                    self.commit(commit);
+                    self.commit(commit)?;
                 }
                 CompiledStep::Bind { value, at, commit } => {
+                    if !self.ready(commit) {
+                        return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
+                    }
                     let value = value(self.frame.slot_states(), &mut self.meter);
                     let Some(value) = value.filter(scalar) else {
                         return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
@@ -303,7 +330,7 @@ impl Run<'_> {
                         return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
                     }
                     self.frame.set_slot(*at, SlotState::Value(value));
-                    self.commit(commit);
+                    self.commit(commit)?;
                 }
                 CompiledStep::If {
                     condition,
@@ -311,12 +338,15 @@ impl Run<'_> {
                     then,
                     otherwise,
                 } => {
+                    if !self.ready(commit) {
+                        return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
+                    }
                     let arm = match condition(self.frame.slot_states(), &mut self.meter) {
                         Some(Value::Bool(true)) => then,
                         Some(Value::Bool(false)) => otherwise,
                         _ => return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index)),
                     };
-                    self.commit(commit);
+                    self.commit(commit)?;
                     // An empty arm ends as soon as it begins: the
                     // reference enters no block.
                     if !arm.steps.is_empty() {
@@ -326,7 +356,7 @@ impl Run<'_> {
                     }
                 }
                 CompiledStep::Continue(commit) => {
-                    self.commit(commit);
+                    self.commit(commit)?;
                     for body in bodies[..=depth].iter().rev() {
                         self.end(body);
                     }
@@ -379,11 +409,25 @@ impl Run<'_> {
     /// units and formulas, and, with a charge tape attached, its static
     /// charge program as the reference charges it (§3.1).
     #[inline(always)]
-    fn commit(&mut self, commit: &Commit) {
+    fn commit(&mut self, commit: &Commit) -> Result<(), Halt> {
+        if INVOKES && let Some(counters) = self.counters.as_deref_mut() {
+            for &site in &commit.calls {
+                counters.advance(site)?;
+            }
+        }
         *self.charged += commit.fixed + self.meter.units;
         if let Some(tape) = self.tape {
             record(tape, &commit.program, &self.meter.formulas);
         }
+        Ok(())
+    }
+
+    fn ready(&self, commit: &Commit) -> bool {
+        !INVOKES
+            || self
+                .counters
+                .as_deref()
+                .is_none_or(|counters| counters.can_advance(&commit.calls))
     }
 }
 

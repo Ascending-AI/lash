@@ -81,6 +81,10 @@ pub(crate) struct Summary {
     pub(crate) reads: Box<[u32]>,
     /// The frame position it writes or declares.
     pub(crate) write: Option<u32>,
+    /// Invoke occurrences committed only when this statement succeeds.
+    calls: Box<[usize]>,
+    /// A statement-root invoke keeps its original action and resume form.
+    action: Option<StmtId>,
 }
 
 impl Summary {
@@ -120,6 +124,26 @@ pub(crate) struct Body {
 }
 
 impl Body {
+    fn calls(&self, calls: &mut Vec<usize>) {
+        for step in &self.steps {
+            match step {
+                Step::Write(summary) | Step::Bind(summary) | Step::Continue(summary) => {
+                    calls.extend_from_slice(&summary.calls);
+                }
+                Step::If {
+                    test,
+                    then,
+                    otherwise,
+                } => {
+                    calls.extend_from_slice(&test.calls);
+                    then.calls(calls);
+                    otherwise.calls(calls);
+                }
+                Step::Leave => {}
+            }
+        }
+    }
+
     /// The most one pass through the block charges: every statement's
     /// most, and an `if`'s test and its dearer arm.
     fn max(&self) -> Option<u64> {
@@ -184,8 +208,7 @@ pub(crate) struct LoopPlan {
     /// checks it (`K-BND-002`): an operation's admission, or a helper
     /// template's inline depth.
     pub(crate) depth: Option<u32>,
-    /// Its call sites' occurrence indexes (`K-EFF-008`): a loop region of
-    /// this version makes no call.
+    /// Its invoke sites' occurrence indexes (`K-EFF-008`), in source order.
     pub(crate) calls: Box<[usize]>,
     compiled: OnceLock<Option<CompiledLoop>>,
 }
@@ -275,6 +298,7 @@ pub(crate) struct CompiledLoop {
 pub(crate) struct Commit {
     pub(crate) fixed: u64,
     pub(crate) program: Box<[Event]>,
+    pub(crate) calls: Box<[usize]>,
 }
 
 impl From<&Summary> for Commit {
@@ -282,6 +306,7 @@ impl From<&Summary> for Commit {
         Self {
             fixed: summary.fixed,
             program: summary.program.clone(),
+            calls: summary.calls.clone(),
         }
     }
 }
@@ -388,6 +413,8 @@ impl Formation<'_> {
                     program: lean(program),
                     reads: Box::default(),
                     write: Some(binding.at),
+                    calls: Box::default(),
+                    action: None,
                 };
                 let head = Head::For {
                     charge,
@@ -410,6 +437,11 @@ impl Formation<'_> {
             .checked_add(body.max()?)?
             .checked_add(self.loop_test)?;
         let binds = matches!(head, Head::For { .. }) || body.binds();
+        let mut calls = match &head {
+            Head::While(test) => test.calls.to_vec(),
+            Head::For { .. } => Vec::new(),
+        };
+        body.calls(&mut calls);
         Some(LoopPlan {
             stmt: id,
             head,
@@ -418,7 +450,7 @@ impl Formation<'_> {
             iteration_max,
             binds,
             depth,
-            calls: Box::default(),
+            calls: calls.into(),
             compiled: OnceLock::new(),
         })
     }
@@ -458,6 +490,7 @@ impl Formation<'_> {
                             _ => Step::Continue(summary),
                         })
                     }
+                    Form::Action(_) => self.action_summary(code, *id, depth),
                     Form::If {
                         then_block,
                         else_block,
@@ -474,6 +507,63 @@ impl Formation<'_> {
             block,
             steps,
             declares: lowered.declares.clone().into(),
+        })
+    }
+
+    /// A root invoke has atom charge events rather than expression ops.
+    /// Keep its action form so a decline resumes the original continuation.
+    fn action_summary(&self, code: &Code, id: StmtId, depth: &mut Option<u32>) -> Option<Step> {
+        let statement = (self.lowered.stmt)(id);
+        let (action, lib, args) = library_invoke(&statement.form)?;
+        let ops = self
+            .lowered
+            .stream
+            .ops
+            .get(statement.ops.start as usize..statement.ops.end() as usize)?;
+        let [Op::Act, end] = ops else {
+            return None;
+        };
+        let (local, bind) = match end {
+            Op::WriteLocal { local, .. } => (local, false),
+            Op::Bind { local, .. } => (local, true),
+            _ => return None,
+        };
+        if code.slots.get(local.slot as usize)?.shared {
+            return None;
+        }
+        let mut reads = Vec::new();
+        for arg in args {
+            match arg {
+                super::Atom::Var(super::Var::Local(local)) if !local.shared => reads.push(local.at),
+                super::Atom::Literal(Constant::Resident(value)) if scalar(value) => {}
+                _ => return None,
+            }
+        }
+        let mut defined = vec![true; args.len()];
+        let mut formula_max = 0;
+        self.site(lib, 0, args.len(), &mut defined, &mut formula_max, depth)?;
+        let mut program = vec![Event::Fixed(Weight::Atomic(1))];
+        program.extend(args.iter().map(|_| Event::Fixed(Weight::Atomic(1))));
+        program.push(Event::Formula);
+        let calls = if matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
+            Box::default()
+        } else {
+            vec![action.occurrence].into_boxed_slice()
+        };
+        let summary = Summary {
+            ops: statement.ops,
+            fixed: 1 + args.len() as u64,
+            formula_max,
+            program: program.into(),
+            reads: reads.into(),
+            write: Some(local.at),
+            calls,
+            action: Some(id),
+        };
+        Some(if bind {
+            Step::Bind(summary)
+        } else {
+            Step::Write(summary)
         })
     }
 
@@ -499,6 +589,7 @@ impl Formation<'_> {
         let mut defined: Vec<bool> = Vec::new();
         let mut formula_max = 0_u64;
         let mut reads = Vec::new();
+        let mut calls = Vec::new();
         for op in body {
             match *op {
                 Op::Region { region, total } => {
@@ -536,14 +627,17 @@ impl Formation<'_> {
                 }
                 Op::Nested { act, args } => {
                     let nested = stream.nested.get(act.ix())?;
-                    let NestedKind::Body(lib) = nested.kind else {
-                        return None;
-                    };
+                    let lib = nested.kind.operator_lib()?;
                     if !nested.operator {
                         return None;
                     }
                     let (start, count) = (args.start.ix(), args.len as usize);
                     self.site(lib, start, count, &mut defined, &mut formula_max, depth)?;
+                    if matches!(nested.kind, NestedKind::Call(_))
+                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
+                    {
+                        calls.push(nested.occurrence);
+                    }
                     program.push(Event::Formula);
                 }
                 _ => return None,
@@ -575,6 +669,8 @@ impl Formation<'_> {
             program: lean(program),
             reads: reads.into(),
             write,
+            calls: calls.into(),
+            action: None,
         })
     }
 
@@ -652,6 +748,7 @@ impl Check<'_, '_> {
         self.statement += 1;
         let stream = self.lowered.stream;
         let mut expected = vec![Event::Fixed(head)];
+        let mut calls = Vec::new();
         let (mut reads, mut write) = (Vec::new(), None);
         let ops = stream
             .ops
@@ -686,13 +783,31 @@ impl Check<'_, '_> {
                             .map(|event| Event::Fixed(event.weight)),
                     );
                 }
-                Op::Operator { .. } => expected.push(Event::Formula),
-                Op::Nested { act, .. } => match stream.nested.get(act.ix()) {
-                    Some(nested) if matches!(nested.kind, NestedKind::Call(_)) => {
-                        self.calls.push(nested.occurrence);
+                Op::Act => {
+                    let id = summary.action.ok_or(Refused::Shape { statement: index })?;
+                    let (action, _, args) = library_invoke(&(self.lowered.stmt)(id).form)
+                        .ok_or(Refused::Shape { statement: index })?;
+                    for arg in args {
+                        if let super::Atom::Var(super::Var::Local(local)) = arg {
+                            reads.push(local.at);
+                        }
+                        expected.push(Event::Fixed(Weight::Atomic(1)));
                     }
-                    _ => expected.push(Event::Formula),
-                },
+                    if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
+                        calls.push(action.occurrence);
+                    }
+                    expected.push(Event::Formula);
+                }
+                Op::Operator { .. } => expected.push(Event::Formula),
+                Op::Nested { act, .. } => {
+                    if let Some(nested) = stream.nested.get(act.ix())
+                        && matches!(nested.kind, NestedKind::Call(_))
+                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
+                    {
+                        calls.push(nested.occurrence);
+                    }
+                    expected.push(Event::Formula);
+                }
                 Op::Local { local, .. } => reads.push(local.at),
                 Op::WriteLocal { local, .. } | Op::Bind { local, .. } => write = Some(local.at),
                 _ => {}
@@ -701,6 +816,10 @@ impl Check<'_, '_> {
         if *summary.reads != *reads || summary.write != write {
             return Err(Refused::Slots { statement: index });
         }
+        if *summary.calls != *calls {
+            return Err(Refused::Calls);
+        }
+        self.calls.extend(calls);
         self.program(summary, expected, index)
     }
 
@@ -752,6 +871,8 @@ impl Check<'_, '_> {
             let own = match step {
                 Step::Write(summary) | Step::Bind(summary) | Step::Continue(summary) => {
                     summary.ops == statement.ops
+                        && summary.action
+                            == matches!(statement.form, Form::Action(_)).then_some(*id)
                 }
                 Step::If { test, .. } => test.ops == statement.ops,
                 Step::Leave => true,
@@ -763,8 +884,12 @@ impl Check<'_, '_> {
             }
             let unit = Weight::Atomic(1);
             match (step, &statement.form) {
-                (Step::Write(summary), Form::Plain) => self.summary(summary, unit, End::Write)?,
-                (Step::Bind(summary), Form::Plain) => self.summary(summary, unit, End::Bind)?,
+                (Step::Write(summary), Form::Plain | Form::Action(_)) => {
+                    self.summary(summary, unit, End::Write)?
+                }
+                (Step::Bind(summary), Form::Plain | Form::Action(_)) => {
+                    self.summary(summary, unit, End::Bind)?
+                }
                 (Step::Continue(summary), Form::Plain) => {
                     self.summary(summary, unit, End::Continue)?;
                 }
@@ -906,7 +1031,7 @@ impl LoopPlan {
                 let lib = |id: LibId| exe.lib(id);
                 let head = match &self.head {
                     Head::While(test) => CompiledHead::While {
-                        test: compile(stream, &lib, test.ops)?,
+                        test: compile(exe, stream, &lib, test)?,
                         commit: test.into(),
                     },
                     Head::For {
@@ -924,7 +1049,7 @@ impl LoopPlan {
                 };
                 Some(CompiledLoop {
                     head,
-                    body: compile_body(stream, &lib, &self.body)?,
+                    body: compile_body(exe, stream, &lib, &self.body)?,
                 })
             })
             .as_ref()
@@ -933,6 +1058,7 @@ impl LoopPlan {
 
 /// `body`'s statements, compiled.
 fn compile_body<'e>(
+    exe: &Executable,
     stream: &Stream,
     lib: &impl Fn(LibId) -> &'e Lib,
     body: &Body,
@@ -943,12 +1069,12 @@ fn compile_body<'e>(
         .map(|step| {
             Some(match step {
                 Step::Write(summary) => CompiledStep::Write {
-                    value: compile(stream, lib, summary.ops)?,
+                    value: compile(exe, stream, lib, summary)?,
                     at: summary.write?,
                     commit: summary.into(),
                 },
                 Step::Bind(summary) => CompiledStep::Bind {
-                    value: compile(stream, lib, summary.ops)?,
+                    value: compile(exe, stream, lib, summary)?,
                     at: summary.write?,
                     commit: summary.into(),
                 },
@@ -957,10 +1083,10 @@ fn compile_body<'e>(
                     then,
                     otherwise,
                 } => CompiledStep::If {
-                    condition: compile(stream, lib, test.ops)?,
+                    condition: compile(exe, stream, lib, test)?,
                     commit: test.into(),
-                    then: compile_body(stream, lib, then)?,
-                    otherwise: compile_body(stream, lib, otherwise)?,
+                    then: compile_body(exe, stream, lib, then)?,
+                    otherwise: compile_body(exe, stream, lib, otherwise)?,
                 },
                 Step::Continue(summary) => CompiledStep::Continue(summary.into()),
                 Step::Leave => CompiledStep::Leave,
@@ -974,8 +1100,52 @@ fn compile_body<'e>(
     })
 }
 
+/// The statically named library invoke of a statement action.
+fn library_invoke(form: &Form) -> Option<(&super::Action, LibId, &[super::Atom])> {
+    let Form::Action(action) = form else {
+        return None;
+    };
+    let super::ActionKind::Call {
+        callee: super::Callee::Library(lib),
+        args,
+    } = &action.kind
+    else {
+        return None;
+    };
+    Some((action, *lib, args))
+}
+
 /// The value of the region statement in `range` as one expression tree.
-fn compile<'e>(stream: &Stream, lib: &impl Fn(LibId) -> &'e Lib, range: OpRange) -> Option<Node> {
+fn compile<'e>(
+    exe: &Executable,
+    stream: &Stream,
+    lib: &impl Fn(LibId) -> &'e Lib,
+    summary: &Summary,
+) -> Option<Node> {
+    if let Some(id) = summary.action {
+        let (_, target, args) = library_invoke(&exe.stmt(id).form)?;
+        let operands = args
+            .iter()
+            .map(|arg| -> Option<Node> {
+                match arg {
+                    super::Atom::Var(super::Var::Local(local)) => {
+                        let at = local.at as usize;
+                        Some(Box::new(move |slots, _| match slots.get(at) {
+                            Some(SlotState::Value(value)) => Some(*value),
+                            _ => None,
+                        }))
+                    }
+                    super::Atom::Literal(Constant::Resident(value)) => {
+                        let value = *value;
+                        Some(Box::new(move |_, _| Some(value)))
+                    }
+                    _ => None,
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        return operator(lib(target), operands);
+    }
+    let range = summary.ops;
     let mut regs: Vec<Option<Node>> = Vec::new();
     let set = |regs: &mut Vec<Option<Node>>, at: usize, node: Node| {
         if regs.len() <= at {
@@ -1013,9 +1183,7 @@ fn compile<'e>(stream: &Stream, lib: &impl Fn(LibId) -> &'e Lib, range: OpRange)
                 );
             }
             Op::Nested { act, args } => {
-                let NestedKind::Body(id) = stream.nested.get(act.ix())?.kind else {
-                    return None;
-                };
+                let id = stream.nested.get(act.ix())?.kind.operator_lib()?;
                 let operands = operands(&mut regs, args)?;
                 set(&mut regs, args.start.ix(), operator(lib(id), operands)?);
             }

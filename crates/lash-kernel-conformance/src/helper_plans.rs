@@ -1092,3 +1092,54 @@ fn memory_off_14_helper_plans_keep_the_corpus_without_memory_scopes() {
 fn memory_off_15_helper_plans_keep_the_corpus_without_memory_scopes() {
     memory_off_helper_plans_keep_the_corpus_without_memory_scopes(15);
 }
+
+/// FIG-6754's actual dialect path, including nested and statement-root invokes.
+pub(crate) fn python_region_programs() -> Vec<(runner::Case, Program)> {
+    let runner = runner::Runner::new("python").unwrap();
+    let sources = [
+        ("branch", "def branch():\n    result = 0\n    i = 0\n    while i < 14:\n        if i % 2 == 0:\n            result = result + i\n        else:\n            result = result - i\n        i = i + 1\n    return result\nresult = branch()\n".to_owned()),
+        ("modulo signs and zero", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        right = right + 1\n        i = i + 1\n    return left\nresult = modulo(-7, -2)\n".to_owned()),
+        ("float modulo", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7.5, -2.0)\n".to_owned()),
+        ("kind decline", "def modulo(left, right):\n    i = 0\n    while i < 4:\n        left = left % right\n        i = i + 1\n    return left\nresult = modulo(7, \"x\")\n".to_owned()),
+    ];
+    sources
+        .into_iter()
+        .map(|(name, source)| {
+            let case = runner::Case {
+                id: format!("Python invoke region: {name}"),
+                dialect: "python".into(),
+                source,
+                bits: 0,
+                stride: 0,
+                nanoseconds: 0,
+            };
+            let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+                panic!("{} lowers", case.id)
+            };
+            (case, program)
+        })
+        .collect()
+}
+
+/// FIG-6754: lowered Python branch and modulo loops reach the generated
+/// templates and form regions over unshared frame slots. Top-level cell
+/// bindings remain session state, outside the scalar region contract.
+#[test]
+fn lowered_python_modulo_branch_loops_form_regions() {
+    use lash_kernel_vm::kernel_internals::loop_regions;
+    for (case, program) in python_region_programs() {
+        assert!(loop_regions(&program).unwrap() > 0, "{}", case.source);
+        let expected = run::<0>(&case, &program, &mut Projector::default());
+        let mut reference = program.clone();
+        reference.library = prepare_with_layout(
+            program.library.registry().clone(),
+            Layout(0).without_regions(),
+        );
+        assert_eq!(
+            run::<0>(&case, &reference, &mut Projector::default()),
+            expected,
+            "{}",
+            case.id
+        );
+    }
+}

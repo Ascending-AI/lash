@@ -490,6 +490,37 @@ impl KernelMachine {
         }
     }
 
+    /// An invoke keeps its action observation and occurrence even when
+    /// its prepared operator answers without a frame.
+    #[inline(always)]
+    pub(super) fn nested_invoke_operator(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        act: lash_kernel_exec::ActIx,
+        lib: LibId,
+        args: Reg,
+    ) -> Status {
+        let entry = &running.stream.nested[act.ix()];
+        self.observe_action(running.exe, &entry.site);
+        if !matches!(entry.site.unit, lash_kernel_doc::Unit::Library(_)) {
+            self.enter(running.task, host, &entry.site, entry.occurrence)?;
+        }
+        let function = running.exe.lib(lib);
+        // Observed deferred plans validate before offering their prepared
+        // entry, just as general invoke dispatch does.
+        let answer = if self.observer.is_some()
+            && matches!(function.run, crate::compile::LibRun::DeferredPlan { .. })
+            && running.exe.fallback(lib).is_none()
+        {
+            self.answer(running.task, running.exe, lib, args, function.arity, args)
+        } else {
+            self.operator(running.task, running.exe, lib, args, args)
+        }
+        .map_err(|interrupt| interrupt.answering(function))?;
+        self.body_answered(running, act, lib, args, answer)
+    }
+
     /// Where an operation's call stands once answered: done, or at the
     /// action while its body or its plan's segment runs.
     fn body_answered(

@@ -2,6 +2,17 @@
 
 use lash_kernel_doc::{FunctionRegistry, PreparedNative, Value, plan::HelperTemplate};
 
+impl super::NestedKind {
+    /// A statically named library call, whether written as a native
+    /// expression or an invoke. Its kind still owns its action semantics.
+    pub(crate) fn operator_lib(&self) -> Option<super::LibId> {
+        match self {
+            Self::Body(lib) | Self::Call(super::NestedCallee::Library(lib)) => Some(*lib),
+            _ => None,
+        }
+    }
+}
+
 /// A native entry, or a body-generated entry over resolved native callees.
 /// Native entries keep their direct function-pointer ABI.
 #[derive(Clone)]

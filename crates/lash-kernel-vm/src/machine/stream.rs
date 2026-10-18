@@ -232,6 +232,16 @@ impl KernelMachine {
                         if self.nested_operator(running, act, lib, at(args.start))? == Flow::Step {
                             return Ok(Ran::Step);
                         }
+                    } else if nested.operator
+                        && let crate::compile::NestedKind::Call(
+                            crate::compile::NestedCallee::Library(lib),
+                        ) = nested.kind
+                    {
+                        if self.nested_invoke_operator(host, running, act, lib, at(args.start))?
+                            == Flow::Step
+                        {
+                            return Ok(Ran::Step);
+                        }
                     } else if let Some(ran) = self.run_rare::<MEMORY>(host, running, op)? {
                         return Ok(ran);
                     }

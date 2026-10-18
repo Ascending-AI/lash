@@ -649,10 +649,9 @@ impl Compiler<'_> {
         let act = ActIx(self.stream.nested.len() as u32);
         let op = Op::Nested { act, args };
         self.stream.nested_at.insert(site.clone(), act);
-        let operator = match kind {
-            NestedKind::Body(lib) => self.resolve.operator(lib, args.len as usize),
-            _ => false,
-        };
+        let operator = kind
+            .operator_lib()
+            .is_some_and(|lib| self.resolve.operator(lib, args.len as usize));
         self.stream.nested.push(Nested {
             occurrence: usize::MAX,
             site,

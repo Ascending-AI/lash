@@ -446,3 +446,94 @@ fn uncharged_helpers_use_the_value_only_prepared_entry() {
         format!("finished {:?}", Datum::Float(Float::new(3.0)))
     );
 }
+
+/// FIG-6754: a template-bearing library invoke is a prepared operator site,
+/// retaining its call occurrence, rather than generic action dispatch.
+#[test]
+fn template_bearing_invokes_are_prepared_operator_sites() {
+    use lash_kernel_doc::plan::{HelperPlan, HelperTemplate};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static ANSWERED: AtomicUsize = AtomicUsize::new(0);
+    let fixture = super::embedder::library(true);
+    let mut registry = (*fixture.registry).clone();
+    let definition = parse_definition(
+        "function law.templated(x: Any) -> Any\nkernel 1\ncharge sum(3, size(x))\nbody { return x }"
+    ).unwrap();
+    let function = registry.register(definition, None).unwrap();
+    let plan = Box::leak(Box::new(HelperPlan {
+        name: "law.templated",
+        function,
+        callees: &[],
+        literals: &[],
+        fields: &[],
+        records: &[],
+        registers: 1,
+        slots: &[],
+        closures: &[],
+        sites: &[],
+        run: |ctx, _| {
+            ctx.begin()?;
+            ctx.param(0, 0)?;
+            Ok(ctx.take(0))
+        },
+        template: Some(HelperTemplate {
+            depth: 1,
+            callees: &[],
+            entry: |args, _| {
+                ANSWERED.fetch_add(1, Ordering::Relaxed);
+                args.first().copied()
+            },
+        }),
+    }));
+    registry.install_plans(&[plan]).unwrap();
+    let source = format!(
+        "{}numbers by_spelling\nuse law.templated = @{function}\nmain {{ return (invoke law.templated(2.0),) }}",
+        fixture.header
+    );
+    let mut document = lash_kernel_doc::parse_document(&source).unwrap();
+    document.main = vec![lash_kernel_doc::Stmt::Return {
+        value: lash_kernel_doc::Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+            kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Library(function)),
+            args: vec![lash_kernel_doc::Expr::Literal(
+                lash_kernel_doc::Literal::Float(Float::new(2.0)),
+            )],
+        })),
+    }];
+    let program = crate::Program {
+        release: lash_kernel_doc::heap::PageId([8; 32]),
+        document: Arc::new(document),
+        library: crate::PreparedLibrary::new(Arc::new(registry)),
+    };
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default())
+        .unwrap_or_else(|_| panic!("the invoke is admitted"));
+    let exe = admitted
+        .executable(&program.document, &program.library)
+        .unwrap_or_else(|_| panic!("the invoke compiles"));
+    let (stream, _, _) = exe.statement(exe.block(exe.code(exe.main).body).stmts[0]);
+    let invoke = stream
+        .nested
+        .iter()
+        .find(|nested| {
+            matches!(
+                nested.kind,
+                crate::compile::NestedKind::Call(crate::compile::NestedCallee::Library(_))
+            )
+        })
+        .unwrap();
+    assert!(
+        invoke.operator,
+        "a template-bearing invoke must select its prepared operator"
+    );
+    let mut machine =
+        super::embedder::start_machine(program, ROOMY, Setup::default().start).unwrap();
+    let mut host = super::embedder::World::default();
+    match machine.run(&mut host, u64::MAX).unwrap() {
+        Step::Ended(End::Finished(finished)) => {
+            assert_eq!(finished.result, Datum::Float(Float::new(2.0)));
+        }
+        other => panic!("template invoke did not finish: {other:?}"),
+    }
+    assert_eq!(ANSWERED.load(Ordering::Relaxed), 1);
+}

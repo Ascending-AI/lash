@@ -782,7 +782,7 @@ pub(crate) struct Nested {
     pub(crate) depth: u32,
     pub(crate) kind: NestedKind,
     /// Whether the call is an operator's (`Op::Operator`): a library call
-    /// of a native with a prepared entry and a body, with exactly its
+    /// with a native entry or generated template, with exactly its
     /// parameters, whose entry answers inline what it can.
     pub(crate) operator: bool,
     /// The op its statement resumes at, as an offset from the start of the

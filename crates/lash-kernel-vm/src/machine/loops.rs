@@ -433,7 +433,7 @@ impl KernelMachine {
                 let (cursor, header) = match *region {
                     None => (cursor, header),
                     Some(region) => {
-                        if let Some(flow) = self.loop_region(task, exe, region)? {
+                        if let Some(flow) = self.loop_region(task, host, exe, region)? {
                             return Ok(flow);
                         }
                         // The region may have stepped the cursor.
@@ -488,7 +488,7 @@ impl KernelMachine {
                     region: Some(region),
                     ..
                 } = running.stmt.form
-                    && let Some(flow) = self.loop_region(task, exe, region)?
+                    && let Some(flow) = self.loop_region(task, host, exe, region)?
                 {
                     return Ok(flow);
                 }

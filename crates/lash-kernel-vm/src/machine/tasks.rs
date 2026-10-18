@@ -181,6 +181,12 @@ impl Occurrences {
         Ok(count)
     }
 
+    /// A region commits each syntactic call site at most once per
+    /// statement. Leave a counter overflow to ordinary action dispatch.
+    pub(super) fn can_advance(&self, sites: &[usize]) -> bool {
+        sites.iter().all(|&index| self.counts[index] < u64::MAX)
+    }
+
     pub(super) fn issued(&self, index: usize) -> Option<u64> {
         self.counts[index].checked_sub(1)
     }
