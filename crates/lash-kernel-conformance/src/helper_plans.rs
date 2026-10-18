@@ -1156,6 +1156,16 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "store in a list",
             "def build():\n    rows = [[0], [1], [2]]\n    for n in range(9):\n        rows[n % 3] = [n]\n        rows[-1] = n\n    return rows\nresult = build()\n",
         ),
+        // FIG-6779: a dict's keys walked by the loop's own cursor under its
+        // protocol's `check`, and a dict that grows while it is walked.
+        (
+            "dict keys",
+            "def build():\n    groups = {}\n    for i in range(9):\n        key = \"k\" + str(i % 4)\n        groups[key] = groups.get(key, 0) + i\n    lines = []\n    for key in groups:\n        lines.append(key + \":\" + str(groups[key]))\n    return \"|\".join(lines)\nresult = build()\n",
+        ),
+        (
+            "dict grown while walked",
+            "def build():\n    groups = {\"a\": 1, \"b\": 2}\n    seen = []\n    for key in groups:\n        seen.append(key)\n        groups[key + \"x\"] = 0\n    return seen\nresult = build()\n",
+        ),
     ];
     let typescript = [
         (
@@ -1321,6 +1331,35 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "python",
             "texts echoed in a loop",
             "def pure_echo(item):\n    return item\ndef demo(items):\n    out = []\n    for item in items:\n        out.append(pure_echo(item))\n    return out\nresult = demo([\"item-0\", \"item-1\", \"item-2\"])\n",
+        ),
+        // FIG-6779: loops whose statements call guests through their
+        // islands: a callee that leaves its island on a long text, one that
+        // raises, a call whose value is written, cold top-level code whose
+        // variables are session bindings, and a dict's keys passed on.
+        (
+            "python",
+            "a callee leaving its island in a loop",
+            "def widen(v):\n    return v * 9\ndef run():\n    out = []\n    for v in [1, 2, \"abcd\", 3]:\n        out.append(widen(v))\n    return out\nresult = run()\n",
+        ),
+        (
+            "python",
+            "a callee raising in a loop",
+            "def share(n):\n    return 12 // n\ndef run():\n    out = []\n    for n in range(3, -2, -1):\n        out.append(share(n))\n    return out\nresult = run()\n",
+        ),
+        (
+            "python",
+            "a called value written in a loop",
+            "def square(v):\n    return v * v\ndef run():\n    total = 0\n    for n in range(6):\n        s = square(n)\n        total = total + s\n    return total\nresult = run()\n",
+        ),
+        (
+            "python",
+            "top-level calls appended in a loop",
+            "def echo(value):\n    return value\nout = []\nfor n in range(-2, 3):\n    out.append(echo(n))\nresult = out\n",
+        ),
+        (
+            "python",
+            "a dict's keys passed to a callee",
+            "def tag(key):\n    return key\ndef run():\n    groups = {\"a\": 1, \"b\": 2, \"c\": 3}\n    out = []\n    for key in groups:\n        out.append(tag(key))\n    return out\nresult = run()\n",
         ),
         (
             "python",

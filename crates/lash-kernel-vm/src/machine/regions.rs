@@ -35,13 +35,16 @@
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::Weight;
+use lash_kernel_state::paged::TableCursor;
 
-use super::loops::{Cursor, Header};
+use super::islands::{Level, RegionGuests};
+use super::loops::{Cursor, Guard, Header, counted};
 use super::ops::Flow;
-use super::{Control, Frame, Halt, KernelMachine, SlotState, fault};
+use super::{Control, Eval, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
     Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event,
-    Executable, LoopPlan, Meter, NESTING, Role, SessionSlot, Taken, UNPRODUCTIVE, scalar, store,
+    Executable, GuestCall, Hook, Kept, LoopPlan, Meter, NESTING, RegionSlot, Role, SessionSlot,
+    Taken, UNPRODUCTIVE, scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -58,6 +61,7 @@ mod admission_laws;
 const SESSIONS_INLINE: usize = 8;
 
 /// How a pass through a block of an iteration went.
+#[derive(Clone, Copy)]
 enum Went {
     /// It ran to the block's end.
     Through,
@@ -66,6 +70,19 @@ enum Went {
     /// It stopped before a statement, in the blocks the chain holds,
     /// outermost first.
     Stopped,
+    /// It stopped inside a statement whose guest call ran, which the chain
+    /// holds as started: the iteration's stack holds the call, and
+    /// [`Cx::called`] what it came to.
+    Called,
+}
+
+/// A region's exit inside a statement standing in its guest call `call`:
+/// the registers it holds across the call, and what the call came to.
+struct Called<'e> {
+    call: &'e GuestCall,
+    regs: Vec<(u32, Value)>,
+    value: Option<Value>,
+    levels: Vec<Level>,
 }
 
 /// An allocating plan's admission of each statement: the bound, the
@@ -80,11 +97,7 @@ struct Admit {
 /// One region's run over its frame: what it charges, records and holds.
 struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     frame: &'a mut Frame,
-    /// The task's occurrence counters, which the region's invokes advance
-    /// as they commit (`K-EFF-008`).
-    counters: Option<&'a mut super::tasks::Occurrences>,
     cx: Cx<'c>,
-    charged: &'a mut u64,
     tape: Option<&'a ChargeTape>,
     /// An allocating plan's admission (`ALLOC`); a scalar plan admits
     /// whole iterations.
@@ -109,6 +122,9 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     declined: bool,
     /// Where it stopped, the iteration had committed a body statement.
     progressed: bool,
+    /// A `for`'s step missed in its `item` or `check` hook, before its
+    /// iteration's first body statement.
+    head_missed: bool,
 }
 
 impl KernelMachine {
@@ -121,10 +137,10 @@ impl KernelMachine {
     pub(super) fn loop_region(
         &mut self,
         task: TaskId,
-        host: &dyn crate::Host,
+        host: &mut dyn crate::Host,
         exe: &Executable,
         region: u32,
-    ) -> Result<Option<Flow>, Halt> {
+    ) -> Eval<Option<Flow>> {
         let plan = &exe.regions[region as usize];
         // A plan whose entries keep missing in this machine is the
         // reference's.
@@ -135,23 +151,36 @@ impl KernelMachine {
         {
             return Ok(None);
         }
-        match (plan.calls.is_empty(), plan.allocates) {
-            (true, false) => self.run_loop_region::<false, false>(task, host, exe, region),
-            (false, false) => self.run_loop_region::<true, false>(task, host, exe, region),
-            (true, true) => self.run_loop_region::<false, true>(task, host, exe, region),
-            (false, true) => self.run_loop_region::<true, true>(task, host, exe, region),
+        let (flow, called) = match (plan.calls.is_empty(), plan.allocates) {
+            (true, false) => self.run_loop_region::<false, false>(task, &*host, exe, region),
+            (false, false) => self.run_loop_region::<true, false>(task, &*host, exe, region),
+            (true, true) => self.run_loop_region::<false, true>(task, &*host, exe, region),
+            (false, true) => self.run_loop_region::<true, true>(task, &*host, exe, region),
+        }?;
+        // An exit inside a statement standing in its guest call: the
+        // reference runs the statement on, or the island's frames stand
+        // above the loop's.
+        if let Some(called) = called {
+            self.guest_exit(
+                host,
+                (task, exe),
+                called.call,
+                called.regs,
+                (called.value, called.levels),
+            )?;
         }
+        Ok(flow)
     }
 
     /// Specialize occurrence bookkeeping away for regions with no invokes,
     /// and statement admission away for scalar plans.
-    fn run_loop_region<const INVOKES: bool, const ALLOC: bool>(
+    fn run_loop_region<'e, const INVOKES: bool, const ALLOC: bool>(
         &mut self,
         task: TaskId,
         host: &dyn crate::Host,
-        exe: &Executable,
+        exe: &'e Executable,
         region: u32,
-    ) -> Result<Option<Flow>, Halt> {
+    ) -> Result<(Option<Flow>, Option<Called<'e>>), Halt> {
         // The environment guard: the loop's code is charged or paced, and
         // nothing observes the run but a charge tape, which the region
         // records.
@@ -164,11 +193,11 @@ impl KernelMachine {
                 .as_deref()
                 .is_some_and(|observer| !observer.only_charges())
         {
-            return Ok(None);
+            return Ok((None, None));
         }
         #[cfg(test)]
         if self.boundary.is_some() {
-            return Ok(None);
+            return Ok((None, None));
         }
         let plan = &exe.regions[region as usize];
         // The memory headroom guard: the nursery is admitted, so no
@@ -179,33 +208,33 @@ impl KernelMachine {
             .saturating_sub(self.heap.certificate().upper.0)
             < NURSERY
         {
-            return Ok(None);
+            return Ok((None, None));
         }
         let memory = self.bounds.memory_meter != crate::MemoryMeter::Off;
         // What the region holds is held as the reference's statements
         // hold it, each in a fresh step, which has no statement credit to
         // draw on.
         if (plan.binds || plan.allocates) && memory && self.heap.statement_reserved() != 0 {
-            return Ok(None);
+            return Ok((None, None));
         }
         // The depth guard: every site's depth check passes in this frame,
         // whose depth the region does not change.
-        if let Some(need) = plan.depth {
-            let frames = self
-                .tasks
-                .get_mut(task.0 as usize)?
-                .ok_or_else(|| fault("no task"))?
-                .frames
-                .len();
-            let depth = frames
-                + self.plans as usize
-                + usize::from(task != TaskId::MAIN || !self.session_cell);
-            if depth as u64 + u64::from(need) > u64::from(self.bounds.call_depth) {
-                return Ok(None);
-            }
+        let frames = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?
+            .frames
+            .len();
+        let depth = (frames
+            + self.plans as usize
+            + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
+        if let Some(need) = plan.depth
+            && depth + u64::from(need) > u64::from(self.bounds.call_depth)
+        {
+            return Ok((None, None));
         }
         let Some(compiled) = plan.compiled(exe) else {
-            return Ok(None);
+            return Ok((None, None));
         };
         // The session slots: each binding the plan names, at its resident
         // value (§3.6), held inline for a plan that names few.
@@ -236,6 +265,24 @@ impl KernelMachine {
             u64::MAX
         };
         let slice_end = self.slice_end;
+        let mut guests = RegionGuests {
+            exe,
+            session: &mut self.session,
+            names: &plan.sessions,
+            scratch: &mut self.islands,
+            tape,
+            recorder,
+            charging,
+            bound,
+            slice_end,
+            observed: self.observer.is_some(),
+            limits: self.limits,
+            memory: memory.then_some(self.bounds.memory),
+            base: depth,
+            call_depth: u64::from(self.bounds.call_depth),
+            levels: Vec::new(),
+            halt: None,
+        };
         let mut arena = self.arena.borrow_mut();
         let state = self
             .tasks
@@ -243,7 +290,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("no task"))?;
         let frame = state.frames.last_mut()?.ok_or_else(|| fault("no frame"))?;
         // What a `for` walks, from where; the cursor of a `while` is none.
-        let walk = match (&compiled.head, frame.control.last()) {
+        let mut walk = match (&compiled.head, frame.control.last()) {
             (CompiledHead::While { .. }, Some(Control::While { .. })) => None,
             (
                 CompiledHead::For { .. },
@@ -254,12 +301,36 @@ impl KernelMachine {
                     guard: None,
                     ..
                 }),
-            ) => Some((cursor.walked(), *items, *position)),
-            _ => return Ok(None),
+            ) => Some((
+                cursor.walked(),
+                Walking::Items {
+                    items: *items,
+                    position: *position,
+                },
+            )),
+            // A guarded table needs the plan's guarded step.
+            (
+                CompiledHead::For {
+                    guard: compiled, ..
+                },
+                Some(Control::For {
+                    cursor: cursor @ (Cursor::Map(table, last) | Cursor::Set(table, last)),
+                    header: Header::Body,
+                    guard,
+                    ..
+                }),
+            ) if guard.is_none() || compiled.is_some() => Some((
+                cursor.walked(),
+                Walking::Keys {
+                    table: *table,
+                    last: *last,
+                    guard: guard.as_deref().copied(),
+                },
+            )),
+            _ => return Ok((None, None)),
         };
         let mut run = Run::<INVOKES, ALLOC> {
             frame,
-            counters: INVOKES.then_some(&mut state.counters),
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
                 charging,
@@ -277,8 +348,11 @@ impl KernelMachine {
                 lets: Vec::new(),
                 declined: false,
                 held: None,
+                charged: self.charged,
+                counters: INVOKES.then_some(&mut state.counters),
+                guests: Some(&mut guests),
+                called: None,
             },
-            charged: &mut self.charged,
             tape,
             admit: Admit {
                 bound,
@@ -292,8 +366,12 @@ impl KernelMachine {
             writes: 0,
             declined: false,
             progressed: false,
+            head_missed: false,
         };
-        let (started, stepped, stopped) = run.batch(plan, compiled, walk, bound, slice_end)?;
+        let batch = run.batch(plan, compiled, walk.as_mut(), bound, slice_end);
+        // The region's charge is the machine's, however its batch ended.
+        self.charged = run.cx.charged;
+        let (started, stopped, called) = batch?;
         let Run {
             frame,
             chain,
@@ -302,15 +380,25 @@ impl KernelMachine {
             writes,
             declined,
             progressed,
+            head_missed,
             ..
         } = run;
+        let Cx { fault: refused, .. } = cx;
+        let RegionGuests { halt, levels, .. } = guests;
+        if let Some(halt) = halt {
+            return Err(halt);
+        }
         // An entry that missed a guard before an iteration ended was
         // unproductive; one that ended an iteration was not. One that
         // committed a body statement first, before a key the loop has not
         // yet written, for one, weighs less. A kind an operator leaves to
         // the reference stops the entry as a barrier does: unproductive
-        // only where nothing ran before it.
-        if stopped && started <= 1 && (missed || declined && !progressed) {
+        // only where nothing ran before it. A `for` whose hook misses at a
+        // step stops before the iteration's first body statement.
+        if (stopped || head_missed)
+            && started <= 1
+            && (missed || head_missed || declined && !progressed)
+        {
             let at = region as usize;
             if self.unproductive.len() <= at {
                 self.unproductive.resize(exe.regions.len().max(at + 1), 0);
@@ -321,8 +409,8 @@ impl KernelMachine {
         {
             *weight = 0;
         }
-        if let Some(fault) = cx.fault {
-            return Err(Halt::from(fault));
+        if let Some(refused) = refused {
+            return Err(Halt::from(refused));
         }
         if let Some(recorder) = recorder {
             recorder.iterated(started - u64::from(stopped));
@@ -351,24 +439,83 @@ impl KernelMachine {
         // the loop's iterations started, a `for`'s cursor past the
         // elements it stepped, and the blocks standing at the statement the
         // region did not run.
-        match frame.control.last_mut() {
-            Some(Control::While { started: total, .. }) => *total += started,
-            Some(Control::For {
-                started: total,
-                cursor: Cursor::List(_, position) | Cursor::Tuple(_, position),
-                ..
-            }) => {
+        match (frame.control.last_mut(), walk) {
+            (Some(Control::While { started: total, .. }), None) => *total += started,
+            (
+                Some(Control::For {
+                    started: total,
+                    cursor: Cursor::List(_, at) | Cursor::Tuple(_, at),
+                    ..
+                }),
+                Some((_, Walking::Items { position, .. })),
+            ) => {
                 *total += started;
-                *position += stepped;
+                *at = position;
+            }
+            (
+                Some(Control::For {
+                    started: total,
+                    cursor: Cursor::Map(_, at) | Cursor::Set(_, at),
+                    guard: held,
+                    ..
+                }),
+                Some((_, Walking::Keys { last, guard, .. })),
+            ) => {
+                *total += started;
+                *at = last;
+                if let (Some(held), Some(guard)) = (held, guard) {
+                    **held = guard;
+                }
             }
             _ => return Err(fault("a loop region left its loop")),
         }
         if !stopped {
-            return Ok(None);
+            return Ok((None, None));
         }
         frame.control.extend(chain);
-        Ok(Some(Flow::Step))
+        // A statement standing in its guest call holds the registers its
+        // continuation reads, read again from where it read them.
+        let called = match called {
+            Some((call, value)) => {
+                let mut regs = Vec::with_capacity(call.holds.len() + 1);
+                for (reg, held) in &call.holds {
+                    let held = match held {
+                        Kept::Slot(RegionSlot::Frame(at)) => match frame.slot(*at) {
+                            SlotState::Value(value) => Some(*value),
+                            _ => None,
+                        },
+                        Kept::Slot(RegionSlot::Session(at)) => {
+                            sessions.get(*at as usize).and_then(|slot| slot.value)
+                        }
+                        Kept::Value(value) => Some(*value),
+                    };
+                    regs.push((*reg, held.ok_or_else(|| fault("a held read is gone"))?));
+                }
+                Some(Called {
+                    call,
+                    regs,
+                    value,
+                    levels,
+                })
+            }
+            None => None,
+        };
+        Ok((Some(Flow::Step), called))
     }
+}
+
+/// Where a `for` region's own cursor stands in what it walks: past the
+/// elements its committed steps gave.
+enum Walking {
+    /// A list's or a tuple's items, from `position`.
+    Items { items: ArenaHandle, position: usize },
+    /// A map's or a set's keys, after the entry `last` visited, with the
+    /// protocol's guard when it checks (`K-ITER-005`).
+    Keys {
+        table: ArenaHandle,
+        last: Option<TableCursor>,
+        guard: Option<Guard>,
+    },
 }
 
 /// The blocks an iteration stands in, the loop's body first: each at the
@@ -376,26 +523,33 @@ impl KernelMachine {
 struct Stack<'p> {
     bodies: [&'p CompiledBody; NESTING + 1],
     nexts: [usize; NESTING + 1],
+    /// The guest call of the statement the iteration stopped in.
+    call: Option<&'p GuestCall>,
 }
 
 impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
-    /// Runs whole iterations while each fits: the iterations it started,
-    /// the elements a `for` stepped, and whether one stopped before a body
-    /// statement.
-    fn batch(
+    /// Runs whole iterations while each fits, a `for`'s cursor in `walk`
+    /// stepped past the elements its iterations took: the iterations it
+    /// started, whether one stopped before or in a body statement, and
+    /// the guest call it stands in and what that came to, when in one.
+    #[expect(
+        clippy::type_complexity,
+        reason = "a batch ends with its iterations and where it stopped"
+    )]
+    fn batch<'p>(
         &mut self,
         plan: &LoopPlan,
-        compiled: &CompiledLoop,
-        walk: Option<(Option<Value>, ArenaHandle, usize)>,
+        compiled: &'p CompiledLoop,
+        mut walk: Option<&mut (Option<Value>, Walking)>,
         bound: u64,
         slice_end: u64,
-    ) -> Result<(u64, usize, bool), Halt> {
+    ) -> Result<(u64, bool, Option<(&'p GuestCall, Option<Value>)>), Halt> {
         let mut stack = Stack {
             bodies: [&compiled.body; NESTING + 1],
             nexts: [0; NESTING + 1],
+            call: None,
         };
         let mut started = 0_u64;
-        let mut stepped = 0_usize;
         loop {
             // The charge headroom guard of a scalar plan: no event of the
             // iteration passes the bound, and no step boundary inside
@@ -403,13 +557,13 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             // statement against the bound, and stops where the reference's
             // step would end.
             if !ALLOC {
-                match self.charged.checked_add(plan.iteration_max) {
+                match self.cx.charged.checked_add(plan.iteration_max) {
                     Some(end) if end <= bound && end < slice_end => {}
                     _ => break,
                 }
             }
             self.cx.meter.reset();
-            match (&compiled.head, walk) {
+            match (&compiled.head, walk.as_deref_mut()) {
                 (CompiledHead::While { test, commit }, _) => {
                     if !self.ahead(commit)
                         || !matches!(
@@ -425,38 +579,78 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 (
                     CompiledHead::For {
                         hook,
+                        guard,
                         commit,
                         binding,
                     },
-                    Some((walked, items, position)),
+                    Some((walked, walking)),
                 ) => {
-                    // The cursor's next element, which a cold chunk or the
-                    // end leaves to the reference.
-                    if !self.ahead(commit) {
-                        break;
-                    }
-                    let Ok(Some(raw)) = self.cx.arena.item(items, (position + stepped) as u64)
-                    else {
-                        break;
-                    };
-                    let element = match hook {
-                        Some(hook) => {
-                            match walked.and_then(|walked| hook(walked, raw, &mut self.cx)) {
-                                Some(element) => element,
-                                None => break,
+                    let walked = *walked;
+                    match walking {
+                        // The cursor's next item, which a cold chunk or the
+                        // end leaves to the reference.
+                        Walking::Items { items, position } => {
+                            if !self.ahead(commit) {
+                                break;
+                            }
+                            let Ok(Some(raw)) = self.cx.arena.item(*items, *position as u64) else {
+                                break;
+                            };
+                            if !self.element(hook.as_ref(), walked, raw, commit, *binding)? {
+                                break;
+                            }
+                            *position += 1;
+                        }
+                        // The table's next key; a guarded table's step runs
+                        // its protocol's `check` first, which gives the items
+                        // the loop may still give.
+                        Walking::Keys {
+                            table,
+                            last,
+                            guard: held,
+                        } => {
+                            let (check, commit) = match (&*held, guard) {
+                                (Some(held), Some((check, commit))) => {
+                                    (Some((check, *held)), commit)
+                                }
+                                (Some(_), None) => break,
+                                (None, _) => (None, commit),
+                            };
+                            if !self.ahead(commit) {
+                                break;
+                            }
+                            let Ok(Some((sequence, raw))) =
+                                self.cx.arena.table_next(*table, last.map(|last| last.0))
+                            else {
+                                break;
+                            };
+                            let mut remaining = None;
+                            if let Some((check, guard)) = check {
+                                let args = [
+                                    walked.unwrap_or(Value::Absent),
+                                    counted(guard.size),
+                                    counted(guard.remaining),
+                                    Value::Bool(true),
+                                ];
+                                match check(args, &mut self.cx) {
+                                    Some(Value::Int(word)) if word >= 0 => {
+                                        remaining = u64::try_from(word).ok();
+                                    }
+                                    _ => {
+                                        self.head_missed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !self.element(hook.as_ref(), walked, raw, commit, *binding)? {
+                                break;
+                            }
+                            *last = Some(TableCursor(sequence));
+                            if let (Some(held), Some(remaining)) = (held, remaining) {
+                                held.remaining = remaining;
                             }
                         }
-                        None => raw,
-                    };
-                    if (!ALLOC && !scalar(&element))
-                        || !self.fits(commit)
-                        || !self.hold(&element)?
-                    {
-                        break;
                     }
-                    self.commit(commit)?;
-                    stepped += 1;
-                    self.frame.set_slot(*binding, SlotState::Value(element));
                 }
                 (CompiledHead::For { .. }, None) => {
                     return Err(fault("a `for` region walks nothing"));
@@ -464,11 +658,19 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             }
             self.ended();
             started += 1;
-            if let Went::Stopped = self.iterate(&mut stack)? {
-                return Ok((started, stepped, true));
+            match self.iterate(&mut stack)? {
+                Went::Stopped => return Ok((started, true, None)),
+                Went::Called => {
+                    let called = stack.call.take().zip(self.cx.called.take());
+                    if called.is_none() {
+                        return Err(fault("a region stopped in a guest call it did not make"));
+                    }
+                    return Ok((started, true, called));
+                }
+                Went::Through | Went::Continued => {}
             }
             // The next test's unit, which the reference charges first.
-            *self.charged += plan.loop_test;
+            self.cx.charged += plan.loop_test;
             if let Some(tape) = self.tape
                 && plan.loop_test != 0
             {
@@ -478,14 +680,18 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         if self.cx.fault.is_some() {
             return Err(fault("a region's fault ended its batch"));
         }
-        Ok((started, stepped, false))
+        Ok((started, false, None))
     }
 
     /// Runs one pass through the loop's body, `stack`'s first block,
     /// entering the `if` arms it takes.
     #[inline(always)]
     fn iterate(&mut self, stack: &mut Stack<'_>) -> Result<Went, Halt> {
-        let Stack { bodies, nexts } = stack;
+        let Stack {
+            bodies,
+            nexts,
+            call,
+        } = stack;
         nexts[0] = 0;
         let mut depth = 0;
         loop {
@@ -602,16 +808,12 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 }
             };
             if !ran {
-                // A statement before it, or the `if` whose arm it stands
-                // in, committed; a decline ends the run, so it is this
-                // statement's.
-                self.progressed = depth > 0 || index > 0;
-                self.declined = self.cx.declined;
-                self.missed = tried && !matches!(step, CompiledStep::Leave) && !self.declined;
-                if self.cx.fault.is_some() {
-                    return Err(fault("a region's fault ended its iteration"));
-                }
-                return Ok(self.stop(&bodies[..=depth], &nexts[..depth], index));
+                return self.stopped(
+                    (&bodies[..=depth], &nexts[..depth], index),
+                    step,
+                    tried,
+                    call,
+                );
             }
             self.ended();
         }
@@ -707,6 +909,71 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         Ok(true)
     }
 
+    /// Binds `raw`, the element a `for`'s cursor gave from `walked`, as
+    /// its `item` hook makes it, committing the step's `commit`; `false`,
+    /// having committed nothing, where the step misses.
+    #[inline(always)]
+    fn element(
+        &mut self,
+        hook: Option<&Hook>,
+        walked: Option<Value>,
+        raw: Value,
+        commit: &Commit,
+        binding: u32,
+    ) -> Result<bool, Halt> {
+        let element = match hook {
+            Some(hook) => match walked.and_then(|walked| hook(walked, raw, &mut self.cx)) {
+                Some(element) => element,
+                None => {
+                    self.head_missed = true;
+                    return Ok(false);
+                }
+            },
+            None => raw,
+        };
+        if (!ALLOC && !scalar(&element)) || !self.fits(commit) || !self.hold(&element)? {
+            return Ok(false);
+        }
+        self.commit(commit)?;
+        self.frame.set_slot(binding, SlotState::Value(element));
+        Ok(true)
+    }
+
+    /// The statement `step` at `index` of the innermost of `bodies` did
+    /// not run, having been `tried`: the iteration stops before it, or in
+    /// it where its guest call ran.
+    #[cold]
+    #[inline(never)]
+    fn stopped<'p>(
+        &mut self,
+        (bodies, nexts, index): (&[&CompiledBody], &[usize], usize),
+        step: &'p CompiledStep,
+        tried: bool,
+        call: &mut Option<&'p GuestCall>,
+    ) -> Result<Went, Halt> {
+        // A statement whose guest call ran stands in it: started, as the
+        // reference's frame holds it there.
+        if self.cx.called.is_some() {
+            let guest = commit_of(step)
+                .and_then(|commit| commit.guest.as_deref())
+                .ok_or_else(|| fault("a guest call ran in no statement of its"))?;
+            // What the statement charged before its call is paid.
+            self.cx.charged += guest.units;
+            *call = Some(guest);
+            self.stop(bodies, nexts, index + 1);
+            return Ok(Went::Called);
+        }
+        // A statement before it, or the `if` whose arm it stands in,
+        // committed; a decline ends the run, so it is this statement's.
+        self.progressed = !nexts.is_empty() || index > 0;
+        self.declined = self.cx.declined;
+        self.missed = tried && !matches!(step, CompiledStep::Leave) && !self.declined;
+        if self.cx.fault.is_some() {
+            return Err(fault("a region's fault ended its iteration"));
+        }
+        Ok(self.stop(bodies, nexts, index))
+    }
+
     /// The iteration stops before statement `index` of the innermost of
     /// `bodies`, each outer one standing at its statement in `nexts`.
     #[cold]
@@ -749,17 +1016,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// builds is not left for a charge it then cannot commit.
     #[inline(always)]
     fn room(&self, step: &CompiledStep) -> bool {
-        let commit = match step {
-            CompiledStep::Write { commit, .. }
-            | CompiledStep::Bind { commit, .. }
-            | CompiledStep::Session { commit, .. }
-            | CompiledStep::If { commit, .. }
-            | CompiledStep::Continue(commit)
-            | CompiledStep::Store { commit, .. }
-            | CompiledStep::Discard { commit, .. } => commit,
-            CompiledStep::Leave => return true,
-        };
-        self.ahead(commit)
+        commit_of(step).is_none_or(|commit| self.ahead(commit))
     }
 
     /// Whether a statement committing `commit` may run: always in a scalar
@@ -774,7 +1031,8 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         }
         let admit = self.admit;
         commit.max.is_none_or(|max| {
-            self.charged
+            self.cx
+                .charged
                 .checked_add(max)
                 .and_then(|total| total.checked_add(admit.loop_test))
                 .is_some_and(|end| end <= admit.bound)
@@ -792,7 +1050,8 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             return true;
         }
         let admit = self.admit;
-        self.charged
+        self.cx
+            .charged
             .checked_add(commit.fixed)
             .and_then(|total| total.checked_add(self.cx.meter.units))
             .and_then(|total| total.checked_add(admit.loop_test))
@@ -808,22 +1067,29 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             self.cx.held.is_none(),
             "only a `do` holds a write, and applies it as it commits"
         );
-        if INVOKES && let Some(counters) = self.counters.as_deref_mut() {
+        if INVOKES && let Some(counters) = self.cx.counters.as_deref_mut() {
             for &site in &commit.calls {
                 counters.advance(site)?;
             }
         }
-        *self.charged += commit.fixed + self.cx.meter.units;
+        // A statement whose guest call ran commits standing in no call.
+        if ALLOC && commit.guest.is_some() {
+            self.cx.called = None;
+        }
+        self.cx.charged += commit.fixed + self.cx.meter.units;
         if let Some(tape) = self.tape {
+            // What a tape recorded before the statement's guest call is
+            // recorded already.
+            let recorded = std::mem::take(&mut self.cx.meter.recorded);
             record(
                 tape,
-                &commit.program,
+                commit.program.get(recorded..).unwrap_or_default(),
                 &commit.arms,
                 &mut self.cx.meter.taken.iter(),
             );
         }
         if ALLOC {
-            self.due |= *self.charged >= self.admit.slice_end;
+            self.due |= self.cx.charged >= self.admit.slice_end;
         }
         Ok(())
     }
@@ -834,6 +1100,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     fn ready(&self, commit: &Commit) -> bool {
         !INVOKES
             || self
+                .cx
                 .counters
                 .as_deref()
                 .is_none_or(|counters| counters.can_advance(&commit.calls))
@@ -847,6 +1114,22 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             self.cx.statement_ended();
             self.due |= self.cx.arena.release_due() || self.cx.arena.cycles_due();
         }
+    }
+}
+
+/// What statement `step` commits; a statement the region leaves commits
+/// nothing.
+#[inline(always)]
+fn commit_of(step: &CompiledStep) -> Option<&Commit> {
+    match step {
+        CompiledStep::Write { commit, .. }
+        | CompiledStep::Bind { commit, .. }
+        | CompiledStep::Session { commit, .. }
+        | CompiledStep::If { commit, .. }
+        | CompiledStep::Continue(commit)
+        | CompiledStep::Store { commit, .. }
+        | CompiledStep::Discard { commit, .. } => Some(commit),
+        CompiledStep::Leave => None,
     }
 }
 
@@ -868,6 +1151,8 @@ fn record(
                 Some(Taken::Formula(units)) => Weight::Atomic(*units),
                 _ => Weight::Atomic(0),
             },
+            // A guest call's island recorded its own events as it ran.
+            Event::Call => continue,
             Event::Arm(index) => {
                 if let (Some(Taken::Arm(arm)), Some(conditional)) =
                     (taken.next(), arms.get(*index as usize))

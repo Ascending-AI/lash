@@ -19,11 +19,29 @@ use lash_kernel_state::kernel_internals::PagedHeap;
 use super::super::{
     Charge, Executable, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
 };
+use super::GuestCall;
 use super::nodes::{
     Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index, scalar,
 };
+use crate::machine::Occurrences;
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
+
+/// The guest calls a region runs through its callees' islands
+/// (`docs/design/kernel-regions.md` §5 R4), which the machine answers.
+pub(crate) trait Guests {
+    /// Runs `call` of `callee` on `args` through its callee's island,
+    /// having paid what its statement charges before it: the value the
+    /// callee returned. `None` where the island does not run, having
+    /// paid nothing, or where it stopped, with [`Cx::called`] set.
+    fn call(
+        &mut self,
+        cx: &mut Cx<'_>,
+        call: &GuestCall,
+        callee: Option<Value>,
+        args: &[Value],
+    ) -> Option<Value>;
+}
 
 /// What a region's statements read, build and hold with: the meter of
 /// the running statement, the executable's libraries, the arena, the
@@ -66,9 +84,36 @@ pub(crate) struct Cx<'a> {
     /// The write the running statement's operator made through its heap
     /// paths, held until the statement commits.
     pub(crate) held: Option<Held>,
+    /// The run's charge, which the machine takes back once the region
+    /// exits. After a statement's guest call ran, it holds the island's
+    /// charge but not what the statement paid before the call, which the
+    /// statement's commit pays with its fixed units.
+    pub(crate) charged: u64,
+    /// The task's occurrence counters, which the region's invokes advance
+    /// as they commit and its guest calls as they run (`K-EFF-008`).
+    pub(crate) counters: Option<&'a mut Occurrences>,
+    /// What runs the plan's guest calls, when it makes any.
+    pub(crate) guests: Option<&'a mut (dyn Guests + 'a)>,
+    /// The running statement's guest call ran: its value, or `None` where
+    /// its island stopped. The statement stands in its call from then on.
+    pub(crate) called: Option<Option<Value>>,
 }
 
 impl Cx<'_> {
+    /// Runs guest call `call` of `callee` on `args` through its callee's
+    /// island ([`Guests::call`]).
+    pub(super) fn guest(
+        &mut self,
+        call: &GuestCall,
+        callee: Option<Value>,
+        args: &[Value],
+    ) -> Option<Value> {
+        let guests = self.guests.take()?;
+        let value = guests.call(self, call, callee, args);
+        self.guests = Some(guests);
+        value
+    }
+
     /// A window of `count` operands, which takes none of the room: what
     /// it holds is held already, as the reference's registers are. A
     /// window past the inline capacity exits to the reference.

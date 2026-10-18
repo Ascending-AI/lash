@@ -2,19 +2,21 @@
 //! ([`LoopPlan::verify`]): the summaries, programs, arms, reads, writes,
 //! session bindings and calls a plan states are its statements' own.
 
-use lash_kernel_exec::{Op, Weight};
+use lash_kernel_exec::{ActIx, Op, Weight};
 
 use super::super::expr::arm_ends;
-use super::super::{Atom, BindingName, BlockId, Form, NestedKind, Var};
+use super::super::{Atom, BindingName, BlockId, Callee, Form, NestedKind, StmtId, Var};
 use super::{
-    Arms, Body, End, Event, Gathered, Head, LibId, LoopPlan, Lowered, Refused, RegionSlot, Step,
-    Summary, barrier, general, lean, library_invoke, scalar_site, writes, writes_last,
+    Arms, Body, End, Event, Gathered, Head, Kept, LibId, LoopPlan, Lowered, Refused, RegionSlot,
+    Step, Summary, barrier, general, guest_call, guest_site, lean, library_invoke, root_call,
+    scalar_site, writes, writes_last,
 };
 
 /// The plan's check against the lowered code: the summaries in the order
 /// [`LoopPlan::verify`] numbers them, and the calls their ops make.
 struct Check<'a, 'l> {
     lowered: &'a Lowered<'l>,
+    loop_test: u64,
     statement: usize,
     calls: Vec<usize>,
     /// The session bindings the ops use, in the order they first use them.
@@ -22,22 +24,41 @@ struct Check<'a, 'l> {
 }
 
 /// What a statement's ops show the verifier: the program and arms they
-/// charge, the invokes they count, the slots they read and write, whether
-/// they allocate and whether their formulas are bounded.
+/// charge, the invokes they count when it commits and the guest call that
+/// counts as it runs, the slots they read and write, whether they
+/// allocate and whether their formulas are bounded.
 struct Seen {
     expected: Vec<Event>,
     arms: Vec<Arms>,
     calls: Vec<usize>,
+    guest: Option<SeenGuest>,
     reads: Vec<RegionSlot>,
     write: Option<RegionSlot>,
     allocates: bool,
     bounded: bool,
 }
 
+/// A guest call the ops make: its entry, its occurrence, where its
+/// statement runs on after it and the register its value goes to, and
+/// the registers its continuation's roles take.
+struct SeenGuest {
+    act: Option<ActIx>,
+    occurrence: usize,
+    resume: u32,
+    reg: u32,
+    roles: Vec<u32>,
+}
+
 impl Check<'_, '_> {
     /// Checks `summary`, the next statement, charged `head` before its ops
-    /// and ending as `end`.
-    fn summary(&mut self, summary: &Summary, head: Weight, end: End) -> Result<(), Refused> {
+    /// and ending as `end`: a guest call of it is body statement `id`'s.
+    fn summary(
+        &mut self,
+        summary: &Summary,
+        head: Weight,
+        end: End,
+        id: Option<StmtId>,
+    ) -> Result<(), Refused> {
         let index = self.statement;
         self.statement += 1;
         let stream = self.lowered.stream;
@@ -58,6 +79,7 @@ impl Check<'_, '_> {
             expected: vec![Event::Fixed(head)],
             arms: Vec::new(),
             calls: Vec::new(),
+            guest: None,
             reads: Vec::new(),
             write: None,
             allocates: false,
@@ -74,6 +96,7 @@ impl Check<'_, '_> {
             expected,
             arms,
             calls,
+            guest,
             reads,
             write,
             allocates,
@@ -91,8 +114,69 @@ impl Check<'_, '_> {
         if *summary.arms != *arms {
             return Err(Refused::Program { statement: index });
         }
+        self.program(summary, expected, index)?;
+        self.guest(summary, guest, id, index)?;
+        self.calls
+            .extend(summary.guest.as_ref().map(|guest| guest.occurrence));
         self.calls.extend(calls);
-        self.program(summary, expected, index)
+        Ok(())
+    }
+
+    /// Checks `summary`'s guest call against the one its ops make, `seen`,
+    /// in body statement `id`: its entry, occurrence and resume, the fixed
+    /// events before it, and the registers it holds across it, each read
+    /// from a slot the statement reads.
+    fn guest(
+        &self,
+        summary: &Summary,
+        seen: Option<SeenGuest>,
+        id: Option<StmtId>,
+        index: usize,
+    ) -> Result<(), Refused> {
+        let shape = Refused::Shape { statement: index };
+        let (stated, seen) = match (&summary.guest, seen) {
+            (None, None) => return Ok(()),
+            (Some(stated), Some(seen)) => (stated, seen),
+            _ => return Err(Refused::Calls),
+        };
+        if Some(stated.stmt) != id
+            || stated.act != seen.act
+            || stated.occurrence != seen.occurrence
+            || stated.resume != seen.resume
+            || stated.reg != seen.reg
+            || stated.holds.iter().map(|(reg, _)| *reg).ne(seen.roles)
+        {
+            return Err(shape);
+        }
+        let at = summary
+            .program
+            .iter()
+            .position(|event| *event == Event::Call)
+            .ok_or(Refused::Program { statement: index })?;
+        let before = summary.program[..at].iter().map(|event| match event {
+            Event::Fixed(weight) => Some(*weight),
+            _ => None,
+        });
+        if stated.through != at + 1
+            || before.ne(stated.before.iter().copied().map(Some))
+            || stated.units
+                != stated
+                    .before
+                    .iter()
+                    .map(|weight| weight.units())
+                    .sum::<u64>()
+            || Some(stated.least) != summary.fixed.checked_add(self.loop_test)
+        {
+            return Err(Refused::Program { statement: index });
+        }
+        let read = |held: &Kept| match held {
+            Kept::Slot(slot) => summary.reads.contains(slot),
+            Kept::Value(_) => true,
+        };
+        if !stated.holds.iter().all(|(_, held)| read(held)) {
+            return Err(Refused::Slots { statement: index });
+        }
+        Ok(())
     }
 
     /// Reads the ops `start..end` of `summary`'s statement into `seen`:
@@ -141,8 +225,15 @@ impl Check<'_, '_> {
                 }
                 Op::Act => {
                     let id = summary.action.ok_or(Refused::Shape { statement: index })?;
-                    let (action, lib, args) = library_invoke(&(self.lowered.stmt)(id).form)
+                    let (action, callee, args) = root_call(&(self.lowered.stmt)(id).form)
                         .ok_or(Refused::Shape { statement: index })?;
+                    // A guest call's callee is read before its arguments.
+                    if let Callee::Value(Var::Local(local)) = callee {
+                        seen.reads.push(RegionSlot::Frame(local.at));
+                    }
+                    if let Callee::Value(Var::Session(name)) = callee {
+                        seen.reads.push(self.sessions.session(name));
+                    }
                     for arg in args {
                         match arg {
                             Atom::Var(Var::Local(local)) => {
@@ -155,16 +246,58 @@ impl Check<'_, '_> {
                         }
                         seen.expected.push(Event::Fixed(Weight::Atomic(1)));
                     }
-                    if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
-                        seen.calls.push(action.occurrence);
+                    let counted = !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_));
+                    match callee {
+                        Callee::Library(lib) => {
+                            if counted {
+                                seen.calls.push(action.occurrence);
+                            }
+                            let scalar = scalar_site((self.lowered.lib)(*lib), args.len());
+                            seen.bounded &= scalar;
+                            seen.allocates |= !scalar;
+                            seen.expected.push(Event::Formula);
+                        }
+                        Callee::Declared(_) | Callee::Value(_) => {
+                            if !counted {
+                                return Err(Refused::Calls);
+                            }
+                            seen.guest = Some(SeenGuest {
+                                act: None,
+                                occurrence: action.occurrence,
+                                resume: pc + 1,
+                                reg: 0,
+                                roles: Vec::new(),
+                            });
+                            seen.bounded = false;
+                            seen.allocates = true;
+                            seen.expected.push(Event::Call);
+                        }
                     }
-                    let scalar = scalar_site((self.lowered.lib)(lib), args.len());
-                    seen.bounded &= scalar;
-                    seen.allocates |= !scalar;
-                    seen.expected.push(Event::Formula);
                 }
                 Op::Nested { act, args } => {
-                    if let Some(nested) = stream.nested.get(act.ix()) {
+                    let nested = stream
+                        .nested
+                        .get(act.ix())
+                        .ok_or(Refused::Program { statement: index })?;
+                    let guest = !nested.operator
+                        && guest_site(nested)
+                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_));
+                    if guest {
+                        // A guest call is its statement's first counted op.
+                        if seen.guest.is_some() || !seen.calls.is_empty() {
+                            return Err(Refused::Calls);
+                        }
+                        seen.guest = Some(SeenGuest {
+                            act: Some(act),
+                            occurrence: nested.occurrence,
+                            resume: pc + 1,
+                            reg: args.start.0,
+                            roles: nested.roles.iter().map(|role| role.reg.0).collect(),
+                        });
+                        seen.bounded = false;
+                        seen.allocates = true;
+                        seen.expected.push(Event::Call);
+                    } else {
                         if matches!(nested.kind, NestedKind::Call(_))
                             && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
                         {
@@ -173,8 +306,8 @@ impl Check<'_, '_> {
                         if let Some(lib) = nested.kind.operator_lib() {
                             seen.bounded &= scalar_site((self.lowered.lib)(lib), args.len as usize);
                         }
+                        seen.expected.push(Event::Formula);
                     }
-                    seen.expected.push(Event::Formula);
                 }
                 Op::Local { local, .. } => seen.reads.push(RegionSlot::Frame(local.at)),
                 Op::Session { name, .. } => {
@@ -207,7 +340,7 @@ impl Check<'_, '_> {
                             .iter()
                             .map(|event| match event {
                                 Event::Fixed(weight) => weight.units(),
-                                Event::Formula | Event::Arm(_) => 0,
+                                Event::Formula | Event::Arm(_) | Event::Call => 0,
                             })
                             .sum::<u64>()
                     };
@@ -246,7 +379,7 @@ impl Check<'_, '_> {
             .iter()
             .map(|event| match event {
                 Event::Fixed(weight) => weight.units(),
-                Event::Formula | Event::Arm(_) => 0,
+                Event::Formula | Event::Arm(_) | Event::Call => 0,
             })
             .sum::<u64>();
         if fixed != summary.fixed {
@@ -299,23 +432,27 @@ impl Check<'_, '_> {
             let unit = Weight::Atomic(1);
             match (step, &statement.form) {
                 (Step::Write(summary), Form::Plain | Form::Action(_)) => {
-                    self.summary(summary, unit, End::Write)?;
+                    self.summary(summary, unit, End::Write, Some(*id))?;
                 }
                 (Step::Bind(summary), Form::Plain | Form::Action(_)) => {
-                    self.summary(summary, unit, End::Bind)?;
+                    self.summary(summary, unit, End::Bind, Some(*id))?;
                 }
                 (Step::Continue(summary), Form::Plain) => {
-                    self.summary(summary, unit, End::Continue)?;
+                    self.summary(summary, unit, End::Continue, Some(*id))?;
                 }
                 (Step::Store(summary), Form::Plain | Form::Action(_)) => {
-                    self.summary(summary, unit, End::Store)?;
+                    self.summary(summary, unit, End::Store, Some(*id))?;
                 }
-                (Step::Discard(summary), Form::Plain) => {
-                    self.summary(summary, unit, End::Discard)?;
+                (Step::Discard(summary), Form::Plain | Form::Action(_)) => {
+                    self.summary(summary, unit, End::Discard, Some(*id))?;
                 }
                 // A region leaves to the reference only a barrier, and what
                 // follows one.
-                (Step::Leave, _) if left || barrier(self.lowered, statement) => {
+                (Step::Leave, _)
+                    if left
+                        || barrier(self.lowered, statement)
+                        || guest_call(self.lowered, statement) =>
+                {
                     left = true;
                 }
                 (
@@ -329,7 +466,7 @@ impl Check<'_, '_> {
                         else_block,
                     },
                 ) => {
-                    self.summary(test, unit, End::Branch)?;
+                    self.summary(test, unit, End::Branch, None)?;
                     self.body(then, *then_block)?;
                     self.body(otherwise, *else_block)?;
                 }
@@ -361,6 +498,7 @@ impl LoopPlan {
         }
         let mut check = Check {
             lowered,
+            loop_test,
             statement: 0,
             calls: Vec::new(),
             sessions: Gathered::default(),
@@ -380,14 +518,16 @@ impl LoopPlan {
                 if test.ops != *ops {
                     return Err(head);
                 }
-                check.summary(test, Weight::Atomic(*metered), End::Test)?;
+                check.summary(test, Weight::Atomic(*metered), End::Test, None)?;
                 (*body, false)
             }
             (
                 Head::For {
                     charge,
+                    guarded,
                     binding,
                     item,
+                    check: guard,
                 },
                 Form::For {
                     metered,
@@ -401,19 +541,37 @@ impl LoopPlan {
                     || bound.shared
                     || *item != via.and_then(|via| via.item)
                     || item.is_some_and(|item| writes(lowered, item))
-                    || charge.write != Some(RegionSlot::Frame(bound.at))
-                    || !charge.reads.is_empty()
+                    || guard.is_some_and(|guard| writes(lowered, guard))
+                    || *guard != via.and_then(|via| via.check)
                 {
                     return Err(head);
                 }
-                let scalar = item.is_none_or(|item| scalar_site((lowered.lib)(item), 2));
-                if charge.general != !scalar || charge.formula_max.is_none() == scalar {
-                    return Err(Refused::Allocates { statement: 0 });
-                }
-                let mut expected = vec![Event::Fixed(Weight::Atomic(*metered))];
-                expected.extend(item.map(|_| Event::Formula));
                 check.statement += 1;
-                check.program(charge, expected, 0)?;
+                let charges = std::iter::once((charge, None)).chain(
+                    guarded
+                        .iter()
+                        .map(|guarded| (&**guarded, guard.map(|guard| (guard, 4)))),
+                );
+                for (summary, guard) in charges {
+                    if summary.write != Some(RegionSlot::Frame(bound.at))
+                        || !summary.reads.is_empty()
+                    {
+                        return Err(head);
+                    }
+                    let hooks: Vec<(LibId, usize)> = guard
+                        .into_iter()
+                        .chain(item.map(|item| (item, 2)))
+                        .collect();
+                    let scalar = hooks
+                        .iter()
+                        .all(|(hook, count)| scalar_site((lowered.lib)(*hook), *count));
+                    if summary.general != !scalar || summary.formula_max.is_none() == scalar {
+                        return Err(Refused::Allocates { statement: 0 });
+                    }
+                    let mut expected = vec![Event::Fixed(Weight::Atomic(*metered))];
+                    expected.extend(hooks.iter().map(|_| Event::Formula));
+                    check.program(summary, expected, 0)?;
+                }
                 (*body, true)
             }
             _ => return Err(head),
@@ -427,6 +585,14 @@ impl LoopPlan {
         }
         let allocates = self.head.summary().allocates() || self.body.allocates();
         if self.allocates != allocates {
+            return Err(Refused::Allocates { statement: 0 });
+        }
+        // Only an allocating plan walks a guarded table.
+        if let Head::For {
+            guarded: Some(_), ..
+        } = &self.head
+            && !allocates
+        {
             return Err(Refused::Allocates { statement: 0 });
         }
         let iteration = if allocates {

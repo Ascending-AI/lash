@@ -62,6 +62,7 @@ use limits::Limiters;
 use loops::Cursor;
 use project::SharedArena;
 use session::{keyed, open_tree};
+pub(crate) use tasks::Occurrences;
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;

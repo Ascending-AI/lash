@@ -113,7 +113,7 @@ impl std::ops::DerefMut for Task {
 }
 
 /// Working state is task-wide, never frame-local or a persistent tree.
-pub(super) struct Occurrences {
+pub(crate) struct Occurrences {
     counts: Box<[u64]>,
     dirty: Vec<usize>,
     marked: Box<[bool]>,
@@ -147,7 +147,7 @@ impl Occurrences {
         problem.map_or(Ok(counters), Err)
     }
 
-    pub(super) fn advance(&mut self, index: usize) -> Result<u64, super::Halt> {
+    pub(crate) fn advance(&mut self, index: usize) -> Result<u64, super::Halt> {
         let count = self.counts[index];
         self.counts[index] = count
             .checked_add(1)
@@ -161,7 +161,7 @@ impl Occurrences {
 
     /// A region commits each syntactic call site at most once per
     /// statement. Leave a counter overflow to ordinary action dispatch.
-    pub(super) fn can_advance(&self, sites: &[usize]) -> bool {
+    pub(crate) fn can_advance(&self, sites: &[usize]) -> bool {
         sites.iter().all(|&index| self.counts[index] < u64::MAX)
     }
 

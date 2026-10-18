@@ -901,13 +901,10 @@ const LEFT_TO_THE_REFERENCE: &[(&str, Idle)] = &[
     ("typescript region: push and text", Idle::Islands),
     ("typescript region: conditional arms", Idle::Islands),
     ("typescript region: inherited name", Idle::Islands),
-    // FIG-6785: loops whose body is a call.
+    // FIG-6785: a `for...of` over an array, whose `ts.for_of.item` hook's
+    // generated template declines a list's items.
     (
-        "python islands: text returns and a discarded call",
-        Idle::Loops,
-    ),
-    (
-        "typescript islands: text returns and a discarded call",
+        "typescript islands: texts echoed by root call actions in a loop",
         Idle::Loops,
     ),
 ];

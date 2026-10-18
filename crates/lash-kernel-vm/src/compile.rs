@@ -59,11 +59,11 @@ pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
     Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event,
-    LoopPlan, Meter, NESTING, Role, SessionSlot, Taken, UNPRODUCTIVE, measured_formula, position,
-    scalar, store,
+    GuestCall, Guests, Hook, Kept, LoopPlan, Meter, NESTING, RegionSlot, Role, SessionSlot, Taken,
+    UNPRODUCTIVE, measured_formula, position, scalar, store,
 };
 #[cfg(test)]
-pub(crate) use regions::{Head, RegionSlot, Step, Summary};
+pub(crate) use regions::{Head, Step, Summary};
 #[cfg(test)]
 pub(crate) use regions::{Lowered, Refused};
 
@@ -1296,17 +1296,25 @@ fn compile_document(
         .map(|(site, count)| (ordinals[site], *count))
         .collect();
     let (regions, islands) = if prepared.layout.regions() {
-        let regions = form_regions(
-            &mut tables,
-            prepared,
-            Costs::of_document(document).loop_test,
-        );
         let base = (
             prepared.tables.codes.len() as u32,
             prepared.tables.blocks.len() as u32,
             prepared.tables.stmts.len() as u32,
         );
+        // Islands form first: a loop region runs its guest calls through
+        // its callees' islands.
         let islands = islands::form(&mut tables, &prepared.libs, base);
+        let regions = form_regions(
+            &mut tables,
+            prepared,
+            Costs::of_document(document).loop_test,
+            &|code: CodeId| {
+                (code.0 as usize)
+                    .checked_sub(base.0 as usize)
+                    .and_then(|own| islands.by_code.get(own).copied().flatten())
+                    .is_some()
+            },
+        );
         (regions, islands)
     } else {
         Default::default()
@@ -1328,7 +1336,12 @@ fn compile_document(
 /// Forms and verifies the loop region of every `while` and `for` of the
 /// document's own `tables` that has one, against `library`, and has each
 /// such loop state its plan (`docs/design/kernel-regions.md` §1).
-fn form_regions(tables: &mut Tables, library: &Prepared, loop_test: u64) -> Vec<LoopPlan> {
+fn form_regions(
+    tables: &mut Tables,
+    library: &Prepared,
+    loop_test: u64,
+    island: &dyn Fn(CodeId) -> bool,
+) -> Vec<LoopPlan> {
     let (blocks, stmts) = (
         library.tables.blocks.len() as u32,
         library.tables.stmts.len() as u32,
@@ -1345,6 +1358,7 @@ fn form_regions(tables: &mut Tables, library: &Prepared, loop_test: u64) -> Vec<
             stmt: &stmt,
             lib: &lib,
             lib_of: &lib_of,
+            island,
         };
         let formation = regions::Formation {
             lowered: lowered(),

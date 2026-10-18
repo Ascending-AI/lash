@@ -21,10 +21,11 @@ use std::ops::Range;
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{NewObject, Value, ValueKind};
 
-use super::super::expr::{self, Expr, Kind, Make};
+use super::super::expr::{self, Callee, Expr, Kind, Make};
 use super::super::{
     BindingName, BlockId, Constant, Executable, Lib, LibId, ReadSite, Source, Stream, find_property,
 };
+use super::GuestCall;
 use super::cx::Cx;
 use crate::machine::SlotState;
 
@@ -37,6 +38,9 @@ pub(crate) struct Meter {
     /// tape records them.
     pub(crate) taken: Vec<Taken>,
     record: bool,
+    /// The events of its program a charge tape recorded before its guest
+    /// call ran, which its commit records on from and clears.
+    pub(crate) recorded: usize,
 }
 
 /// What a statement's run chose of its static program: a formula's units,
@@ -53,6 +57,7 @@ impl Meter {
             units: 0,
             taken: Vec::new(),
             record,
+            recorded: 0,
         }
     }
 
@@ -113,6 +118,11 @@ pub(crate) type Node = Box<dyn Fn(&[SlotState], &mut Cx<'_>) -> Option<Value> + 
 /// value bound, metered, or `None` on a guard miss.
 pub(crate) type Hook = Box<dyn Fn(Value, Value, &mut Cx<'_>) -> Option<Value> + Send + Sync>;
 
+/// A compiled `check` hook: what the loop walks, its size when the loop
+/// opened it, the items still allowed and whether a step gave one, to the
+/// budget the hook gives, metered; `None` on a guard miss.
+pub(crate) type Check = Box<dyn Fn([Value; 4], &mut Cx<'_>) -> Option<Value> + Send + Sync>;
+
 /// A loop plan's compiled form: its head and its body as trees that hold
 /// what each statement charges, so that an iteration reads nothing else.
 pub(crate) struct CompiledLoop {
@@ -132,6 +142,8 @@ pub(crate) struct Commit {
     pub(crate) arms: Box<[super::Arms]>,
     /// The invoke occurrences it advances when it commits.
     pub(crate) calls: Box<[usize]>,
+    /// Its guest call, where an exit after the call stands its frame.
+    pub(crate) guest: Option<Box<GuestCall>>,
 }
 
 impl From<&super::Summary> for Commit {
@@ -142,6 +154,7 @@ impl From<&super::Summary> for Commit {
             program: summary.program.clone(),
             arms: summary.arms.clone(),
             calls: summary.calls.clone(),
+            guest: summary.guest.clone().map(Box::new),
         }
     }
 }
@@ -153,6 +166,8 @@ pub(crate) enum CompiledHead {
     },
     For {
         hook: Option<Hook>,
+        /// A guarded table's `check` hook and what its step commits.
+        guard: Option<(Check, Commit)>,
         commit: Commit,
         binding: u32,
     },
@@ -254,14 +269,16 @@ impl Libs<'_> {
 }
 
 /// The node of `expr`, a value of a region statement's tree: a
-/// statement-root invoke's value is `act`'s, taken.
+/// statement-root invoke's value is `act`'s, taken; a guest call is the
+/// statement's `guest`.
 pub(super) fn compile(
     stream: &Stream,
     libs: &Libs<'_>,
     expr: &Expr,
     act: &mut Option<Node>,
+    guest: Option<&GuestCall>,
 ) -> Option<Node> {
-    let mut node = |expr: &Expr| compile(stream, libs, expr, act);
+    let mut node = |expr: &Expr| compile(stream, libs, expr, act, guest);
     Some(match &expr.kind {
         Kind::Act => act.take()?,
         // A read of an open expression variable is of the value its
@@ -294,7 +311,20 @@ pub(super) fn compile(
         }
         Kind::Operator { lib, args, .. } => operator(libs, *lib, nodes(args, &mut node)?)?,
         Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?)?,
-        Kind::Call { .. } => return None,
+        Kind::Call { callee, args, .. } => {
+            let read = match callee {
+                Callee::Read(read) => Some(match read.kind {
+                    Kind::Local {
+                        local,
+                        scoped: false,
+                        ..
+                    } => celled(local.at),
+                    _ => node(read)?,
+                }),
+                Callee::Declared(_) => None,
+            };
+            guest_call(guest?.clone(), read, nodes(args, &mut node)?)?
+        }
         Kind::Make { make, items } => {
             let items = nodes(items, &mut node)?;
             match make {
@@ -396,18 +426,32 @@ fn conditional(condition: Node, then: (Node, u64), otherwise: (Node, u64)) -> No
 /// The compiled statement-root invoke of operator `id` on `args`, each a
 /// frame variable or a resident literal.
 pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) -> Option<Node> {
-    let operands = args
-        .iter()
+    operator(libs, id, atoms(libs, args)?)
+}
+
+/// The compiled statement-root guest call `call` of `callee` on `args`,
+/// each a frame variable or a resident literal.
+pub(super) fn root_call(
+    libs: &Libs<'_>,
+    call: &GuestCall,
+    callee: &super::super::Callee,
+    args: &[super::super::Atom],
+) -> Option<Node> {
+    let read = match callee {
+        super::super::Callee::Declared(_) => None,
+        super::super::Callee::Value(super::super::Var::Local(local)) => Some(celled(local.at)),
+        super::super::Callee::Value(var) => Some(variable(libs, var)?),
+        super::super::Callee::Library(_) => return None,
+    };
+    guest_call(call.clone(), read, atoms(libs, args)?)
+}
+
+/// The compiled reads of a root action's atoms `args`.
+fn atoms(libs: &Libs<'_>, args: &[super::super::Atom]) -> Option<Vec<Node>> {
+    args.iter()
         .map(|arg| -> Option<Node> {
             match arg {
-                super::super::Atom::Var(super::super::Var::Local(local)) => {
-                    let at = local.at as usize;
-                    Some(Box::new(move |slots, _| match slots.get(at) {
-                        Some(SlotState::Value(value)) => Some(*value),
-                        _ => None,
-                    }))
-                }
-                super::super::Atom::Var(super::super::Var::Session(name)) => libs.session(name),
+                super::super::Atom::Var(var) => variable(libs, var),
                 super::super::Atom::Literal(Constant::Resident(value)) => {
                     let value = *value;
                     Some(Box::new(move |_, _| Some(value)))
@@ -415,8 +459,56 @@ pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) ->
                 _ => None,
             }
         })
-        .collect::<Option<Vec<_>>>()?;
-    operator(libs, id, operands)
+        .collect()
+}
+
+/// The compiled read of variable `var`: an unshared slot or a session
+/// binding of the plan's.
+fn variable(libs: &Libs<'_>, var: &super::super::Var) -> Option<Node> {
+    match var {
+        super::super::Var::Local(local) if !local.shared => {
+            let at = local.at as usize;
+            Some(Box::new(move |slots, _| match slots.get(at) {
+                Some(SlotState::Value(value)) => Some(*value),
+                _ => None,
+            }))
+        }
+        super::super::Var::Session(name) => libs.session(name),
+        _ => None,
+    }
+}
+
+/// The compiled read of the frame variable at `at`, a guest call's callee:
+/// its value, or a captured or shared variable's cell's.
+fn celled(at: u32) -> Node {
+    let at = at as usize;
+    Box::new(move |slots, cx| match slots.get(at)? {
+        SlotState::Value(value) => Some(*value),
+        SlotState::Cell(cell) => cx.arena.cell(*cell).ok(),
+        SlotState::Empty => None,
+    })
+}
+
+/// The most arguments a region's guest call passes, inline.
+const GUEST_ARGS: usize = 12;
+
+/// The compiled guest call `call` of the closure `read` gives, or of its
+/// declared callee, on `args`: run through the callee's island.
+fn guest_call(call: GuestCall, read: Option<Node>, args: Vec<Node>) -> Option<Node> {
+    if args.len() > GUEST_ARGS || read.is_some() == call.callee.is_some() {
+        return None;
+    }
+    Some(Box::new(move |slots, cx| {
+        let callee = match &read {
+            Some(read) => Some(read(slots, cx)?),
+            None => None,
+        };
+        let mut values = [Value::Absent; GUEST_ARGS];
+        for (value, arg) in values.iter_mut().zip(&args) {
+            *value = arg(slots, cx)?;
+        }
+        cx.guest(&call, callee, &values[..args.len()])
+    }))
 }
 
 /// The values of `nodes`, in order, into a buffer of exactly their
@@ -814,6 +906,25 @@ impl Prepared {
             Self::Unset { set, .. } => *set,
         }
     }
+}
+
+/// The compiled `check` hook `function` of an allocating plan, as the
+/// reference's handoff passes its arguments.
+pub(super) fn check(libs: &Libs<'_>, id: LibId) -> Option<Check> {
+    if !libs.general {
+        return None;
+    }
+    libs.exe.lib(id).prepared.as_ref()?;
+    Some(Box::new(move |args, cx| {
+        let window = cx.argument_window(args.len())?;
+        for (at, value) in args.iter().enumerate() {
+            cx.args.put(window.start + at, *value);
+        }
+        let exe = cx.exe;
+        let answer = cx.operate(exe.lib(id), window.clone());
+        cx.args.release(window.start);
+        answer
+    }))
 }
 
 /// Writes `value` at `place` of `target`, with `index` for an index, as

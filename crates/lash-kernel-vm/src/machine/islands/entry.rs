@@ -14,18 +14,25 @@
 use std::rc::Rc;
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::{TaskId, Value};
-use lash_kernel_exec::{ActIx, RegRange};
+use lash_kernel_doc::{KernelDataLimits, TaskId, Value};
+use lash_kernel_exec::{ActIx, RegRange, Weight};
+use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::PhaseRecord;
 
 use super::super::ops::Flow;
+use super::super::session::Session;
 use super::super::stream::Running;
+use super::super::tasks::Occurrences;
 use super::super::{Eval, FRAME_BYTES, Halt, KernelMachine, SlotState, fault};
 use super::{
-    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Stands, Stop, closure_island, held,
+    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, closure_island,
+    held,
 };
-use crate::compile::{CodeId, Executable, NestedCallee, NestedKind};
+use crate::compile::{
+    BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
+};
 use crate::interface::Host;
+use crate::observe::ChargeTape;
 
 /// Where the caller of an island call stands while its callee runs.
 #[derive(Clone, Copy)]
@@ -258,8 +265,6 @@ impl KernelMachine {
         let base = (frames
             + self.plans as usize
             + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
-        let call_depth = u64::from(self.bounds.call_depth);
-        let observed = self.observer.is_some();
         // A paced run has no charge to record and no bound: its pace only
         // meets the slice's end.
         let charging = self.bounds.charge == crate::Charge::Exact;
@@ -268,9 +273,6 @@ impl KernelMachine {
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
         let mut scratch = std::mem::take(&mut self.islands);
-        scratch.epoch = scratch.epoch.wrapping_add(1);
-        scratch.captured.clear();
-        scratch.sessions.clear();
         let arena = Rc::clone(&self.arena);
         let ran = {
             let arena = arena.borrow();
@@ -279,68 +281,67 @@ impl KernelMachine {
                 .get_mut(task.0 as usize)?
                 .ok_or_else(|| fault("no task"))?
                 .counters;
-            let mut island = Island {
+            let ground = Ground {
                 exe,
-                stream: exe.document_stream(),
                 arena: &arena,
                 session: &self.session,
                 tape: recorder.filter(|_| charging),
                 recorder,
                 charging,
-                charged: self.charged,
                 bound: if charging {
                     self.bounds.charge_limit
                 } else {
                     u64::MAX
                 },
                 slice_end: self.slice_end,
-                counters,
-                observed,
+                observed: self.observer.is_some(),
                 limits: self.limits,
                 memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
                 base,
-                call_depth,
-                depth: 0,
-                scratch: &mut scratch,
+                call_depth: u64::from(self.bounds.call_depth),
             };
-            let target = match target {
-                Target::Declared(code) => island.declared(code),
-                Target::Closure(handle) => island.resolve_cold(None, handle),
-                Target::Code(code, cells) => island.with_cells(code, cells),
-            };
-            let plan = target.filter(|(plan, _)| {
-                let plan = &exe.islands.plans[*plan as usize];
-                given <= plan.params.len() && values.iter().all(held) && base <= call_depth
-            });
-            let ran = plan.map(|(plan, captured)| {
-                occurrence
-                    .map_or(Ok(()), |occurrence| island.count(occurrence))
-                    .and_then(|()| island.enter(plan, captured, values))
-            });
-            (ran, island.charged)
+            enter(
+                ground,
+                &mut scratch,
+                counters,
+                &mut self.charged,
+                (target, values),
+                occurrence,
+                &[],
+            )
         };
-        let (ran, charged) = ran;
-        self.charged = charged;
-        let Some(ran) = ran else {
-            self.islands = scratch;
-            return Ok(None);
-        };
-        match ran {
-            Ok(value) => {
-                self.islands = scratch;
-                Ok(Some(Ran::Returned(value)))
-            }
-            Err(Stop) => {
-                let halt = scratch.exit.halt.take();
-                let levels = std::mem::take(&mut scratch.exit.levels);
-                scratch.exit = Exit::default();
-                self.islands = scratch;
-                if let Some(halt) = halt {
-                    return Err(halt.into());
-                }
-                Ok(Some(Ran::Exited(levels)))
-            }
+        self.islands = scratch;
+        Ok(ran?)
+    }
+
+    /// A loop region's guest call `call` ran in its statement, where the
+    /// top frame of `task` now stands holding `regs` across the call. Its
+    /// callee returned `value`: the statement runs on from after the call,
+    /// as a nested call's exit runs on. Or its island stopped, leaving
+    /// `levels`: they convert above the frame, standing at the call.
+    pub(in crate::machine) fn guest_exit(
+        &mut self,
+        host: &mut dyn Host,
+        (task, exe): (TaskId, &Executable),
+        call: &GuestCall,
+        mut regs: Vec<(u32, Value)>,
+        (value, levels): (Option<Value>, Vec<Level>),
+    ) -> Eval<()> {
+        let running = Running::new(task, exe, call.stmt);
+        if let Some(value) = value {
+            regs.push((call.reg, value));
+            self.borrow_value(value);
+            return Ok(self.run_on(host, task, exe, (call.stmt, call.resume, regs))?);
         }
+        self.regs.statement(running.stmt.regs);
+        for (reg, value) in regs {
+            self.put(reg as usize, value);
+        }
+        let caller = match call.act {
+            Some(act) => Caller::Nested(act),
+            None => Caller::Action,
+        };
+        self.convert(host, &running, caller, levels)
     }
 
     /// Converts the virtual frames an island left, `levels` innermost
@@ -481,5 +482,236 @@ impl KernelMachine {
             code: level.code,
         });
         Ok(top)
+    }
+}
+
+/// What an island entry runs under, borrowed from the machine or from the
+/// loop region whose statement makes the call.
+struct Ground<'a> {
+    exe: &'a Executable,
+    arena: &'a Arena,
+    session: &'a Session,
+    tape: Option<&'a ChargeTape>,
+    recorder: Option<&'a ChargeTape>,
+    charging: bool,
+    bound: u64,
+    slice_end: u64,
+    observed: bool,
+    limits: KernelDataLimits,
+    memory: bool,
+    base: u64,
+    call_depth: u64,
+}
+
+/// Runs the call of `target` on `values` as an island in `scratch`,
+/// counting `occurrence` in `counters` when given, from the charge
+/// `charged`, which it advances: first by the fixed events `before` its
+/// caller's statement charges ahead of the call, once the callee is known
+/// to have an island that takes these arguments. `None`: the island does
+/// not run, and nothing changed.
+#[inline(always)]
+fn enter(
+    ground: Ground<'_>,
+    scratch: &mut Scratch,
+    counters: &mut Occurrences,
+    charged: &mut u64,
+    (target, values): (Target<'_>, &[Value]),
+    occurrence: Option<usize>,
+    before: &[Weight],
+) -> Result<Option<Ran>, Halt> {
+    let exe = ground.exe;
+    scratch.epoch = scratch.epoch.wrapping_add(1);
+    scratch.captured.clear();
+    scratch.sessions.clear();
+    let mut island = Island {
+        exe,
+        stream: exe.document_stream(),
+        arena: ground.arena,
+        session: ground.session,
+        tape: ground.tape,
+        recorder: ground.recorder,
+        charging: ground.charging,
+        charged: *charged,
+        bound: ground.bound,
+        slice_end: ground.slice_end,
+        counters,
+        observed: ground.observed,
+        limits: ground.limits,
+        memory: ground.memory,
+        base: ground.base,
+        call_depth: ground.call_depth,
+        depth: 0,
+        scratch,
+    };
+    let target = match target {
+        Target::Declared(code) => island.declared(code),
+        Target::Closure(handle) => island.resolve_cold(None, handle),
+        Target::Code(code, cells) => island.with_cells(code, cells),
+    };
+    let Some((plan, captured)) = target.filter(|(plan, _)| {
+        let plan = &exe.islands.plans[*plan as usize];
+        values.len() <= plan.params.len()
+            && values.iter().all(held)
+            && ground.base <= ground.call_depth
+    }) else {
+        return Ok(None);
+    };
+    for weight in before {
+        island.charged += weight.units();
+        if let Some(tape) = island.tape {
+            tape.push(*weight);
+        }
+    }
+    let ran = occurrence
+        .map_or(Ok(()), |occurrence| island.count(occurrence))
+        .and_then(|()| island.enter(plan, captured, values));
+    *charged = island.charged;
+    match ran {
+        Ok(value) => Ok(Some(Ran::Returned(value))),
+        Err(Stop) => {
+            let halt = scratch.exit.halt.take();
+            let levels = std::mem::take(&mut scratch.exit.levels);
+            scratch.exit = Exit::default();
+            if let Some(halt) = halt {
+                return Err(halt);
+            }
+            Ok(Some(Ran::Exited(levels)))
+        }
+    }
+}
+
+/// What runs a loop region's guest calls through their callees' islands
+/// (`docs/design/kernel-regions.md` §5 R4): the machine's island state and
+/// guards, lent to the region for its run. An island that stops leaves its
+/// virtual frames here, for the region's exit to convert.
+pub(in crate::machine) struct RegionGuests<'a> {
+    pub(in crate::machine) exe: &'a Executable,
+    pub(in crate::machine) session: &'a mut Session,
+    /// The plan's session bindings, which the region holds as slots.
+    pub(in crate::machine) names: &'a [BindingName],
+    pub(in crate::machine) scratch: &'a mut Scratch,
+    /// The tape a charged run records on, and the one its calls are
+    /// counted on, charged or paced.
+    pub(in crate::machine) tape: Option<&'a ChargeTape>,
+    pub(in crate::machine) recorder: Option<&'a ChargeTape>,
+    /// Whether the run is charged, or paced with charge Off.
+    pub(in crate::machine) charging: bool,
+    /// The run's bound, `u64::MAX` when it is paced.
+    pub(in crate::machine) bound: u64,
+    pub(in crate::machine) slice_end: u64,
+    pub(in crate::machine) observed: bool,
+    pub(in crate::machine) limits: KernelDataLimits,
+    /// The memory bound, when memory is accounted.
+    pub(in crate::machine) memory: Option<u64>,
+    pub(in crate::machine) base: u64,
+    pub(in crate::machine) call_depth: u64,
+    /// The frames an island that stopped left, innermost first.
+    pub(in crate::machine) levels: Vec<Level>,
+    pub(in crate::machine) halt: Option<Halt>,
+}
+
+impl Guests for RegionGuests<'_> {
+    fn call(
+        &mut self,
+        cx: &mut Cx<'_>,
+        call: &GuestCall,
+        callee: Option<Value>,
+        args: &[Value],
+    ) -> Option<Value> {
+        // What the statement must fit before it pays anything: its least
+        // with the next test's unit under the bound, its charge before the
+        // call short of the slice's end, where the call's push would end
+        // the step, and the island's headroom and depth.
+        let charged = cx.charged;
+        if self.scratch.held
+            || charged.checked_add(call.least)? > self.bound
+            || charged.checked_add(call.units)? >= self.slice_end
+            || self.base > self.call_depth
+            || args.len() > MAX_ARGS
+            || !args.iter().all(held)
+        {
+            return None;
+        }
+        if let Some(memory) = self.memory
+            && memory.saturating_sub(cx.heap.certificate().upper.0) < ISLAND_ADMITTED
+        {
+            return None;
+        }
+        let target = match (call.callee, callee) {
+            (Some(code), _) => Target::Declared(code),
+            (None, Some(Value::Closure(handle))) => Target::Closure(handle),
+            _ => return None,
+        };
+        let counters = cx.counters.as_deref_mut()?;
+        if !counters.can_advance(&[call.occurrence]) {
+            return None;
+        }
+        // The island reads the bindings the region wrote as the region
+        // left them: its writes so far are published first, in order.
+        let mut written: Vec<(u64, usize)> = cx
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.written != 0)
+            .map(|(at, slot)| (slot.written, at))
+            .collect();
+        written.sort_unstable();
+        for (_, at) in written {
+            let slot = &mut cx.sessions[at];
+            if !slot
+                .value
+                .is_some_and(|value| self.session.publish(&self.names[at].key, value))
+            {
+                self.halt = Some(fault(
+                    "a region wrote a session binding the cell does not hold",
+                ));
+                return None;
+            }
+            slot.written = 0;
+        }
+        let ground = Ground {
+            exe: self.exe,
+            arena: cx.arena,
+            session: self.session,
+            tape: self.tape,
+            recorder: self.recorder,
+            charging: self.charging,
+            bound: self.bound,
+            slice_end: self.slice_end,
+            observed: self.observed,
+            limits: self.limits,
+            memory: self.memory.is_some(),
+            base: self.base,
+            call_depth: self.call_depth,
+        };
+        let ran = enter(
+            ground,
+            self.scratch,
+            counters,
+            &mut cx.charged,
+            (target, args),
+            Some(call.occurrence),
+            &call.before,
+        );
+        let value = match ran {
+            Ok(None) => return None,
+            Ok(Some(Ran::Returned(value))) => Some(value),
+            Ok(Some(Ran::Exited(levels))) => {
+                self.levels = levels;
+                None
+            }
+            Err(halt) => {
+                self.halt = Some(halt);
+                None
+            }
+        };
+        // What the statement charges before the call is paid, and its
+        // commit pays it with the rest of its fixed units: the region's
+        // charge holds the island's own until then, and an exit in the
+        // call takes it as paid.
+        cx.charged -= call.units;
+        cx.meter.recorded = call.through;
+        cx.called = Some(value);
+        value
     }
 }

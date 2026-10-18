@@ -42,7 +42,27 @@ of region are built from one unit.
     expression locals (`LetBind`/`LetEnd` that nothing reads) and `return`;
   - calls to region functions (call islands, below).
 - **Loop region.** A `while` or `for` whose test and body are region
-  statements. It runs as a batch of whole iterations.
+  statements. It runs as a batch of whole iterations. A `for` walks a list,
+  a tuple, or, in an allocating plan, a map's or a set's keys by the loop's
+  own cursor, running its protocol's `check` hook before its `item` hook at
+  each step, as the reference's handoff does (Python's `for k in d`), so a
+  table changed while it is walked raises where the reference raises.
+- **Guest call in a loop region.** A body statement may make one guest call
+  through its callee's island: a root call action (`do`, or a `let` that
+  stores its value), or a nested call whose value feeds the operators after
+  it (`xs.append(f(x))`, `out.push(f(x))`), of a declared function with an
+  island or a closure read from a variable. Only unscoped reads precede the
+  call, and its occurrence is the statement's first counted one. The island
+  runs where the reference's call would: the statement first pays the
+  fixed events its program charges before the call, once the callee is
+  known to have an island that takes these arguments, and the call then
+  counts its occurrence and enters the island. The region publishes the
+  session bindings it wrote, in order, before the island reads any. A
+  callee that returns gives its value to the rest of the statement, which
+  commits the remainder of its program. A statement whose rest then misses,
+  or an island that stops, ends the region standing in that statement at
+  the call (§3.1): a return runs on from after the call with the value in
+  the call's register, and a stop converts the island's frames above it.
 - **Call island.** A call whose callee's body consists of region statements and
   calls to region functions. It runs as virtual frames. Self-recursion was
   prototyped; mutual recursion goes through a per-site plan cache (§2.2).
@@ -61,9 +81,10 @@ of region are built from one unit.
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host
 observations `Clock`, `Random`, `HostRead` and `Print`; `Finish` and `Fail`;
-`try`, `catch` and `finally` (handler entry); a `for` loop's protocol hooks,
-which are callbacks; closure creation; and, in v1, allocation and heap
-writes. Session reads and writes were barriers in v1; they are region ops
+`try`, `catch` and `finally` (handler entry); a `for` loop's protocol
+driver, which steps a guest iterator; closure creation; a call whose callee
+has no island, or a second guest call in one statement; and, in v1,
+allocation and heap writes. Session reads and writes were barriers in v1; they are region ops
 since R6 (§3.6). Allocation becomes a region op in a later lane
 (§5, R5), with admission before growth (§3.5). An op that may raise is not a
 barrier. A raise is a guard miss: the region exits and the reference raises
@@ -223,6 +244,13 @@ opcode fast path outside regions too.
     statement `k` pushes `Control::Block { block: body, next: k }`, as
     `tested(true)` followed by `k` statement steps would leave it. An exit
     before the test leaves the loop where `next_iteration` is due.
+  - **Guest-call exits** stand in the calling statement after its call
+    ran: what the statement paid before the call stays charged and
+    recorded, and the reference runs the statement on from the call's
+    resume op with the registers the statement holds across the call,
+    taken from the region's slots, and the call's value; or, when the
+    island stopped, converts its frames above the statement, standing at
+    the call as a nested call or a root call action stands.
   - **Island exits** convert the virtual frames (selective continuation
     conversion, §3.4). An island charges each event as the reference does,
     in its order, so nothing it charged is ever taken back. At a step end
@@ -442,10 +470,12 @@ it as a slot.
   list read through a session binding is the object a frame slot or another
   binding holds, and a member write through either reaches that one object
   with its dirty mark, as the reference's does. While the region runs,
-  nothing else reads or writes the bindings: it runs inside one step, and
-  calls only natives and prepared operators, which reach no session, and no
-  guest code (closures and islands are barriers to loop regions). So a
-  binding's slot is the binding for the region's duration.
+  nothing else writes the bindings: it runs inside one step, and calls
+  natives and prepared operators, which reach no session, and guest code
+  only through islands, which read bindings and never write one. Before a
+  guest call the region publishes what it wrote, in order, so the island
+  reads each binding as the reference's call would. So a binding's slot is
+  the binding for the region's duration.
 - **Islands.** An island reads a session binding but never writes one: the
   closure bodies of top-level code read their own and other top-level
   functions through their bindings. A read takes the binding's resident

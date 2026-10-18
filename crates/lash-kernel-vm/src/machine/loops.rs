@@ -216,7 +216,7 @@ fn count(value: &Value) -> Option<u64> {
 }
 
 /// A count as a value.
-fn counted(count: u64) -> Value {
+pub(super) fn counted(count: u64) -> Value {
     Value::Int(i64::try_from(count).unwrap_or(i64::MAX))
 }
 
@@ -436,7 +436,14 @@ impl KernelMachine {
                 else {
                     return Err(fault("a `for` loop is not at a `for`").into());
                 };
-                let (cursor, header) = match *region {
+                // A plan this machine retired is the reference's: its
+                // cursor stays as it stands.
+                let live = region.filter(|region| {
+                    self.unproductive
+                        .get(*region as usize)
+                        .is_none_or(|weight| *weight < crate::compile::UNPRODUCTIVE)
+                });
+                let (cursor, header) = match live {
                     None => (cursor, header),
                     Some(region) => {
                         if let Some(flow) = self.loop_region(task, host, exe, region)? {

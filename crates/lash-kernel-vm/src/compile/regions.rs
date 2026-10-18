@@ -49,22 +49,22 @@ use std::sync::OnceLock;
 
 use lash_kernel_doc::FunctionId;
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_exec::{Op, OpRange, Reg, Weight};
+use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 
 mod cx;
 mod nodes;
 mod verify;
 
-pub(crate) use cx::{Cx, measured_formula};
+pub(crate) use cx::{Cx, Guests, measured_formula};
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Meter, Place, Role,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Hook, Meter, Place, Role,
     SessionSlot, Taken, position, scalar, store,
 };
 
 use super::expr::{self, Expr, Kind};
 use super::{
-    BindingName, Block, BlockId, Code, Constant, Executable, Form, Lib, LibId, LibRun, Stmt,
-    StmtId, Stream,
+    BindingName, Block, BlockId, Code, CodeId, Constant, Executable, Form, Lib, LibId, LibRun,
+    NestedCallee, NestedKind, Stmt, StmtId, Stream,
 };
 use nodes::Libs;
 
@@ -97,6 +97,9 @@ pub(crate) enum Event {
     /// The arm a conditional expression takes: the program of its arm of
     /// the statement's [`Arms`] at this index.
     Arm(u32),
+    /// A guest call through its callee's island ([`GuestCall`]), which
+    /// charges and records its own events as the reference does.
+    Call,
 }
 
 /// A conditional expression's arms (`JumpIfFalse`, then `Jump`): each
@@ -182,6 +185,46 @@ pub(crate) enum RegionSlot {
     Session(u32),
 }
 
+/// A guest call a region statement makes through its callee's island
+/// (`docs/design/kernel-regions.md` §5 R4): a call nested in a plain
+/// statement whose operands before it are reads, or a statement's root
+/// call action. The region pays what the statement charges before the call
+/// when the island runs, counting the call's occurrence there as the
+/// reference does; once it ran, a statement that does not commit leaves its
+/// frame in the statement, for the reference to run on.
+#[derive(Clone, Debug)]
+pub(crate) struct GuestCall {
+    pub(crate) stmt: StmtId,
+    /// A nested call's entry; `None` for a root call action.
+    pub(crate) act: Option<ActIx>,
+    pub(crate) occurrence: usize,
+    /// Its declared callee; `None` for a closure its operand reads.
+    pub(crate) callee: Option<CodeId>,
+    /// The fixed events the statement charges before the call, in order,
+    /// and their units.
+    pub(crate) before: Box<[Weight]>,
+    pub(crate) units: u64,
+    /// The program's events up to and including the call's.
+    pub(crate) through: usize,
+    /// The least the statement and the next test's unit charge: what must
+    /// fit the bound before it pays anything.
+    pub(crate) least: u64,
+    /// The op the statement runs on from once the call returned, and the
+    /// register its value goes to.
+    pub(crate) resume: u32,
+    pub(crate) reg: u32,
+    /// The registers the statement holds across the call: each with the
+    /// read that gave it, as the continuation's roles take them.
+    pub(crate) holds: Box<[(u32, Kept)]>,
+}
+
+/// What a register a statement holds across its guest call was read from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Kept {
+    Slot(RegionSlot),
+    Value(lash_kernel_doc::Value),
+}
+
 /// A region statement on its one path: a loop's test, the `for`'s head, a
 /// body statement, or an `if`'s test.
 #[derive(Clone)]
@@ -218,6 +261,8 @@ pub(crate) struct Summary {
     roots: Box<[(Role, Expr)]>,
     /// Where a store writes.
     place: Option<Place>,
+    /// Its guest call, if it makes one.
+    pub(crate) guest: Option<GuestCall>,
 }
 
 impl Summary {
@@ -230,6 +275,13 @@ impl Summary {
     /// static most.
     fn allocates(&self) -> bool {
         self.general || self.formula_max.is_none()
+    }
+
+    /// The occurrences it counts, in op order: its guest call's, which
+    /// its operands before it never count, then those it commits.
+    fn counted(&self, calls: &mut Vec<usize>) {
+        calls.extend(self.guest.as_ref().map(|guest| guest.occurrence));
+        calls.extend_from_slice(&self.calls);
     }
 }
 
@@ -274,13 +326,13 @@ impl Body {
                 | Step::Bind(summary)
                 | Step::Continue(summary)
                 | Step::Store(summary)
-                | Step::Discard(summary) => calls.extend_from_slice(&summary.calls),
+                | Step::Discard(summary) => summary.counted(calls),
                 Step::If {
                     test,
                     then,
                     otherwise,
                 } => {
-                    calls.extend_from_slice(&test.calls);
+                    test.counted(calls);
                     then.calls(calls);
                     otherwise.calls(calls);
                 }
@@ -344,13 +396,18 @@ impl Body {
 pub(crate) enum Head {
     /// A `while`'s test, which an iteration runs when it holds.
     While(Summary),
-    /// A `for` over a list or a tuple, stepped by the loop's own cursor:
-    /// its scheduled units and its `item` hook's formula, in `charge`
-    /// (no ops), the variable each element is bound to, and the hook.
+    /// A `for` stepped by the loop's own cursor over a list's or a tuple's
+    /// items, or a map's or a set's keys: its scheduled units and its
+    /// `item` hook's formula, in `charge` (no ops); a guarded table's step
+    /// also runs its protocol's `check` hook first, in `guarded`, which
+    /// only an allocating plan states; the variable each element is bound
+    /// to, and the hooks.
     For {
         charge: Summary,
+        guarded: Option<Box<Summary>>,
         binding: u32,
         item: Option<LibId>,
+        check: Option<LibId>,
     },
 }
 
@@ -430,6 +487,8 @@ pub(crate) struct Lowered<'a> {
     pub(crate) lib: &'a dyn Fn(LibId) -> &'a Lib,
     /// The library function a template's heap path calls.
     pub(crate) lib_of: &'a dyn Fn(&FunctionId) -> Option<LibId>,
+    /// Whether declared code has a call island.
+    pub(crate) island: &'a dyn Fn(CodeId) -> bool,
 }
 
 /// Whether library `function` is an operator a region calls with `count`
@@ -500,7 +559,8 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
                 Some(lib) => !operator_site((lowered.lib)(lib), args.len as usize),
                 None => true,
             },
-            _ => true,
+            Some(nested) => !guest_site(nested),
+            None => true,
         },
         Op::Call { lib, args } => !native_site((lowered.lib)(LibId(lib.0)), args.len as usize),
         _ => true,
@@ -543,6 +603,41 @@ fn writes_last(lowered: &Lowered<'_>, ops: &[Op]) -> bool {
         _ => ops,
     };
     !before.iter().any(writer)
+}
+
+/// Whether nested action `nested` is a guest call that may enter its
+/// callee's island: a closure's, or a declared function's that has one.
+fn guest_site(nested: &super::Nested) -> bool {
+    nested.island
+        && matches!(
+            nested.kind,
+            NestedKind::Call(NestedCallee::Read | NestedCallee::Declared(_))
+        )
+}
+
+/// Whether `statement` makes a guest call a region may run through its
+/// callee's island: one its derivation may refuse, which leaves the
+/// statement to the reference as a barrier is.
+fn guest_call(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
+    if let Form::Action(action) = &statement.form {
+        return matches!(
+            action.kind,
+            super::ActionKind::Call {
+                callee: super::Callee::Declared(_) | super::Callee::Value(_),
+                ..
+            }
+        );
+    }
+    let stream = lowered.stream;
+    stream
+        .ops
+        .get(statement.ops.start as usize..statement.ops.end() as usize)
+        .is_some_and(|ops| {
+            ops.iter().any(|op| {
+                matches!(op, Op::Nested { act, .. }
+                    if stream.nested.get(act.ix()).is_some_and(guest_site))
+            })
+        })
 }
 
 /// Whether `op` allocates, calls a native, reads a member, holds a value
@@ -632,7 +727,7 @@ impl Formation<'_> {
         }
         let statement = (self.lowered.stmt)(id);
         let mut gathered = Gathered::default();
-        let (head, block) = match &statement.form {
+        let (mut head, block) = match &statement.form {
             Form::While {
                 metered,
                 test,
@@ -640,8 +735,14 @@ impl Formation<'_> {
                 ..
             } => {
                 let units = vec![Event::Fixed(Weight::Atomic(*metered))];
-                let test =
-                    self.summarize(code, *test, End::Test, *metered, units, &mut gathered)?;
+                let test = self.summarize(
+                    code,
+                    *test,
+                    End::Test,
+                    (*metered, units),
+                    None,
+                    &mut gathered,
+                )?;
                 (Head::While(test), *body)
             }
             Form::For {
@@ -655,35 +756,13 @@ impl Formation<'_> {
                     return None;
                 }
                 let item = via.and_then(|via| via.item);
-                let mut program = vec![Event::Fixed(Weight::Atomic(*metered))];
-                let mut formula_max = Some(0);
-                let mut general = false;
-                if let Some(item) = item {
-                    if writes(&self.lowered, item) {
-                        return None;
-                    }
-                    general = !scalar_site((self.lowered.lib)(item), 2);
-                    self.site(item, 2, &mut formula_max, &mut gathered)?;
-                    program.push(Event::Formula);
-                }
-                let charge = Summary {
-                    ops: OpRange { start: 0, len: 0 },
-                    fixed: *metered,
-                    formula_max,
-                    program: lean(program),
-                    arms: Box::default(),
-                    reads: Box::default(),
-                    write: Some(RegionSlot::Frame(binding.at)),
-                    general,
-                    calls: Box::default(),
-                    action: None,
-                    roots: Box::default(),
-                    place: None,
-                };
+                let charge = self.head_charge(*metered, binding.at, item, None, &mut gathered)?;
                 let head = Head::For {
                     charge,
+                    guarded: None,
                     binding: binding.at,
                     item,
+                    check: via.and_then(|via| via.check),
                 };
                 (head, *body)
             }
@@ -696,6 +775,23 @@ impl Formation<'_> {
             return None;
         }
         let allocates = head.summary().allocates() || body.allocates();
+        // An allocating plan also walks a map's or a set's keys under its
+        // protocol's guard: `check` runs before `item` at each step. A
+        // scalar plan walks no guarded table.
+        if allocates
+            && let Head::For {
+                charge,
+                guarded,
+                binding,
+                item,
+                check: Some(check),
+            } = &mut head
+        {
+            let metered = charge.fixed;
+            *guarded = self
+                .head_charge(metered, *binding, *item, Some(*check), &mut gathered)
+                .map(Box::new);
+        }
         let iteration_max = if allocates {
             0
         } else {
@@ -705,10 +801,10 @@ impl Formation<'_> {
                 .checked_add(self.loop_test)?
         };
         let binds = matches!(head, Head::For { .. }) || body.binds();
-        let mut calls = match &head {
-            Head::While(test) => test.calls.to_vec(),
-            Head::For { .. } => Vec::new(),
-        };
+        let mut calls = Vec::new();
+        if let Head::While(test) = &head {
+            test.counted(&mut calls);
+        }
         body.calls(&mut calls);
         Some(LoopPlan {
             stmt: id,
@@ -722,6 +818,51 @@ impl Formation<'_> {
             calls: calls.into(),
             sessions: gathered.sessions.into(),
             compiled: OnceLock::new(),
+        })
+    }
+
+    /// What a `for`'s head charges each step: its scheduled units, its
+    /// protocol's `check` formula when it guards the step, then its `item`
+    /// hook's formula, binding the variable at `binding`.
+    fn head_charge(
+        &self,
+        metered: u64,
+        binding: u32,
+        item: Option<LibId>,
+        check: Option<LibId>,
+        gathered: &mut Gathered,
+    ) -> Option<Summary> {
+        let mut program = vec![Event::Fixed(Weight::Atomic(metered))];
+        let mut formula_max = Some(0);
+        let mut general = false;
+        for (hook, count) in check
+            .map(|check| (check, 4))
+            .into_iter()
+            .chain(item.map(|item| (item, 2)))
+        {
+            // A hook's write is the reference's: what an operator writes
+            // commits only with a `do`.
+            if writes(&self.lowered, hook) {
+                return None;
+            }
+            general |= !scalar_site((self.lowered.lib)(hook), count);
+            self.site(hook, count, &mut formula_max, gathered)?;
+            program.push(Event::Formula);
+        }
+        Some(Summary {
+            ops: OpRange { start: 0, len: 0 },
+            fixed: metered,
+            formula_max,
+            program: lean(program),
+            arms: Box::default(),
+            reads: Box::default(),
+            write: Some(RegionSlot::Frame(binding)),
+            general,
+            calls: Box::default(),
+            action: None,
+            roots: Box::default(),
+            place: None,
+            guest: None,
         })
     }
 
@@ -748,8 +889,9 @@ impl Formation<'_> {
                     return Some(Step::Leave);
                 }
                 let statement = (self.lowered.stmt)(*id);
-                // A statement-root invoke of a prepared operator runs in
-                // the region; any other action is a barrier.
+                // A statement-root invoke of a prepared operator, or a
+                // guest call through its callee's island, runs in the
+                // region; any other action is a barrier.
                 if let Form::Action(_) = statement.form {
                     let used = gathered.sessions.len();
                     let step = self.action_summary(code, *id, gathered);
@@ -764,37 +906,36 @@ impl Formation<'_> {
                     return Some(Step::Leave);
                 }
                 let unit = || vec![Event::Fixed(Weight::Atomic(1))];
-                match &statement.form {
-                    Form::Plain => {
-                        let last = self.stream_op(statement.ops.end().checked_sub(1)?)?;
-                        let end = End::of(last)?;
-                        let summary =
-                            self.summarize(code, statement.ops, end, 1, unit(), gathered)?;
-                        Some(match end {
-                            End::Write => Step::Write(summary),
-                            End::Bind => Step::Bind(summary),
-                            End::Store => Step::Store(summary),
-                            End::Discard => Step::Discard(summary),
-                            _ => Step::Continue(summary),
-                        })
-                    }
+                let used = gathered.sessions.len();
+                let step = match &statement.form {
+                    Form::Plain => self.plain(code, *id, gathered),
                     Form::If {
                         then_block,
                         else_block,
-                    } => Some(Step::If {
-                        test: self.summarize(
-                            code,
-                            statement.ops,
-                            End::Branch,
-                            1,
-                            unit(),
-                            gathered,
-                        )?,
-                        then: self.body(code, *then_block, gathered, nesting + 1)?,
-                        otherwise: self.body(code, *else_block, gathered, nesting + 1)?,
-                    }),
+                    } => (|| {
+                        Some(Step::If {
+                            test: self.summarize(
+                                code,
+                                statement.ops,
+                                End::Branch,
+                                (1, unit()),
+                                None,
+                                gathered,
+                            )?,
+                            then: self.body(code, *then_block, gathered, nesting + 1)?,
+                            otherwise: self.body(code, *else_block, gathered, nesting + 1)?,
+                        })
+                    })(),
                     _ => None,
+                };
+                // A guest call its derivation refuses leaves the statement
+                // to the reference, as a barrier does.
+                if step.is_none() && guest_call(&self.lowered, statement) {
+                    gathered.sessions.truncate(used);
+                    left = true;
+                    return Some(Step::Leave);
                 }
+                step
             })
             .collect::<Option<Box<[Step]>>>()?;
         Some(Body {
@@ -804,13 +945,31 @@ impl Formation<'_> {
         })
     }
 
+    /// The step of plain body statement `id`, whose guest call, if it
+    /// makes one, runs through its callee's island.
+    fn plain(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Step> {
+        let statement = (self.lowered.stmt)(id);
+        let last = self.stream_op(statement.ops.end().checked_sub(1)?)?;
+        let end = End::of(last)?;
+        let unit = vec![Event::Fixed(Weight::Atomic(1))];
+        let summary = self.summarize(code, statement.ops, end, (1, unit), Some(id), gathered)?;
+        Some(match end {
+            End::Write => Step::Write(summary),
+            End::Bind => Step::Bind(summary),
+            End::Store => Step::Store(summary),
+            End::Discard => Step::Discard(summary),
+            _ => Step::Continue(summary),
+        })
+    }
+
     /// A root invoke has atom charge events rather than expression ops.
     /// Keep its action form so a decline resumes the original continuation:
     /// a write or a declaration of its value, or a store whose ops take it
-    /// from the first register.
+    /// from the first register; a guest call's value may also be
+    /// discarded.
     fn action_summary(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Step> {
         let statement = (self.lowered.stmt)(id);
-        let (action, lib, args) = library_invoke(&statement.form)?;
+        let (action, callee, args) = root_call(&statement.form)?;
         let stream = self.lowered.stream;
         let ops = stream
             .ops
@@ -822,57 +981,53 @@ impl Formation<'_> {
             }
             _ => return None,
         };
-        let mut reads = Vec::new();
-        for arg in args {
-            reads.extend(Self::atom(arg, gathered)?);
-        }
-        let (write, bind) = match end {
+        let (walk, shared, guest) = self.action_head(action, callee, args, gathered)?;
+        let (write, step): (_, fn(Summary) -> Step) = match end {
             Op::WriteLocal { local, .. } | Op::Bind { local, .. }
                 if code.slots.get(local.slot as usize)?.shared =>
             {
                 return None;
             }
-            Op::WriteLocal { local, .. } => (RegionSlot::Frame(local.at), false),
-            Op::Bind { local, .. } => (RegionSlot::Frame(local.at), true),
-            Op::WriteSession { name, .. } => {
-                (gathered.session(stream.names.get(name.ix())?), false)
-            }
+            Op::WriteLocal { local, .. } => (Some(RegionSlot::Frame(local.at)), Step::Write),
+            Op::Bind { local, .. } => (Some(RegionSlot::Frame(local.at)), Step::Bind),
+            Op::WriteSession { name, .. } => (
+                Some(gathered.session(stream.names.get(name.ix())?)),
+                Step::Write,
+            ),
+            Op::End if guest.is_some() => (None, Step::Discard),
             _ => return None,
         };
-        // A write its value then takes is the reference's: what the
-        // operator writes commits only with a `do`.
-        if writes(&self.lowered, lib) {
-            return None;
-        }
-        let mut formula_max = Some(0);
-        self.site(lib, args.len(), &mut formula_max, gathered)?;
-        let mut program = vec![Event::Fixed(Weight::Atomic(1))];
-        program.extend(args.iter().map(|_| Event::Fixed(Weight::Atomic(1))));
-        program.push(Event::Formula);
-        let calls = if matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
-            Box::default()
-        } else {
-            vec![action.occurrence].into_boxed_slice()
+        let Walk {
+            fixed,
+            formula_max,
+            program,
+            allocates,
+        } = walk;
+        let guest = match guest {
+            Some(callee) => Some(self.guest(
+                id,
+                (None, action.occurrence, callee),
+                (&program, fixed),
+                (statement.ops.start + 1, 0),
+                Box::default(),
+            )?),
+            None => None,
         };
-        let summary = Summary {
+        Some(step(Summary {
             ops: statement.ops,
-            fixed: 1 + args.len() as u64,
+            fixed,
             formula_max,
             program: program.into(),
             arms: Box::default(),
-            reads: reads.into(),
-            write: Some(write),
-            general: !scalar_site((self.lowered.lib)(lib), args.len()),
-            calls,
+            reads: shared.reads.into(),
+            write,
+            general: allocates,
+            calls: shared.calls.into(),
             action: Some(id),
             roots: Box::default(),
             place: None,
-        };
-        Some(if bind {
-            Step::Bind(summary)
-        } else {
-            Step::Write(summary)
-        })
+            guest,
+        }))
     }
 
     /// The summary of statement-root invoke `id` whose continuation stores
@@ -880,23 +1035,8 @@ impl Formation<'_> {
     /// store's, the value in the first register.
     fn action_store(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Summary> {
         let statement = (self.lowered.stmt)(id);
-        let (action, lib, args) = library_invoke(&statement.form)?;
-        if writes(&self.lowered, lib) {
-            return None;
-        }
-        let mut shared = Shared::default();
-        for arg in args {
-            shared.reads.extend(Self::atom(arg, gathered)?);
-        }
-        if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_)) {
-            shared.calls.push(action.occurrence);
-        }
-        let units = 1 + args.len() as u64;
-        let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
-        program.push(Event::Formula);
-        let mut walk = Walk::new(units, program);
-        walk.allocates = !scalar_site((self.lowered.lib)(lib), args.len());
-        self.site(lib, args.len(), &mut walk.formula_max, gathered)?;
+        let (action, callee, args) = root_call(&statement.form)?;
+        let (walk, shared, guest) = self.action_head(action, callee, args, gathered)?;
         let tree = expr::statement(self.lowered.stream, statement.ops, true)?;
         let mut summary = self.finish(
             code,
@@ -908,7 +1048,165 @@ impl Formation<'_> {
             gathered,
         )?;
         summary.action = Some(id);
+        if let Some(callee) = guest {
+            summary.guest = Some(self.guest(
+                id,
+                (None, action.occurrence, callee),
+                (&summary.program, summary.fixed),
+                (statement.ops.start + 1, 0),
+                Box::default(),
+            )?);
+        }
         Some(summary)
+    }
+
+    /// What statement-root call `action` of `callee` on `args` charges and
+    /// reads before its continuation: its unit, a unit per argument, then
+    /// a library function's formula, counting its occurrence when the
+    /// statement commits; or a guest call through its callee's island,
+    /// which counts it as it runs. A guest call's callee is read before
+    /// its arguments; it is given as the declared code it calls, if any.
+    fn action_head(
+        &self,
+        action: &super::Action,
+        callee: &super::Callee,
+        args: &[super::Atom],
+        gathered: &mut Gathered,
+    ) -> Option<(Walk, Shared, Option<Option<CodeId>>)> {
+        let mut shared = Shared::default();
+        let guest = match callee {
+            super::Callee::Library(_) => None,
+            super::Callee::Declared(code) => (self.lowered.island)(*code).then_some(Some(*code)),
+            super::Callee::Value(var) => {
+                shared.reads.push(Self::var(var, gathered)?);
+                Some(None)
+            }
+        };
+        for arg in args {
+            shared.reads.extend(Self::atom(arg, gathered)?);
+        }
+        let counted = !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_));
+        let units = 1 + args.len() as u64;
+        let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
+        let walk = match callee {
+            super::Callee::Library(lib) => {
+                // A write its value then takes is the reference's: what
+                // the operator writes commits only with a `do`.
+                if writes(&self.lowered, *lib) {
+                    return None;
+                }
+                if counted {
+                    shared.calls.push(action.occurrence);
+                }
+                program.push(Event::Formula);
+                let mut walk = Walk::new(units, program);
+                walk.allocates = !scalar_site((self.lowered.lib)(*lib), args.len());
+                self.site(*lib, args.len(), &mut walk.formula_max, gathered)?;
+                walk
+            }
+            _ => {
+                guest?;
+                if !counted {
+                    return None;
+                }
+                program.push(Event::Call);
+                let mut walk = Walk::new(units, program);
+                walk.allocates = true;
+                walk.formula_max = None;
+                walk
+            }
+        };
+        Some((walk, shared, guest))
+    }
+
+    /// The guest call `(act, occurrence, callee)` of statement `stmt`,
+    /// whose leaned program and fixed units are `(program, fixed)`: it
+    /// runs on at `resume` with its value in register `reg`, holding
+    /// `holds` across the call. Only fixed events precede it.
+    fn guest(
+        &self,
+        stmt: StmtId,
+        (act, occurrence, callee): (Option<ActIx>, usize, Option<CodeId>),
+        (program, fixed): (&[Event], u64),
+        (resume, reg): (u32, u32),
+        holds: Box<[(u32, Kept)]>,
+    ) -> Option<GuestCall> {
+        let at = program.iter().position(|event| *event == Event::Call)?;
+        let before = program[..at]
+            .iter()
+            .map(|event| match event {
+                Event::Fixed(weight) => Some(*weight),
+                _ => None,
+            })
+            .collect::<Option<Box<[Weight]>>>()?;
+        Some(GuestCall {
+            stmt,
+            act,
+            occurrence,
+            callee,
+            units: before.iter().map(|weight| weight.units()).sum(),
+            before,
+            through: at + 1,
+            least: fixed.checked_add(self.loop_test)?,
+            resume,
+            reg,
+            holds,
+        })
+    }
+
+    /// The guest call nested at `site` of the statement whose values are
+    /// `roots`: every value computed before it is a read, and each register
+    /// the statement holds across it is one, which an exit after it reads
+    /// again.
+    fn nested_guest(
+        &self,
+        roots: &[(Role, Expr)],
+        (program, fixed): (&[Event], u64),
+        site: GuestSite,
+        gathered: &mut Gathered,
+    ) -> Option<GuestCall> {
+        let stream = self.lowered.stream;
+        if !roots.iter().all(|(_, root)| reads_before(root, site.pc)) {
+            return None;
+        }
+        let entry = stream.nested.get(site.act.ix())?;
+        let holds = entry
+            .roles
+            .iter()
+            .map(|role| {
+                let mut found = None;
+                for (_, root) in roots {
+                    latest_read(root, role.reg.0, site.pc, &mut found);
+                }
+                let held = match &found?.kind {
+                    Kind::Local { local, .. } => Kept::Slot(RegionSlot::Frame(local.at)),
+                    Kind::Session { name, .. } => {
+                        Kept::Slot(gathered.session(stream.names.get(name.ix())?))
+                    }
+                    Kind::Const(value) => Kept::Value(*value),
+                    _ => return None,
+                };
+                Some((role.reg.0, held))
+            })
+            .collect::<Option<_>>()?;
+        self.guest(
+            site.stmt,
+            (Some(site.act), site.occurrence, site.callee),
+            (program, fixed),
+            (site.pc + 1, site.reg),
+            holds,
+        )
+    }
+
+    /// The slot a guest call's callee variable `var` reads: a frame
+    /// variable, a captured or shared one from its cell, or a session
+    /// binding.
+    fn var(var: &super::Var, gathered: &mut Gathered) -> Option<RegionSlot> {
+        match var {
+            super::Var::Local(local) => Some(RegionSlot::Frame(local.at)),
+            super::Var::Session(name) => Some(gathered.session(name)),
+            super::Var::Unbound(_) => None,
+        }
     }
 
     /// The slot a statement-root invoke's argument `atom` reads, if any:
@@ -929,19 +1227,24 @@ impl Formation<'_> {
     }
 
     /// The summary of the region statement in `range`, which ends as
-    /// `end`, charged `fixed` units and `program` before its ops.
+    /// `end`, charged `fixed` units and `program` before its ops; a guest
+    /// call of it is admitted when it is body statement `guest`'s.
     fn summarize(
         &self,
         code: &Code,
         range: OpRange,
         end: End,
-        fixed: u64,
-        program: Vec<Event>,
+        (fixed, program): (u64, Vec<Event>),
+        guest: Option<StmtId>,
         gathered: &mut Gathered,
     ) -> Option<Summary> {
         let tree = expr::statement(self.lowered.stream, range, false)?;
         let walk = Walk::new(fixed, program);
-        self.finish(code, range, end, walk, Shared::default(), tree, gathered)
+        let shared = Shared {
+            stmt: guest,
+            ..Shared::default()
+        };
+        self.finish(code, range, end, walk, shared, tree, gathered)
     }
 
     /// The summary of the region statement in `range`, read as `tree`,
@@ -1017,6 +1320,7 @@ impl Formation<'_> {
             self.expr(code, root, &mut walk, &mut shared, gathered, false)?;
         }
         walk.close(stream, &tree.closes)?;
+        let site = shared.guest.take();
         let write = match tree.last {
             Op::WriteLocal { local, .. } | Op::Bind { local, .. } => {
                 Some(RegionSlot::Frame(local.at))
@@ -1030,12 +1334,19 @@ impl Formation<'_> {
             program,
             allocates,
         } = walk;
-        let Shared { reads, calls, arms } = shared;
+        let program = lean(program);
+        let guest = match site {
+            Some(site) => Some(self.nested_guest(&roots, (&program, fixed), site, gathered)?),
+            None => None,
+        };
+        let Shared {
+            reads, calls, arms, ..
+        } = shared;
         Some(Summary {
             ops: range,
             fixed,
             formula_max,
-            program: lean(program),
+            program,
             arms: arms.into(),
             reads: reads.into(),
             write,
@@ -1044,6 +1355,7 @@ impl Formation<'_> {
             action: None,
             roots: roots.into(),
             place,
+            guest,
         })
     }
 
@@ -1060,11 +1372,33 @@ impl Formation<'_> {
         gathered: &mut Gathered,
         arm: bool,
     ) -> Option<()> {
-        for operand in expr.operands() {
-            self.expr(code, operand, walk, shared, gathered, arm)?;
+        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
+        match &expr.kind {
+            // A guest call's callee may be a captured or shared variable,
+            // read from its cell, which nothing writes while the region
+            // runs: the region writes no cell, and an island only its own
+            // frame's variables.
+            Kind::Call {
+                callee: expr::Callee::Read(read),
+                args,
+                ..
+            } if matches!(read.kind, Kind::Local { local, scoped: false, .. } if !unshared(local.slot)) =>
+            {
+                let Kind::Local { local, .. } = read.kind else {
+                    return None;
+                };
+                shared.reads.push(RegionSlot::Frame(local.at));
+                for arg in args {
+                    self.expr(code, arg, walk, shared, gathered, arm)?;
+                }
+            }
+            _ => {
+                for operand in expr.operands() {
+                    self.expr(code, operand, walk, shared, gathered, arm)?;
+                }
+            }
         }
         let stream = self.lowered.stream;
-        let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
         match &expr.kind {
             // A statement-root invoke's value: its events precede the ops.
             Kind::Act => {}
@@ -1105,7 +1439,36 @@ impl Formation<'_> {
                 walk.close(stream, closes)?;
                 walk.program.push(Event::Formula);
             }
-            Kind::Call { .. } => return None,
+            // A guest call that may enter its callee's island, one in a
+            // body statement, on no conditional arm: what its island
+            // charges no static program states.
+            Kind::Call {
+                invoke,
+                callee,
+                closes,
+                ..
+            } => {
+                let stmt = shared.stmt?;
+                let nested = stream.nested.get(invoke.act.ix())?;
+                if arm || shared.guest.is_some() || !invoke.guest || !guest_site(nested) {
+                    return None;
+                }
+                walk.close(stream, closes)?;
+                walk.program.push(Event::Call);
+                walk.formula_max = None;
+                walk.allocates = true;
+                shared.guest = Some(GuestSite {
+                    stmt,
+                    pc: expr.pc,
+                    reg: expr.reg,
+                    act: invoke.act,
+                    occurrence: invoke.occurrence,
+                    callee: match callee {
+                        expr::Callee::Declared(code) => Some(*code),
+                        expr::Callee::Read(_) => None,
+                    },
+                });
+            }
             // A record's names are short texts the region writes as they
             // are.
             Kind::Record { fields, .. } => {
@@ -1239,12 +1602,55 @@ impl Walk {
 }
 
 /// What a statement's derivation and its arms share: the slots read, the
-/// invoke occurrences and the arms.
+/// invoke occurrences and the arms; the body statement whose guest call
+/// it may admit, and the one it admitted.
 #[derive(Default)]
 struct Shared {
     reads: Vec<RegionSlot>,
     calls: Vec<usize>,
     arms: Vec<Arms>,
+    stmt: Option<StmtId>,
+    guest: Option<GuestSite>,
+}
+
+/// A guest call a derivation admitted, nested in statement `stmt`: its
+/// op and register, its entry and occurrence, and its declared callee.
+struct GuestSite {
+    stmt: StmtId,
+    pc: u32,
+    reg: u32,
+    act: ActIx,
+    occurrence: usize,
+    callee: Option<CodeId>,
+}
+
+/// Whether every value of `expr` computed before op `pc` is a read.
+fn reads_before(expr: &Expr, pc: u32) -> bool {
+    let read = matches!(
+        expr.kind,
+        Kind::Local { scoped: false, .. } | Kind::Session { .. } | Kind::Const(_)
+    );
+    let arms = match &expr.kind {
+        Kind::Cond {
+            then, otherwise, ..
+        } => [then, otherwise].iter().all(|arm| {
+            arm.value
+                .as_deref()
+                .is_none_or(|value| reads_before(value, pc))
+        }),
+        _ => true,
+    };
+    (read || expr.pc >= pc) && arms && expr.operands().all(|operand| reads_before(operand, pc))
+}
+
+/// The read of `expr` into register `reg` latest before op `pc`.
+fn latest_read<'e>(expr: &'e Expr, reg: u32, pc: u32, found: &mut Option<&'e Expr>) {
+    if expr.reg == reg && expr.pc < pc && found.is_none_or(|found| found.pc < expr.pc) {
+        *found = Some(expr);
+    }
+    for operand in expr.operands() {
+        latest_read(operand, reg, pc, found);
+    }
 }
 
 /// `program` without the zero-unit events the reference never records.
@@ -1292,12 +1698,20 @@ impl LoopPlan {
                     },
                     Head::For {
                         charge,
+                        guarded,
                         binding,
                         item,
+                        check,
                     } => CompiledHead::For {
                         hook: match item {
                             Some(item) => Some(nodes::hook(&libs, *item)?),
                             None => None,
+                        },
+                        guard: match (guarded, check) {
+                            (Some(guarded), Some(check)) => {
+                                Some((nodes::check(&libs, *check)?, (&**guarded).into()))
+                            }
+                            _ => None,
                         },
                         commit: charge.into(),
                         binding: *binding,
@@ -1310,6 +1724,18 @@ impl LoopPlan {
             })
             .as_ref()
     }
+}
+
+/// The call a statement's root call action makes: its callee and its
+/// arguments.
+fn root_call(form: &Form) -> Option<(&super::Action, &super::Callee, &[super::Atom])> {
+    let Form::Action(action) = form else {
+        return None;
+    };
+    let super::ActionKind::Call { callee, args } = &action.kind else {
+        return None;
+    };
+    Some((action, callee, args))
 }
 
 /// The statically named library invoke of a statement action.
@@ -1328,14 +1754,24 @@ fn library_invoke(form: &Form) -> Option<(&super::Action, LibId, &[super::Atom])
 }
 
 /// The value a write or a declaration stores: its expression's, or a
-/// statement-root invoke's operator call.
+/// statement-root invoke's operator call or guest call.
 fn value(stream: &Stream, libs: &Libs<'_>, summary: &Summary) -> Option<nodes::Node> {
     match (summary.action, &*summary.roots) {
-        (Some(id), []) => {
-            let (_, target, args) = library_invoke(&libs.exe.stmt(id).form)?;
-            nodes::action(libs, target, args)
+        (Some(id), []) => root(libs, summary, id),
+        (None, [(Role::Value, root)]) => {
+            nodes::compile(stream, libs, root, &mut None, summary.guest.as_ref())
         }
-        (None, [(Role::Value, root)]) => nodes::compile(stream, libs, root, &mut None),
+        _ => None,
+    }
+}
+
+/// The value of statement `id`'s root call action, whose summary is
+/// `summary`: its library function's, or its guest call's.
+fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
+    let (_, callee, args) = root_call(&libs.exe.stmt(id).form)?;
+    match (callee, &summary.guest) {
+        (super::Callee::Library(lib), None) => nodes::action(libs, *lib, args),
+        (_, Some(guest)) => nodes::root_call(libs, guest, callee, args),
         _ => None,
     }
 }
@@ -1382,17 +1818,15 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
                     // A statement-root invoke's value is its continuation's
                     // first operand.
                     let mut act = match summary.action {
-                        Some(id) => {
-                            let (_, target, args) = library_invoke(&libs.exe.stmt(id).form)?;
-                            Some(nodes::action(libs, target, args)?)
-                        }
+                        Some(id) => Some(root(libs, summary, id)?),
                         None => None,
                     };
+                    let guest = summary.guest.as_ref().filter(|_| summary.action.is_none());
                     let operands = summary
                         .roots
                         .iter()
                         .map(|(role, root)| {
-                            Some((*role, nodes::compile(stream, libs, root, &mut act)?))
+                            Some((*role, nodes::compile(stream, libs, root, &mut act, guest)?))
                         })
                         .collect::<Option<_>>()?;
                     CompiledStep::Store {
