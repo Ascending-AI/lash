@@ -2,6 +2,7 @@
 //! `perf-witness`; an inactive witness performs no clock reads or allocation.
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -14,13 +15,17 @@ use super::AlreadyInstalled;
 pub const RECORD_LIMIT: usize = 8192;
 /// Static producer sites; excess sites share an explicitly named overflow bin.
 pub const SITE_LIMIT: usize = 64;
-/// Whether this process currently accepts physical queue observations.
+/// Whether the current task or process accepts physical queue observations.
 pub fn is_recording() -> bool {
-    ENABLED.load(Ordering::Acquire)
+    TASK.try_with(|_| ()).is_ok() || ENABLED.load(Ordering::Acquire)
 }
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static CURRENT: LazyLock<Mutex<Option<Arc<Recording>>>> = LazyLock::new(|| Mutex::new(None));
+tokio::task_local! {
+    static TASK: Arc<Recording>;
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WINDOW_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy)]
@@ -66,7 +71,7 @@ pub struct Snapshot {
     /// Enqueues at excess sites, aggregated into `other_sites`.
     pub overflow_site_operations: u64,
     /// Thread-filtered collectors only filter finalized records. Occupancy
-    /// requires a process window, so their occupancy fields are unavailable.
+    /// requires observing enqueues, so their occupancy fields are unavailable.
     pub occupancy_available: bool,
 }
 
@@ -188,10 +193,14 @@ impl Snapshot {
     }
 }
 
-/// Exclusive process-scoped window; timers retain their original window so
-/// accepted work that outlives this guard cannot contaminate the next one.
-pub struct Collector(Arc<Recording>);
+/// A physical-operation window, either installed for the process or scoped to
+/// a task. Timers retain their original window even when they outlive its scope.
+pub struct Collector {
+    data: Arc<Recording>,
+    process_scoped: bool,
+}
 impl Collector {
+    /// Install an exclusive process-wide window for whole-process measurements.
     pub fn install() -> Result<Self, AlreadyInstalled> {
         Self::install_scoped(None)
     }
@@ -209,6 +218,26 @@ impl Collector {
         if current.is_some() {
             return Err(AlreadyInstalled);
         }
+        let collector = Self::new(thread, true);
+        *current = Some(Arc::clone(&collector.data));
+        ENABLED.store(true, Ordering::Release);
+        Ok(collector)
+    }
+
+    /// Create an independent window. Only futures wrapped in `scope` contribute;
+    /// unrelated tasks and process-wide observations cannot enter this window.
+    pub fn for_task() -> Self {
+        Self::new(None, false)
+    }
+
+    /// Record this future's queue operations in this window, across awaits and
+    /// thread changes. Spawned tasks need their own explicit scope. Within the
+    /// scope this window takes precedence over any process-wide collector.
+    pub async fn scope<T>(&self, future: impl Future<Output = T>) -> T {
+        TASK.scope(Arc::clone(&self.data), future).await
+    }
+
+    fn new(thread: Option<std::thread::ThreadId>, process_scoped: bool) -> Self {
         let data = Arc::new(Recording {
             window: NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed),
             opened: Instant::now(),
@@ -219,14 +248,15 @@ impl Collector {
                 ..Snapshot::default()
             }),
         });
-        *current = Some(Arc::clone(&data));
-        ENABLED.store(true, Ordering::Release);
-        Ok(Self(data))
+        Self {
+            data,
+            process_scoped,
+        }
     }
 
     pub fn snapshot(&self) -> Snapshot {
         let mut snapshot = self
-            .0
+            .data
             .snapshot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -240,6 +270,9 @@ impl Collector {
 }
 impl Drop for Collector {
     fn drop(&mut self) {
+        if !self.process_scoped {
+            return;
+        }
         ENABLED.store(false, Ordering::Release);
         CURRENT
             .lock()
@@ -263,13 +296,15 @@ pub struct Timer {
 }
 impl Timer {
     pub fn enqueue(site: &'static str) -> Option<Self> {
-        if !ENABLED.load(Ordering::Acquire) {
-            return None;
-        }
-        let data = CURRENT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()?;
+        let data = TASK.try_with(Arc::clone).ok().or_else(|| {
+            if !ENABLED.load(Ordering::Acquire) {
+                return None;
+            }
+            CURRENT
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        })?;
         let context = WORKER.with(|worker| worker.get().0);
         // A gate belongs to its accepted worker's window. If that window
         // closed, suppress its child rather than assigning it to a new one.
@@ -437,6 +472,52 @@ fn nanos(duration: Duration) -> u64 {
 mod tests {
     use super::*;
     static INSTALL_GUARD: Mutex<()> = Mutex::new(());
+
+    // QUEUE-TASK-ISOLATION: overlapping task windows count only their own
+    // admissions, including timers finalized after the scope exits.
+    #[tokio::test]
+    async fn task_windows_keep_independent_populations_and_late_completions() {
+        let first = Collector::for_task();
+        let second = Collector::for_task();
+        let (late, ()) = tokio::join!(
+            first.scope(async {
+                assert!(is_recording());
+                let timer = Timer::enqueue("shared_site").expect("first admission");
+                tokio::task::yield_now().await;
+                assert_eq!(first.snapshot().sites["shared_site"].waiting, 1);
+                timer
+            }),
+            second.scope(async {
+                let mut timer = Timer::enqueue("shared_site").expect("second admission");
+                tokio::task::yield_now().await;
+                timer.start_service();
+                timer.complete();
+            }),
+        );
+        drop(late);
+        let first = first.snapshot();
+        let second = second.snapshot();
+        let first = &first.sites["shared_site"];
+        let second = &second.sites["shared_site"];
+        assert_eq!(
+            (
+                first.enqueued,
+                first.finished,
+                first.incomplete,
+                first.waiting
+            ),
+            (1, 1, 1, 0)
+        );
+        assert_eq!(
+            (
+                second.enqueued,
+                second.finished,
+                second.completed,
+                second.in_service
+            ),
+            (1, 1, 1, 0)
+        );
+    }
 
     // FIG-5663's bounded-record rule includes incomplete admissions and
     // declares overflow, instead of growing indefinitely or hiding samples.

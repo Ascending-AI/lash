@@ -508,44 +508,70 @@ mod tests {
             .connect(database.url())
             .await
             .expect("one-connection pool");
+        let other_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(database.url())
+            .await
+            .expect("unrelated pool");
         let held = pool.acquire().await.expect("hold pool");
-        let collector = Collector::install().expect("capture");
-        let mut waiting = Box::pin(checkout(&pool));
-        std::future::poll_fn(|cx| {
-            assert!(waiting.as_mut().poll(cx).is_pending());
-            std::task::Poll::Ready(())
-        })
-        .await;
-        assert_eq!(
-            collector.snapshot().sites["postgres.pool_checkout"].waiting,
-            1
-        );
-        drop(held);
-        let mut connection = waiting.await.expect("checkout");
-        control("SELECT pg_advisory_xact_lock(1)", async {
-            sqlx::query("SELECT pg_advisory_xact_lock(1)")
-                .execute(&mut *connection)
-                .await
-                .expect("lock")
-        })
-        .await;
-        let receipt = collector.snapshot();
-        let checkout = &receipt.sites["postgres.pool_checkout"];
-        let lock = &receipt.sites["postgres.lock_statement_upper_bound"];
-        assert_eq!(
-            (
-                checkout.enqueued,
-                checkout.finished,
-                checkout.completed,
-                checkout.waiting
-            ),
-            (1, 1, 1, 0)
-        );
-        assert_eq!((lock.enqueued, lock.finished, lock.completed), (1, 1, 1));
-        assert_eq!((checkout.service.max, lock.service.max), (0, 0));
-        assert!(checkout.last_finished_ns <= lock.first_enqueued_ns);
-        drop(collector);
-        drop(connection);
+        let collector = Collector::for_task();
+        collector
+            .scope(async {
+                let mut waiting = Box::pin(checkout(&pool));
+                std::future::poll_fn(|cx| {
+                    assert!(waiting.as_mut().poll(cx).is_pending());
+                    std::task::Poll::Ready(())
+                })
+                .await;
+                assert_eq!(
+                    collector.snapshot().sites["postgres.pool_checkout"].waiting,
+                    1
+                );
+                drop(held);
+                let mut connection = waiting.await.expect("checkout");
+                control("SELECT pg_advisory_xact_lock(1)", async {
+                    sqlx::query("SELECT pg_advisory_xact_lock(1)")
+                        .execute(&mut *connection)
+                        .await
+                        .expect("lock")
+                })
+                .await;
+                // FIG-6763: unrelated tasks can check out another pool and run
+                // lock-containing statements while this law's window is open.
+                let unrelated = tokio::spawn(async move {
+                    let (first, second) =
+                        tokio::join!(checkout(&other_pool), checkout(&other_pool));
+                    let mut first = first.expect("first unrelated checkout");
+                    let second = second.expect("second unrelated checkout");
+                    control("SELECT pg_advisory_xact_lock(2)", async {
+                        sqlx::query("SELECT pg_advisory_xact_lock(2)")
+                            .execute(&mut *first)
+                            .await
+                            .expect("unrelated lock")
+                    })
+                    .await;
+                    drop((first, second));
+                    other_pool.close().await;
+                });
+                unrelated.await.expect("unrelated task");
+                let receipt = collector.snapshot();
+                let checkout = &receipt.sites["postgres.pool_checkout"];
+                let lock = &receipt.sites["postgres.lock_statement_upper_bound"];
+                assert_eq!(
+                    (
+                        checkout.enqueued,
+                        checkout.finished,
+                        checkout.completed,
+                        checkout.waiting
+                    ),
+                    (1, 1, 1, 0)
+                );
+                assert_eq!((lock.enqueued, lock.finished, lock.completed), (1, 1, 1));
+                assert_eq!((checkout.service.max, lock.service.max), (0, 0));
+                assert!(checkout.last_finished_ns <= lock.first_enqueued_ns);
+                drop(connection);
+            })
+            .await;
         pool.close().await;
     }
 

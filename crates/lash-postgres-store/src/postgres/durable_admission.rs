@@ -105,29 +105,31 @@ mod tests {
             .acquire_many_owned(permits)
             .await
             .expect("hold admission");
-        let collector =
-            Collector::install_for_thread(std::thread::current().id()).expect("queue collector");
-        let mut waiting = Box::pin(store.now());
-        std::future::poll_fn(|cx| {
-            assert!(waiting.as_mut().poll(cx).is_pending());
-            std::task::Poll::Ready(())
-        })
-        .await;
-        let blocked = Instant::now();
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let forced_wait = blocked.elapsed();
-        drop(held);
-        waiting.await.expect("operation admitted");
-        let snapshot = collector.snapshot();
-        let record = snapshot
-            .records
-            .iter()
-            .find(|r| r.site == "postgres.work_admission")
-            .expect("admission receipt");
-        assert!(u128::from(record.queue_wait_ns) >= forced_wait.as_nanos());
-        assert_eq!(record.elapsed_ns, record.queue_wait_ns + record.service_ns);
-        assert!(record.completed);
-        drop(collector);
+        let collector = Collector::for_task();
+        collector
+            .scope(async {
+                let mut waiting = Box::pin(store.now());
+                std::future::poll_fn(|cx| {
+                    assert!(waiting.as_mut().poll(cx).is_pending());
+                    std::task::Poll::Ready(())
+                })
+                .await;
+                let blocked = Instant::now();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                let forced_wait = blocked.elapsed();
+                drop(held);
+                waiting.await.expect("operation admitted");
+                let snapshot = collector.snapshot();
+                let record = snapshot
+                    .records
+                    .iter()
+                    .find(|r| r.site == "postgres.work_admission")
+                    .expect("admission receipt");
+                assert!(u128::from(record.queue_wait_ns) >= forced_wait.as_nanos());
+                assert_eq!(record.elapsed_ns, record.queue_wait_ns + record.service_ns);
+                assert!(record.completed);
+            })
+            .await;
         drop(store);
         drop(storage);
         drop(database);
