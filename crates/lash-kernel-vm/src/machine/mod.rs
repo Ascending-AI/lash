@@ -310,6 +310,8 @@ struct Frame {
     code: CodeId,
     // Rebuilt from the admitted code; never written to a frame row.
     charging: bool,
+    /// Its code counts the run's pace: charged code under charge Off.
+    paced: bool,
     slots: frames::Slots,
     /// Where the frame stands when no block of its says: its body's
     /// entry, a return policy's site, or its body while a run-root cleanup
@@ -412,12 +414,15 @@ pub struct KernelMachine {
     /// until a seal completes it (seam G).
     projecting: bool,
     charging: bool,
+    /// The running code counts the run's pace (`Frame::paced`).
+    paced: bool,
     /// The charge region the running statement stands in, admitted whole
     /// (`stream::Admitted`): what it executed is charged when it closes or
     /// is left.
     region: Option<stream::Admitted>,
-    /// The charge at which the running slice returns, at its next step's
-    /// end: a region admitted whole ends strictly below it.
+    /// The charge, or with charge Off the pace, at which the running
+    /// slice returns, at its next step's end: a region admitted whole ends
+    /// strictly below it.
     slice_end: u64,
     /// The property read sites' caches: never saved, so a restore
     /// discards them.
@@ -433,6 +438,9 @@ pub struct KernelMachine {
     islands: islands::Scratch,
     /// The segments standing at callback sites of a call being offered.
     segments: segments::Yielding,
+    /// The run's charge; with charge Off, its pace: one unit for each
+    /// statement, loop test and action atom of charged code. Slices count
+    /// it, and nothing reads the pace out.
     charged: u64,
     /// The cost table of the kernel version the document states.
     costs: crate::costs::Costs,
@@ -1266,19 +1274,13 @@ impl KernelMachine {
     }
 
     /// Runs tasks until none is ready, the run ends, or `slice` units of
-    /// charge have passed (`K-MACH-005`).
-    fn run_slice<const METERED: bool>(
-        &mut self,
-        host: &mut dyn Host,
-        slice: u64,
-    ) -> Result<Step, MachineError> {
-        let before = if METERED { self.charged } else { 0 };
-        if METERED {
-            self.slice_end = before.saturating_add(slice);
-        }
-        // With no charge meter the scheduling budget counts machine steps.
-        // The entry chooses this specialization once; Exact keeps its charge slices.
-        let mut remaining = slice.max(1);
+    /// charge, or with charge Off of pace, have passed (`K-MACH-005`).
+    /// Pace, like charge, does not depend on the plan: a region or an
+    /// island counts it as the reference does, so a slice falls where it
+    /// would without them.
+    fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        let before = self.charged;
+        self.slice_end = before.saturating_add(slice);
         // A helper's callbacks run as islands only for a host that
         // observes no sites.
         self.islands.quiet = !host.observes_sites();
@@ -1366,13 +1368,7 @@ impl KernelMachine {
                 return Ok(self.finish_with(end));
             }
             let more = self.current.is_some() || !self.ready.is_empty();
-            let spent = if METERED {
-                self.charged.saturating_sub(before) >= slice
-            } else {
-                remaining -= 1;
-                remaining == 0
-            };
-            if more && spent {
+            if more && self.charged.saturating_sub(before) >= slice {
                 // A slice return projects only when the host seals: ids
                 // never depend on where slices fall.
                 if host.cancel_requested() {

@@ -112,6 +112,7 @@ impl Compiler<'_> {
             free,
             charged,
             charging: charged && self.metered,
+            paced: charged && !self.metered,
         }
     }
 

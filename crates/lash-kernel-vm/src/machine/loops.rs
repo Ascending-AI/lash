@@ -407,6 +407,8 @@ impl KernelMachine {
     ) -> Status {
         if self.charging {
             self.charge(self.costs.loop_test)?;
+        } else if self.paced {
+            self.charged += self.costs.loop_test;
         }
         self.warm_cursor(task)?;
         // Borrowed by field, so that the loop's position can be read

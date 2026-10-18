@@ -574,9 +574,11 @@ pub(super) struct Formation<'a> {
 
 impl Formation<'_> {
     /// The plan of loop statement `id` of `code`; `None` when it is no
-    /// loop region.
+    /// loop region. Charged code forms one whether its run charges it or,
+    /// with charge Off, paces it: lowered under Off, its summaries' fixed
+    /// units are its pace (statement, action-atom and loop-test units).
     pub(super) fn form(&self, code: &Code, id: StmtId) -> Option<LoopPlan> {
-        if !code.charging {
+        if !code.charged {
             return None;
         }
         let statement = (self.lowered.stmt)(id);
@@ -1216,6 +1218,7 @@ impl LoopPlan {
                 let libs = Libs {
                     exe,
                     general: self.allocates,
+                    charging: exe.charging(),
                     sessions: &self.sessions,
                 };
                 let head = match &self.head {

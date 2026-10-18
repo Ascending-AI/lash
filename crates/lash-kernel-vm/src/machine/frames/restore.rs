@@ -282,6 +282,7 @@ pub(super) fn frame(
         slots,
         code: code_id,
         charging: code.charging,
+        paced: code.paced,
         statement: record.statement.clone(),
         pending: Continuation {
             saved: if pending.is_some() {

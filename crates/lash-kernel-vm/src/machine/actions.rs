@@ -607,6 +607,8 @@ impl KernelMachine {
     fn atom(&mut self, task: TaskId, exe: &Executable, atom: &Atom) -> Eval<Value> {
         if self.charging {
             self.charge(1)?;
+        } else if self.paced {
+            self.charged += 1;
         }
         self.observe_expression();
         match atom {

@@ -235,6 +235,9 @@ pub(super) struct Libs<'e> {
     pub(super) exe: &'e Executable,
     /// Whether the plan allocates: its nodes hold any value.
     pub(super) general: bool,
+    /// Whether the run is charged: a paced run's scalar nodes measure no
+    /// formula.
+    pub(super) charging: bool,
     /// The plan's session bindings.
     pub(super) sessions: &'e [BindingName],
 }
@@ -469,11 +472,15 @@ impl Answer {
         })
     }
 
-    /// The entry on `args`: its scalar value and its formula from the
-    /// table, at the sizes its guard certifies or, where it certifies none,
-    /// the values show.
+    /// The entry on `args`: its scalar value, metered by its formula from
+    /// the table, at the sizes its guard certifies or, where it certifies
+    /// none, the values show. A paced run's (not `CHARGING`) runs the
+    /// value-only guard, which answers and declines as the charged one.
     #[inline(always)]
-    fn call(&self, args: &[Value]) -> Option<(Value, u64)> {
+    fn call<const CHARGING: bool>(&self, args: &[Value], meter: &mut Meter) -> Option<Value> {
+        if !CHARGING {
+            return self.prepared.call(args).filter(scalar);
+        }
         let answer = self.prepared.answer(args, true)?;
         let result = answer.value;
         if !scalar(&result) {
@@ -487,7 +494,8 @@ impl Answer {
                 Source::Nothing => None,
             })?,
         };
-        Some((result, self.table.units(mask)?))
+        meter.formula(self.table.units(mask)?);
+        Some(result)
     }
 }
 
@@ -503,6 +511,15 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
         }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
+    if libs.charging {
+        scalar_operator::<true>(answer, operands)
+    } else {
+        scalar_operator::<false>(answer, operands)
+    }
+}
+
+/// A scalar plan's operator over `operands`, answered by `answer`.
+fn scalar_operator<const CHARGING: bool>(answer: Answer, operands: Vec<Node>) -> Option<Node> {
     let mut operands = operands.into_iter();
     let a = operands.next()?;
     Some(match operands.next() {
@@ -511,9 +528,7 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
             if !scalar(&x) {
                 return None;
             }
-            let (result, units) = answer.call(&[x])?;
-            cx.meter.formula(units);
-            Some(result)
+            answer.call::<CHARGING>(&[x], &mut cx.meter)
         }),
         Some(b) => Box::new(move |slots, cx| {
             let x = a(slots, cx)?;
@@ -521,9 +536,7 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
             if !scalar(&x) || !scalar(&y) {
                 return None;
             }
-            let (result, units) = answer.call(&[x, y])?;
-            cx.meter.formula(units);
-            Some(result)
+            answer.call::<CHARGING>(&[x, y], &mut cx.meter)
         }),
     })
 }
@@ -737,14 +750,21 @@ pub(super) fn hook(libs: &Libs<'_>, id: LibId) -> Option<Hook> {
         }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
-    Some(Box::new(move |walked, raw, cx| {
+    Some(if libs.charging {
+        scalar_hook::<true>(answer)
+    } else {
+        scalar_hook::<false>(answer)
+    })
+}
+
+/// A scalar plan's `item` hook, answered by `answer`.
+fn scalar_hook<const CHARGING: bool>(answer: Answer) -> Hook {
+    Box::new(move |walked, raw, cx| {
         if !scalar(&raw) {
             return None;
         }
-        let (result, units) = answer.call(&[walked, raw])?;
-        cx.meter.formula(units);
-        Some(result)
-    }))
+        answer.call::<CHARGING>(&[walked, raw], &mut cx.meter)
+    })
 }
 
 /// Writes `value` at `place` of `target`, with `index` for an index, as

@@ -217,7 +217,12 @@ The rules below apply when the host selects `Charge::Exact`, the default.
 `Charge::Off` removes the meter and its bound: preparation emits no charge
 regions, execution evaluates no completion charge formula, and charge readouts
 are `None`. Native guards and the other bounds still apply. The run saves its
-charge policy and every worker resumes that same choice (FIG-6732).
+charge policy and every worker resumes that same choice (FIG-6732). Under
+Off a run still counts its pace: one unit for each statement, loop
+continuation test and action atom of guest code and closures, the units
+`K-CHG-002` gives them. A slice counts pace where Exact counts charge, so
+where a slice returns does not depend on the plan or on how library
+functions run (FIG-6775). Nothing reads pace out.
 
 - **K-CHG-001.** A run is charged in charge units, deterministically: the charge of a run is a function of what it executed and of nothing else. It does not depend on the engine's layout, on caches, on whether a native implementation or a kernel body ran, or on parking.
 - **K-CHG-002.** The cost table of kernel version 1: each statement executed costs 1; each expression node evaluated costs 1; a tuple, list, map, set or record construction costs 1 more per member written; each test of a loop's continuation costs 1; an action costs 1 per atom; copying a value out or decoding one in (`K-EFF-002`, `K-EFF-005`) costs its deep size (`K-CHG-005`).

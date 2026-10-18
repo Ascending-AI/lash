@@ -71,11 +71,11 @@ impl KernelMachine {
     /// Rebuilds the active charge mode from the resident frame cache.
     pub(super) fn refresh_charging(&mut self, task: TaskId) -> Result<(), Halt> {
         let metered = self.bounds.charge == crate::Charge::Exact;
-        self.charging = self
+        (self.charging, self.paced) = self
             .task(task)?
             .frames
             .last_mut()?
-            .map_or(metered, |frame| frame.charging);
+            .map_or((metered, !metered), |frame| (frame.charging, frame.paced));
         Ok(())
     }
 
@@ -118,6 +118,7 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = frame.charging;
+        self.paced = frame.paced;
         let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
@@ -128,6 +129,8 @@ impl KernelMachine {
                         let last = self.steps.verify && *next == stmts.len();
                         if self.charging {
                             self.charge(1)?;
+                        } else if self.paced {
+                            self.charged += 1;
                         }
                         let running = Running::new(task, exe, id);
                         // Counting stays inline and does not enable the work/context
@@ -728,6 +731,7 @@ impl KernelMachine {
             Some(mut frame) => {
                 frame.code = code_id;
                 frame.charging = code.charging;
+                frame.paced = code.paced;
                 // A spent frame of the same body left standing at its entry
                 // keeps that copy; only another site is replaced.
                 if !frame.statement.same_version(entry) {
@@ -741,6 +745,7 @@ impl KernelMachine {
                 Box::new(Frame {
                     code: code_id,
                     charging: code.charging,
+                    paced: code.paced,
                     slots: super::frames::Slots::default(),
                     statement: entry.clone(),
                     pending: super::frames::Continuation::default(),

@@ -406,6 +406,12 @@ impl std::ops::Deref for Executable {
 }
 
 impl Executable {
+    /// Whether the run charges its charged code (`Charge::Exact`); with
+    /// charge Off, that code is paced.
+    pub(crate) fn charging(&self) -> bool {
+        self.library.0.charge == crate::Charge::Exact
+    }
+
     pub(crate) fn block_ordinal(&self, id: BlockId) -> Option<u32> {
         let at = (id.0 as usize).checked_sub(self.block_base)?;
         self.own.block_ordinals.get(at).copied()
@@ -700,6 +706,10 @@ pub(crate) struct Code {
     /// (`K-CHG-007`); guest code and closures remain charged.
     pub(crate) charged: bool,
     pub(crate) charging: bool,
+    /// Charged code in a run with charge Off: its statements, loop tests
+    /// and action atoms count the run's pace, which slices measure, so
+    /// that where a slice falls does not depend on the plan.
+    pub(crate) paced: bool,
 }
 
 pub(crate) struct SlotInfo {

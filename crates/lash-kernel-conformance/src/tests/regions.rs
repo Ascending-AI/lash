@@ -4,16 +4,17 @@
 //! charge, the same expanded charge program on the tape, the same prints,
 //! parks, requests and effect ids, and at every slice return and park the
 //! same sealed semantic checkpoint, with a checkpoint sealed under either
-//! plan resuming under the other.
+//! plan resuming under the other. Every case runs so with charge Exact and
+//! with charge Off, whose slices count the run's pace (FIG-6775).
 
 use std::sync::Arc;
 
 use lash_kernel_doc::{Document, Name, parse_document, print_document};
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_vm::kernel_internals::{
-    Layout, RegionWork, call_islands, loop_regions, prepare_with_layout, transient_hold,
+    Layout, RegionWork, call_islands, in_charge, loop_regions, prepare_with_layout, transient_hold,
 };
-use lash_kernel_vm::{Machine, PreparedLibrary, Program};
+use lash_kernel_vm::{Charge, Machine, PreparedLibrary, Program};
 
 use crate::machine::{Run, case_program, run_program_in};
 use crate::projection::{Image, Plan, Projector, corpus_agrees, taped_work};
@@ -25,6 +26,9 @@ const ON: u64 = 0;
 const OFF: u64 = Layout(ON).without_regions().0;
 /// The slices every case runs under, the last unbounded.
 const SLICES: [u64; 7] = [1, 2, 3, 7, 50, 333, u64::MAX];
+/// The charge policies every case runs under: under Off, charged code
+/// runs paced, and the slices count its pace.
+const CHARGES: [Charge; 2] = [Charge::Exact, Charge::Off];
 /// The most bounds a case's sweep runs: its first and last events' and an
 /// even spread between.
 const BOUNDS: usize = 240;
@@ -337,12 +341,13 @@ struct Probe<'a> {
     work: RegionWork,
 }
 
-/// Runs `case` under plan `L`, bounded at `charge` when given, sealing at
-/// every slice return and park and, with `imports`, resuming the other
-/// plan's image there.
+/// Runs `case` under plan `L` and the `policy`, bounded at `charge` when
+/// given, sealing at every slice return and park and, with `imports`,
+/// resuming the other plan's image there.
 fn probe<'a, const L: u64>(
     program: &Program,
     case: &Case,
+    policy: Charge,
     charge: Option<u64>,
     imports: Option<&'a [Image]>,
 ) -> Result<Probe<'a>, HarnessError> {
@@ -353,9 +358,11 @@ fn probe<'a, const L: u64>(
         ..Projector::default()
     };
     let (observations, tape, work) = taped_work(|| {
-        let mut start = |program, bounds, start, source: &crate::pages::Source| {
-            Plan::<L>::start(program, bounds, start, Box::new(source.clone()))
-        };
+        let mut start =
+            |program, mut bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
+                bounds.charge = policy;
+                Plan::<L>::start(program, bounds, start, Box::new(source.clone()))
+            };
         let run = Run {
             start: &mut start,
             printed: &mut || {},
@@ -529,11 +536,11 @@ fn compare(
     }
 }
 
-/// Checks `case` under both plans across the sweep, adding each
-/// disagreement to `failures`. Gives the work regions committed in its
-/// natural run with regions on, which its unsliced run after the sweep
-/// commits again: a plan the sweep retired would leave that run, and every
-/// one after it, to the reference.
+/// Checks `case` under both plans across the sweep, with charge Exact and
+/// Off, adding each disagreement to `failures`. Gives the work regions
+/// committed in its natural run with regions on and charge Exact: where
+/// that run ended an iteration in a region or entered an island, its run
+/// with charge Off, paced, does too.
 fn check(
     on: &PreparedLibrary,
     off: &PreparedLibrary,
@@ -541,7 +548,42 @@ fn check(
     counts: &mut Counts,
     failures: &mut Vec<String>,
 ) -> RegionWork {
+    let charged = check_in(Charge::Exact, on, off, case, counts, failures);
+    // A charge-bound refusal is the charge oracle's: Off has no bound.
+    if matches!(&case.expected.end, ExpectedEnd::Bound { name, .. } if name == "charge") {
+        return charged;
+    }
+    let paced = check_in(Charge::Off, on, off, case, counts, failures);
+    if (charged.iterations > 0 && paced.iterations == 0) || (charged.calls > 0 && paced.calls == 0)
+    {
+        failures.push(format!(
+            "{}: regions committed {charged:?} with charge Exact and {paced:?} with charge Off",
+            case.name
+        ));
+    }
+    charged
+}
+
+/// Checks `case` under both plans and the `policy` across the sweep, and
+/// gives the work regions committed in its natural run with regions on,
+/// which its unsliced run after the sweep commits again: a plan the sweep
+/// retired would leave that run, and every one after it, to the
+/// reference. Under Off, which has no charge bound, every slice: where its
+/// pace returns a slice, and the images there, are what a plan can get
+/// wrong. The images resume across plans under Exact.
+fn check_in(
+    policy: Charge,
+    on: &PreparedLibrary,
+    off: &PreparedLibrary,
+    case: &Case,
+    counts: &mut Counts,
+    failures: &mut Vec<String>,
+) -> RegionWork {
+    let exact = policy == Charge::Exact;
     let mut case = case.clone();
+    if !exact {
+        case.name = format!("{} (charge off)", case.name);
+    }
     case.environment.resume = false;
     case.environment.slice = u64::MAX;
     let Some(on) = case_program(on, &case) else {
@@ -551,7 +593,7 @@ fn check(
         library: off.clone(),
         ..on.clone()
     };
-    let natural = match probe::<ON>(&on, &case, None, None) {
+    let natural = match probe::<ON>(&on, &case, policy, None, None) {
         Ok(natural) => natural,
         Err(error) => {
             failures.push(format!("{}, natural run: {error:?}", case.name));
@@ -571,16 +613,21 @@ fn check(
     // a charge, resuming the given images.
     let held = |case: &Case, imports: Option<&[Image]>, regions: bool, charge: u64| {
         let probe = if regions {
-            probe::<ON>(&on, case, Some(charge), imports)
+            probe::<ON>(&on, case, policy, Some(charge), imports)
         } else {
-            probe::<OFF>(&off, case, Some(charge), imports)
+            probe::<OFF>(&off, case, policy, Some(charge), imports)
         };
         probe.ok()?.projector.held
     };
-    for bound in bounds(&program, case.environment.bounds.charge) {
+    let swept = if exact {
+        bounds(&program, case.environment.bounds.charge)
+    } else {
+        Vec::new()
+    };
+    for bound in swept {
         counts.bounds += 1;
-        let a = probe::<ON>(&on, &case, Some(bound), None);
-        let b = probe::<OFF>(&off, &case, Some(bound), None);
+        let a = probe::<ON>(&on, &case, policy, Some(bound), None);
+        let b = probe::<OFF>(&off, &case, policy, Some(bound), None);
         compare(
             &case,
             &format!("bound {bound}"),
@@ -596,8 +643,8 @@ fn check(
         let mut sliced = case.clone();
         sliced.environment.slice = slice;
         sliced.environment.max_steps = sliced.environment.max_steps.max(1_000_000);
-        let a = probe::<ON>(&on, &sliced, None, None);
-        let b = probe::<OFF>(&off, &sliced, None, None);
+        let a = probe::<ON>(&on, &sliced, policy, None, None);
+        let b = probe::<OFF>(&off, &sliced, policy, None, None);
         compare(
             &sliced,
             &format!("slice {slice}"),
@@ -621,10 +668,12 @@ fn check(
         // resume under either plan. A resumed run is compared with a
         // resumed run: where a resume prices its memory against a
         // continuous run is the slice law's, not the plans'.
-        if let (Ok(a), Ok(b)) = (&a, &b) {
+        if let (Ok(a), Ok(b)) = (&a, &b)
+            && exact
+        {
             counts.resumes += 1;
-            let off_resumed = probe::<OFF>(&off, &sliced, None, Some(&a.projector.images));
-            let on_resumed = probe::<ON>(&on, &sliced, None, Some(&b.projector.images));
+            let off_resumed = probe::<OFF>(&off, &sliced, policy, None, Some(&a.projector.images));
+            let on_resumed = probe::<ON>(&on, &sliced, policy, None, Some(&b.projector.images));
             let what = format!("slice {slice}, each resuming the other's images");
             compare(
                 &sliced,
@@ -643,10 +692,13 @@ fn check(
                 failures,
             );
         }
+        if !exact {
+            continue;
+        }
         for bound in [whole / 3, whole / 2, whole.saturating_sub(5)] {
             counts.slice_bounds += 1;
-            let a = probe::<ON>(&on, &sliced, Some(bound), None);
-            let b = probe::<OFF>(&off, &sliced, Some(bound), None);
+            let a = probe::<ON>(&on, &sliced, policy, Some(bound), None);
+            let b = probe::<OFF>(&off, &sliced, policy, Some(bound), None);
             let what = format!("slice {slice}, bound {bound}");
             compare(
                 &sliced,
@@ -785,6 +837,28 @@ fn formed(library: &PreparedLibrary, case: &Case) -> (usize, usize) {
     )
 }
 
+/// How many loop regions and call islands `case`'s document forms under
+/// `on`: the same with charge Off, whose charged code is paced, and none
+/// under `off`, with either policy.
+fn formed_alike(on: &PreparedLibrary, off: &PreparedLibrary, case: &Case) -> (usize, usize) {
+    let formed_on = formed(on, case);
+    assert_eq!(
+        formed(&in_charge(on, Charge::Off), case),
+        formed_on,
+        "{}: charge Off forms other plans",
+        case.name
+    );
+    for policy in CHARGES {
+        assert_eq!(
+            formed(&in_charge(off, policy), case),
+            (0, 0),
+            "{}: plans form with regions off, charge {policy:?}",
+            case.name
+        );
+    }
+    formed_on
+}
+
 /// Which plans of a program its natural run leaves to the reference.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Idle {
@@ -859,7 +933,10 @@ fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<S
 /// call-island programs, each
 /// as written and wrapped in a function, run alike with regions on and
 /// off, under every bound around their charge programs' events and every
-/// slice, with each plan resuming the other's checkpoints.
+/// slice, with each plan resuming the other's checkpoints. Each but the
+/// smith programs runs so with charge Off too, under every slice: its
+/// plans form as under Exact, run where they run charged, and its slices
+/// count its pace.
 fn regions_on_and_off_agree(shard: usize) {
     let began = std::time::Instant::now();
     let registry = Arc::new(super::corpus_registry());
@@ -877,13 +954,8 @@ fn regions_on_and_off_agree(shard: usize) {
     for (name, text, call_depth) in programs {
         region_programs += 1;
         let case = program_case(name, text, *call_depth);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
-        assert_eq!(
-            formed(&off, &case),
-            (0, 0),
-            "{name}: regions form with regions off"
-        );
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
@@ -894,13 +966,8 @@ fn regions_on_and_off_agree(shard: usize) {
         }
         region_programs += 1;
         let case = program_case(name, text, 16);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
-        assert_eq!(
-            formed(&off, &case),
-            (0, 0),
-            "{name}: regions form with regions off"
-        );
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
@@ -926,13 +993,8 @@ fn regions_on_and_off_agree(shard: usize) {
                 dropped: false,
             }]];
         }
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
-        assert_eq!(
-            formed(&off, &case),
-            (0, 0),
-            "{name}: regions form with regions off"
-        );
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
@@ -953,9 +1015,8 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{}: no loop region forms", case.name);
-        assert_eq!(formed(&off, &case), (0, 0), "{}", case.name);
         regions += plans.0;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(&case.name, plans, work, &mut failures);
@@ -970,13 +1031,8 @@ fn regions_on_and_off_agree(shard: usize) {
     {
         island_programs += 1;
         let case = program_case(name, text, *call_depth);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.1 > 0, "{name}: no call island forms");
-        assert_eq!(
-            formed(&off, &case),
-            (0, 0),
-            "{name}: islands form with regions off"
-        );
         islands += plans.1;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
@@ -998,9 +1054,8 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{}", case.name);
-        assert_eq!(formed(&off, &case), (0, 0));
         for call_depth in [1, 2, 3, 4, 16] {
             case.environment.bounds.call_depth = call_depth;
             let work = check(&on, &off, &case, &mut counts, &mut failures);
@@ -1024,9 +1079,8 @@ fn regions_on_and_off_agree(shard: usize) {
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        let plans = formed(&on, &case);
+        let plans = formed_alike(&on, &off, &case);
         assert!(plans.1 > 0, "{}: no call island forms", case.name);
-        assert_eq!(formed(&off, &case), (0, 0));
         for call_depth in [3, 16] {
             case.environment.bounds.call_depth = call_depth;
             let work = check(&on, &off, &case, &mut counts, &mut failures);

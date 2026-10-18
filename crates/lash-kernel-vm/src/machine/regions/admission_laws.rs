@@ -97,6 +97,7 @@ fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
     let mut arena = machine.arena.borrow_mut();
     let mut cx = Cx {
         meter: Meter::new(false),
+        charging: exe.charging(),
         args: super::super::registers::Arguments::new(),
         exe: &exe,
         arena: &mut arena,

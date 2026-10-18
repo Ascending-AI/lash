@@ -72,10 +72,7 @@ impl Machine for KernelMachine {
             (enabled, added)
         };
         self.observe_phase(GuestPhase::Interpret);
-        let result = match self.bounds.charge {
-            crate::Charge::Exact => self.run_slice::<true>(host, slice),
-            crate::Charge::Off => self.run_slice::<false>(host, slice),
-        };
+        let result = self.run_slice(host, slice);
         #[cfg(any(test, feature = "perf-witness"))]
         if witness {
             if observer_added {
@@ -376,6 +373,7 @@ impl KernelMachine {
             pins: Pins::default(),
             projecting: false,
             charging: true,
+            paced: false,
             region: None,
             slice_end: u64::MAX,
             sites: Default::default(),

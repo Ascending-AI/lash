@@ -473,8 +473,11 @@ it as a slot.
   A session atom of an invoke charges its atom unit, as a local's does. So
   session reads and writes are fixed events of the region's static program,
   checked against the stream's `RegionTable` events like any other, and the
-  tape records them unchanged. With charge off (FIG-6732), no region runs
-  and nothing is recorded.
+  tape records them unchanged. With charge off (FIG-6732), regions still
+  form and run, paced (FIG-6775): they record nothing, measure no formula,
+  and count the run's pace by their statements' fixed units, which lowering
+  under Off leaves at their statement, action-atom and loop-test units, so
+  the slice's end stops them where it stops the reference.
 - **Exit.** Every exit publishes, before the step returns, each binding the
   region wrote: its last value, with a write mark that orders it among the
   bindings written since the last projection point, in the order of the

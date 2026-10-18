@@ -7,7 +7,10 @@
 //!
 //! An island charges each event as the reference does, in its order, and
 //! counts each call's occurrence where the reference counts it, so nothing
-//! it commits is ever taken back. It exits where the reference would have
+//! it commits is ever taken back. With charge Off it runs paced: it
+//! measures no formula, and its statements' units count the run's pace,
+//! as `advance` counts them, so the slice's end stops it where it stops
+//! the reference. It exits where the reference would have
 //! to run on its own, and converts its virtual frames into the machine
 //! frames the reference holds there (§3.4):
 //!
@@ -192,7 +195,13 @@ struct Island<'a> {
     /// The session overlay its binding reads take resident values from.
     session: &'a Session,
     tape: Option<&'a ChargeTape>,
-    /// The run's charge, the machine's once the island ends.
+    /// The tape the calls it enters are counted on, charged or paced.
+    recorder: Option<&'a ChargeTape>,
+    /// Whether the run is charged: a paced one measures no formula, and
+    /// its prepared entries answer by their value-only guards.
+    charging: bool,
+    /// The run's charge, or with charge Off its pace, the machine's once
+    /// the island ends.
     charged: u64,
     bound: u64,
     slice_end: u64,
@@ -364,6 +373,8 @@ impl Island<'_> {
         let charge =
             if !(!site.body_when_observed || !self.observed) || !self.depth_fits(site.depth) {
                 None
+            } else if !self.charging {
+                site.entry.call(args).filter(held).map(|value| (value, 0))
             } else if args.iter().all(scalar) {
                 match site.entry.call(args) {
                     Some(result) if scalar(&result) => site
@@ -417,6 +428,9 @@ impl Island<'_> {
         if !held(&value) {
             return None;
         }
+        if !self.charging {
+            return Some((value, 0));
+        }
         let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
             Some(units) => units,
             None => match fast.charge(&function.charge, args, &value) {
@@ -459,7 +473,7 @@ impl Island<'_> {
         let args = &padded[..function.arity];
         if let Some((entry, fast)) = &function.prepared
             && self.depth_fits(site.depth)
-            && let Some(answer) = entry.answer(args, true)
+            && let Some(answer) = entry.answer(args, self.charging)
         {
             return self.answered(function, fast, args, answer);
         }
@@ -488,6 +502,9 @@ impl Island<'_> {
         let value = answer.ok().filter(|value| !built && held(value))?;
         if arena.summary_of(&value).depth as usize > self.limits.value_depth() {
             return None;
+        }
+        if !self.charging {
+            return Some((value, 0));
         }
         let units = measured_formula(arena, &function.charge, args, Some(&value))?;
         Some((value, units))
@@ -663,8 +680,8 @@ impl Island<'_> {
             self.left(island, captured, &slots);
             return Err(stop);
         }
-        if let Some(tape) = self.tape {
-            tape.entered();
+        if let Some(recorder) = self.recorder {
+            recorder.entered();
         }
         self.depth += 1;
         let ran = run_block(self, &compiled.body, &mut slots);

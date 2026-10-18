@@ -81,7 +81,7 @@ impl KernelMachine {
             host.observes_sites(),
             running.task,
             running.exe,
-            self.charging,
+            self.charging || self.paced,
             target,
             (first, given),
             Some(nested.occurrence),
@@ -111,7 +111,7 @@ impl KernelMachine {
             host.observes_sites(),
             running.task,
             running.exe,
-            self.charging,
+            self.charging || self.paced,
             Target::Code(code, cells),
             (out, count),
             None,
@@ -137,11 +137,12 @@ impl KernelMachine {
         if exe.island_of(code).is_none() {
             return Ok(None);
         }
+        let callee = exe.code(code);
         self.island(
             !self.islands.quiet,
             task,
             exe,
-            exe.code(code).charging,
+            callee.charging || callee.paced,
             Target::Code(code, cells),
             (args, count),
             None,
@@ -174,9 +175,10 @@ impl KernelMachine {
 
     /// Runs the call of `target` in `task` on the `given` arguments in the
     /// registers from `first` as an island when its code's body is one,
-    /// counting `occurrence` as the call's when given. `charging` is
-    /// whether the callee runs charged, `sites` whether the host observes
-    /// sites. `None`: the island does not run, and nothing changed.
+    /// counting `occurrence` as the call's when given. `counted` is
+    /// whether the callee runs charged or, with charge Off, paced, `sites`
+    /// whether the host observes sites. `None`: the island does not run,
+    /// and nothing changed.
     #[expect(
         clippy::too_many_arguments,
         reason = "each caller states where its callee runs and what it counts"
@@ -186,7 +188,7 @@ impl KernelMachine {
         sites: bool,
         task: TaskId,
         exe: &Executable,
-        charging: bool,
+        counted: bool,
         target: Target<'_>,
         (first, given): (usize, usize),
         occurrence: Option<usize>,
@@ -208,7 +210,7 @@ impl KernelMachine {
         // The environment guard: nothing observes the run but a charge
         // tape, which the island records, and no host observes sites.
         if self.islands.held
-            || !charging
+            || !counted
             || !self.ran.is_empty()
             || self.steps.verify
             || sites
@@ -258,6 +260,13 @@ impl KernelMachine {
             + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
         let call_depth = u64::from(self.bounds.call_depth);
         let observed = self.observer.is_some();
+        // A paced run has no charge to record and no bound: its pace only
+        // meets the slice's end.
+        let charging = self.bounds.charge == crate::Charge::Exact;
+        let recorder = self
+            .observer
+            .as_deref()
+            .and_then(|observer| observer.charges.as_ref());
         let mut scratch = std::mem::take(&mut self.islands);
         scratch.epoch = scratch.epoch.wrapping_add(1);
         scratch.captured.clear();
@@ -275,12 +284,15 @@ impl KernelMachine {
                 stream: exe.document_stream(),
                 arena: &arena,
                 session: &self.session,
-                tape: self
-                    .observer
-                    .as_deref()
-                    .and_then(|observer| observer.charges.as_ref()),
+                tape: recorder.filter(|_| charging),
+                recorder,
+                charging,
                 charged: self.charged,
-                bound: self.bounds.charge_limit,
+                bound: if charging {
+                    self.bounds.charge_limit
+                } else {
+                    u64::MAX
+                },
                 slice_end: self.slice_end,
                 counters,
                 observed,

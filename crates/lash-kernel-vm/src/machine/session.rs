@@ -103,6 +103,7 @@ pub(crate) fn start(
         pins: Pins::default(),
         projecting: false,
         charging: false,
+        paced: false,
         region: None,
         slice_end: u64::MAX,
         sites: Default::default(),

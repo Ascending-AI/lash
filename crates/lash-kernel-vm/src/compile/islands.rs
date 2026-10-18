@@ -178,8 +178,7 @@ pub(super) fn form(tables: &mut Tables, libs: &[Lib], base: (u32, u32, u32)) -> 
         ..Islands::default()
     };
     for (index, code) in tables.codes.iter().enumerate() {
-        if !code.charging
-            || !code.charged
+        if !code.charged
             || !code.free.is_empty()
             || code.slots_by_at.len() > MAX_SLOTS
             || code.params.iter().any(|param| param.shared)

@@ -22,6 +22,12 @@
 //! and writes it there, admitting a write's holding as the reference's
 //! session write does, and publishes what it wrote to the cell's session
 //! at its exit, in the order it wrote them, before any boundary.
+//!
+//! With charge Off, a region of charged code runs paced: it measures no
+//! formula and records nothing, and counts the run's pace as the
+//! reference does, by its statements' fixed units, which lowering under
+//! Off leaves at their statement, action-atom and loop-test units. The
+//! slice's end then stops it where it stops the reference.
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
@@ -143,9 +149,10 @@ impl KernelMachine {
         exe: &Executable,
         region: u32,
     ) -> Result<Option<Flow>, Halt> {
-        // The environment guard: nothing observes the run but a charge
-        // tape, which the region records.
-        if !self.charging
+        // The environment guard: the loop's code is charged or paced, and
+        // nothing observes the run but a charge tape, which the region
+        // records.
+        if !(self.charging || self.paced)
             || host.observes_sites()
             || !self.ran.is_empty()
             || self.steps.verify
@@ -211,11 +218,21 @@ impl KernelMachine {
         for (slot, name) in sessions.iter_mut().zip(&plan.sessions) {
             slot.value = self.session.resident(&name.key);
         }
-        let tape = self
+        // A paced run has no charge to record and no bound: its pace only
+        // meets the slice's end.
+        // The work it commits is recorded either way.
+        let charging = self.charging;
+        let recorder = self
             .observer
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
-        let (bound, slice_end) = (self.bounds.charge_limit, self.slice_end);
+        let tape = recorder.filter(|_| charging);
+        let bound = if charging {
+            self.bounds.charge_limit
+        } else {
+            u64::MAX
+        };
+        let slice_end = self.slice_end;
         let mut arena = self.arena.borrow_mut();
         let state = self
             .tasks
@@ -242,6 +259,7 @@ impl KernelMachine {
             counters: INVOKES.then_some(&mut state.counters),
             cx: Cx {
                 meter: Meter::new(tape.is_some()),
+                charging,
                 args: super::registers::Arguments::new(),
                 exe,
                 arena: &mut arena,
@@ -302,8 +320,8 @@ impl KernelMachine {
         if let Some(fault) = cx.fault {
             return Err(Halt::from(fault));
         }
-        if let Some(tape) = tape {
-            tape.iterated(started - u64::from(stopped));
+        if let Some(recorder) = recorder {
+            recorder.iterated(started - u64::from(stopped));
         }
         // The exit publishes the session writes before any boundary, in
         // the order the region made them, as the reference's writes left

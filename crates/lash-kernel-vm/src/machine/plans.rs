@@ -608,6 +608,7 @@ impl KernelMachine {
         let end = slots + plan.plan.slots.len();
         self.regs.statement(end as u32);
         let charging = std::mem::replace(&mut self.charging, false);
+        let paced = std::mem::replace(&mut self.paced, false);
         // A body's frame keeps its call's arguments for its formula when
         // the call is charged, or roots a task (`push_operation_frame`).
         let keep = charging || root;
@@ -635,7 +636,7 @@ impl KernelMachine {
         // in its step, as it does when the body's frame returns.
         let halt = run.halt.take();
         self.plans -= 1;
-        self.charging = charging;
+        (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
             // Its registers hold what its frame will: they are released
             // once the frames stand.

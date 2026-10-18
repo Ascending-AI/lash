@@ -221,8 +221,9 @@ impl KernelMachine {
             return Err(fault("a segment yielded standing nowhere").into());
         };
         let charging = std::mem::replace(&mut self.charging, false);
+        let paced = std::mem::replace(&mut self.paced, false);
         let stood = self.stand_all(task, exe, standing, callee, awaiting);
-        self.charging = charging;
+        (self.charging, self.paced) = (charging, paced);
         // What the plans' registers held is the frames' now.
         self.regs.release(release);
         self.heap.execution_roots_moved();
@@ -607,6 +608,7 @@ impl KernelMachine {
             self.pins.borrowed.extend(kept.iter().copied());
         }
         let charging = std::mem::replace(&mut self.charging, false);
+        let paced = std::mem::replace(&mut self.paced, false);
         self.plans += 1;
         let mut run = PlanRun::<MEMORY, SHARED> {
             machine: self,
@@ -659,7 +661,7 @@ impl KernelMachine {
         };
         let halt = run.halt.take();
         self.plans -= 1;
-        self.charging = charging;
+        (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
             self.stand_segments(task, exe, None)?;
             return Ok(None);

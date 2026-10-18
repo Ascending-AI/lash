@@ -14,6 +14,12 @@ pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> P
     PreparedLibrary::with_layout(registry, layout)
 }
 
+/// `library` preparing code for the `charge` policy: under Off, lowering
+/// emits no charge regions, and charged code runs paced.
+pub fn in_charge(library: &PreparedLibrary, charge: crate::Charge) -> PreparedLibrary {
+    library.in_charge(charge)
+}
+
 /// Starts a run whose program executes in `layout`.
 ///
 /// # Errors

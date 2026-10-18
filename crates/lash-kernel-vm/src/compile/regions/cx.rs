@@ -27,6 +27,9 @@ use crate::machine::sites::SiteCaches;
 /// slots.
 pub(crate) struct Cx<'a> {
     pub(crate) meter: Meter,
+    /// Whether the run is charged: a paced one measures no formula, and
+    /// its prepared entries answer by their value-only guards.
+    pub(crate) charging: bool,
     pub(crate) args: Arguments,
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
@@ -228,8 +231,10 @@ impl Cx<'_> {
     /// when it answers, a miss when it raises, declines or asks again.
     pub(super) fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let value = self.answered(function, args.clone())?;
-        let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
-        self.meter.measured(units);
+        if self.charging {
+            let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
+            self.meter.measured(units);
+        }
         Some(value)
     }
 
@@ -286,7 +291,7 @@ impl Cx<'_> {
     /// body runs.
     pub(super) fn operate(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
-        let answer = match entry.answer(&self.args[args.clone()], true) {
+        let answer = match entry.answer(&self.args[args.clone()], self.charging) {
             Some(answer) => answer,
             // An installed native answers first, as the reference's call.
             None if matches!(function.run, LibRun::Native { .. }) => {
@@ -324,6 +329,9 @@ impl Cx<'_> {
         let value = answer.value;
         if !self.pin(&value) {
             return None;
+        }
+        if !self.charging {
+            return Some(value);
         }
         let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
             Some(units) => units,
