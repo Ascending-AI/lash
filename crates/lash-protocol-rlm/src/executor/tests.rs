@@ -1254,6 +1254,17 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
     );
 }
 
+// FIG-6711 makes the effect's display label opaque to the host.
+// Require a label naming the unsettled work, without parsing coordinates.
+fn assert_interrupted_effect_label(message: &str, callee: &str) {
+    let label = message
+        .split_once(&format!("effect `{callee}` at "))
+        .and_then(|(_, rest)| rest.split_once(" started and never settled"))
+        .map(|(label, _)| label)
+        .expect("the interrupted effect has a display label");
+    assert!(!label.is_empty(), "{message}");
+}
+
 /// FIG-5763 / ADR 0132 NR-2: an interrupted Once effect names the
 /// admitted call and warns that its outside work may already have happened.
 #[tokio::test(flavor = "multi_thread")]
@@ -1277,11 +1288,7 @@ async fn an_interrupted_once_effect_observation_names_the_effect() {
         failure.message
     );
     assert!(failure.message.contains("echo.say"), "{}", failure.message);
-    assert!(
-        failure.message.contains("site") && failure.message.contains("occurrence 0"),
-        "{}",
-        failure.message
-    );
+    assert_interrupted_effect_label(&failure.message, "echo.say");
     assert!(
         failure
             .message

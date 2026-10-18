@@ -490,10 +490,8 @@ fn slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         text.summary().chars as usize,
     ) as u64)
         .max(first);
-    let whole = text.whole()?;
-    let start = offset(&whole, first);
-    let end = offset(&whole, last);
-    sliced(call.new, &whole, start..end)
+    let [start, end] = slice_boundaries(text, [first, last], false)?;
+    sliced_view(call.new, text, start as usize..end as usize)
 }
 fn utf16_slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = text_view(&call.args, 0)?;
@@ -510,18 +508,22 @@ fn utf16_slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     };
     let start = target(&*integer_value(&call.args, 1)?);
     let end = target(&*integer_value(&call.args, 2)?);
-    let [from, to] = utf16_boundaries(text, [start, end])?;
+    let [from, to] = slice_boundaries(text, [start, end], true)?;
     if start > end {
         return Ok(call.new.text(""));
     }
     sliced_view(call.new, text, from as usize..to as usize)
 }
 
-/// The byte offsets of UTF-16 positions `targets`, each at most the text's
-/// length, read from the front up to the farther one: a slice reads the
-/// pages its range addresses, never the whole text (FIG-6193). A position
-/// inside a surrogate pair is refused.
-fn utf16_boundaries(text: TextView<'_>, targets: [u64; 2]) -> Result<[u64; 2], NativeError> {
+/// The byte offsets of scalar or UTF-16 positions `targets`, each at most
+/// the text's length, read from the front up to the farther one. Both slice
+/// operations fault only that prefix's chunks (FIG-6193, FIG-6750). A UTF-16
+/// position inside a surrogate pair is refused.
+fn slice_boundaries(
+    text: TextView<'_>,
+    targets: [u64; 2],
+    utf16: bool,
+) -> Result<[u64; 2], NativeError> {
     let mut offsets = [text.summary().utf8_bytes; 2];
     let mut found = targets.map(|target| target == 0);
     for (offset, found) in offsets.iter_mut().zip(found) {
@@ -534,7 +536,7 @@ fn utf16_boundaries(text: TextView<'_>, targets: [u64; 2]) -> Result<[u64; 2], N
         let (mut units, mut bytes) = (0_u64, 0_u64);
         'walk: for chunk in text.chunks() {
             for c in chunk?.chars() {
-                units += c.len_utf16() as u64;
+                units += if utf16 { c.len_utf16() as u64 } else { 1 };
                 bytes += c.len_utf8() as u64;
                 for at in 0..2 {
                     if !found[at] && units >= targets[at] {

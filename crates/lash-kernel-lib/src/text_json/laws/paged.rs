@@ -56,7 +56,7 @@ const ENTRY: &str = "entry f(t: Text) -> Any\nfn f(t) {\n\
     let d = perform echo(3) as Any\n\
     print x print y return z }\nmain { }\n";
 
-fn program() -> Program {
+fn program(operation: &str) -> Program {
     let mut registry = FunctionRegistry::new();
     register_machine_functions(&mut registry).unwrap();
     super::super::register_text_json(&mut registry).unwrap();
@@ -65,7 +65,7 @@ fn program() -> Program {
     for (id, function) in registry.iter() {
         text.push_str(&format!("use {} = @{id}\n", function.definition().name));
     }
-    text.push_str(ENTRY);
+    text.push_str(&ENTRY.replace("text.utf16_slice", operation));
     Program {
         release: PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
@@ -94,7 +94,7 @@ fn deliver(machine: &mut KernelMachine, request: &Request) {
 }
 
 /// The machine sealed, and opened cold over `source`.
-fn reopen(machine: &mut KernelMachine, source: &Counting) {
+fn reopen(machine: &mut KernelMachine, source: &Counting, operation: &str) {
     let sealed = machine
         .seal(SealBudget {
             pages: u64::MAX,
@@ -103,7 +103,7 @@ fn reopen(machine: &mut KernelMachine, source: &Counting) {
         .unwrap()
         .unwrap();
     *machine = KernelMachine::open(
-        program(),
+        program(operation),
         BOUNDS,
         &sealed.checkpoint(),
         Vec::new(),
@@ -118,10 +118,21 @@ fn reopen(machine: &mut KernelMachine, source: &Counting) {
 /// statement that reads no text.
 #[test]
 fn a_utf16_slice_of_a_cold_paged_text_reads_only_the_pages_it_addresses() {
+    cold_slice_reads_only_addressed_pages("text.utf16_slice");
+}
+
+/// FIG-6750: scalar-indexed slicing has the same cold-page economy as
+/// UTF-16 slicing; retaining a large Python string never resends it whole.
+#[test]
+fn a_scalar_slice_of_a_cold_paged_text_reads_only_the_pages_it_addresses() {
+    cold_slice_reads_only_addressed_pages("text.slice");
+}
+
+fn cold_slice_reads_only_addressed_pages(operation: &str) {
     let text: String = (0..20_000).map(|i| format!("{i:05}")).collect();
     let source = Counting::default();
     let mut machine = start_with_layout(
-        program(),
+        program(operation),
         BOUNDS,
         CellStart {
             owner: PageId([9; 32]),
@@ -139,7 +150,7 @@ fn a_utf16_slice_of_a_cold_paged_text_reads_only_the_pages_it_addresses() {
     let mut request = park(&mut machine, &mut world);
     let mut reads = Vec::new();
     for _ in 0..3 {
-        reopen(&mut machine, &source);
+        reopen(&mut machine, &source, operation);
         let before = source.reads.get();
         deliver(&mut machine, &request);
         request = park(&mut machine, &mut world);

@@ -256,6 +256,14 @@ large value is repeatedly replaced. Every successful exact refinement resets
 the estimate to its reachable cost. Growth can include new live values, so
 the trigger is an estimate, never an exact liveness claim or memory verdict.
 
+The header also retains `collection_entities`, the live entity count from
+that same refinement or first carry (FIG-6750). A carry collects when entity
+growth reaches `max(ceil(collection_entities / 2), 1)`, independently of the
+byte trigger. The carry's identity allowance is half the last live
+population, so a large scalar's byte allowance cannot defer cleanup of
+retired frozen reply families. Both triggers are paid for by intervening allocation; neither
+a no-op carry nor an ordinary park adds a trace.
+
 A carry whose census still contains a closure entity or task edge also
 collects (FIG-6681). Its required carry classification already walks the live
 identity graph; collection reuses the immutable payload pages and adds a

@@ -1234,12 +1234,19 @@ large heap to memory pressure. This is an estimate: new live allocations may
 also contribute to growth. It changes neither the memory metric nor its exact
 refusal rule.
 
+S7, identity pacing (FIG-6750): `collection_entities` retains the entity count
+at the same refinement or first carry. Entity growth of at least
+`max(ceil(collection_entities / 2), 1)` also collects, independently of byte
+growth. Lazy family members count, so a large scalar cannot starve cleanup
+of retired reply families. Half-live identity growth triggers collection;
+intervening allocation pays for each trace.
+
 Carries whose population certificate counts a closure entity or task edge
 also collect (FIG-6681). Carry classification already walks their live
 identity graph, so that boundary also reclaims dead cell identities and
 families while sharing immutable payload pages. A byte-size cutoff would let
 a large scalar keep a growing family reference table alive and rewritten at
-every park. Data-only carries retain the allocation pacing above.
+every park. Data-only carries retain both allocation triggers above.
 
 Every decision input is the heap header's, preserving FIG-6453's checkpoint-cut
 independence. A no-op data-only carry adds no debt and traces nothing; parks

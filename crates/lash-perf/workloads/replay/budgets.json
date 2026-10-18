@@ -218,8 +218,8 @@
       "workload": "py-codemode",
       "metric": "ipc_frames",
       "check": "per_turn_median",
-      "max": 160,
-      "why": "about twice today's worker exchange per cell"
+      "max": 64,
+      "why": "FIG-6750: twice the measured 32-frame median after scalar slicing faults only addressed chunks and entity-paced carry bounds retired families"
     },
     {
       "workload": "ts-codemode",
@@ -232,8 +232,8 @@
       "workload": "py-codemode",
       "metric": "ipc_bytes",
       "check": "per_turn_median",
-      "max": 262144,
-      "why": "a parked cell's 1 MB global is not resent per turn"
+      "max": 131072,
+      "why": "FIG-6750: the next power of two above twice the measured 47,980-byte median; a retained 1 MB global is never resent per turn"
     }
   ],
   "known_breaches": []

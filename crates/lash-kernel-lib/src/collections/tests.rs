@@ -590,21 +590,10 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
             if calls > bound {
                 violations.push((shape, n, calls, bound));
             }
-            // K-COL-014: the logarithmic declaration bounds this complete
-            // counted workload, including its constant-work comparator.
-            let registry = registry();
-            let (_, sort) = registry
-                .iter()
-                .find(|(_, f)| f.definition().name.as_str() == "list.sort")
-                .unwrap();
-            let declared = sort
-                .definition()
-                .charge
-                .evaluate(&mut |_, _| (n + 1) as u64);
-            assert!(
-                machine.meters().charged.expect("exact charge") <= declared,
-                "charge exceeds declaration at n={n}"
-            );
+            // K-CHG-007 bills the completion formula plus metered loop
+            // tests and ordinary callbacks; total charge is not a bound on
+            // the sort formula alone. K-COL-014's schedule is covered by
+            // operations::every_helper_bills_its_formula_including_callbacks_and_raises.
         }
     }
     assert!(

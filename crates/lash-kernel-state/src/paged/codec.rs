@@ -88,7 +88,8 @@ record!(HeapRoot {
     next_family: u64,
     accounting: AccountingCertificate,
     population: DataOnlyCertificate,
-    collection_live: Option<LogicalBytes>
+    collection_live: Option<LogicalBytes>,
+    collection_entities: Option<u64>
 });
 record!(FrozenSummary {
     entities: u64,

@@ -35,6 +35,38 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     assert!(receipt.exists());
 }
 
+/// FIG-6750 / FIG-6681: a retained megabyte scalar cannot starve cleanup
+/// of retired reply families. Twenty-four turns distinguish sustained
+/// history growth from the prompt prefix's bounded initial tree growth.
+#[test]
+fn a_large_retained_scalar_keeps_history_turn_sql_writes_flat() {
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = dir.path().join("receipt.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .args(["replay", "py-codemode", "--turns", "24"])
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&receipt)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
+    let summary = &receipt["workloads"][0]["summary"];
+    for (metric, ceiling) in [("sql_rows_written", 0.5), ("sql_bytes_written", 512.0)] {
+        let slope = summary[metric]["robust_slope_per_history_turn"]
+            .as_f64()
+            .expect("the repeated turns have a counted history slope");
+        eprintln!("retained scalar: {metric} history slope {slope}, ceiling {ceiling}");
+        assert!(slope <= ceiling, "{metric} grows with history: {slope}");
+    }
+}
+
 /// TRAFFIC-CONSERVATION: replay exports complete per-kind transport and
 /// physical SQLite attribution from the same cuts as its existing totals.
 #[test]

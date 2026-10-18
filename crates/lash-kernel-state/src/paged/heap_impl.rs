@@ -40,10 +40,12 @@ pub struct PagedHeap {
         AccountingCertificate,
         DataOnlyCertificate,
         Option<LogicalBytes>,
+        Option<u64>,
     )>,
     pub(super) accounting: AccountingCertificate,
     pub(super) population: DataOnlyCertificate,
     pub(super) collection_live: Option<LogicalBytes>,
+    pub(super) collection_entities: Option<u64>,
     pub(super) family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     /// The execution roots, installed only through publication.
@@ -125,10 +127,16 @@ impl PagedHeap {
             next_family: root.next_family,
             epoch,
             header: Some(page),
-            header_state: Some((root.accounting, root.population, root.collection_live)),
+            header_state: Some((
+                root.accounting,
+                root.population,
+                root.collection_live,
+                root.collection_entities,
+            )),
             accounting: root.accounting,
             population: root.population,
             collection_live: root.collection_live,
+            collection_entities: root.collection_entities,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -150,6 +158,7 @@ impl PagedHeap {
             ..AccountingCertificate::FRESH
         };
         self.collection_live = None;
+        self.collection_entities = None;
         self.header = None;
     }
 
@@ -225,6 +234,7 @@ impl PagedHeap {
             accounting: self.accounting,
             population: self.population,
             collection_live: self.collection_live,
+            collection_entities: self.collection_entities,
         })
     }
     /// The entity's current head, copied.
@@ -581,6 +591,7 @@ impl SemanticHeap for PagedHeap {
             header: None,
             header_state: None,
             collection_live: None,
+            collection_entities: None,
             population: DataOnlyCertificate {
                 closure_entities: 0,
                 task_edges: 0,
@@ -614,6 +625,7 @@ impl SemanticHeap for PagedHeap {
             accounting: root.accounting,
             population: root.population,
             collection_live: root.collection_live,
+            collection_entities: root.collection_entities,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -842,6 +854,7 @@ impl SemanticHeap for PagedHeap {
                     Ok(decision) => {
                         self.holdings.projected();
                         self.collection_live = Some(census.certificate().upper);
+                        self.collection_entities = Some(census.certificate().entities);
                         match decision {
                             RefinedDecision::Granted(_) => Ok(()),
                             RefinedDecision::Refused { .. } => Err(HeapWriteError::Memory),
@@ -858,7 +871,13 @@ impl SemanticHeap for PagedHeap {
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
         self.settle_growth()?;
         if self.header.is_some()
-            && self.header_state == Some((self.accounting, self.population, self.collection_live))
+            && self.header_state
+                == Some((
+                    self.accounting,
+                    self.population,
+                    self.collection_live,
+                    self.collection_entities,
+                ))
         {
             if let Some(census) = &mut self.census {
                 census.rebase();
@@ -889,7 +908,12 @@ impl SemanticHeap for PagedHeap {
             return Ok(None);
         }
         self.header = Some(self.access.seal(PageKind::KEYED_LEAF, tokens, children)?);
-        self.header_state = Some((root.accounting, root.population, root.collection_live));
+        self.header_state = Some((
+            root.accounting,
+            root.population,
+            root.collection_live,
+            root.collection_entities,
+        ));
         self.epoch.0 = self
             .epoch
             .0

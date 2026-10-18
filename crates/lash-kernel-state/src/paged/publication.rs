@@ -401,6 +401,7 @@ impl PagedHeap {
         if decision.is_ok() {
             self.holdings.held = 0;
             self.collection_live = Some(census.certificate().upper);
+            self.collection_entities = Some(census.certificate().entities);
         }
         self.accounting = census.certificate();
         self.header = None;
@@ -591,6 +592,7 @@ impl PagedHeap {
         if decision.is_ok() {
             self.holdings.held = 0;
             self.collection_live = Some(census.certificate().upper);
+            self.collection_entities = Some(census.certificate().entities);
         }
         match decision {
             Ok(RefinedDecision::Granted(_)) => Ok(()),
@@ -604,9 +606,12 @@ impl PagedHeap {
     /// shares their pages, while keeping dead families rewrites their growing
     /// reference table at each park (FIG-6681).
     ///
-    /// Data-only carries collect after growth of at least max(last live
-    /// estimate, 128 KiB). A no-op carry spends none of that allowance. Every
-    /// input is persisted in the heap header, independent of checkpoint cuts.
+    /// Data-only carries collect after byte growth of at least max(last
+    /// live byte estimate, 128 KiB), or entity growth of at least max(ceil(last
+    /// live entity estimate / 2), 1). The entity count includes lazy family
+    /// members: large scalar payloads cannot starve their cleanup (FIG-6750).
+    /// A no-op carry spends neither allowance. Both estimates persist across
+    /// cold opens and checkpoint cuts.
     pub(super) fn collects_at_carry(&self) -> bool {
         self.census.as_ref().is_some_and(|census| {
             let upper = census.certificate().upper.0;
@@ -615,6 +620,9 @@ impl PagedHeap {
                 || self.collection_live.is_some_and(|live| {
                     upper.saturating_sub(live.0) >= live.0.max(CARRY_COLLECTION_BYTES)
                 })
+                || self.collection_entities.is_some_and(|live| {
+                    census.certificate().entities.saturating_sub(live) >= live.div_ceil(2).max(1)
+                })
         })
     }
     /// Seed pacing once without tracing the initial, potentially huge,
@@ -622,6 +630,10 @@ impl PagedHeap {
     pub(super) fn carried_collection_estimate(&mut self) {
         if self.collection_live.is_none() {
             self.collection_live = Some(self.accounting.upper);
+            self.header = None;
+        }
+        if self.collection_entities.is_none() {
+            self.collection_entities = Some(self.accounting.entities);
             self.header = None;
         }
     }

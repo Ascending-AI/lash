@@ -78,7 +78,9 @@ async fn failures_keep_their_causes_and_name_the_work() {
         .expect("the repeat passes the memory bound");
     assert_eq!(failure.kind, lash_core::CellFailureKind::Policy);
     assert!(
-        failure.message.contains("library function `text.repeat`"),
+        // FIG-6678 names the admitting operation, independently of its
+        // generated plan's nested calls.
+        failure.message.contains("library function `py.mul`"),
         "{}",
         failure.message
     );
@@ -111,11 +113,10 @@ async fn failures_keep_their_causes_and_name_the_work() {
     )
     .await;
     let failure = response.error().expect("the Once call was interrupted");
+    assert_interrupted_effect_label(&failure.message, "echo_say");
     for text in [
         "tool_failed",
         "echo_say",
-        "site",
-        "occurrence 0",
         "outside work may already have happened",
         "check outside state before calling again",
     ] {

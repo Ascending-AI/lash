@@ -688,6 +688,12 @@ seal reads a staged leaf back and places its rows canonically.
   reservations, holds, arena memory pricing and census work; its memory readout
   is zero and its checkpoint carries an unmetered certificate. Semantic value
   summaries, persistence and reference ownership remain active.
+  Carry collection is paced by both bytes and entity count (FIG-6750): the
+  heap header retains each last-live estimate across cold opens. It collects
+  when byte growth reaches `max(last_live_bytes, 128 KiB)` or entity growth
+  reaches `max(ceil(last_live_entities / 2), 1)`. Large immutable scalars cannot
+  starve cleanup of retired frozen families. Ordinary parks and no-op carries
+  collect nothing merely for crossing a boundary.
   Refinement prices cold objects by their persisted summaries and resident ones
   by their bodies, and both give the same exact live cost, so the verdict does
   not depend on residency.
