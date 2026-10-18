@@ -821,9 +821,49 @@ pub trait NativeFunction: Send + Sync {
     }
 }
 
+type ChargedEntry = fn(&[Value]) -> Option<PreparedAnswer>;
+
 /// A native's certified entry that reads no arena object.
 #[derive(Clone, Copy, Debug)]
 pub struct PreparedNative {
+    /// The value-only guard, with no charge measurements or metadata.
     pub entry: fn(&[Value]) -> Option<Value>,
+    /// The same guard with certified scalar sizes, used only when the call
+    /// is charged. It must answer and decline exactly as `entry` does.
+    pub charged_entry: Option<ChargedEntry>,
     pub operation: &'static str,
+}
+
+/// A prepared answer and the scalar sizes established by its guard.
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedAnswer {
+    pub value: Value,
+    /// Present only for at most three immediate scalar arguments and an
+    /// immediate scalar result. Bits 0..2 describe arguments, bit 3 the
+    /// result: a set bit means a nonzero word integer (size 2); every
+    /// other certified value has size 1. Deep size equals size and nested
+    /// size is zero. A guard that cannot certify this leaves it absent.
+    pub scalar_sizes: Option<u8>,
+}
+
+impl From<Value> for PreparedAnswer {
+    fn from(value: Value) -> Self {
+        Self {
+            value,
+            scalar_sizes: None,
+        }
+    }
+}
+
+impl PreparedNative {
+    /// Selects charge metadata only for a charged call (K-CHG-007).
+    /// An uncharged helper body runs the value-only guard.
+    #[inline]
+    pub fn answer(&self, args: &[Value], charging: bool) -> Option<PreparedAnswer> {
+        if charging && let Some(entry) = self.charged_entry {
+            entry(args)
+        } else {
+            (self.entry)(args).map(Into::into)
+        }
+    }
 }

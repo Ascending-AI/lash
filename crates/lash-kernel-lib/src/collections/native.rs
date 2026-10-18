@@ -309,6 +309,7 @@ pub(super) fn functions<T>(
             Arc::new(Aux(
                 function,
                 entry.map(|entry| PreparedNative {
+                    charged_entry: None,
                     entry,
                     operation: name,
                 }),
@@ -327,7 +328,14 @@ pub(super) fn functions<T>(
                     entry: fn(&[Value]) -> Option<Value>,
                     operation: &'static str|
      -> Arc<dyn NativeFunction> {
-        Arc::new(Aux(function, Some(PreparedNative { entry, operation })))
+        Arc::new(Aux(
+            function,
+            Some(PreparedNative {
+                charged_entry: None,
+                entry,
+                operation,
+            }),
+        ))
     };
     for (signature, native, charge) in [
         (
@@ -769,6 +777,7 @@ impl NativeFunction for Native {
         macro_rules! check {
             ($kind:ident) => {
                 PreparedNative {
+                    charged_entry: None,
                     operation: concat!(stringify!($kind), ".check"),
                     entry: |args| {
                         let value = args.first()?;
@@ -981,6 +990,7 @@ impl NativeFunction for IdentityKey {
 
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            charged_entry: None,
             operation: "collection.identity_key(Any, Any, Text)",
             entry: |args| {
                 field(args.get(2)?).ok()?;

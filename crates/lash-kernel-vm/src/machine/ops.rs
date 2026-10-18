@@ -284,11 +284,14 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        if matches!(value, Value::Bool(_)) {
+        // Immediates own no arena storage and their register slot is
+        // already admitted. Holding a page-value shell until statement
+        // end would reserve and release bytes that were never allocated.
+        if super::Pins::scalar(value) {
             return Ok(());
         }
         let bytes = self.arena.borrow().cost_of(value);
-        self.pins.hold(value, bytes)?;
+        self.pins.root(value);
         self.reserve(bytes)
     }
 
@@ -677,7 +680,8 @@ impl KernelMachine {
             None
         };
         if let Some((prepared, fast)) = &function.prepared
-            && let Some(value) = (prepared.entry)(&self.regs[args..args + function.arity])
+            && let Some(value) =
+                prepared.answer(&self.regs[args..args + function.arity], self.charging)
         {
             self.observe(Event::NativeEnter { task, lib });
             self.prepared_answered(exe, lib, args, out, value, fast)?;
@@ -715,14 +719,19 @@ impl KernelMachine {
         lib: LibId,
         args: Reg,
         out: Reg,
-        value: Value,
+        answer: lash_kernel_doc::PreparedAnswer,
         fast: &crate::compile::Fast,
     ) -> Eval<()> {
         let function = exe.lib(lib);
         let end = args + function.arity;
         self.observe(Event::NativeFast);
+        let value = answer.value;
         self.pin_value(&value)?;
-        let units = if self.charging {
+        let units = if !self.charging {
+            0
+        } else if let Some(units) = answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
+            units
+        } else {
             match fast.charge(&function.charge, &self.regs[args..end], &value) {
                 Charge::Units(units) => units,
                 Charge::Plan(plan) => {
@@ -732,8 +741,6 @@ impl KernelMachine {
                     })?
                 }
             }
-        } else {
-            0
         };
         self.charge_call(exe, lib, units)?;
         self.observe(Event::NativeExit);
@@ -798,7 +805,7 @@ impl KernelMachine {
                 if prepared
                     && let Some((entry, fast)) = &function.prepared
                     // A prepared entry reads and builds no arena object.
-                    && let Some(value) = (entry.entry)(&self.regs[args..end])
+                    && let Some(value) = entry.answer(&self.regs[args..end], self.charging)
                 {
                     self.prepared_answered(exe, lib, args, out, value, fast)?;
                     return Ok(Answer::Done);

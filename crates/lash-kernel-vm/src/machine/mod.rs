@@ -447,16 +447,13 @@ impl std::fmt::Debug for KernelMachine {
     }
 }
 
-/// What the statement being run holds outside any variable: each value
-/// that names an object or a task, which a collection keeps, and the bytes
-/// of the values that name nothing, which it only counts.
+/// What the statement holds outside any variable: values that name an
+/// object or task, which a collection keeps. Immediate scalars need no pin.
 #[derive(Default)]
 struct Pins {
     values: Vec<Value>,
     /// Values being transferred between an existing register and its caller.
     borrowed: Vec<Value>,
-    /// Local costs of immediate pins, which have no edges to trace.
-    bytes: u64,
     /// Every object a native call's arguments reach goes back on its pages
     /// before the call.
     #[cfg(test)]
@@ -475,22 +472,6 @@ impl Pins {
         )
     }
 
-    /// Holds `value`, of `bytes` bytes.
-    #[inline(always)]
-    fn hold(&mut self, value: &Value, bytes: u64) -> Result<(), Halt> {
-        if matches!(value, Value::Bool(_)) {
-            return Ok(());
-        }
-        if Self::scalar(value) {
-            self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
-                HeapFault::Malformed("statement scalar holding cost overflow".into())
-            })?;
-        } else {
-            self.root(value);
-        }
-        Ok(())
-    }
-
     #[inline(always)]
     fn root(&mut self, value: &Value) {
         self.values.push(*value);
@@ -499,7 +480,6 @@ impl Pins {
     fn clear(&mut self) {
         self.values.clear();
         self.borrowed.clear();
-        self.bytes = 0;
     }
 }
 
@@ -695,7 +675,7 @@ impl KernelMachine {
                 lash_kernel_state::paged::StatementRoots {
                     registers: &registers,
                     pinned: &pinned,
-                    pinned_bytes: self.pins.bytes,
+                    pinned_bytes: 0,
                     borrowed: &borrowed,
                 },
                 || {

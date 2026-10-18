@@ -19,6 +19,7 @@ impl NativeFunction for Scalar {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            charged_entry: None,
             entry: Self::answer,
             operation: "law.scalar",
         })
@@ -64,6 +65,7 @@ impl NativeFunction for Truth {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            charged_entry: None,
             entry: Self::answer,
             operation: "law.truth",
         })
@@ -85,6 +87,7 @@ impl NativeFunction for ListItem {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            charged_entry: None,
             entry: Self::answer,
             operation: "law.list_item",
         })
@@ -98,6 +101,20 @@ impl ListItem {
             }
             _ => None,
         }
+    }
+}
+
+struct ValueOnly;
+impl NativeFunction for ValueOnly {
+    fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        panic!("the value-only prepared guard must answer")
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: Scalar::answer,
+            charged_entry: Some(|_| panic!("an uncharged helper produced charge metadata")),
+            operation: "law.value_only",
+        })
     }
 }
 
@@ -115,6 +132,7 @@ fn probes(
     let is_float = register("law.float", "x: Any", Arc::new(IsFloat));
     let add = register("law.add", "a: Any, b: Any", Arc::new(AddFloat));
     let boolean = register("law.boolean", "x: Any", Arc::new(IsBool));
+    let value_only = register("law.value_only", "x: Any", Arc::new(ValueOnly));
     let definition = parse_definition(&format!(
         r#"function law.scalar(x: Any) -> Any
 kernel 1
@@ -147,7 +165,13 @@ body {{
     let item = registry
         .register(definition, Some(Arc::new(ListItem)))
         .unwrap();
+    let definition = parse_definition(&format!(
+        "function law.uncharged(x: Any) -> Any\nkernel 1\ncharge 7\nuse law.value_only = @{}\nbody {{ return law.value_only(x) }}\n", value_only.1
+    )).unwrap();
+    let uncharged = registry.register(definition, None).unwrap();
     vec![
+        value_only,
+        ("law.uncharged", uncharged),
         is_float,
         add,
         boolean,
@@ -402,5 +426,23 @@ main { return call up(0) }
     assert!(
         answered > 0 && refused > 0,
         "{answered} answered, {refused} refused"
+    );
+}
+
+/// K-CHG-007: a helper body evaluates its prepared scalar operation without
+/// entering any charge-only guard. Both a general-call fallback and the
+/// metadata-producing callback panic, so a successful nonempty result is
+/// evidence that the value-only entry ran.
+#[test]
+fn uncharged_helpers_use_the_value_only_prepared_entry() {
+    let trace = observe(
+        "main { let value = invoke law.uncharged(2.0) return value }",
+        ROOMY,
+        Layout(0),
+        false,
+    );
+    assert_eq!(
+        trace.0,
+        format!("finished {:?}", Datum::Float(Float::new(3.0)))
     );
 }

@@ -1,5 +1,7 @@
 //! Library-owned entries specialized by operation and operand domain.
 
+use lash_kernel_doc::PreparedAnswer;
+
 use super::{Binary, Domain, Math, Operation, PreparedNative, Unary, Value, plain};
 
 trait Scalar {
@@ -8,28 +10,70 @@ trait Scalar {
 }
 
 #[inline]
-fn run<const DOMAIN: u8, S: Scalar>(args: &[Value]) -> Option<Value> {
+fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Option<PreparedAnswer> {
     if args.len() != S::ARITY {
         return None;
     }
+    let mut sizes = CHARGED.then_some(0u8);
     if matches!(S::OPERATION, Operation::IntParse | Operation::FloatParse) {
         if !matches!(args[0], Value::Text(_))
             || (S::ARITY == 2 && !matches!(args[1], Value::Int(_)))
         {
             return None;
         }
-    } else {
-        let admitted = |value: &Value| match DOMAIN {
-            0 => true,
-            1 => matches!(value, Value::Int(_) | Value::Float(_)),
-            2 => matches!(value, Value::Int(_)),
-            _ => matches!(value, Value::Float(_)),
-        };
-        if !args.iter().all(admitted) {
-            return None;
+        sizes = None;
+    } else if DOMAIN != 0 || CHARGED {
+        for (index, value) in args.iter().enumerate() {
+            match value {
+                Value::Int(word) => {
+                    if DOMAIN == 3 {
+                        return None;
+                    }
+                    if CHARGED && *word != 0 {
+                        sizes = sizes.map(|mask| mask | (1 << index));
+                    }
+                }
+                Value::Float(_) => {
+                    if DOMAIN == 2 {
+                        return None;
+                    }
+                }
+                Value::Null | Value::Absent | Value::Bool(_) => {
+                    if DOMAIN != 0 {
+                        return None;
+                    }
+                }
+                _ => {
+                    if DOMAIN != 0 {
+                        return None;
+                    }
+                    sizes = None;
+                }
+            }
         }
     }
-    plain(S::OPERATION, args, None).ok()?
+    // Errors decline to the general entry, which charges the raise using
+    // the original formula and its absent result measurement.
+    let value = plain(S::OPERATION, args, None).ok()??;
+    let result_size = if CHARGED {
+        match value {
+            Value::Int(word) => Some(word != 0),
+            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => Some(false),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    Some(PreparedAnswer {
+        value,
+        scalar_sizes: if CHARGED {
+            sizes
+                .zip(result_size)
+                .map(|(mask, nonzero)| mask | (u8::from(nonzero) << 3))
+        } else {
+            None
+        },
+    })
 }
 
 macro_rules! entries {
@@ -48,10 +92,10 @@ macro_rules! entries {
             }
             Some(match operation {
                 $( $operation => match domain {
-                    Domain::Any => PreparedNative { entry: run::<0, $marker>, operation: concat!(stringify!($expression), " / Any") },
-                    Domain::Number => PreparedNative { entry: run::<1, $marker>, operation: concat!(stringify!($expression), " / Number") },
-                    Domain::Int => PreparedNative { entry: run::<2, $marker>, operation: concat!(stringify!($expression), " / Int") },
-                    Domain::Float => PreparedNative { entry: run::<3, $marker>, operation: concat!(stringify!($expression), " / Float") },
+                    Domain::Any => PreparedNative { entry: |args| run::<0, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<0, true, $marker>), operation: concat!(stringify!($expression), " / Any") },
+                    Domain::Number => PreparedNative { entry: |args| run::<1, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<1, true, $marker>), operation: concat!(stringify!($expression), " / Number") },
+                    Domain::Int => PreparedNative { entry: |args| run::<2, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<2, true, $marker>), operation: concat!(stringify!($expression), " / Int") },
+                    Domain::Float => PreparedNative { entry: |args| run::<3, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<3, true, $marker>), operation: concat!(stringify!($expression), " / Float") },
                 }, )*
                 // Integer text reserves its digits before writing them.
                 Operation::IntText => return None,

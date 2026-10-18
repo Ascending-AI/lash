@@ -195,10 +195,10 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 &mut counter,
             );
             if let Some(prepared) = registered.native().unwrap().prepare()
-                && let Some(prepared) = (prepared.entry)(&args)
+                && let Some(prepared) = prepared.answer(&args, true)
             {
                 assert_eq!(
-                    testsupport::datum(&heap, &prepared),
+                    testsupport::datum(&heap, &prepared.value),
                     testsupport::datum(&heap, result.as_ref().unwrap()),
                     "{name} prepared/general"
                 );
@@ -383,4 +383,78 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
             assert_eq!(world.prints, prints, "{}", case["name"]);
         }
     }
+}
+
+/// K-CHG-003/004: a guard's zero/nonzero mask selects exactly the declared
+/// completion formula over the recorded operator corpus. Errors keep the
+/// generic raise path; no result bit is invented for them.
+#[test]
+fn prepared_scalar_completion_matches_operator_corpus() {
+    let mut registry = FunctionRegistry::new();
+    register_numbers(&mut registry).unwrap();
+    let mut specialized = 0;
+    let mut masks = std::collections::BTreeSet::new();
+    for shard in NATIVE_SHARDS {
+        let shard: serde_json::Value = serde_json::from_str(shard).unwrap();
+        for case in shard["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let id: FunctionId = serde_json::from_value(case["function"].clone()).unwrap();
+            let registered = registry.get(&id).unwrap();
+            let Some(prepared) = registered.native().unwrap().prepare() else {
+                continue;
+            };
+            let definition = registered.definition();
+            let mut heap = testsupport::heap();
+            let args: Vec<Value> = case["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| decode(serde_json::from_value(arg.clone()).unwrap(), &mut heap))
+                .collect();
+            let Some(answer) = prepared.answer(&args, true) else {
+                continue;
+            };
+            let uncharged = (prepared.entry)(&args).expect("the value-only guard agrees");
+            assert_eq!(
+                testsupport::datum(&heap, &answer.value),
+                testsupport::datum(&heap, &uncharged),
+                "{name}: charged/value-only entry"
+            );
+            let Some(mask) = answer.scalar_sizes else {
+                continue;
+            };
+            let Some(units) =
+                lash_kernel_vm::kernel_internals::prepared_scalar_charge(definition, mask)
+            else {
+                continue;
+            };
+            let generic = definition.charge.evaluate(&mut |operand, measure| {
+                let value = match operand {
+                    Operand::Result => Some(&answer.value),
+                    Operand::Param(name) => definition
+                        .signature
+                        .params
+                        .iter()
+                        .position(|param| param.name == *name)
+                        .and_then(|index| args.get(index)),
+                };
+                value.map_or(0, |value| match measure {
+                    Measure::Size => size(value, &heap),
+                    Measure::DeepSize => deep_size(value, &heap),
+                    Measure::Magnitude => magnitude(value, &heap),
+                    Measure::NestedSize => nested_size(value, &heap),
+                })
+            });
+            assert_eq!(units, generic, "{name}: guard mask {mask:04b}");
+            assert_eq!(
+                units,
+                case["expected"]["charged"].as_u64().unwrap(),
+                "{name}: recorded charge"
+            );
+            specialized += 1;
+            masks.insert(mask);
+        }
+    }
+    assert!(specialized > 0);
+    assert!(masks.contains(&0) && masks.iter().any(|mask| mask & 8 != 0));
 }

@@ -51,6 +51,7 @@ macro_rules! prepared {
             }
             fn prepare(&self) -> Option<PreparedNative> {
                 Some(PreparedNative {
+                    charged_entry: None,
                     entry: |args| Self::answer(args).ok(),
                     operation: stringify!($native),
                 })
@@ -96,6 +97,7 @@ impl NativeFunction for Concat {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            charged_entry: None,
             entry: |args| match args {
                 [Value::Text(a), Value::Text(b)] => {
                     ShortText::new(&format!("{}{}", a.as_str(), b.as_str())).map(Value::Text)

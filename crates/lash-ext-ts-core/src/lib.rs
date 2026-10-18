@@ -27,8 +27,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative,
-    RegistryError, Value,
+    Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedAnswer,
+    PreparedNative, RegistryError, Value,
 };
 
 /// Why [`implement`] could not add the natives.
@@ -166,13 +166,17 @@ impl NativeFunction for Add {
     }
 
     fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            entry: |args| match args {
+        fn entry(args: &[Value]) -> Option<Value> {
+            match args {
                 [Value::Float(left), Value::Float(right), ..] => {
                     Some(Value::Float(Float::new(left.get() + right.get())))
                 }
                 _ => None,
-            },
+            }
+        }
+        Some(PreparedNative {
+            entry,
+            charged_entry: Some(|args| entry(args).map(float_answer)),
             operation: "ts.add / Float",
         })
     }
@@ -238,8 +242,15 @@ impl NativeFunction for Relate {
             Relation::Gt => |args| floats(args, Relation::Gt),
             Relation::Ge => |args| floats(args, Relation::Ge),
         };
+        let charged_entry: fn(&[Value]) -> Option<PreparedAnswer> = match self.relation {
+            Relation::Lt => |args| floats(args, Relation::Lt).map(float_answer),
+            Relation::Le => |args| floats(args, Relation::Le).map(float_answer),
+            Relation::Gt => |args| floats(args, Relation::Gt).map(float_answer),
+            Relation::Ge => |args| floats(args, Relation::Ge).map(float_answer),
+        };
         Some(PreparedNative {
             entry,
+            charged_entry: Some(charged_entry),
             operation: "ts relation / Float",
         })
     }
@@ -265,11 +276,15 @@ impl NativeFunction for ToNumber {
         }
     }
     fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            entry: |args| match args {
+        fn entry(args: &[Value]) -> Option<Value> {
+            match args {
                 [value @ Value::Float(_)] => Some(*value),
                 _ => None,
-            },
+            }
+        }
+        Some(PreparedNative {
+            entry,
+            charged_entry: Some(|args| entry(args).map(float_answer)),
             operation: "ts.to_number / Float",
         })
     }
@@ -287,13 +302,17 @@ impl NativeFunction for Subtract {
         }
     }
     fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            entry: |args| match args {
+        fn entry(args: &[Value]) -> Option<Value> {
+            match args {
                 [Value::Float(left), Value::Float(right)] => {
                     Some(Value::Float(Float::new(left.get() - right.get())))
                 }
                 _ => None,
-            },
+            }
+        }
+        Some(PreparedNative {
+            entry,
+            charged_entry: Some(|args| entry(args).map(float_answer)),
             operation: "ts.sub / Float",
         })
     }
@@ -327,5 +346,13 @@ impl NativeFunction for Get {
             return Err(NativeError::Decline);
         }
         Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))
+    }
+}
+
+/// The float guards certify size-one arguments and result.
+fn float_answer(value: Value) -> PreparedAnswer {
+    PreparedAnswer {
+        value,
+        scalar_sizes: Some(0),
     }
 }

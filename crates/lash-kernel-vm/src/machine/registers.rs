@@ -219,7 +219,6 @@ mod laws {
                         .all(|value| value.handle().is_none())
                 );
                 assert!(machine.pins.values.is_empty());
-                assert_eq!(machine.pins.bytes, 0);
                 let _ = machine.meters();
             }
         }

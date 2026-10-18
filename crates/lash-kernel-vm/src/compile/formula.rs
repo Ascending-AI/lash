@@ -338,6 +338,8 @@ impl Plan {
 /// size 0, and a formula that measures only scalar sizes is closed over
 /// sizes 1 and 2, including zero and nonzero small integers.
 pub(crate) struct Fast {
+    /// Completion units indexed by the prepared guard's scalar size mask.
+    scalar: Option<Box<[u64; 16]>>,
     /// The formula as it computes for values that hold nothing
     /// ([`doc::Formula::shallow`]).
     shallow: Plan,
@@ -394,13 +396,41 @@ impl Fast {
                 .map(|(source, _)| *source)
                 .collect()
         };
+        let scalar = (params.len() <= 3
+            && charge
+                .measurements
+                .iter()
+                .all(|(_, kind)| *kind != doc::Measure::Magnitude))
+        .then(|| {
+            Box::new(std::array::from_fn(|mask| {
+                charge.evaluate(|source, kind| {
+                    if kind == doc::Measure::NestedSize {
+                        return 0;
+                    }
+                    let bit = match source {
+                        Source::Arg(index) => index,
+                        Source::Result => 3,
+                        Source::Nothing => return 0,
+                    };
+                    1 + ((mask >> bit) & 1) as u64
+                })
+            }))
+        });
         Self {
+            scalar,
             unit,
             small,
             deep: measured(doc::Measure::DeepSize),
             nested: measured(doc::Measure::NestedSize),
             shallow,
         }
+    }
+
+    /// The exact formula for scalar sizes already certified by the guard.
+    /// Formulas measuring magnitude retain the general fallback.
+    #[inline]
+    pub(crate) fn scalar_units(&self, mask: u8) -> Option<u64> {
+        self.scalar.as_ref()?.get(usize::from(mask)).copied()
     }
 
     /// How to charge a call with `args` that returned `result`: what

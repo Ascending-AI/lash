@@ -31,7 +31,6 @@ use crate::compile::{Executable, LibId, PreparedPlan};
 pub(super) struct Mark {
     pins: usize,
     borrowed: usize,
-    bytes: u64,
     reserved: u64,
 }
 
@@ -132,7 +131,6 @@ impl PlanRun<'_> {
         let machine = &mut *self.machine;
         machine.pins.values.truncate(mark.pins);
         machine.pins.borrowed.truncate(mark.borrowed);
-        machine.pins.bytes = machine.pins.bytes.min(mark.bytes);
         machine.heap.release_reserved_to(mark.reserved)?;
         let registers = self.prepared.plan.registers as usize;
         machine.regs.clear_range(self.base..self.base + registers);
@@ -150,7 +148,6 @@ impl PlanRun<'_> {
         self.statement = Some(Mark {
             pins: machine.pins.values.len(),
             borrowed: machine.pins.borrowed.len(),
-            bytes: machine.pins.bytes,
             reserved: machine.heap.statement_reserved(),
         });
         Ok(())

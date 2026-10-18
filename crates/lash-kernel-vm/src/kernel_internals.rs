@@ -108,3 +108,15 @@ pub fn task_identity(
 pub fn segments(library: &PreparedLibrary) -> (usize, Vec<String>) {
     library.segments()
 }
+
+/// The prepared scalar completion formula, for the owning library's
+/// independent charge oracle. A missing specialization uses the normal
+/// machine formula instead.
+pub fn prepared_scalar_charge(
+    definition: &lash_kernel_doc::FunctionDefinition,
+    mask: u8,
+) -> Option<u64> {
+    let params = &definition.signature.params;
+    let plan = crate::compile::Plan::new(&definition.charge, params);
+    crate::compile::Fast::new(&definition.charge, params, &plan).scalar_units(mask)
+}
