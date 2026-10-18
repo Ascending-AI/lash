@@ -767,6 +767,55 @@ fn scalar_hook<const CHARGING: bool>(answer: Answer) -> Hook {
     })
 }
 
+/// A heap path's write to a guest object, checked as the reference's
+/// member write checks it and held until its statement commits
+/// ([`Cx::commit_write`]), its growth's bound reserved out of the room. The
+/// write is its operator's last evaluation and the operator its
+/// statement's (`compile::regions`), so the statement evaluates nothing
+/// after it that reads what it writes; a statement that misses drops it.
+pub(crate) struct Held {
+    pub(super) write: Prepared,
+    pub(super) bound: u64,
+}
+
+impl Held {
+    /// Whether `value` is the object the write changes: its cost and
+    /// size are the reference's after the write.
+    pub(super) fn changes(&self, value: &Value) -> bool {
+        value.handle() == Some(self.write.target())
+    }
+}
+
+/// A member write checked as the reference's checks it: what it writes
+/// where, its growth not yet held.
+pub(crate) enum Prepared {
+    /// `value` at position `at` of `list`, appending at its length.
+    List {
+        list: ArenaHandle,
+        at: u64,
+        value: Value,
+    },
+    /// `written` under `key` of `table`.
+    Table {
+        table: ArenaHandle,
+        key: Value,
+        written: Value,
+    },
+    /// `key` out of `set`.
+    Unset { set: ArenaHandle, key: Value },
+}
+
+impl Prepared {
+    /// The object it writes.
+    fn target(&self) -> ArenaHandle {
+        match self {
+            Self::List { list, .. } => *list,
+            Self::Table { table, .. } => *table,
+            Self::Unset { set, .. } => *set,
+        }
+    }
+}
+
 /// Writes `value` at `place` of `target`, with `index` for an index, as
 /// the reference's member write does, marking what it changes dirty and
 /// holding its growth, which the room admits first; `None`, having
@@ -778,15 +827,31 @@ pub(crate) fn store(
     index: Value,
     value: Value,
 ) -> Option<()> {
+    let (write, _) = prepare(cx, place, target, index, value)?;
+    apply(cx, write)
+}
+
+/// The write of `value` at `place` of `target`, with `index` for an
+/// index, checked as the reference's member write checks it, and the most
+/// its growth holds, which the room admits; `None` where the reference
+/// raises or must decode first.
+#[inline(always)]
+pub(super) fn prepare(
+    cx: &Cx<'_>,
+    place: &Place,
+    target: Value,
+    index: Value,
+    value: Value,
+) -> Option<(Prepared, u64)> {
     let (table, key, written) = match (target, place) {
         (Value::List(list), Place::Index) => {
             let length = cx.arena.len(list).ok()?;
             let at = position(&index).filter(|at| *at <= length)?;
-            if !cx.fits(cx.arena.cost_of(&value)) {
+            let bound = cx.arena.cost_of(&value);
+            if !cx.fits(bound) {
                 return None;
             }
-            let grown = cx.arena.list_set(list, at, value).ok()?;
-            return cx.hold(grown).then_some(());
+            return Some((Prepared::List { list, at, value }, bound));
         }
         (Value::Record(record), Place::Field(name)) => (record, *name, value),
         (Value::Record(record), Place::Index)
@@ -806,7 +871,7 @@ pub(crate) fn store(
                     if cx.arena.unresolved(set, &index).ok()?.is_some() {
                         return None;
                     }
-                    return cx.arena.table_delete(set, &index).ok();
+                    return Some((Prepared::Unset { set, key: index }, 0));
                 }
                 _ => return None,
             }
@@ -820,6 +885,31 @@ pub(crate) fn store(
     if cx.arena.unresolved(table, &key).ok()?.is_some() || !cx.fits(bound) {
         return None;
     }
-    let grown = cx.arena.table_write(table, key, written).ok()?;
+    Some((
+        Prepared::Table {
+            table,
+            key,
+            written,
+        },
+        bound,
+    ))
+}
+
+/// Makes `write`, which [`prepare`] checked, and holds its growth; `None`
+/// where the arena must decode first.
+#[inline(always)]
+pub(super) fn apply(cx: &mut Cx<'_>, write: Prepared) -> Option<()> {
+    let grown = match write {
+        Prepared::List { list, at, value } => cx.arena.list_set(list, at, value).ok()?,
+        Prepared::Table {
+            table,
+            key,
+            written,
+        } => cx.arena.table_write(table, key, written).ok()?,
+        Prepared::Unset { set, key } => {
+            cx.arena.table_delete(set, &key).ok()?;
+            0
+        }
+    };
     cx.hold(grown).then_some(())
 }

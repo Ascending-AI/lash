@@ -158,6 +158,32 @@ impl Entry {
         });
         heap.max(self.depth())
     }
+
+    /// Whether a heap path may write a guest object: its own, or one of a
+    /// callee's entry below it ([`inner`]).
+    pub(crate) fn writes<'l>(
+        &self,
+        lib: &dyn Fn(super::LibId) -> &'l super::Lib,
+        lib_of: &dyn Fn(&FunctionId) -> Option<super::LibId>,
+    ) -> bool {
+        self.writes_at(lib, lib_of, 0)
+    }
+
+    fn writes_at<'l>(
+        &self,
+        lib: &dyn Fn(super::LibId) -> &'l super::Lib,
+        lib_of: &dyn Fn(&FunctionId) -> Option<super::LibId>,
+        level: u32,
+    ) -> bool {
+        self.heap(lib_of).is_some_and(|(heap, callees, _)| {
+            heap.writes
+                || level < INNER
+                    && callees
+                        .iter()
+                        .filter_map(|&callee| inner(lib(callee)))
+                        .any(|entry| entry.writes_at(lib, lib_of, level + 1))
+        })
+    }
 }
 
 /// How many helpers below an operator's heap paths a callee's entry

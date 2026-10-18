@@ -1399,6 +1399,167 @@ fn a_memory_refusal_agrees_only_within_the_transient_slack() {
     assert!(!agree(&held, &finished, &mut short));
 }
 
+/// A host's charge limiter that grows the limit once by its amount, then
+/// refuses.
+struct GrowOnce(Option<u64>);
+
+impl lash_kernel_vm::ChargeLimiter for GrowOnce {
+    fn limit_reached(&mut self, _: u64, _: u64) -> lash_kernel_vm::LimitDecision {
+        self.0
+            .take()
+            .map_or(lash_kernel_vm::LimitDecision::Refuse, |grow| {
+                lash_kernel_vm::LimitDecision::Grow(grow)
+            })
+    }
+}
+
+/// What a run observably did: its end, its charge, its prints and its
+/// expanded charge program.
+type Ran = (
+    ExpectedEnd,
+    Option<u64>,
+    Vec<lash_kernel_doc::Datum>,
+    Vec<Weight>,
+);
+
+/// How `program`'s run under plan `L` ends at charge limit `limit`, with a
+/// limiter that grows it once by `grow` when given, and the work regions
+/// committed in it.
+fn limited<const L: u64>(
+    program: &Program,
+    name: &str,
+    limit: u64,
+    grow: Option<u64>,
+) -> (Ran, RegionWork) {
+    let (ended, tape, work) = taped_work(|| {
+        let start = lash_kernel_vm::CellStart {
+            target: lash_kernel_vm::Target::Main,
+            args: Vec::new(),
+            session: None,
+            owner: crate::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
+        };
+        let mut environment = Environment::default();
+        environment.bounds.call_depth = 16;
+        let bounds = lash_kernel_vm::Bounds {
+            charge_limit: limit,
+            ..environment.bounds.into()
+        };
+        let mut machine = Plan::<L>::start(
+            program.clone(),
+            bounds,
+            start,
+            Box::new(crate::pages::Source::default()),
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+        machine.set_options(lash_kernel_vm::MachineOptions {
+            charge_limiter: grow.map(|grow| {
+                Box::new(GrowOnce(Some(grow))) as Box<dyn lash_kernel_vm::ChargeLimiter>
+            }),
+            ..Default::default()
+        });
+        let mut world = crate::helper_plans::World {
+            bits: 0,
+            stride: 1,
+            nanoseconds: 0,
+            prints: Vec::new(),
+        };
+        loop {
+            match machine.run(&mut world, u64::MAX) {
+                Ok(lash_kernel_vm::Step::Ended(end)) => {
+                    return (
+                        ExpectedEnd::from_end(end),
+                        machine.meters().charged,
+                        world.prints,
+                    );
+                }
+                Ok(lash_kernel_vm::Step::Slice) => {}
+                Ok(_) => panic!("{name}: a run without effects parked"),
+                Err(error) => panic!("{name}: {error}"),
+            }
+        }
+    });
+    let (end, charged, prints) = ended;
+    let ran = (end, charged, prints, Weight::expand(tape.iter().copied()));
+    (ran, work)
+}
+
+/// FIG-6781: a region statement's heap writes commit with the statement
+/// (`docs/design/kernel-regions.md` §1: a failed guard changes nothing a
+/// run can see). A statement that misses after a template wrote a guest
+/// object, here a read past a list its own append grew, leaves the write
+/// to the reference, which makes it once: regions on finish as off do.
+/// And the FIG-6768 limiter comparison over the dialects' heap-path
+/// programs: a run whose limiter grows its charge limit where the run
+/// reaches it, at every limit around its charge program's events, runs
+/// as one started with the grown limit, with regions on and off alike,
+/// though the crossing falls inside a statement whose template wrote.
+#[test]
+fn region_heap_writes_commit_with_their_statement() {
+    let programs = crate::helper_plans::heap_write_programs();
+    let (mut runs, mut failures) = (0, Vec::new());
+    for (lowered, program) in &programs {
+        let name = &lowered.id;
+        let registry = program.library.registry();
+        let on = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(ON)),
+            ..program.clone()
+        };
+        let off = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+            ..program.clone()
+        };
+        let roomy = Environment::default().bounds.charge;
+        let mut case = program_case(name, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        assert!(
+            formed(&on.library, &case).0 > 0,
+            "{name}: no loop region forms"
+        );
+        let (natural, work) = limited::<ON>(&on, name, roomy, None);
+        let (reference, _) = limited::<OFF>(&off, name, roomy, None);
+        // The witnesses' writes run in regions; only the append its own
+        // statement then reads past is left to the reference.
+        if name.contains("heap write: ") && !name.ends_with("reads past") && work.iterations == 0 {
+            failures.push(format!("{name}: no region iteration ran: {work:?}"));
+        }
+        if natural != reference {
+            failures.push(format!(
+                "{name}: regions on {:?} {:?} charged {:?}, off {:?} {:?} charged {:?}",
+                natural.0, natural.2, natural.1, reference.0, reference.2, reference.1
+            ));
+            continue;
+        }
+        let total = natural.1.expect("charge is metered");
+        let grow = total;
+        for limit in bounds(&natural.3, total) {
+            runs += 3;
+            let (grown, _) = limited::<ON>(&on, name, limit, Some(grow));
+            let (started, _) = limited::<ON>(&on, name, limit + grow, None);
+            let (off, _) = limited::<OFF>(&off, name, limit, Some(grow));
+            if grown != started || grown != off {
+                failures.push(format!(
+                    "{name}: limit {limit} grown by {grow}: regions on {:?} {:?} charged {:?}, \
+                     started with it {:?} {:?} charged {:?}, regions off {:?} {:?} charged {:?}",
+                    grown.0, grown.2, grown.1, started.0, started.2, started.1, off.0, off.2, off.1
+                ));
+                break;
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} programs disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    println!(
+        "region heap writes commit with their statement: programs={} runs={runs}",
+        programs.len()
+    );
+}
+
 macro_rules! program_shards {
     ($($name:ident: $shard:expr),+ $(,)?) => {
         $(

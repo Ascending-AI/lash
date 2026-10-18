@@ -1,7 +1,9 @@
 //! A region's context (`docs/design/kernel-regions.md` §3.5): the census
 //! and admission a region's compiled statements read, build and hold with,
 //! as the reference's anchors hold and reserve what its statements make,
-//! and the heap paths of a template whose body a region runs.
+//! and the heap paths of a template whose body a region runs. A write the
+//! heap paths make to a guest object is held until its statement commits
+//! ([`Held`]): a statement that misses drops it, having written nothing.
 
 use std::ops::Range;
 
@@ -17,7 +19,9 @@ use lash_kernel_state::kernel_internals::PagedHeap;
 use super::super::{
     Charge, Executable, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
 };
-use super::nodes::{Meter, Place, SessionSlot, error_field, read_index, scalar, store};
+use super::nodes::{
+    Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index, scalar,
+};
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
 
@@ -46,8 +50,8 @@ pub(crate) struct Cx<'a> {
     pub(crate) room: u64,
     /// What the running statement reserves until it ends, out of the
     /// room: its pins and its native calls' work, as the reference's
-    /// statement credit; and, while a construction collects its members,
-    /// the least it will hold.
+    /// statement credit; while a construction collects its members, the
+    /// least it will hold; and the bound of the write it holds.
     pub(crate) transient: u64,
     /// The fault a node met, which ends the run: a miss is no fault.
     pub(crate) fault: Option<HeapFault>,
@@ -59,6 +63,9 @@ pub(crate) struct Cx<'a> {
     /// paths leave to the general call, before they built anything: the
     /// reference's own, as a barrier is.
     pub(crate) declined: bool,
+    /// The write the running statement's operator made through its heap
+    /// paths, held until the statement commits.
+    pub(crate) held: Option<Held>,
 }
 
 impl Cx<'_> {
@@ -98,6 +105,20 @@ impl Cx<'_> {
     #[inline]
     fn free(&self) -> u64 {
         self.room.saturating_sub(self.transient)
+    }
+
+    /// Applies the write the committing statement holds, if any, as the
+    /// reference's member write makes it; `false`, having written nothing,
+    /// where the arena must decode first, so that the statement misses.
+    #[inline]
+    pub(crate) fn commit_write(&mut self) -> bool {
+        match self.held.take() {
+            Some(held) => {
+                self.transient = self.transient.saturating_sub(held.bound);
+                apply(self, held.write).is_some()
+            }
+            None => true,
+        }
     }
 
     /// Whether `bytes` of growth fit the room, so that holding them after
@@ -222,7 +243,14 @@ impl Cx<'_> {
         Some(value)
     }
 
+    /// What `plan` charges a call of `args` that gave `result`, measured
+    /// as the reference measures it. With a write held, a formula that
+    /// measures an object other than a long text, which the write may
+    /// change or reach, is the reference's to measure after the write.
     fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> Option<u64> {
+        if self.held.is_some() && measures_object(plan, args, result) {
+            return None;
+        }
         measured_formula(self.arena, plan, args, result)
     }
 
@@ -327,7 +355,12 @@ impl Cx<'_> {
             },
         };
         let value = answer.value;
-        if !self.pin(&value) {
+        // A value the held write changes is pinned at its cost after the
+        // write, which the reference's pin anchor reserves.
+        if !scalar(&value)
+            && (self.held.as_ref().is_some_and(|held| held.changes(&value))
+                || !self.reserve(self.arena.cost_of(&value)))
+        {
             return None;
         }
         if !self.charging {
@@ -379,6 +412,20 @@ pub(crate) fn measured_formula(
     (!failed).then_some(units)
 }
 
+/// Whether `plan`, charging a call of `args` that gave `result`, measures
+/// an object other than a long text: one a held write may change or reach.
+#[inline]
+fn measures_object(plan: &Plan, args: &[Value], result: Option<&Value>) -> bool {
+    plan.measurements().iter().any(|(source, _)| {
+        let value = match *source {
+            Source::Arg(index) => args.get(index),
+            Source::Result => result,
+            Source::Nothing => None,
+        };
+        value.is_some_and(|value| value.handle().is_some() && !matches!(value, Value::LongText(_)))
+    })
+}
+
 /// The most parameters a heap path's callee takes.
 const HEAP_ARITY: usize = 8;
 
@@ -389,8 +436,10 @@ const HEAP_ARITY: usize = 8;
 /// later alternative, so the statement misses. `bound` is what the running
 /// path's plan variables grew by, reserved until the statement ends; what a
 /// declined path reserved is released to `mark`, the statement's credit and
-/// the region's reservations where the paths began. `built` is whether a
-/// call answered an object, or a tuple or a store was made.
+/// the region's reservations where the paths began, and the write it held
+/// is dropped. `built` is whether a call answered an object, or a tuple or
+/// a store was made. Once a write is held, every further form declines: it
+/// is a path's last, and a caller's path reads nothing after it.
 struct HeapCx<'c, 'a> {
     cx: &'c mut Cx<'a>,
     callees: &'c [LibId],
@@ -399,11 +448,14 @@ struct HeapCx<'c, 'a> {
     built: bool,
     bound: u64,
     mark: (u64, u64),
+    /// Whether a write was held where the paths began.
+    held: bool,
 }
 
 impl<'c, 'a> HeapCx<'c, 'a> {
     fn new(cx: &'c mut Cx<'a>, callees: &'c [LibId], level: u32) -> Self {
         let mark = (cx.heap.statement_reserved(), cx.transient);
+        let held = cx.held.is_some();
         Self {
             cx,
             callees,
@@ -412,12 +464,16 @@ impl<'c, 'a> HeapCx<'c, 'a> {
             built: false,
             bound: 0,
             mark,
+            held,
         }
     }
 
-    /// What the paths reserved is released: a declined path changed
-    /// nothing a run sees.
+    /// What the paths reserved is released and what they wrote dropped: a
+    /// declined path changed nothing a run sees.
     fn release(&mut self) {
+        if !self.held {
+            self.cx.held = None;
+        }
         if !self.cx.memory {
             return;
         }
@@ -462,6 +518,9 @@ impl<'c, 'a> HeapCx<'c, 'a> {
 
 impl TemplateHeap for HeapCx<'_, '_> {
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {
+        if self.cx.held.is_some() {
+            return None;
+        }
         let exe = self.cx.exe;
         let function = exe.lib(*self.callees.get(callee)?);
         // One argument per parameter, absent past those given; a callee
@@ -488,6 +547,9 @@ impl TemplateHeap for HeapCx<'_, '_> {
     }
 
     fn bind(&mut self, value: Value, previous: Option<Value>) -> Option<()> {
+        if self.cx.held.is_some() {
+            return None;
+        }
         if !self.cx.memory {
             return Some(());
         }
@@ -508,10 +570,16 @@ impl TemplateHeap for HeapCx<'_, '_> {
     }
 
     fn index(&mut self, target: Value, index: Value) -> Option<Value> {
+        if self.cx.held.is_some() {
+            return None;
+        }
         read_index(self.cx, None, target, index)
     }
 
     fn field(&mut self, target: Value, field: &str) -> Option<Value> {
+        if self.cx.held.is_some() {
+            return None;
+        }
         match target {
             Value::Record(_) => read_index(
                 self.cx,
@@ -525,6 +593,9 @@ impl TemplateHeap for HeapCx<'_, '_> {
     }
 
     fn tuple(&mut self, items: &[Value]) -> Option<Value> {
+        if self.cx.held.is_some() {
+            return None;
+        }
         self.grown(|paths| {
             let cx = &mut *paths.cx;
             let tuple = cx
@@ -536,8 +607,18 @@ impl TemplateHeap for HeapCx<'_, '_> {
         .inspect(|_| self.built = true)
     }
 
+    /// Checks the write as the reference's member write does and holds it
+    /// until the statement commits.
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()> {
-        self.grown(|paths| store(paths.cx, &Place::Index, target, index, value))
-            .inspect(|_| self.built = true)
+        if self.cx.held.is_some() {
+            return None;
+        }
+        let (write, bound) = prepare(self.cx, &Place::Index, target, index, value)?;
+        if self.cx.memory {
+            self.cx.transient += bound;
+        }
+        self.cx.held = Some(Held { write, bound });
+        self.built = true;
+        Some(())
     }
 }

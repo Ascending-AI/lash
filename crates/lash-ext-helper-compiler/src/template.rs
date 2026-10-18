@@ -953,6 +953,8 @@ const HEAP: [(&str, ValueKind, bool); 4] = [
 struct Pass {
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
+    /// Whether a path of an arm writes an arena object.
+    writes: bool,
 }
 
 impl Evaluator<'_> {
@@ -984,6 +986,7 @@ impl Evaluator<'_> {
         let mut pass = Pass {
             arms: BTreeMap::new(),
             depth: 1,
+            writes: false,
         };
         for mask in 0..combinations {
             let mut state = State {
@@ -1046,6 +1049,7 @@ impl Evaluator<'_> {
             for (state, value) in results {
                 let value = value.or_else(|| Symbol::constant(Value::Null))?;
                 pass.depth = pass.depth.max(state.depth);
+                pass.writes |= state.effects().writes;
                 if binds {
                     let _ = writeln!(code, "            heap.path();");
                 }
@@ -1187,8 +1191,8 @@ pub(crate) fn emit(
         Some(heap) => {
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, callees: &[",
-                heap.depth
+                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, callees: &[",
+                heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {
                 let _ = write!(descriptor, "p::function({:?}), ", callee.to_string());

@@ -8,7 +8,7 @@ use super::super::expr::arm_ends;
 use super::super::{Atom, BindingName, BlockId, Form, NestedKind, Var};
 use super::{
     Arms, Body, End, Event, Gathered, Head, LibId, LoopPlan, Lowered, Refused, RegionSlot, Step,
-    Summary, barrier, general, lean, library_invoke, scalar_site,
+    Summary, barrier, general, lean, library_invoke, scalar_site, writes, writes_last,
 };
 
 /// The plan's check against the lowered code: the summaries in the order
@@ -45,7 +45,13 @@ impl Check<'_, '_> {
             .ops
             .get(summary.ops.start as usize..summary.ops.end() as usize)
             .ok_or(Refused::Program { statement: index })?;
-        if !end.ends(ops.last()) {
+        // An operator that writes runs only as the last evaluation of a
+        // `do`, whose commit applies its write.
+        let root_writes = summary
+            .action
+            .and_then(|id| library_invoke(&(self.lowered.stmt)(id).form))
+            .is_some_and(|(_, lib, _)| writes(self.lowered, lib));
+        if !end.ends(ops.last()) || !writes_last(self.lowered, ops) || root_writes {
             return Err(Refused::Shape { statement: index });
         }
         let mut seen = Seen {
@@ -394,6 +400,7 @@ impl LoopPlan {
                 if *binding != bound.at
                     || bound.shared
                     || *item != via.and_then(|via| via.item)
+                    || item.is_some_and(|item| writes(lowered, item))
                     || charge.write != Some(RegionSlot::Frame(bound.at))
                     || !charge.reads.is_empty()
                 {

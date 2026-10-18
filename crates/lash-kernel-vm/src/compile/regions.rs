@@ -32,6 +32,14 @@
 //! statement with any other op is a barrier: the region stops before it
 //! and the reference runs it, as it runs a `break` or a `return`.
 //!
+//! An operator whose heap paths write a guest object
+//! ([`lash_kernel_doc::plan::HeapTemplate::writes`]) runs only as its
+//! statement's last evaluation before a `do` ends it: its write is held
+//! until the statement commits and applied then, so that a statement
+//! that misses leaves nothing written for the reference to write again,
+//! and nothing the statement evaluates reads the object the write is
+//! held for. Anywhere else such a call is a barrier.
+//!
 //! A session binding is a region slot between boundaries (§3.6): a plan
 //! names the bindings its statements read and write ([`LoopPlan::sessions`]),
 //! and a region holds their resident values from its entry and publishes
@@ -455,6 +463,9 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
     else {
         return true;
     };
+    if !writes_last(lowered, ops) {
+        return true;
+    }
     ops.iter().any(|op| match *op {
         Op::Region { .. }
         | Op::Local { .. }
@@ -494,6 +505,44 @@ fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
         Op::Call { lib, args } => !native_site((lowered.lib)(LibId(lib.0)), args.len as usize),
         _ => true,
     })
+}
+
+/// Whether operator `lib`'s heap paths, or a callee's entry below them,
+/// may write a guest object: an installed native answers where its entry
+/// declines, so its heap paths never run.
+fn writes(lowered: &Lowered<'_>, lib: LibId) -> bool {
+    let function = (lowered.lib)(lib);
+    match &function.prepared {
+        Some((entry, _)) if !matches!(function.run, LibRun::Native { .. }) => {
+            entry.writes(lowered.lib, lowered.lib_of)
+        }
+        _ => false,
+    }
+}
+
+/// Whether the statement of `ops` calls an operator that writes
+/// ([`writes`]) only as its last evaluation before the `do` that ends it,
+/// the call whose value the `do` discards: then what it writes commits
+/// with the statement, and nothing the statement evaluates after reads
+/// the object the write is held for.
+fn writes_last(lowered: &Lowered<'_>, ops: &[Op]) -> bool {
+    let stream = lowered.stream;
+    let writer = |op: &Op| {
+        let lib = match *op {
+            Op::Operator { lib, .. } => Some(LibId(lib.0)),
+            Op::Nested { act, .. } => stream
+                .nested
+                .get(act.ix())
+                .and_then(|nested| nested.kind.operator_lib()),
+            _ => None,
+        };
+        lib.is_some_and(|lib| writes(lowered, lib))
+    };
+    let before = match ops {
+        [before @ .., _, Op::End] => before,
+        _ => ops,
+    };
+    !before.iter().any(writer)
 }
 
 /// Whether `op` allocates, calls a native, reads a member, holds a value
@@ -610,6 +659,9 @@ impl Formation<'_> {
                 let mut formula_max = Some(0);
                 let mut general = false;
                 if let Some(item) = item {
+                    if writes(&self.lowered, item) {
+                        return None;
+                    }
                     general = !scalar_site((self.lowered.lib)(item), 2);
                     self.site(item, 2, &mut formula_max, &mut gathered)?;
                     program.push(Event::Formula);
@@ -787,6 +839,11 @@ impl Formation<'_> {
             }
             _ => return None,
         };
+        // A write its value then takes is the reference's: what the
+        // operator writes commits only with a `do`.
+        if writes(&self.lowered, lib) {
+            return None;
+        }
         let mut formula_max = Some(0);
         self.site(lib, args.len(), &mut formula_max, gathered)?;
         let mut program = vec![Event::Fixed(Weight::Atomic(1))];
@@ -824,6 +881,9 @@ impl Formation<'_> {
     fn action_store(&self, code: &Code, id: StmtId, gathered: &mut Gathered) -> Option<Summary> {
         let statement = (self.lowered.stmt)(id);
         let (action, lib, args) = library_invoke(&statement.form)?;
+        if writes(&self.lowered, lib) {
+            return None;
+        }
         let mut shared = Shared::default();
         for arg in args {
             shared.reads.extend(Self::atom(arg, gathered)?);
@@ -902,6 +962,10 @@ impl Formation<'_> {
         gathered: &mut Gathered,
     ) -> Option<Summary> {
         let stream = self.lowered.stream;
+        let ops = stream.ops.get(range.start as usize..range.end() as usize)?;
+        if !writes_last(&self.lowered, ops) {
+            return None;
+        }
         walk.allocates |= general(stream, self.lowered.lib, tree.last);
         let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
         // The values its last op takes, by role, and where a store writes.

@@ -15,7 +15,10 @@
 //! its formulas measure what they are given. At each statement's end it
 //! runs the statement's kill set: what the statement made is held by a
 //! root or garbage. When the arena's collection is due, the region exits
-//! at that boundary, where the reference's step collects.
+//! at that boundary, where the reference's step collects. A write an
+//! operator's heap paths make to a guest object is held until its `do`
+//! is admitted and applied as it commits: a statement that misses leaves
+//! nothing written, so the reference's run of it writes once.
 //!
 //! Session bindings are region slots between boundaries (§3.6): a region
 //! takes each binding its plan names at its resident value on entry, reads
@@ -273,6 +276,7 @@ impl KernelMachine {
                 fault: None,
                 lets: Vec::new(),
                 declined: false,
+                held: None,
             },
             charged: &mut self.charged,
             tape,
@@ -583,9 +587,12 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                                 true
                             }
                     }
+                    // A write its operator held is applied once the
+                    // statement is admitted, as part of its commit.
                     CompiledStep::Discard { value, commit } => {
                         value(self.frame.slot_states(), &mut self.cx).is_some()
                             && self.fits(commit)
+                            && self.cx.commit_write()
                             && {
                                 self.commit(commit)?;
                                 true
@@ -797,6 +804,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// charge program as the reference charges it (§3.1).
     #[inline(always)]
     fn commit(&mut self, commit: &Commit) -> Result<(), Halt> {
+        debug_assert!(
+            self.cx.held.is_none(),
+            "only a `do` holds a write, and applies it as it commits"
+        );
         if INVOKES && let Some(counters) = self.counters.as_deref_mut() {
             for &site in &commit.calls {
                 counters.advance(site)?;

@@ -1208,6 +1208,50 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
     programs
 }
 
+/// FIG-6781: programs whose loop statements write a guest object through
+/// a template's heap path, each a `(dialect, name, source)`: a counter
+/// in a dict read and written back in one statement, function-local and
+/// at a cell's top level, where the dict is a session binding; and an
+/// append whose own statement then reads past the list's end, so the
+/// statement misses after the append wrote.
+pub(crate) fn heap_write_programs() -> Vec<(runner::Case, Program)> {
+    [
+        (
+            "python",
+            "a dict counter",
+            "def build():\n    d = {\"n\": 0}\n    i = 0\n    while i < 10:\n        d[\"n\"] += 1\n        i = i + 1\n    return d[\"n\"]\nresult = build()\nprint(result)\n",
+        ),
+        (
+            "python",
+            "a top-level dict counter",
+            "d = {\"n\": 0}\ni = 0\nwhile i < 10:\n    d[\"n\"] += 1\n    i = i + 1\nprint(d[\"n\"])\n",
+        ),
+        (
+            "python",
+            "an append its statement then reads past",
+            "def fill(xs):\n    for i in range(3):\n        (xs.append(i), xs[9])\ndef build():\n    xs = []\n    try:\n        fill(xs)\n    except IndexError:\n        pass\n    return xs\nprint(build())\n",
+        ),
+    ]
+    .into_iter()
+    .map(|(dialect, name, source)| {
+        let runner = runner::Runner::new(dialect).unwrap();
+        let case = runner::Case {
+            id: format!("{dialect} heap write: {name}"),
+            dialect: dialect.into(),
+            source: source.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+            panic!("{} lowers", case.id)
+        };
+        (case, program)
+    })
+    .chain(dialect_region_programs())
+    .collect()
+}
+
 /// FIG-6755: the cold `sum1m` and `branch1m` shapes of
 /// `scripts/perf/kernel/embedded`, shortened, at a cell's top level in
 /// both dialects: their variables are session bindings, which regions

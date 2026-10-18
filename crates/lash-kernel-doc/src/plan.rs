@@ -108,6 +108,10 @@ pub struct HeapTemplate {
     pub callees: &'static [FunctionId],
     /// Conservative extra call-depth headroom, including the helper.
     pub depth: u32,
+    /// Whether a path writes an arena object ([`TemplateHeap::set_index`]):
+    /// the write is the path's last fallible step, but what runs after
+    /// the call in its caller's statement may still fail.
+    pub writes: bool,
 }
 
 /// What a heap path reads, builds and writes with: the forms a helper body
