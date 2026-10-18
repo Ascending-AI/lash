@@ -156,7 +156,7 @@ pub(crate) fn float_binary(op: Binary, a: f64, b: f64) -> Float {
         Binary::Mul => a * b,
         Binary::Div => a / b,
         Binary::DivTrunc => (a / b).trunc(),
-        Binary::RemTrunc => libm::fmod(a, b),
+        Binary::RemTrunc => trunc_remainder(a, b),
         Binary::RemFloor => floor_remainder(a, b),
         Binary::DivFloor => {
             if b == 0.0 {
@@ -171,8 +171,29 @@ pub(crate) fn float_binary(op: Binary, a: f64, b: f64) -> Float {
     Float::new(result)
 }
 
+/// `fmod(a, b)`, bit for bit. Integral operands below 2^63 in magnitude
+/// with a nonzero divisor take an integer remainder: fmod is exact, so the
+/// integer result is fmod's, and a zero result keeps the dividend's sign.
+/// NaN, infinities, a zero divisor and fractions go to libm.
+#[inline]
+fn trunc_remainder(a: f64, b: f64) -> f64 {
+    // Conversions saturate and NaN converts to 0, so an integral double in
+    // [-2^63, 2^63) is one that converts back to itself; 2^63 and above
+    // saturate to i64::MAX, which rounds back to 2^63.
+    let (x, y) = (a as i64, b as i64);
+    if x as f64 == a && y as f64 == b && x != i64::MAX && y != i64::MAX && y != 0 {
+        // i64::MIN % -1 is 0, which wrapping_rem returns without overflow.
+        match x.wrapping_rem(y) {
+            0 => libm::copysign(0.0, a),
+            r => r as f64,
+        }
+    } else {
+        libm::fmod(a, b)
+    }
+}
+
 fn floor_remainder(a: f64, b: f64) -> f64 {
-    let remainder = libm::fmod(a, b);
+    let remainder = trunc_remainder(a, b);
     if remainder == 0.0 {
         libm::copysign(0.0, b)
     } else if remainder.is_sign_negative() != b.is_sign_negative() {
@@ -354,4 +375,49 @@ pub(crate) fn unary(
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     Ok(scalar_unary(op, &Numeric::read(value, args, new)?)?.store(new))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trunc_remainder;
+
+    /// The integer remainder answers exactly as libm's fmod, bit for bit,
+    /// on the edges of its admission: signed zeros, the exact-integer and
+    /// i64 bounds, saturation, NaN, infinities and fractions.
+    #[test]
+    fn trunc_remainder_is_fmod_bit_for_bit() {
+        let two53 = 9_007_199_254_740_992.0_f64;
+        let two63 = 9_223_372_036_854_775_808.0_f64;
+        let edges = [
+            0.0,
+            1.0,
+            2.0,
+            3.0,
+            7.0,
+            1.5,
+            0.5,
+            1e-300,
+            f64::MIN_POSITIVE,
+            two53 - 1.0,
+            two53,
+            two53 + 2.0,
+            two63 - 1024.0,
+            two63,
+            two63 * 2.0,
+            1e300,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NAN,
+        ];
+        let values: Vec<f64> = edges.iter().flat_map(|&x| [x, -x]).collect();
+        for &a in &values {
+            for &b in &values {
+                let (got, want) = (trunc_remainder(a, b), libm::fmod(a, b));
+                assert!(
+                    got.to_bits() == want.to_bits() || (got.is_nan() && want.is_nan()),
+                    "{a:?} % {b:?}: {got:?}, fmod gives {want:?}"
+                );
+            }
+        }
+    }
 }
