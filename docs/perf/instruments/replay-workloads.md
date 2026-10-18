@@ -225,6 +225,28 @@ store asked to write and gives the same value every run (to a few bytes of
 id and timestamp spelling), so the gate's byte-slope budgets bind it
 (FIG-6280).
 
+The Python gate runs 24 turns (FIG-6751). Its canonical prompt-prefix tree
+fills its first levels during the initial rounds: the 12-turn row-slope
+estimate overweights those few steps. In the attributed 24-turn observation,
+kernel candidate writes stay at 269 rows per steady turn, the total row slope
+is 0.4, and turns 13–24 have a zero robust row slope. The ordinary observation
+measures 0.375 over all steady turns. The longer window keeps the existing
+0.5-row slope tolerance and every byte-slope ceiling.
+
+FIG-6751 re-derived only Python's physical-write median as 2,453,504 B from
+an ordinary 24-turn debug replay on `2d246aab61`; its 25% headroom is unchanged
+(3,066,880 B). Other baseline metrics retain their previous values. The
+bisection's adjacent samples measured 2,338,816 B on `cf1c07b95a` and
+2,371,584 B on `47e8cfc5bd` (FIG-6717), whose commit explicitly states:
+“Page shapes change in place (dev-phase format).” Its canonical boundaries
+replace overflow splits and change which kernel pages a snapshot writes.
+Paired physical attribution over the same eleven steady turns totals
+26,009,600 → 26,226,688 B: `cell.snapshot+admit` accounts for +270,336 B;
+root leases and turn admission are unchanged. Per-kind totals include SQLite
+page-placement variation, so a single record's difference is not an exact
+allocation to its logical rows. This is a page-shape baseline change, not a
+new write, snapshot, or slope exemption.
+
 A metric the backend cannot count is absent, never zero. PostgreSQL rounds
 carry no SQL, WAL or decode counts (its stores count none of them per
 process); they keep allocation, CPU, IPC, node and wall metrics.

@@ -15,7 +15,7 @@
     },
     {
       "workload": "py-codemode",
-      "turns": 12
+      "turns": 24
     }
   ],
   "baseline_tolerance": {

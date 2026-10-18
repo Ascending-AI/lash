@@ -74,7 +74,7 @@
     "py-codemode": {
       "script_digest": "e92e8798c9486627132064c9b9ae1c7ec2d80a4defc4f532acfa0054efa41370",
       "backend": "sqlite-file",
-      "turns": 12,
+      "turns": 24,
       "per_turn_median": {
         "allocated_bytes": 97053634.0,
         "allocations": 64783.0,
@@ -89,7 +89,7 @@
         "sql_statements": 878.0,
         "sql_transactions": 80.0,
         "sql_writes": 193.0,
-        "store_bytes_written": 1892352.0,
+        "store_bytes_written": 2453504.0,
         "worker_executions": 1.0,
         "workers_killed": 0.0
       },
