@@ -13,7 +13,8 @@
 //! executable: deterministic, immutable and never saved. Their compiled
 //! form is built on first entry and cached in the plan.
 //!
-//! Island ops: reads of unshared slots and of captures, resident constants
+//! Island ops: reads of unshared slots, of captures and of session
+//! bindings (`K-SES-001`), resident constants
 //! an island frame may hold ([`held`]), prepared operators (`Op::Operator`,
 //! or `Op::Nested` of an operator), helper calls whose prepared entry has a
 //! scalar table (`call lib`, counted), general calls of natives that build
@@ -88,6 +89,13 @@ pub(crate) enum Expr {
     /// variable is unbound, the head of the region it stands in.
     Local {
         at: u32,
+        miss: u32,
+    },
+    /// A session binding's read, by its name in the stream: `miss` is
+    /// where the reference resumes when the island cannot read it, the
+    /// head of the region it stands in.
+    Session {
+        name: u32,
         miss: u32,
     },
     Const(Value),
@@ -507,6 +515,11 @@ impl Former<'_> {
                     let miss = walk.miss(pc);
                     walk.define(dst, Expr::Local { at: local.at, miss })?;
                 }
+                Op::Session { dst, name } => {
+                    stream.names.get(name.ix())?;
+                    let miss = walk.miss(pc);
+                    walk.define(dst, Expr::Session { name: name.0, miss })?;
+                }
                 Op::Const { dst, c } => match stream.consts.get(c.ix())? {
                     Constant::Resident(value) if held(value) => {
                         walk.define(dst, Expr::Const(*value))?;
@@ -834,7 +847,7 @@ fn verify_block(
 
 fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> Result<(), Refused> {
     match expr {
-        Expr::Local { .. } | Expr::Const(_) => Ok(()),
+        Expr::Local { .. } | Expr::Session { .. } | Expr::Const(_) => Ok(()),
         Expr::Operator {
             args,
             close,

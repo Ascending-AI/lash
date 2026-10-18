@@ -54,7 +54,9 @@ of region are built from one unit.
   the callback charges by its own code's charging.
   Inside, an island runs held-value operators by their prepared entries and
   measured formulas, natives with no operation by their prepared entry or a
-  call that builds nothing, and list and tuple item reads.
+  call that builds nothing, list and tuple item reads, and reads of session
+  bindings (§3.6), so a top-level function that calls itself through its
+  binding runs as an island.
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host
@@ -440,6 +442,16 @@ it as a slot.
   calls only natives and prepared operators, which reach no session, and no
   guest code (closures and islands are barriers to loop regions). So a
   binding's slot is the binding for the region's duration.
+- **Islands.** An island reads a session binding but never writes one: the
+  closure bodies of top-level code read their own and other top-level
+  functions through their bindings. A read takes the binding's resident
+  value when the island frame may hold it (§3.5), and otherwise misses at
+  the head of its charge region, as an unbound frame variable does, and the
+  reference loads it. Nothing writes a binding while an island runs: its
+  statements write only frame variables, and its calls reach only islands,
+  natives and prepared operators. Each entry therefore keeps the values it
+  has read, and starts with none, since the reference may have written the
+  binding between two entries.
 - **Admission and memory.** A durable run that accounts memory moves the
   census from a binding's old holding to its new one at each write
   (`hold_session_binding`), admitting growth first. In a region, a write

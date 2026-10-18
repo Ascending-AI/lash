@@ -225,6 +225,16 @@ const ISLANDS: &[(&str, &str, u32)] = &[
         "main { let f = fn(args) { return let(t = if(num.lt(list.len(args), 1), [0], args), num.mul(t[0], 2)) } let g = fn(t) { return t[2] } try { let a = invoke collection.map([[1], [2, 3], [], [4]], f) let b = invoke collection.map([(1, 2, 3), (4, 5, 6)], g) let c = invoke collection.map([[1, 2]], g) finish (a, b, c) } catch e { finish e.kind } }",
         64,
     ),
+    (
+        "top-level recursion through its session binding, read again after a rebinding",
+        "main { let k = 1 let f = absent set f = fn(n) { if num.lt(n, 2) { return num.add(n, k) } return num.add(apply f(num.sub(n, 1)), apply f(num.sub(n, 2))) } let a = apply f(6) set k = 10 let b = apply f(6) finish (a, b) }",
+        64,
+    ),
+    (
+        "session bindings no island frame holds or that are not yet bound, left to the reference",
+        "main { let t = (1, 2) let g = absent set g = fn(n) { if num.lt(n, 1) { return t } return apply g(num.sub(n, 1)) } let a = apply g(3) let h = absent set h = fn(n) { if num.lt(n, 1) { return late } return apply h(num.sub(n, 1)) } try { let b = apply h(3) finish (a, b) } catch e { let late = 0 finish (a, e.kind, late) } }",
+        64,
+    ),
 ];
 
 /// Programs whose loop regions allocate (§5, R5): they build records,

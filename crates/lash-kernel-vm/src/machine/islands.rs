@@ -37,6 +37,7 @@ use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
 
 use super::frames::Role;
+use super::session::Session;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 use crate::compile::islands::{
@@ -75,10 +76,11 @@ type Answer = Result<Value, Stop>;
 /// runs, or a stop with the registers it held recorded.
 type Node = Box<dyn Fn(&mut Island<'_>, &mut Slots) -> Answer + Send + Sync>;
 
-/// A compiled operand: a variable or a constant read in place, or an
-/// expression.
+/// A compiled operand: a variable, a session binding or a constant read
+/// in place, or an expression.
 enum Operand {
     Slot { at: usize, miss: u32 },
+    Session { name: u32, miss: u32 },
     Const(Value),
     Node(Node),
 }
@@ -90,6 +92,10 @@ impl Operand {
             Self::Slot { at, miss } => match slots.get(*at) {
                 Some(Some(value)) => Ok(*value),
                 _ => Err(island.at(*miss)),
+            },
+            Self::Session { name, miss } => match island.session(*name) {
+                Some(value) => Ok(value),
+                None => Err(island.at(*miss)),
             },
             Self::Const(value) => Ok(*value),
             Self::Node(node) => node(island, slots),
@@ -264,6 +270,12 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
         Expr::Local { at, miss } => {
             return Some(Operand::Slot {
                 at: *at as usize,
+                miss: *miss,
+            });
+        }
+        Expr::Session { name, miss } => {
+            return Some(Operand::Session {
+                name: *name,
                 miss: *miss,
             });
         }
@@ -659,6 +671,9 @@ pub(super) struct Scratch {
     cached: Vec<Option<Cached>>,
     /// The captured values and their cells, of each cached callee.
     captured: Vec<(Value, ArenaHandle)>,
+    /// Each session binding read, by its name in the stream, at its
+    /// resident value: nothing writes a binding while an island runs.
+    sessions: Vec<(u32, Value)>,
     exit: Exit,
     /// The running slice's host observes no sites: callbacks a helper's
     /// plan applies may run as islands.
@@ -681,6 +696,8 @@ struct Island<'a> {
     exe: &'a Executable,
     stream: &'a Stream,
     arena: &'a Arena,
+    /// The session overlay its binding reads take resident values from.
+    session: &'a Session,
     tape: Option<&'a ChargeTape>,
     /// The run's charge, the machine's once the island ends.
     charged: u64,
@@ -981,6 +998,26 @@ impl Island<'_> {
         }
         let units = measured_formula(arena, &function.charge, args, Some(&value))?;
         Some((value, units))
+    }
+
+    /// The session binding named `name` in the stream, at its resident
+    /// value when the frame may hold it; `None` where the reference reads
+    /// it: no value is resident for it (`docs/design/kernel-regions.md`
+    /// §3.6), or one the frame may not hold.
+    #[inline(always)]
+    fn session(&mut self, name: u32) -> Option<Value> {
+        match self.scratch.sessions.iter().find(|(read, _)| *read == name) {
+            Some((_, value)) => Some(*value),
+            None => self.session_cold(name),
+        }
+    }
+
+    #[inline(never)]
+    fn session_cold(&mut self, name: u32) -> Option<Value> {
+        let binding = self.stream.names.get(name as usize)?;
+        let value = self.session.resident(&binding.key).filter(held)?;
+        self.scratch.sessions.push((name, value));
+        Some(value)
     }
 
     /// `target[at]` of a list or a tuple, when the frame may hold it;

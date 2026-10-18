@@ -1273,6 +1273,11 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "texts echoed in a loop",
             "def pure_echo(item):\n    return item\ndef demo(items):\n    out = []\n    for item in items:\n        out.append(pure_echo(item))\n    return out\nresult = demo([\"item-0\", \"item-1\", \"item-2\"])\n",
         ),
+        (
+            "python",
+            "top-level recursion through its session binding",
+            "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nresult = fib(10)\n",
+        ),
     ];
     sources
         .into_iter()

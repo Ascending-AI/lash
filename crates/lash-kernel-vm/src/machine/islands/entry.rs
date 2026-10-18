@@ -263,6 +263,7 @@ impl KernelMachine {
         let mut scratch = std::mem::take(&mut self.islands);
         scratch.epoch = scratch.epoch.wrapping_add(1);
         scratch.captured.clear();
+        scratch.sessions.clear();
         let arena = Rc::clone(&self.arena);
         let ran = {
             let arena = arena.borrow();
@@ -275,6 +276,7 @@ impl KernelMachine {
                 exe,
                 stream: exe.document_stream(),
                 arena: &arena,
+                session: &self.session,
                 tape: self
                     .observer
                     .as_deref()
