@@ -793,7 +793,7 @@ impl KernelMachine {
         let entry = function
             .operation()
             .then(|| {
-                self.operation_entry(task, exe, lib, args)
+                self.operation_entry(task, exe, function, args)
                     .map_err(|interrupt| interrupt.in_function(&function.definition.name))
             })
             .transpose()?;
@@ -825,7 +825,7 @@ impl KernelMachine {
         let function = exe.lib(lib);
         let entry = if function.operation() {
             Some(
-                self.operation_entry(task, exe, lib, args)
+                self.operation_entry(task, exe, function, args)
                     .map_err(|interrupt| interrupt.in_function(&function.definition.name))?,
             )
         } else {
@@ -924,6 +924,11 @@ impl KernelMachine {
         // does not, from here to its charge. A halt ends the run and its
         // observation with it.
         if self.observer.is_some() && !matches!(function.run, LibRun::Body(_)) {
+            if let LibRun::DeferredPlan { body, .. } = &function.run
+                && exe.fallback(lib).is_none()
+            {
+                return Ok(Answer::Body((*body).into()));
+            }
             self.observe(Event::NativeEnter { task, lib });
         }
         if prepared
@@ -938,6 +943,15 @@ impl KernelMachine {
         let result = match &function.run {
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
             LibRun::Plan { plan, .. } => {
+                match self.run_plan(task, exe, lib, plan, args, admission)? {
+                    Some(result) => result,
+                    None => return Ok(Answer::Yielded),
+                }
+            }
+            LibRun::DeferredPlan { body, .. } => {
+                let Some(plan) = exe.fallback(lib) else {
+                    return Ok(Answer::Body((*body).into()));
+                };
                 match self.run_plan(task, exe, lib, plan, args, admission)? {
                     Some(result) => result,
                     None => return Ok(Answer::Yielded),
@@ -963,11 +977,7 @@ impl KernelMachine {
                 })?;
                 Ok(self.new_object(NewObject::List(unfinished))?)
             }
-            LibRun::Native {
-                native,
-                body,
-                fallback,
-            } => {
+            LibRun::Native { native, body, .. } => {
                 let limit = match &function.limit {
                     Some(limit) => {
                         self.warm_formula(limit, args, None)?;
@@ -1079,7 +1089,7 @@ impl KernelMachine {
                         let Some(body) = body else {
                             return Err(fault("a native with no kernel body declined").into());
                         };
-                        if let Some(plan) = fallback {
+                        if let Some(plan) = exe.fallback(lib) {
                             match self.run_plan(task, exe, lib, plan, args, admission)? {
                                 Some(result) => result,
                                 None => return Ok(Answer::Yielded),

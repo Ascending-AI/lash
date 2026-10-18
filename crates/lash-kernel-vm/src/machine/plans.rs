@@ -13,8 +13,6 @@
 //! A segment's callback sites yield where the body would stand in a frame
 //! (`super::segments`, FIG-6709).
 
-use std::sync::Arc;
-
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
 use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
@@ -48,11 +46,12 @@ pub(super) struct Walk {
 
 /// One running plan: the machine, the caller's arguments and the plan's
 /// registers.
-pub(super) struct PlanRun<'m, const MEMORY: bool> {
+pub(super) struct PlanRun<'m, const MEMORY: bool, const SHARED: bool> {
     pub(super) machine: &'m mut KernelMachine,
     pub(super) task: TaskId,
     pub(super) exe: &'m Executable,
-    pub(super) prepared: &'m Arc<PreparedPlan>,
+    pub(super) owner: &'m std::sync::Arc<PreparedPlan>,
+    pub(super) prepared: &'m PreparedPlan,
     pub(super) lib: LibId,
     /// The caller's argument registers: the plan's parameters, which a
     /// plan reads where the native path reads them.
@@ -74,9 +73,14 @@ pub(super) struct PlanRun<'m, const MEMORY: bool> {
     pub(super) halt: Option<Box<Halt>>,
 }
 
-impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
+impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
     fn shared(&self, slot: u32) -> bool {
-        self.prepared.locals[slot as usize].is_some_and(|local| local.shared)
+        SHARED
+            && self
+                .prepared
+                .shared
+                .as_ref()
+                .is_some_and(|shared| shared[slot as usize])
     }
 
     fn cell(&self, slot: u32) -> Result<ArenaHandle, Halt> {
@@ -156,7 +160,7 @@ impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
     }
 }
 
-impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
+impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
     /// Opens the next statement, ending the one open.
     pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
         let ended = self.end_statement();
@@ -177,7 +181,7 @@ impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
     }
 }
 
-impl<const MEMORY: bool> PlanContext for PlanRun<'_, MEMORY> {
+impl<const MEMORY: bool, const SHARED: bool> PlanContext for PlanRun<'_, MEMORY, SHARED> {
     fn begin(&mut self) -> Result<(), PlanExit> {
         self.open_statement()
     }
@@ -544,38 +548,59 @@ impl KernelMachine {
     /// `args`: its result, or the value it raises; `None` when it yielded
     /// at a callback site, its frames to stand there once the caller has
     /// saved where it stands ([`KernelMachine::stand_segments`]).
+    #[inline(always)]
     pub(super) fn run_plan(
         &mut self,
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        plan: &Arc<PreparedPlan>,
+        plan: &std::sync::Arc<PreparedPlan>,
         args: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Option<Result<Value, Value>>> {
-        if self.bounds.memory_limit == crate::MemoryLimit::Off {
-            self.run_plan_memory::<false>(task, exe, lib, plan, args, entry)
+        if plan.shared.is_some() {
+            self.run_plan_variant::<true>(task, exe, lib, plan, args, entry)
         } else {
-            self.run_plan_memory::<true>(task, exe, lib, plan, args, entry)
+            self.run_plan_variant::<false>(task, exe, lib, plan, args, entry)
         }
     }
 
-    fn run_plan_memory<const MEMORY: bool>(
+    fn run_plan_variant<const SHARED: bool>(
         &mut self,
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        plan: &Arc<PreparedPlan>,
+        plan: &std::sync::Arc<PreparedPlan>,
+        args: Reg,
+        entry: Option<&super::operation_entry::OperationEntry>,
+    ) -> Eval<Option<Result<Value, Value>>> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            self.run_plan_memory::<false, SHARED>(task, exe, lib, plan, args, entry)
+        } else {
+            self.run_plan_memory::<true, SHARED>(task, exe, lib, plan, args, entry)
+        }
+    }
+
+    fn run_plan_memory<const MEMORY: bool, const SHARED: bool>(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        plan: &std::sync::Arc<PreparedPlan>,
         args: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
     ) -> Eval<Option<Result<Value, Value>>> {
         // The call's depth unit (`K-BND-002`): an operation's admission
         // checked it; any other plan's is checked as its body's frame is at
         // its push, and a refusal here names no function.
-        if !exe.lib(lib).operation() {
-            self.check_call_depth(task)?;
-        }
-        let arity = exe.lib(lib).arity;
+        let root = if !plan.operation {
+            self.check_call_depth(task)?
+        } else if let Some(entry) = entry {
+            entry.root
+        } else {
+            self.task(task)?.frames.is_empty()
+        };
+        let arity = plan.arity;
         let base = self.regs.extent().max(args + arity);
         let registers = plan.plan.registers as usize;
         let slots = base + registers;
@@ -584,12 +609,13 @@ impl KernelMachine {
         let charging = std::mem::replace(&mut self.charging, false);
         // A body's frame keeps its call's arguments for its formula when
         // the call is charged, or roots a task (`push_operation_frame`).
-        let keep = charging || self.task(task)?.frames.is_empty();
+        let keep = charging || root;
         self.plans += 1;
-        let mut run = PlanRun::<MEMORY> {
+        let mut run = PlanRun::<MEMORY, SHARED> {
             machine: self,
             task,
             exe,
+            owner: plan,
             prepared: plan,
             lib,
             args,

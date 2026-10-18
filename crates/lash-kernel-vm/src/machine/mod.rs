@@ -131,7 +131,9 @@ impl Interrupt {
     /// its admission names as the body's does.
     fn answering(self, lib: &crate::compile::Lib) -> Self {
         match lib.run {
-            crate::compile::LibRun::Plan { .. } => self,
+            crate::compile::LibRun::Plan { .. } | crate::compile::LibRun::DeferredPlan { .. } => {
+                self
+            }
             _ => self.in_function(&lib.definition.name),
         }
     }
@@ -301,6 +303,8 @@ struct Storage {
 
 struct Frame {
     code: CodeId,
+    // Rebuilt from the admitted code; never written to a frame row.
+    charging: bool,
     slots: frames::Slots,
     /// Where the frame stands when no block of its says: its body's
     /// entry, a return policy's site, or its body while a run-root cleanup
@@ -1044,7 +1048,7 @@ impl KernelMachine {
         }
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
-                self.refresh_charging(task, exe)?;
+                self.refresh_charging(task)?;
                 self.resume(task, exe, incoming)
                     .and_then(|value| {
                         self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)
@@ -1054,16 +1058,6 @@ impl KernelMachine {
             None => self.advance(task, host, exe),
         };
         self.settle(task, host, exe, outcome)
-    }
-
-    fn refresh_charging(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
-        let metered = self.bounds.charge == crate::Charge::Exact;
-        self.charging = self
-            .task(task)?
-            .frames
-            .last_mut()?
-            .map_or(metered, |frame| exe.code(frame.code).charging);
-        Ok(())
     }
 
     fn settle(

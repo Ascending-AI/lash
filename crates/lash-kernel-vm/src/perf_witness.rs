@@ -161,3 +161,34 @@ pub fn next_ready_statement(
     let site = frame.statement.resolve(heap.pages())?;
     Ok(Some(lash_kernel_doc::Site::clone(&site)))
 }
+
+/// A first-use library compilation boundary. A callback body's compilation
+/// includes its ordinary fallback code and semantic restore tables.
+#[derive(Clone, Copy)]
+pub enum Preparation {
+    Begin {
+        function: lash_kernel_doc::FunctionId,
+        callback: bool,
+    },
+    End,
+}
+
+type PreparationObserver = Box<dyn FnMut(Preparation)>;
+thread_local! {
+    static PREPARATION: std::cell::RefCell<Option<PreparationObserver>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs a calling-thread probe for first-use helper compilation. The
+/// probe runs outside guest execution and changes no guest charge or state.
+pub fn observe_preparation(observer: Option<Box<dyn FnMut(Preparation)>>) {
+    PREPARATION.with(|slot| *slot.borrow_mut() = observer);
+}
+
+#[cfg(feature = "perf-witness")]
+pub(crate) fn preparation(event: Preparation) {
+    PREPARATION.with(|slot| {
+        if let Some(observer) = slot.borrow_mut().as_mut() {
+            observer(event);
+        }
+    });
+}

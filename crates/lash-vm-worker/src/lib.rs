@@ -20,6 +20,7 @@ mod library;
 mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod read_laws;
+mod token_bootstrap;
 #[cfg(all(test, unix))]
 mod turn_laws;
 #[cfg(feature = "dialect-typescript")]

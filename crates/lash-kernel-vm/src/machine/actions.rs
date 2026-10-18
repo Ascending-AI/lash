@@ -958,7 +958,7 @@ impl KernelMachine {
         let handle = Value::Task(child);
         // A task root is outside its spawner's synchronous library call.
         // A native answer bills the same root formula as a body frame.
-        self.refresh_charging(child, exe)?;
+        self.refresh_charging(child)?;
         let started = match target {
             Target::Code(code, captures) => {
                 let pushed =
@@ -975,7 +975,7 @@ impl KernelMachine {
                 let value = self.take(args);
                 self.end_task(child, Ok(value))?;
                 self.put(args, handle);
-                self.refresh_charging(task, exe)?;
+                self.refresh_charging(task)?;
                 return Ok(Flow::Done);
             }
             // What the new task raises before it has a frame is its error.
@@ -983,7 +983,7 @@ impl KernelMachine {
                 let value = self.thrown_by(raised)?;
                 self.end_task(child, Err(*value))?;
                 self.put(args, handle);
-                self.refresh_charging(task, exe)?;
+                self.refresh_charging(task)?;
                 return Ok(Flow::Done);
             }
             Err(halt) => return Err(halt),

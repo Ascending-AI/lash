@@ -1,40 +1,40 @@
-//! The registry used by the gate-six benchmark and its allocation law.
-
+//! The benchmarks use the same token bootstrap as production workers.
+use lash_kernel_doc::FunctionRegistry;
 use std::sync::Arc;
 
-use lash_kernel_dialect::NamedLibrary;
-use lash_kernel_doc::FunctionRegistry;
+#[path = "../../lash-vm-worker/src/token_bootstrap.rs"]
+mod token_bootstrap;
 
 #[expect(
     clippy::expect_used,
-    reason = "benchmark setup: the shipped library and helpers register by construction"
+    reason = "the shipped token library assembles by construction"
 )]
 pub(crate) fn registry() -> Arc<FunctionRegistry> {
-    let mut registry = FunctionRegistry::new();
-    lash_kernel_lib::register_numbers(&mut registry).expect("numeric library registration");
-    lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
-    lash_kernel_vm::register_machine_functions(&mut registry)
-        .expect("machine library registration");
-    lash_kernel_lib::register_collections(&mut registry).expect("collection library registration");
+    let mut registry = token_bootstrap::kernel(|registry| {
+        lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
+        lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
+        lash_kernel_vm::register_machine_functions(registry).map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .expect("kernel token bootstrap");
     lash_ext_regex_ecma::register(
         &mut registry,
-        &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
+        &Arc::new(lash_ext_regex_ecma::Engine::new(256)),
     )
-    .expect("regex extension registration");
-    lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
-    lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
-    let mut library = NamedLibrary::from_registry(&registry).expect("unique kernel names");
-    let mut helpers = Vec::new();
-    for definition in lash_dialect_typescript::define_helpers(&mut library)
-        .unwrap_or_else(|error| panic!("{error}"))
-    {
-        helpers.push(
-            registry
-                .register(definition, None)
-                .unwrap_or_else(|error| panic!("{error}")),
-        );
+    .expect("regex extension");
+    let extensions =
+        token_bootstrap::register(&mut registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)
+            .expect("extension tokens");
+    lash_ext_date_ecma::implement(&mut registry, extensions.iter().copied()).expect("date natives");
+    lash_ext_url_whatwg::implement(&mut registry, extensions).expect("URL natives");
+    for dialect in lash_vm_releases::DIALECTS {
+        let helpers =
+            token_bootstrap::register(&mut registry, dialect.helpers).expect("helper tokens");
+        if dialect.dialect == lash_vm_releases::TYPESCRIPT {
+            lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript natives");
+        } else {
+            lash_ext_py_core::implement(&mut registry, helpers).expect("Python natives");
+        }
     }
-    // A worker adds its operations' natives, so the benchmark does too.
-    lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript operation natives");
     Arc::new(registry)
 }

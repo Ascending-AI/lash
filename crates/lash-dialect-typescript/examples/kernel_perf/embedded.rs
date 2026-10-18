@@ -9,6 +9,8 @@ use super::*;
     reason = "explicit benchmark arguments, source input and JSON receipt"
 )]
 pub(super) fn main() -> Result<(), String> {
+    let preparation =
+        preparation_probe(std::env::var("KERNEL_PERF_PREPARATION").is_ok_and(|value| value == "1"));
     let began = Instant::now();
     let allocations = stats_alloc::Region::new(ALLOCATOR);
     let mut args = std::env::args().skip(2);
@@ -37,20 +39,7 @@ pub(super) fn main() -> Result<(), String> {
         "\nawait finish(result);\n"
     });
     let registry = registry();
-    let mut registry = (*registry).clone();
-    let mut names = NamedLibrary::from_registry(&registry).expect("unique library names");
-    let mut helpers = Vec::new();
-    for definition in
-        lash_dialect_python::define_helpers(&mut names).map_err(|error| error.to_string())?
-    {
-        helpers.push(
-            registry
-                .register(definition, None)
-                .map_err(|error| error.to_string())?,
-        );
-    }
-    lash_ext_py_core::implement(&mut registry, helpers).expect("Python natives");
-    let registry = Arc::new(registry);
+
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
@@ -133,6 +122,7 @@ pub(super) fn main() -> Result<(), String> {
             "memory": machine.meters().memory,
             "memory_work": memory_work,
             "result": result,
+            "preparation": *preparation.borrow(),
             "registry_ns": registry_ns,
             "lower_ns": lower_ns,
             "library_compile_ns": library_compile_ns,
@@ -178,5 +168,93 @@ fn plain(value: Datum) -> Result<Json, String> {
             })
             .collect(),
         other => Err(format!("result outside common JSON domain: {other:?}")),
+    }
+}
+
+/// Optional first-use compilation attribution. The regular paired population
+/// leaves this off; a diagnostic run records each helper separately.
+fn preparation_probe(enabled: bool) -> std::rc::Rc<std::cell::RefCell<Vec<Json>>> {
+    use lash_kernel_vm::perf_witness::{Preparation, observe_preparation};
+    let samples = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    if !enabled {
+        return samples;
+    }
+    let output = std::rc::Rc::clone(&samples);
+    let mut pending = None;
+    observe_preparation(Some(Box::new(move |event| match event {
+        Preparation::Begin { function, callback } => {
+            pending = Some((function, callback, Instant::now(), Instructions::start()));
+        }
+        Preparation::End => {
+            if let Some((function, callback, start, counter)) = pending.take() {
+                let count = counter.and_then(Instructions::finish);
+                output.borrow_mut().push(json!({
+                    "function": function.to_string(), "callback": callback,
+                    "instructions": count, "wall_ns": start.elapsed().as_nanos(),
+                }));
+            }
+        }
+    })));
+    samples
+}
+
+/// A per-thread instructions:u counter, owned by the diagnostic process.
+#[cfg(target_os = "linux")]
+struct Instructions(i32);
+
+#[cfg(not(target_os = "linux"))]
+struct Instructions;
+
+#[cfg(not(target_os = "linux"))]
+impl Instructions {
+    fn start() -> Result<Self, String> {
+        Err("instructions:u requires Linux".into())
+    }
+    fn finish(self) -> Result<u64, String> {
+        Err("instructions:u requires Linux".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[expect(
+    unsafe_code,
+    reason = "the optional instrument reads Linux perf instructions:u"
+)]
+impl Instructions {
+    fn start() -> Result<Self, String> {
+        let mut attr = [0u64; 8];
+        attr[0] = 64u64 << 32;
+        attr[1] = 1;
+        attr[5] = 1 | (1 << 5) | (1 << 6);
+        let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, attr.as_ptr(), 0, -1, -1, 0) };
+        let fd = i32::try_from(fd).map_err(|error| error.to_string())?;
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let counter = Self(fd);
+        if unsafe { libc::ioctl(fd, 0x2400, 0) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(counter)
+    }
+
+    fn finish(self) -> Result<u64, String> {
+        let mut count = 0u64;
+        if unsafe { libc::ioctl(self.0, 0x2401, 0) } != 0
+            || unsafe { libc::read(self.0, (&raw mut count).cast(), 8) } != 8
+        {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(count)
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[expect(unsafe_code, reason = "the measurement owns its perf descriptor")]
+impl Drop for Instructions {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.0);
+        }
     }
 }

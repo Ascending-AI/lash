@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub use crate::compile::Layout;
 use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 
-/// Compiles every library body in `registry` laid out as `layout` says.
+/// Prepares `registry` under `layout`; library bodies compile on first use.
 pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> PreparedLibrary {
     PreparedLibrary::with_layout(registry, layout)
 }

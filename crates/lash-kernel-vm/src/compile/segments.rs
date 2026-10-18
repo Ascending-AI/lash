@@ -15,7 +15,7 @@ use lash_kernel_doc::plan::{HelperPlan, PlanLoop};
 use lash_kernel_doc::{Site, Unit};
 use lash_kernel_exec::ActIx;
 
-use super::{BlockId, CodeId, Form, Local, StmtId, Suffix, Tables};
+use super::{Base, BlockId, CodeId, Form, Local, StmtId, Suffix, Tables};
 
 /// A segment's sites and variables under one layout.
 pub(crate) struct Segment {
@@ -75,11 +75,12 @@ impl Segment {
         locals: &[Option<Local>],
         body: CodeId,
         tables: &Tables,
+        base: &Base,
     ) -> Result<Self, String> {
         let unit = Unit::Library(plan.function);
         let code = tables
             .codes
-            .get(body.0 as usize)
+            .get((body.0 - base.codes) as usize)
             .ok_or("the body has no code")?;
         if let Some((local, _)) = plan
             .slots
@@ -96,7 +97,7 @@ impl Segment {
         let mut sites = Vec::with_capacity(plan.sites.len());
         let mut by_stand = BTreeMap::new();
         for (index, site) in plan.sites.iter().enumerate() {
-            let resolved = resolve_site(tables, code.body, &unit, site)
+            let resolved = resolve_site(tables, base, code.body, &unit, site)
                 .map_err(|problem| format!("site {:?}: {problem}", site.path))?;
             if by_stand
                 .insert((resolved.stmt, resolved.act), index as u32)
@@ -116,19 +117,20 @@ impl Segment {
 
 fn resolve_site(
     tables: &Tables,
+    base: &Base,
     body: BlockId,
     unit: &Unit,
     site: &lash_kernel_doc::plan::PlanSite,
 ) -> Result<SegmentSite, String> {
     let path = site.path;
-    let block_site = |block: BlockId| &tables.blocks[block.0 as usize].site;
+    let block_site = |block: BlockId| &tables.blocks[(block.0 - base.blocks) as usize].site;
     let mut depth = 0;
     let mut block = body;
     let mut control = Vec::new();
     let mut loops = site.loops.iter();
     let (stmt, index) = loop {
         let index = *path.get(depth).ok_or("the path ends at a block")? as usize;
-        let stmt = *tables.blocks[block.0 as usize]
+        let stmt = *tables.blocks[(block.0 - base.blocks) as usize]
             .stmts
             .get(index)
             .ok_or("no statement at the path")?;
@@ -140,7 +142,7 @@ fn resolve_site(
             .get(..depth + 2)
             .map(|inner| Site::new(unit.clone(), inner));
         let at = |candidate: BlockId| inner.as_ref() == Some(block_site(candidate));
-        let form = &tables.stmts[stmt.0 as usize].form;
+        let form = &tables.stmts[(stmt.0 - base.stmts) as usize].form;
         let descended = match form {
             Form::If {
                 then_block,
@@ -203,7 +205,7 @@ fn resolve_site(
             None => break (stmt, depth + 1),
         }
     };
-    let form = &tables.stmts[stmt.0 as usize].form;
+    let form = &tables.stmts[(stmt.0 - base.stmts) as usize].form;
     let statement = &path[..index];
     let full = Site::new(unit.clone(), path);
     let (act, pending, roles) = if let Some(act) = tables.stream.nested_at.get(&full) {

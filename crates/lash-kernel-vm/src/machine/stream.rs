@@ -71,7 +71,25 @@ pub(super) struct Running<'a> {
 
 impl<'a> Running<'a> {
     /// Statement `id` of `task`.
+    #[inline(always)]
     pub(super) fn new(task: TaskId, exe: &'a Executable, id: StmtId) -> Self {
+        let Some((stream, stmt, edge)) = exe.document_statement(id) else {
+            return Self::library(task, exe, id);
+        };
+        Self {
+            task,
+            exe,
+            id,
+            stream,
+            stmt,
+            edge,
+        }
+    }
+
+    // Same signature as `new`: its library branch can tail-call without
+    // saving the document path's constructor arguments across lazy lookup.
+    #[inline(never)]
+    fn library(task: TaskId, exe: &'a Executable, id: StmtId) -> Self {
         let (stream, stmt, edge) = exe.statement(id);
         Self {
             task,

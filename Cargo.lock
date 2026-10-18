@@ -2103,6 +2103,7 @@ name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "libc",
  "lash-dialect-python",
  "lash-ext-date-ecma",
  "lash-ext-py-core",
@@ -2117,6 +2118,7 @@ dependencies = [
  "lash-kernel-lib",
  "lash-kernel-state",
  "lash-kernel-vm",
+ "lash-internal-vm-releases",
  "ryu-js",
  "serde",
  "serde_json",

@@ -68,6 +68,17 @@ pub(super) enum ResultOrigin {
 }
 
 impl KernelMachine {
+    /// Rebuilds the active charge mode from the resident frame cache.
+    pub(super) fn refresh_charging(&mut self, task: TaskId) -> Result<(), Halt> {
+        let metered = self.bounds.charge == crate::Charge::Exact;
+        self.charging = self
+            .task(task)?
+            .frames
+            .last_mut()?
+            .map_or(metered, |frame| frame.charging);
+        Ok(())
+    }
+
     /// Immediate literals are compiled values. A literal an arena object
     /// holds is built in the arena when the operation reads it.
     pub(super) fn literal(&mut self, literal: &crate::compile::Constant) -> Eval<Value> {
@@ -106,7 +117,7 @@ impl KernelMachine {
             .frames
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
-        self.charging = exe.code(frame.code).charging;
+        self.charging = frame.charging;
         let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
@@ -433,7 +444,7 @@ impl KernelMachine {
         frame: Box<Frame>,
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
-        self.refresh_charging(task, exe)?;
+        self.refresh_charging(task)?;
         if self.charging
             && let Some(call) = &frame.library
         {
@@ -662,19 +673,20 @@ impl KernelMachine {
     /// Reserves the next active call's depth unit (K-BND-002). Native
     /// operation answers are synchronous, so their unit ends with dispatch;
     /// a decline transfers it to the body's frame until return or raise.
-    pub(super) fn check_call_depth(&mut self, task: TaskId) -> Eval<()> {
-        self.call_depth_headroom(task).map(|_| ())
+    /// Returns whether the admitted task has no frames.
+    pub(super) fn check_call_depth(&mut self, task: TaskId) -> Eval<bool> {
+        self.call_depth_headroom(task).map(|(root, _)| root)
     }
 
-    pub(super) fn call_depth_headroom(&mut self, task: TaskId) -> Eval<u32> {
+    pub(super) fn call_depth_headroom(&mut self, task: TaskId) -> Eval<(bool, u32)> {
         // `main`'s own frame is not a call.
-        let depth = self.task(task)?.frames.len()
-            + self.plans as usize
-            + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let frames = self.task(task)?.frames.len();
+        let depth =
+            frames + self.plans as usize + usize::from(task != TaskId::MAIN || !self.session_cell);
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        Ok(self.bounds.call_depth - depth as u32)
+        Ok((frames == 0, self.bounds.call_depth - depth as u32))
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
@@ -714,6 +726,7 @@ impl KernelMachine {
         Ok(match self.storage.frames.pop() {
             Some(mut frame) => {
                 frame.code = code_id;
+                frame.charging = code.charging;
                 // A spent frame of the same body left standing at its entry
                 // keeps that copy; only another site is replaced.
                 if !frame.statement.same_version(entry) {
@@ -726,6 +739,7 @@ impl KernelMachine {
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
                     code: code_id,
+                    charging: code.charging,
                     slots: super::frames::Slots::default(),
                     statement: entry.clone(),
                     pending: super::frames::Continuation::default(),

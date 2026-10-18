@@ -248,6 +248,13 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+export_file(
+    name = "src/token_bootstrap.rs",
+    src = "src/token_bootstrap.rs",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

@@ -7,9 +7,8 @@
 //! frame slots, declared and library functions to table indexes, and every
 //! node that an identity names keeps its site.
 //!
-//! It is compiled in two parts. A [`PreparedLibrary`] holds every library
-//! body of a registry, compiled once for all the runs that use the
-//! registry. Each immutable document's admission and own code are reused
+//! It is compiled in two parts. A [`PreparedLibrary`] indexes a registry and compiles each library
+//! body on first use, once for all runs using that registry. Each immutable document's admission and own code are reused
 //! at start and import against that library. Its code is numbered after
 //! the library's, so preparation does not grow with the library. A
 //! function's identity is its content, so the body compiled under it is
@@ -41,8 +40,10 @@ use crate::functions::{MachineFunction, machine_function};
 mod formula;
 mod library;
 pub(crate) use library::{Lib, LibRun, PreparedPlan};
+mod lazy;
 mod lower;
 mod occurrences;
+mod parameters;
 mod preparation;
 mod reads;
 mod scopes;
@@ -175,7 +176,7 @@ impl Tables {
     }
 }
 
-/// A function registry with every library body in it compiled, once, for
+/// A function registry whose library bodies compile on demand, once, for
 /// all the runs of all the documents that use it. An embedder prepares
 /// its registry once and hands the same library to every [`Program`]
 /// (`crate::Program`); each document is admitted and compiled once against
@@ -193,16 +194,19 @@ struct Prepared {
     alternative: std::sync::OnceLock<PreparedLibrary>,
     registry: Arc<FunctionRegistry>,
     layout: Layout,
-    tables: Tables,
+    tables: lazy::LibraryTables,
     /// Every registered function, in the layout's order.
     libs: Vec<Lib>,
+    functions: Vec<FunctionId>,
+    runs: Vec<Runs>,
+    operators: Vec<Option<usize>>,
+    plan_sites: Vec<u32>,
+    // Admission metadata stays outside the hot call table.
+    shared_params: Vec<Vec<usize>>,
     lib_of: BTreeMap<FunctionId, LibId>,
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
-    /// Each installed segment whose sites its body does not state, and
-    /// why: its body runs instead.
-    unresolved: Vec<String>,
     /// Where the library's property read sites, its plans' among them,
     /// end.
     sites: u32,
@@ -213,13 +217,13 @@ impl fmt::Debug for PreparedLibrary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PreparedLibrary")
             .field("functions", &self.0.libs.len())
-            .field("bodies", &self.0.tables.codes.len())
+            .field("bodies", &self.0.tables.compiled())
             .finish_non_exhaustive()
     }
 }
 
 impl PreparedLibrary {
-    /// Compiles every library body in `registry`.
+    /// Prepares the registry. Each body compiles once, when first needed.
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self::with_layout(registry, Layout::default())
     }
@@ -250,39 +254,32 @@ impl PreparedLibrary {
     /// fallbacks, and each installed one whose sites its body does not
     /// state.
     pub(crate) fn segments(&self) -> (usize, Vec<String>) {
-        let running = self
-            .0
-            .libs
-            .iter()
-            .filter(|lib| match &lib.run {
-                LibRun::Plan { plan, .. }
-                | LibRun::Native {
-                    fallback: Some(plan),
-                    ..
-                } => plan.segment.is_some(),
-                _ => false,
-            })
-            .count();
-        (running, self.0.unresolved.clone())
+        let mut running = 0;
+        let mut unresolved = Vec::new();
+        for index in 0..self.0.libs.len() {
+            let lib = self.0.lib(LibId(index as u32));
+            let plan = match &lib.run {
+                LibRun::Plan { plan, .. } => Some(plan),
+                LibRun::Native { .. } | LibRun::DeferredPlan { .. } => {
+                    self.0.fallback(LibId(index as u32))
+                }
+                _ => None,
+            };
+            if plan.is_some_and(|plan| plan.segment.is_some()) {
+                running += 1;
+            } else if plan.is_none()
+                && !self.0.layout.declines()
+                && let Err(problem) = self.0.checked_plan(index)
+            {
+                unresolved.push(format!("{}: {problem}", lib.definition.name));
+            }
+        }
+        (running, unresolved)
     }
 
-    /// Checks the ops of every statement of the library's bodies
-    /// (`lash_kernel_exec::verify_stream`): each range is well formed and
-    /// spans no Boundary. Gives how many statements it checked.
+    /// Explicitly verifies every library body, including cold fallbacks.
     pub(crate) fn verify_stream(&self) -> Result<usize, KirError> {
-        let tables = &self.0.tables;
-        tables.verify_stream(
-            &Base {
-                codes: 0,
-                blocks: 0,
-                stmts: 0,
-                occurrences: 0,
-                sites: 0,
-            },
-            tables.codes.len(),
-            tables.blocks.len(),
-            self.0.libs.len(),
-        )
+        self.0.tables.verify_stream(&self.0)
     }
 
     /// The registry the library was prepared from.
@@ -337,6 +334,10 @@ fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
 /// The document's codes, blocks and statements are numbered after the
 /// library's.
 pub(crate) struct Executable {
+    // Immutable census boundaries, beside the document hot path.
+    code_base: usize,
+    block_base: usize,
+    stmt_base: usize,
     library: PreparedLibrary,
     document: Arc<Document>,
     own: Arc<DocumentCode>,
@@ -370,63 +371,86 @@ impl std::ops::Deref for Executable {
     }
 }
 
-/// The entry `index` names in a library's table followed by a document's.
-fn entry<'t, T>(library: &'t [T], own: &'t [T], index: u32) -> Option<&'t T> {
-    let index = index as usize;
-    match index.checked_sub(library.len()) {
-        None => library.get(index),
-        Some(own_index) => own.get(own_index),
-    }
-}
-
 impl Executable {
     pub(crate) fn block_ordinal(&self, id: BlockId) -> Option<u32> {
-        let at = (id.0 as usize).checked_sub(self.library.0.tables.blocks.len())?;
+        let at = (id.0 as usize).checked_sub(self.block_base)?;
         self.own.block_ordinals.get(at).copied()
-    }
-
-    pub(crate) fn get_code(&self, id: CodeId) -> Option<&Code> {
-        entry(&self.library.0.tables.codes, &self.own.tables.codes, id.0)
-    }
-
-    pub(crate) fn get_stmt(&self, id: StmtId) -> Option<&Stmt> {
-        entry(&self.library.0.tables.stmts, &self.own.tables.stmts, id.0)
     }
 
     #[expect(
         clippy::expect_used,
         reason = "every code id the machine holds was handed out by this executable"
     )]
+    #[inline]
     pub(crate) fn code(&self, id: CodeId) -> &Code {
-        self.get_code(id).expect("a code of this executable")
+        match (id.0 as usize).checked_sub(self.code_base) {
+            Some(own) => &self.own.tables.codes[own],
+            None => self
+                .library
+                .0
+                .tables
+                .code(&self.library.0, id)
+                .expect("a code of this executable"),
+        }
     }
 
     #[expect(
         clippy::expect_used,
         reason = "every block id the machine holds was handed out by this executable"
     )]
+    #[inline]
     pub(crate) fn block(&self, id: BlockId) -> &Block {
-        entry(&self.library.0.tables.blocks, &self.own.tables.blocks, id.0)
-            .expect("a block of this executable")
+        match (id.0 as usize).checked_sub(self.block_base) {
+            Some(own) => &self.own.tables.blocks[own],
+            None => self
+                .library
+                .0
+                .tables
+                .block(&self.library.0, id)
+                .expect("a block of this executable"),
+        }
     }
 
     #[expect(
         clippy::expect_used,
         reason = "every statement id the machine holds was handed out by this executable"
     )]
+    #[inline]
     pub(crate) fn stmt(&self, id: StmtId) -> &Stmt {
-        self.get_stmt(id).expect("a statement of this executable")
+        match (id.0 as usize).checked_sub(self.stmt_base) {
+            Some(own) => &self.own.tables.stmts[own],
+            None => self
+                .library
+                .0
+                .tables
+                .stmt(&self.library.0, id)
+                .expect("a statement of this executable"),
+        }
     }
 
     /// Statement `id`, the stream its ops are in, and where its step
     /// leaves its frame when it completes in its own block.
+    #[inline]
+    pub(crate) fn document_statement(&self, id: StmtId) -> Option<(&Stream, &Stmt, StepEdge)> {
+        let at = (id.0 as usize).checked_sub(self.stmt_base)?;
+        let tables = &self.own.tables;
+        Some((&tables.stream, &tables.stmts[at], tables.edges[at]))
+    }
+
+    #[inline]
     pub(crate) fn statement(&self, id: StmtId) -> (&Stream, &Stmt, StepEdge) {
+        self.document_statement(id)
+            .unwrap_or_else(|| self.library_statement(id.0 as usize))
+    }
+
+    // Keep lazy resolution out of the document's statement loop.
+    #[inline(never)]
+    fn library_statement(&self, index: usize) -> (&Stream, &Stmt, StepEdge) {
         let library = &self.library.0.tables;
-        let index = id.0 as usize;
-        let (tables, at) = match index.checked_sub(library.stmts.len()) {
-            None => (library, index),
-            Some(own) => (&self.own.tables, own),
-        };
+        let body = library.stmts[index];
+        let slot = &library.bodies[body];
+        let tables = library.tables(&self.library.0, body);
+        let at = index - slot.base.stmts as usize;
         (&tables.stream, &tables.stmts[at], tables.edges[at])
     }
 
@@ -448,8 +472,18 @@ impl Executable {
         )
     }
 
+    pub(crate) fn fallback(&self, id: LibId) -> Option<&Arc<PreparedPlan>> {
+        self.library.0.fallback(id)
+    }
+
+    #[inline]
     pub(crate) fn lib(&self, id: LibId) -> &Lib {
         &self.library.0.libs[id.0 as usize]
+    }
+
+    #[inline]
+    pub(crate) fn shared_params(&self, id: LibId) -> &[usize] {
+        &self.library.0.shared_params[id.0 as usize]
     }
 
     /// Resolves a source statement inside one admitted code body.
@@ -534,7 +568,13 @@ impl Executable {
     /// functions.
     fn tables_of(&self, unit: &Unit) -> Option<&Tables> {
         match unit {
-            Unit::Library(function) => self.reaches(function).then_some(&self.library.0.tables),
+            Unit::Library(function) => {
+                if !self.reaches(function) {
+                    return None;
+                }
+                let body = *self.library.0.tables.body_of.get(function)?;
+                Some(self.library.0.tables.tables(&self.library.0, body))
+            }
             Unit::Main | Unit::Function(_) => Some(&self.own.tables),
         }
     }
@@ -569,8 +609,10 @@ impl Executable {
         self.library
             .0
             .tables
-            .blocks
+            .bodies
             .iter()
+            .enumerate()
+            .flat_map(|(index, _)| &self.library.0.tables.tables(&self.library.0, index).blocks)
             .chain(&self.own.tables.blocks)
     }
 
@@ -1127,29 +1169,14 @@ fn compile_document(
     let mut units: Vec<UnitSource<'_>> = vec![UnitSource::Main];
     units.extend(document.functions.keys().map(UnitSource::Function));
     shuffler.shuffle(layout, &mut units);
-    let bodies: Vec<Runs> = prepared
-        .libs
-        .iter()
-        .map(|lib| match &lib.run {
-            LibRun::Body(_) | LibRun::Plan { .. } | LibRun::Native { body: Some(_), .. } => {
-                Runs::Body
-            }
-            LibRun::Native { body: None, .. } | LibRun::Machine(_) => Runs::Answers,
-        })
-        .collect();
-    let operators: Vec<Option<usize>> = prepared
-        .libs
-        .iter()
-        .map(|lib| lib.prepared.as_ref().map(|_| lib.arity))
-        .collect();
     let mut compiler = Compiler::new(
         layout,
         shuffler,
         Resolve {
             lib_of: &prepared.lib_of,
             listed: Some(&document.manifest.functions),
-            bodies: &bodies,
-            operators: &operators,
+            bodies: &prepared.runs,
+            operators: &prepared.operators,
         },
         &document.private_bindings,
         Base {

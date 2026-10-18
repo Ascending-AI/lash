@@ -65,12 +65,11 @@ impl Executable {
     }
 
     pub(crate) fn occurrence_index(&self, site: &Site) -> Option<usize> {
-        let tables = if matches!(site.unit, Unit::Library(_)) {
-            &self.library.0.tables
+        if matches!(site.unit, Unit::Library(_)) {
+            self.library.0.tables.occurrence_at.get(site).copied()
         } else {
-            &self.own.tables
-        };
-        tables.occurrence_at.get(site).copied()
+            self.own.tables.occurrence_at.get(site).copied()
+        }
     }
 
     /// Saved metadata keys can be inline tokens or a digest of a long site.

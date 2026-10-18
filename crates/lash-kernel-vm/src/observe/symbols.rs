@@ -133,6 +133,13 @@ impl GuestSymbols {
                     kind: match lib.run {
                         LibRun::Native { .. } => LibKind::Native,
                         LibRun::Plan { .. } => LibKind::Plan,
+                        LibRun::DeferredPlan { .. } => {
+                            if exe.fallback(LibId(token)).is_some() {
+                                LibKind::Plan
+                            } else {
+                                LibKind::Body
+                            }
+                        }
                         LibRun::Machine(_) => LibKind::Machine,
                         LibRun::Body(_) => LibKind::Body,
                     },

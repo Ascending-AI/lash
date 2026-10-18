@@ -108,7 +108,9 @@ lash_rust_binary(
         "tests/test262/test/**/*.js",
     ],
     exec_properties = sized_exec_properties("lash-dialect-typescript", "kernel_perf"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-vm-worker:src/token_bootstrap.rs",
+    ],
     include_dev_deps = True,
     library = ":lash-dialect-typescript",
     library_crate_name = "lash_dialect_typescript",

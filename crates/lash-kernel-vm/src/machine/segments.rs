@@ -88,13 +88,13 @@ pub(super) struct Yielding {
     callee: Option<Callee>,
 }
 
-impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
+impl<const MEMORY: bool, const SHARED: bool> PlanRun<'_, MEMORY, SHARED> {
     /// Stands at site `site` while its callee is offered the call: what the
     /// body's frame would hold there is the machine's.
     fn stand(&mut self, site: u32) {
         let kept = std::mem::replace(&mut self.kept, Kept::Window { keep: false });
         self.machine.segments.standing.push(Standing {
-            plan: Arc::clone(self.prepared),
+            plan: Arc::clone(self.owner),
             lib: self.lib,
             site,
             args: self.args,
@@ -397,7 +397,7 @@ impl KernelMachine {
         else {
             return Ok(None);
         };
-        let Some((plan, body)) = segment_plan(&exe.lib(call.lib).run) else {
+        let Some((plan, body)) = segment_plan(exe, call.lib) else {
             return Ok(None);
         };
         let Some(segment) = &plan.segment else {
@@ -430,11 +430,23 @@ impl KernelMachine {
             .frames
             .pop()?
             .ok_or_else(|| fault("a standing frame is missing"))?;
-        self.refresh_charging(task, exe)?;
-        let resumed = if self.bounds.memory_limit == crate::MemoryLimit::Off {
-            self.resume_plan::<false>(task, exe, lib, &plan, site, &frame, value)
-        } else {
-            self.resume_plan::<true>(task, exe, lib, &plan, site, &frame, value)
+        self.refresh_charging(task)?;
+        let resumed = match (
+            self.bounds.memory_limit == crate::MemoryLimit::Off,
+            plan.shared.is_some(),
+        ) {
+            (true, true) => {
+                self.resume_plan::<false, true>(task, exe, lib, &plan, site, &frame, value)
+            }
+            (true, false) => {
+                self.resume_plan::<false, false>(task, exe, lib, &plan, site, &frame, value)
+            }
+            (false, true) => {
+                self.resume_plan::<true, true>(task, exe, lib, &plan, site, &frame, value)
+            }
+            (false, false) => {
+                self.resume_plan::<true, false>(task, exe, lib, &plan, site, &frame, value)
+            }
         };
         let result = match resumed {
             Ok(Some(result)) => result,
@@ -453,7 +465,7 @@ impl KernelMachine {
     /// standing there, with `value` the site's: what the call ends with,
     /// or `None` when the plan yielded again and its frames stand.
     #[allow(clippy::too_many_arguments)]
-    fn resume_plan<const MEMORY: bool>(
+    fn resume_plan<const MEMORY: bool, const SHARED: bool>(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -558,10 +570,11 @@ impl KernelMachine {
         }
         let charging = std::mem::replace(&mut self.charging, false);
         self.plans += 1;
-        let mut run = PlanRun::<MEMORY> {
+        let mut run = PlanRun::<MEMORY, SHARED> {
             machine: self,
             task,
             exe,
+            owner: plan,
             prepared: plan,
             lib,
             args,
@@ -624,14 +637,13 @@ impl KernelMachine {
 
 /// The plan `run` runs a call by, its own or the one its native falls
 /// back to, and its body's code.
-fn segment_plan(run: &LibRun) -> Option<(&Arc<PreparedPlan>, CodeId)> {
-    match run {
+fn segment_plan(exe: &Executable, lib: LibId) -> Option<(&Arc<PreparedPlan>, CodeId)> {
+    match &exe.lib(lib).run {
         LibRun::Plan { plan, body } => Some((plan, *body)),
         LibRun::Native {
-            fallback: Some(plan),
-            body: Some(body),
-            ..
-        } => Some((plan, *body)),
+            body: Some(body), ..
+        }
+        | LibRun::DeferredPlan { body, .. } => Some((exe.fallback(lib)?, *body)),
         _ => None,
     }
 }
@@ -642,8 +654,8 @@ fn segment_of<'p>(
     lib: LibId,
     plan: &'p PreparedPlan,
 ) -> Result<(&'p Segment, CodeId), Halt> {
-    let (_, body) = segment_plan(&exe.lib(lib).run)
-        .ok_or_else(|| fault("a segment's function runs no plan"))?;
+    let (_, body) =
+        segment_plan(exe, lib).ok_or_else(|| fault("a segment's function runs no plan"))?;
     let segment = plan
         .segment
         .as_ref()

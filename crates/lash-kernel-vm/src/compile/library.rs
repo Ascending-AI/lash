@@ -1,14 +1,11 @@
 //! One admitted library function and the implementation that runs it.
-
-use super::{CodeId, Constant, Entry, Fast, Field, Layout, LibId, Local, Plan, Tables, segments};
-use crate::functions::MachineFunction;
-use lash_kernel_doc as doc;
-use lash_kernel_doc::Site;
-use lash_kernel_doc::{FunctionDefinition, FunctionId, NativeFunction};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use super::*;
+use lash_kernel_doc::NativeFunction;
 
 pub(crate) struct Lib {
+    pub(crate) index: LibId,
+    pub(crate) shares_params: bool,
+    pub(crate) operation: bool,
     pub(crate) id: FunctionId,
     pub(crate) definition: Arc<FunctionDefinition>,
     pub(crate) run: LibRun,
@@ -17,7 +14,7 @@ pub(crate) struct Lib {
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
-    /// An unguarded native or generated helper entry and its own formula charge:
+    /// An unguarded native's prepared entry and its formula-derived charge:
     /// the inline fast path of the operator op that calls it
     /// (`Op::Operator`, or a nested call its entry marks). Odd layouts and
     /// arena-dependent natives use the general call.
@@ -30,9 +27,12 @@ impl Lib {
     /// Body-only calls reserve their ordinary frame at entry; a generated
     /// plan of one is its body, and reserves the unit at its own entry.
     pub(crate) fn operation(&self) -> bool {
-        self.definition.has_native() && self.definition.body().is_some()
+        self.operation
     }
 }
+
+// Keep first-use caches out of the hot call entry's inline storage.
+type LazyPlan = Box<std::sync::OnceLock<Option<Arc<PreparedPlan>>>>;
 
 pub(crate) enum LibRun {
     /// The native implementation, and the kernel body that runs a call it
@@ -41,13 +41,19 @@ pub(crate) enum LibRun {
         native: Arc<dyn NativeFunction>,
         body: Option<CodeId>,
         /// The same body's plan runs a decline without re-offering the native.
-        fallback: Option<Arc<PreparedPlan>>,
+        fallback: Option<LazyPlan>,
     },
     /// The body's generated plan, which answers every call; the body's
     /// code stays for a frame saved inside it (FIG-6678).
     Plan {
         plan: Arc<PreparedPlan>,
         body: CodeId,
+    },
+    /// Callback or closure metadata is resolved on first use. A failed
+    /// resolution selects the interpreted body before the call starts.
+    DeferredPlan {
+        body: CodeId,
+        prepared: LazyPlan,
     },
     Body(CodeId),
     Machine(MachineFunction),
@@ -57,11 +63,15 @@ pub(crate) enum LibRun {
 /// indexes, its literals as the body's constants, its fields with their
 /// read hints.
 pub(crate) struct PreparedPlan {
+    pub(crate) arity: usize,
+    pub(crate) operation: bool,
     pub(crate) plan: &'static doc::plan::HelperPlan,
     pub(crate) callees: Vec<LibId>,
     pub(crate) literals: Vec<Constant>,
     pub(crate) fields: Vec<Field>,
     pub(crate) locals: Vec<Option<Local>>,
+    /// Binding needs only the shared-cell flag, not a frame-local mapping.
+    pub(crate) shared: Option<Box<[bool]>>,
     pub(crate) closures: Vec<CodeId>,
     /// A segment's sites where its body's frame stands at them (FIG-6709).
     pub(crate) segment: Option<segments::Segment>,
@@ -70,13 +80,16 @@ pub(crate) struct PreparedPlan {
 impl PreparedPlan {
     pub(super) fn new(
         plan: &'static doc::plan::HelperPlan,
+        definition: &doc::FunctionDefinition,
         lib_of: &BTreeMap<FunctionId, LibId>,
         layout: Layout,
         body: CodeId,
-        tables: &Tables,
+        tables: Option<(&Tables, &Base)>,
         sites: &mut u32,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
+        let arity = definition.signature.params.len();
+        let operation = definition.has_native() && definition.body().is_some();
         let callees = plan
             .callees
             .iter()
@@ -111,7 +124,21 @@ impl PreparedPlan {
                 Field::new(name, *sites - 1, layout)
             })
             .collect();
-        let code = &tables.codes[body.0 as usize];
+        let Some((tables, base)) = tables else {
+            return Ok(Self {
+                arity,
+                operation,
+                plan,
+                callees,
+                literals,
+                fields,
+                locals: Vec::new(),
+                shared: None,
+                closures: Vec::new(),
+                segment: None,
+            });
+        };
+        let code = &tables.codes[(body.0 - base.codes) as usize];
         let locals: Vec<Option<Local>> = plan
             .slots
             .iter()
@@ -147,13 +174,24 @@ impl PreparedPlan {
             })
             .collect();
         let segment = (!plan.sites.is_empty())
-            .then(|| segments::Segment::resolve(plan, &locals, body, tables))
+            .then(|| segments::Segment::resolve(plan, &locals, body, tables, base))
             .transpose()?;
         Ok(Self {
+            arity,
+            operation,
             plan,
             callees,
             literals,
             fields,
+            shared: locals
+                .iter()
+                .any(|local| local.is_some_and(|local| local.shared))
+                .then(|| {
+                    locals
+                        .iter()
+                        .map(|local| local.is_some_and(|local| local.shared))
+                        .collect()
+                }),
             locals,
             closures,
             segment,

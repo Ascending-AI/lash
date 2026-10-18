@@ -330,3 +330,88 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         assert_eq!(observe(layout), reference, "layout {layout}");
     }
 }
+
+/// Startup §3.8: preparing a registry leaves unused helper bodies cold.
+/// Native calls do not compile their fallback; an interpreted call compiles
+/// only its own body, once, and shares it across starts.
+#[test]
+fn helper_bodies_compile_only_when_the_body_runs() {
+    use super::embedder::{ROOMY, Source, World, library};
+    use crate::{CellStart, KernelMachine, PreparedLibrary, Program, Target};
+    use lash_kernel_doc::heap::PageId;
+    use std::sync::Arc;
+
+    let fixture = library(true);
+    let mut registry = (*fixture.registry).clone();
+    let identity = lash_kernel_doc::parse_definition(
+        "function cold.identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
+    )
+    .unwrap();
+    let function = registry.register(identity, None).unwrap();
+    let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
+        name: "cold.identity",
+        template: None,
+        function,
+        callees: &[],
+        literals: &[],
+        fields: &[],
+        records: &[],
+        registers: 1,
+        slots: &[],
+        closures: &[],
+        sites: &[],
+        run: |cx, _| {
+            cx.begin()?;
+            cx.param(0, 0)?;
+            Ok(cx.take(0))
+        },
+    }));
+    registry.install_plans(&[plan]).unwrap();
+    let header = format!("{}use cold.identity = @{function}\n", fixture.header);
+    let prepared = PreparedLibrary::new(Arc::new(registry));
+    let cold = format!("{prepared:?}");
+    assert!(
+        cold.contains("bodies: 0"),
+        "unused bodies must stay cold: {cold}"
+    );
+    for (source, compiled) in [
+        ("main { return pair.twice(21) }", 0),
+        ("main { return invoke cold.identity(42) }", 0),
+        (
+            "main { return invoke each.twice(fn(x) { return num.add(x, 1) }, 40) }",
+            1,
+        ),
+        (
+            "main { return invoke each.twice(fn(x) { return num.add(x, 1) }, 40) }",
+            1,
+        ),
+    ] {
+        let document =
+            lash_kernel_doc::parse_document(&format!("numbers by_spelling\n{}\n{source}", header))
+                .unwrap();
+        let mut machine = KernelMachine::start(
+            Program {
+                release: PageId([8; 32]),
+                document: Arc::new(document),
+                library: prepared.clone(),
+            },
+            ROOMY,
+            CellStart {
+                target: Target::Main,
+                args: Vec::new(),
+                session: None,
+                owner: PageId([9; 32]),
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+            Box::new(Source::default()),
+        )
+        .unwrap();
+        assert!(matches!(
+            machine.run(&mut World::default(), u64::MAX).unwrap(),
+            Step::Ended(End::Finished(_))
+        ));
+        let state = format!("{prepared:?}");
+        assert!(state.contains(&format!("bodies: {compiled}")), "{state}");
+    }
+}

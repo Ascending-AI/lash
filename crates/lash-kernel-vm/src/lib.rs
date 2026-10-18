@@ -19,7 +19,7 @@
 //! document, loading each continuation path as execution needs it.
 //!
 //! An embedder prepares its registry once as a [`PreparedLibrary`], which
-//! compiles every library body, and hands it to every [`Program`]: a run's
+//! lazily compiles library bodies, and hands it to every [`Program`]: a run's
 //! starts and opens reuse each live document's admission and compiled code.
 //!
 //! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder

@@ -30,7 +30,9 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode, NamedLibrary, Package};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, ValidatedFunctions};
+#[cfg(test)]
+use lash_kernel_doc::ValidatedFunctions;
+use lash_kernel_doc::{FunctionId, FunctionRegistry};
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::graph::ReleaseGraph;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
@@ -74,9 +76,8 @@ pub struct Embedding {
     /// the build interprets, made when first asked for: a worker that runs
     /// no successor's document never redeclares (FIG-5796).
     interpreted: OnceLock<Result<Arc<FunctionRegistry>, EmbedError>>,
-    /// `written` and `interpreted` with every library body compiled, once
-    /// for all the runs of the worker: `written` before the worker is
-    /// ready, `interpreted` when a successor's document first runs.
+    /// Prepared indexes of `written` and `interpreted`, shared by every
+    /// run of the worker. Each helper body compiles only when it is needed.
     prepared_written: OnceLock<PreparedLibrary>,
     prepared_interpreted: OnceLock<PreparedLibrary>,
     pub(crate) library: NamedLibrary,
@@ -206,7 +207,7 @@ impl Embedding {
 
     /// The prepared library a machine runs a document written for kernel
     /// version `kernel` over: [`Embedding::registry_for`]'s registry, its
-    /// library bodies compiled when a document first runs against it.
+    /// library bodies compiled on first use.
     ///
     /// # Errors
     ///
@@ -308,15 +309,8 @@ impl Embedder {
     ///
     /// [`EmbedError::Registry`].
     pub fn kernel() -> Result<Self, EmbedError> {
-        let mut registry = FunctionRegistry::new();
-        crate::library::register_kernel_base(&mut registry).map_err(EmbedError::Registry)?;
-        let collections = ValidatedFunctions::from_tokens(lash_vm_releases::KERNEL_COLLECTIONS)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        registry
-            .register_validated(collections)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        lash_kernel_lib::implement_collections(&mut registry)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        let registry = crate::token_bootstrap::kernel(crate::library::register_kernel_base)
+            .map_err(EmbedError::Registry)?;
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
@@ -371,12 +365,8 @@ impl Embedder {
         if let Some(extensions) = extensions {
             extensions(&mut self.registry).map_err(EmbedError::Registry)?;
         }
-        let helpers =
-            ValidatedFunctions::from_tokens(built.helpers).map_err(|error| registry(&error))?;
-        let operations: Vec<FunctionId> = helpers.iter().map(|(function, _)| *function).collect();
-        self.registry
-            .register_validated(helpers)
-            .map_err(|error| registry(&error))?;
+        let operations = crate::token_bootstrap::register(&mut self.registry, built.helpers)
+            .map_err(EmbedError::Registry)?;
         natives(&mut self.registry, &operations).map_err(EmbedError::Registry)?;
         let releases: Vec<HelperReleaseIndex> =
             serde_json::from_slice(built.helper_release_index).map_err(|error| registry(&error))?;
@@ -974,12 +964,8 @@ mod release_tests;
 #[cfg(feature = "dialect-typescript")]
 fn register_typescript_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
     crate::library::register_extensions(registry)?;
-    let definitions = ValidatedFunctions::from_tokens(lash_vm_releases::TYPESCRIPT_EXTENSIONS)
-        .map_err(|error| error.to_string())?;
-    let functions: Vec<_> = definitions.iter().map(|(function, _)| *function).collect();
-    registry
-        .register_validated(definitions)
-        .map_err(|error| error.to_string())?;
+    let functions =
+        crate::token_bootstrap::register(registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)?;
     lash_ext_date_ecma::implement(registry, functions.iter().copied())
         .map_err(|error| error.to_string())?;
     lash_ext_url_whatwg::implement(registry, functions).map_err(|error| error.to_string())?;

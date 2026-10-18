@@ -1,11 +1,12 @@
 //! Canonical admission precedes every implementation of an operation.
 
-use super::{Eval, KernelMachine, fault};
-use crate::compile::{CodeId, Executable, LibId, LibRun};
+use super::{Eval, KernelMachine};
+use crate::compile::{CodeId, Executable, Lib};
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::arena::ArenaHandle;
 
 pub(super) struct OperationEntry {
+    pub(super) root: bool,
     pub(super) shared: Vec<Option<ArenaHandle>>,
     pub(super) depth_headroom: u32,
 }
@@ -52,30 +53,20 @@ impl KernelMachine {
         &mut self,
         task: TaskId,
         exe: &Executable,
-        lib: LibId,
+        function: &Lib,
         args: usize,
     ) -> Eval<OperationEntry> {
-        let depth_headroom = self.call_depth_headroom(task)?;
-        let function = exe.lib(lib);
-        let code = match function.run {
-            LibRun::Body(code)
-            | LibRun::Plan { body: code, .. }
-            | LibRun::Native {
-                body: Some(code), ..
-            } => exe.code(code),
-            _ => return Err(fault("an operation has no body").into()),
-        };
+        let (root, depth_headroom) = self.call_depth_headroom(task)?;
         let mut shared = Vec::new();
-        if code.params.iter().any(|param| param.shared) {
+        if function.shares_params {
             shared.resize(function.arity, None);
-            for (index, param) in code.params.iter().enumerate() {
-                if param.shared {
-                    let value = self.regs[args + index];
-                    shared[index] = Some(self.new_cell(value)?);
-                }
+            for &index in exe.shared_params(function.index) {
+                let value = self.regs[args + index];
+                shared[index] = Some(self.new_cell(value)?);
             }
         }
         Ok(OperationEntry {
+            root,
             shared,
             depth_headroom,
         })
