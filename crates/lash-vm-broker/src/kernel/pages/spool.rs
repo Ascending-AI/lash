@@ -3,24 +3,26 @@
 //!
 //! A spool is content addressed: each staged page is one file named by its
 //! digest, and the directory is the index, so the parent's memory holds the
-//! spool's usage and nothing per page. Writes stream straight to disk
-//! through a rename, so a buffer holds at most the page being written. A
-//! quota bounds the spool's file contents: each staged page's bytes, plus
-//! [`ENTRY_BYTES`] of manifest scratch for each staged page and each
-//! distinct external reference (FIG-6512). A publication's install writes
-//! its edge log within that scratch, beside the sorted manifest (FIG-6596).
+//! spool's usage and nothing per page. A page is written straight to its
+//! own file, so a buffer holds at most the page being written; a write
+//! that fails removes its file. A quota bounds the spool's file contents:
+//! each staged page's bytes, plus [`ENTRY_BYTES`] of manifest scratch for
+//! each staged page and each distinct external reference (FIG-6512). A
+//! publication's install writes its edge log within that scratch, beside
+//! the sorted manifest (FIG-6596).
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
-//! DAG that stops at committed references, marking each page it reaches in
-//! a marker directory bucketed by the digest's first byte and appending its
-//! record to a file that is also the walk's queue. An external sort with
-//! bounded runs orders the records into the manifest file, ascending by
-//! digest, which is the store's blob lock order; the manifest streams from
-//! any cursor, and settlement streams it again to delete the candidate's
-//! pages. No step holds more than a fixed number of records in memory
-//! (FIG-6421). Staged pages no candidate reaches stay until the spool's
-//! owner names the roots it still needs ([`StageSpool::retain`]), so the
-//! cells of one session can share a spool.
+//! DAG that stops at committed references, appending the record of each
+//! page it reaches to a file that is also the walk's queue. A page that
+//! more than one staged page names is marked when first reached, in a
+//! marker directory bucketed by the digest's first byte; any other page is
+//! reached once. An external sort with bounded runs orders the records into
+//! the manifest file, ascending by digest, which is the store's blob lock
+//! order; the manifest streams from any cursor, and settlement streams it
+//! again to delete the candidate's pages. No step holds more than a fixed
+//! number of records in memory (FIG-6421). Staged pages no candidate
+//! reaches stay until the spool's owner names the roots it still needs
+//! ([`StageSpool::retain`]), so the cells of one session can share a spool.
 //!
 //! A spool lives exactly as long as its stage lease: an authoritative
 //! commit deletes the candidate's pages, an authoritative refusal discards
@@ -372,46 +374,54 @@ impl DiskSpool {
         self.pages().join(id.to_hex())
     }
 
+    fn refs(&self, id: &NodeId) -> PathBuf {
+        self.dir.join("refs").join(id.to_hex())
+    }
+
     /// Incoming edges from staged pages, including edges to staged children.
-    /// The count is a filename under the child's digest directory. These
-    /// empty files add no content bytes beyond the entry's charge, and the
-    /// index stays on disk rather than growing a per-entry map in the parent.
+    /// The count is the target of a symbolic link named by the child's
+    /// digest, so one call reads it and one writes it. A link adds no
+    /// content bytes beyond the entry's charge, and the index stays on disk
+    /// rather than growing a per-entry map in the parent.
     fn references(&self, id: &NodeId) -> Result<u64, StageFault> {
-        let dir = self.dir.join("refs").join(id.to_hex());
-        let mut names = match fs::read_dir(dir) {
-            Ok(names) => names,
+        let count = match fs::read_link(self.refs(id)) {
+            Ok(count) => count,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
             Err(error) => return Err(io(&error)),
         };
-        let entry = names
-            .next()
-            .transpose()
-            .map_err(|error| io(&error))?
-            .ok_or_else(|| StageFault::Io("a staging reference count is missing".to_owned()))?;
-        entry
-            .file_name()
+        count
             .to_str()
-            .and_then(|name| name.parse().ok())
+            .and_then(|count| count.parse().ok())
             .ok_or_else(|| StageFault::Io("a staging reference count is invalid".to_owned()))
     }
 
-    fn reference(&mut self, id: &NodeId, add: bool) -> Result<(), StageFault> {
-        let old = self.references(id)?;
+    /// Moves `id`'s count from `old`, which [`Self::references`] read, one
+    /// edge up or down. `staged` is whether `id` is a staged page: an
+    /// unstaged child holds its entry exactly while it is referenced.
+    fn reference(
+        &mut self,
+        id: &NodeId,
+        old: u64,
+        add: bool,
+        staged: bool,
+    ) -> Result<(), StageFault> {
         let next = if add { old + 1 } else { old - 1 };
-        let dir = self.dir.join("refs").join(id.to_hex());
+        let path = self.refs(id);
         match (old, next) {
             (0, _) => {
-                fs::create_dir(&dir).map_err(|error| io(&error))?;
-                fs::write(dir.join(next.to_string()), []).map_err(|error| io(&error))?;
-                self.entries += u64::from(!self.staged(id));
+                std::os::unix::fs::symlink(next.to_string(), &path).map_err(|error| io(&error))?;
+                self.entries += u64::from(!staged);
             }
             (_, 0) => {
-                fs::remove_file(dir.join(old.to_string())).map_err(|error| io(&error))?;
-                fs::remove_dir(&dir).map_err(|error| io(&error))?;
-                self.entries -= u64::from(!self.staged(id));
+                fs::remove_file(&path).map_err(|error| io(&error))?;
+                self.entries -= u64::from(!staged);
             }
-            _ => fs::rename(dir.join(old.to_string()), dir.join(next.to_string()))
-                .map_err(|error| io(&error))?,
+            _ => {
+                let partial = self.dir.join("refs").join(format!(".next-{}", id.to_hex()));
+                std::os::unix::fs::symlink(next.to_string(), &partial)
+                    .map_err(|error| io(&error))?;
+                fs::rename(&partial, &path).map_err(|error| io(&error))?;
+            }
         }
         Ok(())
     }
@@ -443,22 +453,23 @@ impl DiskSpool {
 
     /// Deletes the staged page `id`, if staged.
     fn remove(&mut self, id: &NodeId) -> Result<(), StageFault> {
-        let path = self.page(id);
-        let len = match fs::metadata(&path) {
-            Ok(metadata) => metadata.len(),
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(io(&error)),
+        let bytes = match self.read(id) {
+            Ok(bytes) => bytes,
+            Err(StageFault::Missing(_)) => return Ok(()),
+            Err(fault) => return Err(fault),
         };
-        let bytes = self.read(id)?;
         let envelope =
             parse_envelope(&bytes, Some(*id)).map_err(|_| StageFault::HashMismatch(*id))?;
-        fs::remove_file(&path).map_err(|error| io(&error))?;
+        fs::remove_file(self.page(id)).map_err(|error| io(&error))?;
         self.entries -= u64::from(self.references(id)? == 0);
         for child in envelope.children.iter() {
-            self.reference(&child, false)?;
+            let old = self.references(&child)?;
+            // Only the last edge's removal asks whether the child is staged.
+            let staged = old == 1 && self.staged(&child);
+            self.reference(&child, old, false, staged)?;
         }
         self.usage.pages -= 1;
-        self.usage.bytes -= len;
+        self.usage.bytes -= bytes.len() as u64;
         Ok(())
     }
 }
@@ -486,26 +497,29 @@ impl StageSpool for DiskSpool {
         if self.staged(&page.id) {
             return Ok(());
         }
-        if let Some(child) = envelope
-            .children
-            .iter()
-            .find(|child| !protected(child) && !self.staged(child))
-        {
-            return Err(StageFault::Unauthorized {
-                page: page.id,
-                child,
-            });
-        }
-        // The canonical child table is distinct. Count the union of staged
-        // pages and their direct children before writing anything; an external
-        // reference that becomes staged already occupies its entry.
-        let own_entry = u64::from(self.references(&page.id)? == 0);
-        let mut added = own_entry;
+        // Each child is looked up once: whether it is staged, then its
+        // count. The canonical child table is distinct, so no child's count
+        // moves before its own update below.
+        let mut counted = Vec::with_capacity(envelope.children.len());
         for child in envelope.children.iter() {
-            if !self.staged(&child) && self.references(&child)? == 0 {
-                added += 1;
+            let staged = self.staged(&child);
+            if !staged && !protected(&child) {
+                return Err(StageFault::Unauthorized {
+                    page: page.id,
+                    child,
+                });
             }
+            counted.push((child, staged, self.references(&child)?));
         }
+        // Count the union of staged pages and their direct children before
+        // writing anything; an external reference that becomes staged
+        // already occupies its entry.
+        let own_entry = u64::from(self.references(&page.id)? == 0);
+        let added = own_entry
+            + counted
+                .iter()
+                .filter(|(_, staged, old)| !staged && *old == 0)
+                .count() as u64;
         let len = page.bytes.len() as u64;
         let charged = self.usage.bytes.saturating_add(len).saturating_add(
             self.entries
@@ -518,12 +532,20 @@ impl StageSpool for DiskSpool {
             });
         }
         let target = self.page(&page.id);
-        let partial = self.pages().join(format!(".partial-{}", page.id.to_hex()));
-        fs::write(&partial, &page.bytes).map_err(|error| io(&error))?;
-        fs::rename(&partial, &target).map_err(|error| io(&error))?;
+        let mut file = File::options()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|error| io(&error))?;
+        if let Err(error) = file.write_all(&page.bytes) {
+            drop(file);
+            let _ = fs::remove_file(&target);
+            return Err(io(&error));
+        }
+        drop(file);
         self.entries += own_entry;
-        for child in envelope.children.iter() {
-            self.reference(&child, true)?;
+        for (child, staged, old) in counted {
+            self.reference(&child, old, true, staged)?;
         }
         #[cfg(feature = "perf-witness")]
         self.spooled_bytes.fetch_add(len, Ordering::Relaxed);
@@ -617,14 +639,21 @@ impl StageSpool for DiskSpool {
         }
         let marks = dir.join("marks");
         fs::create_dir_all(&marks).map_err(|error| io(&error))?;
+        // One exclusive create both tests and sets a mark; a bucket is made
+        // the first time a mark misses it.
         let mark = |id: &NodeId, fresh: bool| -> Result<bool, StageFault> {
             let bucket = marks.join(hex(&id.0[..1]));
             let path = bucket.join(format!("{}.{}", id.to_hex(), if fresh { 'f' } else { 'e' }));
-            if path.is_file() {
-                return Ok(false);
+            let create = || File::options().write(true).create_new(true).open(&path);
+            match create() {
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => return Ok(false),
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    fs::create_dir(&bucket).map_err(|error| io(&error))?;
+                    create().map_err(|error| io(&error))?;
+                }
+                Err(error) => return Err(io(&error)),
             }
-            fs::create_dir_all(&bucket).map_err(|error| io(&error))?;
-            fs::write(&path, []).map_err(|error| io(&error))?;
             self.meter.touch(1);
             Ok(true)
         };
@@ -672,7 +701,10 @@ impl StageSpool for DiskSpool {
             summary.fresh_edges += envelope.children.len() as u64;
             for child in envelope.children.iter() {
                 let fresh = self.staged(&child);
-                if mark(&child, fresh)? {
+                // A child's count is the staged pages naming it, so a child
+                // only this page names is reached once, here: only a shared
+                // child needs a mark.
+                if self.references(&child)? == 1 || mark(&child, fresh)? {
                     append(&mut queue, &record(&child, fresh), &self.meter)?;
                     written += 1;
                     summary.external += u64::from(!fresh);
