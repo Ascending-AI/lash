@@ -84,7 +84,7 @@
       }
     },
     "PageEnvelope": {
-      "description": "One page as it crosses: its complete envelope, with its digest.\n\nOnly the envelope crosses (FIG-6321): a page is named by the digest of\nits envelope, so the receiver derives the digest as it decodes, and a\ndecoded page's `id` is its envelope's digest by construction.",
+      "description": "One page as it crosses: its complete envelope, with its digest.\n\nOnly the envelope crosses (FIG-6321): a page is named by the digest of\nits envelope, so the receiver derives the digest as it decodes. Every\npage envelope, decoded or built, is named by its envelope's digest by\nconstruction, so a receiver checks its framing and never hashes it\nagain (FIG-6932).",
       "items": {
         "format": "uint8",
         "maximum": 255,
