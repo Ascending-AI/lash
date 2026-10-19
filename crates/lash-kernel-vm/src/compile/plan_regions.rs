@@ -19,7 +19,10 @@
 //! the plan's unshared variables, member writes and `do`, of expressions
 //! that read variables and resident constants, call library functions the
 //! plan calls, and build the empty tuple; a statement's root action is a
-//! callback the plan applies at its site, or a library call. Plans belong
+//! callback the plan applies at its site, or a library call. A call the
+//! plan invokes at a site, as a statement's own action or nested in its
+//! expression, is offered there as the plan offers it, so a callee that
+//! runs its body stands the plan at that site (FIG-6797). Plans belong
 //! to the layout's prepared library: deterministic, immutable and never
 //! saved, formed only when the layout forms regions.
 
@@ -106,8 +109,9 @@ pub(crate) enum NodeKind {
         callee: u32,
         args: Box<[Node]>,
     },
-    /// The statement's root action: a call of `lib` its plan offers at
-    /// site `site`, which may run its body in a frame.
+    /// A call of `lib` its plan offers at site `site`, which may run its
+    /// body in a frame: the statement's root action, or a call nested in
+    /// its expression that the plan invokes there.
     Invoke {
         site: u32,
         lib: LibId,
@@ -276,22 +280,22 @@ impl Former<'_> {
                 },
                 Op::Branch { cond, then_, else_ },
             ) if then_.0 == then_block.0 && else_.0 == else_block.0 => Step::If {
-                cond: self.test(tree.take(cond)?)?,
+                cond: self.test(id, tree.take(cond)?)?,
                 then: self.block(*then_block, enclosing)?,
                 otherwise: self.block(*else_block, enclosing)?,
             },
             (Form::Plain, Op::WriteLocal { local, src }) if src.0 == 0 => Step::Assign {
                 slot: self.local(local)?,
-                value: self.node(tree.take(src)?)?,
+                value: self.node(id, tree.take(src)?)?,
             },
             (Form::Plain, Op::Bind { local, src }) if src.0 == 0 => Step::Bind {
                 slot: self.local(local)?,
-                value: self.node(tree.take(src)?)?,
+                value: self.node(id, tree.take(src)?)?,
             },
             (Form::Plain, Op::SetIndex { target, src }) => {
-                self.store(&mut tree, target, src, None)?
+                self.store(id, &mut tree, target, src, None)?
             }
-            (Form::Plain, Op::End) => Step::Discard(self.node(tree.take(Reg(0))?)?),
+            (Form::Plain, Op::End) => Step::Discard(self.node(id, tree.take(Reg(0))?)?),
             _ => return None,
         };
         tree.spent().then_some(step)
@@ -361,7 +365,7 @@ impl Former<'_> {
                     value: act,
                 }
             }
-            Op::SetIndex { target, src } => self.store(&mut tree, target, src, Some(act))?,
+            Op::SetIndex { target, src } => self.store(id, &mut tree, target, src, Some(act))?,
             Op::End => {
                 tree.take(Reg(0))?;
                 Step::Discard(act)
@@ -371,10 +375,12 @@ impl Former<'_> {
         tree.spent().then_some(step)
     }
 
-    /// A member write of the value in `src` to the target in `target` at
-    /// the index after it, `act` standing for the statement's root action.
+    /// A member write of statement `id`, of the value in `src` to the
+    /// target in `target` at the index after it, `act` standing for the
+    /// statement's root action.
     fn store(
         &self,
+        id: StmtId,
         tree: &mut expr::Statement,
         target: Reg,
         src: Reg,
@@ -386,7 +392,7 @@ impl Former<'_> {
             tree.take(Reg(target.0 + 1))?,
             tree.take(src)?,
         ]
-        .map(|expr| (expr.pc, self.acted(expr, &mut act)));
+        .map(|expr| (expr.pc, self.acted(id, expr, &mut act)));
         if act.is_some() {
             return None;
         }
@@ -399,15 +405,16 @@ impl Former<'_> {
         })
     }
 
-    /// `expr`, the root action's value standing where the tree reads it.
-    fn acted(&self, expr: Expr, act: &mut Option<Node>) -> Option<Node> {
+    /// `expr` of statement `id`, the root action's value standing where
+    /// the tree reads it.
+    fn acted(&self, id: StmtId, expr: Expr, act: &mut Option<Node>) -> Option<Node> {
         match expr.kind {
             Kind::Act => act.take(),
             Kind::Pin(inner) => Some(Node {
                 reg: expr.reg,
-                kind: NodeKind::Pin(Box::new(self.acted(*inner, act)?)),
+                kind: NodeKind::Pin(Box::new(self.acted(id, *inner, act)?)),
             }),
-            _ => self.node(expr),
+            _ => self.node(id, expr),
         }
     }
 
@@ -427,20 +434,33 @@ impl Former<'_> {
         (reg < self.registers).then_some(())
     }
 
-    fn node(&self, expr: Expr) -> Option<Node> {
+    /// `expr` of statement `id`.
+    fn node(&self, id: StmtId, expr: Expr) -> Option<Node> {
         self.fits(expr.reg)?;
+        // A nested call the plan invokes at a site may run its body: it is
+        // offered there, as the plan's own code offers it.
+        let site = match &expr.kind {
+            Kind::Operator {
+                invoke: Some(invoke),
+                ..
+            } => self.segment.by_stand.get(&(id, Some(invoke.act))).copied(),
+            _ => None,
+        };
         let kind = match expr.kind {
             Kind::Local { local, scoped, .. } if !scoped => NodeKind::Local(self.local(local)?),
             Kind::Const(value) => NodeKind::Const(value),
-            Kind::Pin(inner) => NodeKind::Pin(Box::new(self.node(*inner)?)),
+            Kind::Pin(inner) => NodeKind::Pin(Box::new(self.node(id, *inner)?)),
             Kind::Make {
                 make: Make::Tuple,
                 items,
             } if items.is_empty() => NodeKind::Unit,
+            Kind::Operator { lib, args, .. } if site.is_some() => {
+                self.invoked(id, site?, expr.reg, lib, args)?
+            }
             Kind::Operator {
                 lib, invoke, args, ..
-            } if invoke.is_none_or(|invoke| invoke.operator) => self.call(lib, args)?,
-            Kind::Native { lib, args, .. } => self.call(lib, args)?,
+            } if invoke.is_none_or(|invoke| invoke.operator) => self.call(id, lib, args)?,
+            Kind::Native { lib, args, .. } => self.call(id, lib, args)?,
             _ => return None,
         };
         Some(Node {
@@ -451,8 +471,8 @@ impl Former<'_> {
 
     /// An `if`'s test: its statement grows nothing, so a hole test need
     /// not hold the tuple it compares with.
-    fn test(&self, expr: Expr) -> Option<Node> {
-        let node = self.node(expr)?;
+    fn test(&self, id: StmtId, expr: Expr) -> Option<Node> {
+        let node = self.node(id, expr)?;
         Some(match node.kind {
             NodeKind::Call { lib, args }
                 if (self.same)(lib)
@@ -471,13 +491,39 @@ impl Former<'_> {
         })
     }
 
-    fn call(&self, lib: LibId, args: Box<[Expr]>) -> Option<NodeKind> {
-        let args = args
-            .into_vec()
-            .into_iter()
-            .map(|arg| self.node(arg))
-            .collect::<Option<Box<[Node]>>>()?;
+    fn call(&self, id: StmtId, lib: LibId, args: Box<[Expr]>) -> Option<NodeKind> {
+        let args = self.nodes(id, args)?;
         Some(NodeKind::Call { lib, args })
+    }
+
+    /// A call of `lib` nested in statement `id`, its value to register
+    /// `reg`, that the plan invokes at site `site`: offered there when the
+    /// plan's site takes its value in that register and holds no other
+    /// operand.
+    fn invoked(
+        &self,
+        id: StmtId,
+        site: u32,
+        reg: u32,
+        lib: LibId,
+        args: Box<[Expr]>,
+    ) -> Option<NodeKind> {
+        let stated = self.plan.sites.get(site as usize)?;
+        if !matches!(stated.call, SiteCall::Invoke(_))
+            || stated.dst != reg
+            || !stated.roles.is_empty()
+        {
+            return None;
+        }
+        let args = self.nodes(id, args)?;
+        Some(NodeKind::Invoke { site, lib, args })
+    }
+
+    fn nodes(&self, id: StmtId, args: Box<[Expr]>) -> Option<Box<[Node]>> {
+        args.into_vec()
+            .into_iter()
+            .map(|arg| self.node(id, arg))
+            .collect()
     }
 }
 

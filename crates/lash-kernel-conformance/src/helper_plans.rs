@@ -1370,6 +1370,15 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "top-level recursion through its session binding",
             "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nresult = fib(10)\n",
         ),
+        // FIG-6797: push's loop region offers its nested `ts.array.set`
+        // invoke at the plan's site, so a write that runs its body on an
+        // array-like object stands the plan there, not a call that faults;
+        // the values pushed come from a guest call's island.
+        (
+            "typescript",
+            "push onto an array-like object",
+            "function negate(value) { return -value; }\nfunction run() {\n  const obj = {};\n  obj.push = Array.prototype.push;\n  const length = obj.push(negate(1), negate(2));\n  return [length, obj.length, obj[0], obj[1]];\n}\nconst result = run();\n",
+        ),
     ];
     sources
         .into_iter()
