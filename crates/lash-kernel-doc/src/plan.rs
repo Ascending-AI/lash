@@ -99,8 +99,9 @@ pub struct HelperTemplate {
 /// what the template does not. A path's last fallible step precedes its
 /// one write, if it writes: a path that declines has written nothing. Its
 /// immediate calls use the template's resolved prepared natives
-/// ([`HelperTemplate::callees`]), its other calls the general call of
-/// `callees`.
+/// ([`HelperTemplate::callees`]), its collection lengths and membership
+/// tests [`TemplateHeap::len`] and [`TemplateHeap::contains`] (FIG-6815),
+/// its other calls the general call of `callees`.
 #[derive(Debug)]
 pub struct HeapTemplate {
     pub entry: fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>,
@@ -137,6 +138,30 @@ pub trait TemplateHeap {
     /// `set target[index] = value`: its growth held and what it changes
     /// marked dirty, or nothing written.
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()>;
+    /// `<collection>.len(target)`, as the native answers it.
+    fn len(&mut self, collection: Collection, target: Value) -> Option<Value>;
+    /// `<table>.contains(target, key)`, as the native answers it.
+    fn contains(&mut self, table: Table, target: Value, key: Value) -> Option<Value>;
+}
+
+/// The collection a heap path's length read names: `list.len` reads a
+/// list, `map.len` a map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Collection {
+    List,
+    Tuple,
+    Map,
+    Set,
+    Record,
+}
+
+/// The table a heap path's membership test names: `map.contains` tests a
+/// map's keys, `record.contains` a record's fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Table {
+    Map,
+    Set,
+    Record,
 }
 
 /// A callback site: an action of the body where the plan may yield, and

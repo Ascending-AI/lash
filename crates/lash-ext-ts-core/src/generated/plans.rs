@@ -11614,7 +11614,7 @@ const TS_PAD: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_pad,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ], heap: Some(p::HeapTemplate { entry: ts_pad_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ], heap: Some(p::HeapTemplate { entry: ts_pad_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.pad`.
@@ -11680,7 +11680,7 @@ fn ts_pad_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     match args {
         [Value::List(_), Value::Int(_) | Value::Float(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 Some(args[0])
@@ -12789,7 +12789,7 @@ const TS_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 2, writes: true, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a48db7d7bc26e834026f0752c3095ed7524574b446555f64aa73642133a9a875"), p::function("e9886b7a11db61846edba464571bfc9d68aa80c5b52813318c49083edbb03ceb"), p::function("0c2f652b119c3110982d8904c9b83189a81f433ced3b922abd34cea385f08a1f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("42336ad8860dee22550738bf12089721de2d03a2797de1487934ff62a34113f6"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 2, writes: true, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a48db7d7bc26e834026f0752c3095ed7524574b446555f64aa73642133a9a875"), p::function("e9886b7a11db61846edba464571bfc9d68aa80c5b52813318c49083edbb03ceb"), p::function("0c2f652b119c3110982d8904c9b83189a81f433ced3b922abd34cea385f08a1f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("42336ad8860dee22550738bf12089721de2d03a2797de1487934ff62a34113f6"), ] }) }),
 };
 
 /// `ts.set`.
@@ -13403,7 +13403,7 @@ fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v14 = match (natives[4].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(8, &[v0, Value::Int(0)])? }; let _ = v14;
                 if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = heap.call(10, &[args[0]])?; let _ = v15;
+                let v15 = heap.len(p::Collection::List, args[0])?; let _ = v15;
                 let v16 = match (natives[4].entry)(&[v15, v0]) { Some(value) => value, None => heap.call(8, &[v15, v0])? }; let _ = v16;
                 if !matches!(v16, Value::Bool(false)) { return None; }
                 heap.set_index(args[0], v0, args[2])?;
@@ -13424,7 +13424,7 @@ fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
                 heap.bind(v10, Some(v0))?;
                 let v11 = match (natives[4].entry)(&[v10, Value::Int(0)]) { Some(value) => value, None => heap.call(8, &[v10, Value::Int(0)])? }; let _ = v11;
                 if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = heap.call(10, &[args[0]])?; let _ = v12;
+                let v12 = heap.len(p::Collection::List, args[0])?; let _ = v12;
                 let v13 = match (natives[4].entry)(&[v12, v10]) { Some(value) => value, None => heap.call(8, &[v12, v10])? }; let _ = v13;
                 if !matches!(v13, Value::Bool(false)) { return None; }
                 heap.set_index(args[0], v10, args[2])?;
@@ -14134,7 +14134,7 @@ const TS_HAS_OWN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has_own,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_has_own_heap, depth: 2, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("e9886b7a11db61846edba464571bfc9d68aa80c5b52813318c49083edbb03ceb"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("a48db7d7bc26e834026f0752c3095ed7524574b446555f64aa73642133a9a875"), p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_has_own_heap, depth: 2, writes: false, callees: &[p::function("e9886b7a11db61846edba464571bfc9d68aa80c5b52813318c49083edbb03ceb"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("a48db7d7bc26e834026f0752c3095ed7524574b446555f64aa73642133a9a875"), p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), ] }) }),
 };
 
 /// `ts.has_own`.
@@ -14741,30 +14741,30 @@ fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[1], v0])?; let _ = v1;
+                let v1 = heap.call(0, &[args[1], v0])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = match (natives[0].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(2, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[1].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(3, &[v1, Value::Int(0)])? }; let _ = v3;
+                let v3 = match (natives[1].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v1, Value::Int(0)])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(true)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[1], v0])?; let _ = v1;
+                let v1 = heap.call(0, &[args[1], v0])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = match (natives[0].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(2, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[1].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(3, &[v1, Value::Int(0)])? }; let _ = v3;
+                let v3 = match (natives[1].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v1, Value::Int(0)])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 let v4 = heap.index(args[0], v1)?; let _ = v4;
                 let v5 = heap.tuple(&[])?; let _ = v5;
-                let v6 = match (natives[0].entry)(&[v4, v5]) { Some(value) => value, None => heap.call(2, &[v4, v5])? }; let _ = v6;
+                let v6 = match (natives[0].entry)(&[v4, v5]) { Some(value) => value, None => heap.call(1, &[v4, v5])? }; let _ = v6;
                 let v7 = (natives[2].entry)(&[v6])?; let _ = v7;
                 Some(v7)
             })() { return Some(value); }
@@ -14776,12 +14776,12 @@ fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
                 let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
                 let v1 = heap.tuple(&[])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(2, &[v0, v1])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
                 let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
                 if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(4, &[args[1]])?; let _ = v4;
+                let v4 = heap.call(3, &[args[1]])?; let _ = v4;
                 heap.bind(v4, None)?;
-                let v5 = heap.call(6, &[args[0], v4])?; let _ = v5;
+                let v5 = heap.contains(p::Table::Record, args[0], v4)?; let _ = v5;
                 Some(v5)
             })() { return Some(value); }
             None
@@ -14792,10 +14792,10 @@ fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
                 let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
                 let v1 = heap.tuple(&[])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(2, &[v0, v1])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
                 let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
                 if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(6, &[args[0], args[1]])?; let _ = v4;
+                let v4 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v4;
                 Some(v4)
             })() { return Some(value); }
             None
@@ -17624,7 +17624,7 @@ const TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_map_size_heap, depth: 1, writes: false, callees: &[p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_map_size_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.map.size`.
@@ -17655,7 +17655,7 @@ fn ts_map_size_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     match args {
         [Value::Map(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -17875,7 +17875,7 @@ const TS_MAP_HAS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_has,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_has_heap, depth: 1, writes: false, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_has_heap, depth: 1, writes: false, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }) }),
 };
 
 /// `ts.map.has`.
@@ -17922,7 +17922,7 @@ fn ts_map_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 let v1 = heap.tuple(&[Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?), Value::Text(lash_kernel_doc::arena::ShortText::new("key")?)])?; let _ = v1;
                 let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)]) { Some(value) => value, None => heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)])? }; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[args[0], v2])?; let _ = v3;
+                let v3 = heap.contains(p::Table::Map, args[0], v2)?; let _ = v3;
                 Some(v3)
             })() { return Some(value); }
             None
@@ -19898,7 +19898,7 @@ const TS_SET_CONTAINS_OTHER: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_contains_other,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_contains_other_heap, depth: 1, writes: false, callees: &[p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"), p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_contains_other_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.set.contains_other`.
@@ -19926,16 +19926,16 @@ fn ts_set_contains_other(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
 fn ts_set_contains_other_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+        [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
         },
-        [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Set, args[0], args[1])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -19967,7 +19967,7 @@ const TS_SET_OTHER_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_other_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_size_heap, depth: 1, writes: false, callees: &[p::function("3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38"), p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_size_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.set.other_size`.
@@ -19994,17 +19994,17 @@ fn ts_set_other_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 fn ts_set_other_size_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_)] => {
+        [Value::Map(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             None
         },
-        [Value::Map(_)] => {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Set, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -28144,7 +28144,7 @@ const TS_NUMBER_CONVERT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_convert,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_number_convert_heap, depth: 2, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd"), p::function("0c2f652b119c3110982d8904c9b83189a81f433ced3b922abd34cea385f08a1f"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_number_convert_heap, depth: 2, writes: false, callees: &[p::function("c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd"), p::function("0c2f652b119c3110982d8904c9b83189a81f433ced3b922abd34cea385f08a1f"), ] }) }),
 };
 
 /// `ts.number.convert`.
@@ -28201,21 +28201,21 @@ fn ts_number_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v2;
+                let v2 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v2;
                 heap.bind(v2, None)?;
                 let v3 = heap.index(v2, Value::Int(0))?; let _ = v3;
                 heap.bind(v3, None)?;
-                let v4 = heap.call(2, &[v3])?; let _ = v4;
+                let v4 = heap.call(1, &[v3])?; let _ = v4;
                 heap.bind(v4, None)?;
                 Some(v4)
             })() { return Some(value); }
@@ -36903,7 +36903,7 @@ const TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_size_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_size_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.url_search_params.size`.
@@ -36922,7 +36922,7 @@ fn ts_url_search_params_size_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
                 let v0 = heap.field(args[0], "pairs")?; let _ = v0;
-                let v1 = heap.call(0, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
                 Some(v2)
             })() { return Some(value); }
@@ -39310,7 +39310,7 @@ const TS_ARRAY_MATCH_LENGTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_match_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_match_length_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_match_length_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.array.match_length`.
@@ -39329,7 +39329,7 @@ fn ts_array_match_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
                 let v0 = heap.field(args[0], "items")?; let _ = v0;
-                let v1 = heap.call(0, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
                 Some(v2)
             })() { return Some(value); }
@@ -39626,7 +39626,7 @@ const TS_ARRAY_ARGUMENT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_argument,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_array_argument_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_array_argument_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.array.argument`.
@@ -39654,14 +39654,14 @@ fn ts_array_argument_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     match args {
         [Value::List(_), Value::Int(_) | Value::Float(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.index(args[0], args[1])?; let _ = v2;
                 Some(v2)
             })() { return Some(value); }
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 Some(Value::Absent)
@@ -39954,7 +39954,7 @@ const TS_ARRAY_LENGTH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.array.length`.
@@ -40022,7 +40022,7 @@ fn ts_array_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     match args {
         [Value::List(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -40050,7 +40050,7 @@ const TS_ARRAY_LENGTH_PROPERTY: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_length_property,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_property_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_property_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `ts.array.length_property`.
@@ -40067,7 +40067,7 @@ fn ts_array_length_property_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -40866,7 +40866,7 @@ const TS_ARRAY_CONSTRUCT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_construct,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_construct_heap, depth: 1, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_construct_heap, depth: 1, writes: false, callees: &[p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }) }),
 };
 
 /// `ts.array.construct`.
@@ -40969,10 +40969,10 @@ fn ts_array_construct_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(1)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                let v3 = heap.call(1, &[args[1]])?; let _ = v3;
+                let v3 = heap.call(0, &[args[1]])?; let _ = v3;
                 Some(v3)
             })() { return Some(value); }
             None
@@ -41839,7 +41839,7 @@ const TS_ARRAY_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_array_slice_heap, depth: 2, writes: false, callees: &[p::function("e178b4fc5192035fa4ab4f03b8f74fddb532e8fac0d92d79300e17a720b55332"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("de24617b869c64332524c62aeef7da893e7d6794dc486ba41909d21d2b2a47d5"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_array_slice_heap, depth: 2, writes: false, callees: &[p::function("e178b4fc5192035fa4ab4f03b8f74fddb532e8fac0d92d79300e17a720b55332"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("de24617b869c64332524c62aeef7da893e7d6794dc486ba41909d21d2b2a47d5"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }) }),
 };
 
 /// `ts.array.slice`.
@@ -43827,7 +43827,7 @@ const TS_ARRAY_GENERIC_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("06a4512d3bdd533b7b56c16646548095fac63f5a3f05a2abdfa564a29f11a049"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("8a8dd65564d5024cfd646758ccb1a69fe473b4f862454917992734b4597741c7"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("250bfe1ee9e9cc5437b8ed9d05db60ab6bec1f39fb366d7508e76e36342a8cde"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("06a4512d3bdd533b7b56c16646548095fac63f5a3f05a2abdfa564a29f11a049"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("8a8dd65564d5024cfd646758ccb1a69fe473b4f862454917992734b4597741c7"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("250bfe1ee9e9cc5437b8ed9d05db60ab6bec1f39fb366d7508e76e36342a8cde"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }) }),
 };
 
 /// `ts.array.generic_lastIndexOf`.
@@ -55655,7 +55655,7 @@ const TS_STRING_CREATE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_create,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_string_create_heap, depth: 2, writes: false, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("828e9b3b69b1e2c746ac8e99a9429f19522acd9f2a1c4243f28a0dfd2cfc2a17"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_string_create_heap, depth: 2, writes: false, callees: &[p::function("828e9b3b69b1e2c746ac8e99a9429f19522acd9f2a1c4243f28a0dfd2cfc2a17"), ] }) }),
 };
 
 /// `ts.string.create`.
@@ -55705,19 +55705,19 @@ fn ts_string_create_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 Some(Value::Text(lash_kernel_doc::arena::ShortText::new("")?))
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v2 = heap.index(args[1], Value::Int(0))?; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[v2])?; let _ = v3;
+                let v3 = heap.call(0, &[v2])?; let _ = v3;
                 heap.bind(v3, None)?;
                 Some(v3)
             })() { return Some(value); }
@@ -56142,7 +56142,7 @@ const TS_STRING_AT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_at,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_at_heap, depth: 2, writes: false, callees: &[p::function("c05823c8bfbd74ff79de52a74b02a37795e2e7116502f4e69bf901e83bbc638d"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_at_heap, depth: 2, writes: false, callees: &[p::function("c05823c8bfbd74ff79de52a74b02a37795e2e7116502f4e69bf901e83bbc638d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), ] }) }),
 };
 
 /// `ts.string.at`.
@@ -56299,12 +56299,12 @@ fn ts_string_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Absent, None)?;
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Int(0), None)?;
-                let v4 = heap.call(3, &[args[0]])?; let _ = v4;
+                let v4 = heap.call(2, &[args[0]])?; let _ = v4;
                 heap.bind(v4, None)?;
                 let v5 = (natives[0].entry)(&[Value::Int(0), v4])?; let _ = v5;
                 if !matches!(v5, Value::Bool(false)) { return None; }
@@ -56313,18 +56313,18 @@ fn ts_string_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Absent, None)?;
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Int(0), None)?;
-                let v4 = heap.call(3, &[args[0]])?; let _ = v4;
+                let v4 = heap.call(2, &[args[0]])?; let _ = v4;
                 heap.bind(v4, None)?;
                 let v5 = (natives[0].entry)(&[Value::Int(0), v4])?; let _ = v5;
                 if !matches!(v5, Value::Bool(true)) { return None; }
                 heap.bind(Value::Int(0), None)?;
                 heap.bind(Value::Int(1), None)?;
-                let v6 = heap.call(4, &[args[0], Value::Int(0), Value::Int(1)])?; let _ = v6;
+                let v6 = heap.call(3, &[args[0], Value::Int(0), Value::Int(1)])?; let _ = v6;
                 heap.bind(v6, None)?;
                 Some(v6)
             })() { return Some(value); }
@@ -57065,7 +57065,7 @@ const TS_STRING_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_slice_heap, depth: 2, writes: false, callees: &[p::function("d7dec36a9075d947da35ba26aa64bdff94de9741b32a83f843fe08b4c7ec619e"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_slice_heap, depth: 2, writes: false, callees: &[p::function("d7dec36a9075d947da35ba26aa64bdff94de9741b32a83f843fe08b4c7ec619e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }) }),
 };
 
 /// `ts.string.slice`.
@@ -57553,7 +57553,7 @@ const TS_STRING_SUBSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_substring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_substring_heap, depth: 2, writes: false, callees: &[p::function("d6081d45701c3699b24a919bc1b5ae632f47aef9f274d5ae8efbd531e412aaec"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_substring_heap, depth: 2, writes: false, callees: &[p::function("d6081d45701c3699b24a919bc1b5ae632f47aef9f274d5ae8efbd531e412aaec"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }) }),
 };
 
 /// `ts.string.substring`.
@@ -57985,7 +57985,7 @@ const TS_STRING_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_indexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_indexof_heap, depth: 2, writes: false, callees: &[p::function("56f621a4717c16be1d9de45fa9c786bc561441ce2126fe1ab24dd2ccd0f9a98a"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_indexof_heap, depth: 2, writes: false, callees: &[p::function("56f621a4717c16be1d9de45fa9c786bc561441ce2126fe1ab24dd2ccd0f9a98a"), ] }) }),
 };
 
 /// `ts.string.indexOf`.
@@ -58134,7 +58134,7 @@ fn ts_string_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v3 = heap.call(0, &[args[0], args[1]])?; let _ = v3;
@@ -59031,7 +59031,7 @@ const TS_STRING_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_includes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_includes_heap, depth: 2, writes: false, callees: &[p::function("1812805d7e8ffbf526cb9d3e9106baaa5dc691702c20c0e1a8a12b360afe558d"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_includes_heap, depth: 2, writes: false, callees: &[p::function("1812805d7e8ffbf526cb9d3e9106baaa5dc691702c20c0e1a8a12b360afe558d"), ] }) }),
 };
 
 /// `ts.string.includes`.
@@ -59181,7 +59181,7 @@ fn ts_string_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v3 = heap.call(0, &[args[0], args[1]])?; let _ = v3;
@@ -59246,7 +59246,7 @@ const TS_STRING_STARTSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_startswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_startswith_heap, depth: 2, writes: false, callees: &[p::function("89a8eda1bea493aa8481e08ac39bbdbc32c3b937824b2578d752f377b5b503e8"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_startswith_heap, depth: 2, writes: false, callees: &[p::function("89a8eda1bea493aa8481e08ac39bbdbc32c3b937824b2578d752f377b5b503e8"), ] }) }),
 };
 
 /// `ts.string.startsWith`.
@@ -59396,7 +59396,7 @@ fn ts_string_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v3 = heap.call(0, &[args[0], args[1]])?; let _ = v3;
@@ -59465,7 +59465,7 @@ const TS_STRING_ENDSWITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_endswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_endswith_heap, depth: 2, writes: false, callees: &[p::function("041a08f00c79ce1346535da6a11082174deb311ffeebbbc2294270806d471b45"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_endswith_heap, depth: 2, writes: false, callees: &[p::function("041a08f00c79ce1346535da6a11082174deb311ffeebbbc2294270806d471b45"), ] }) }),
 };
 
 /// `ts.string.endsWith`.
@@ -59637,7 +59637,7 @@ fn ts_string_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v3 = heap.call(0, &[args[0], args[1]])?; let _ = v3;
@@ -65076,7 +65076,7 @@ const TS_STRING_SPLIT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_split,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_split_heap, depth: 2, writes: false, callees: &[p::function("0eccb5db40695d8e1e82eaf8ee93945c22345be18249441dfe5f80540b36f5c9"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_split_heap, depth: 2, writes: false, callees: &[p::function("0eccb5db40695d8e1e82eaf8ee93945c22345be18249441dfe5f80540b36f5c9"), ] }) }),
 };
 
 /// `ts.string.split`.
@@ -65222,7 +65222,7 @@ fn ts_string_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v3 = heap.call(0, &[args[0], args[1]])?; let _ = v3;
@@ -74410,7 +74410,7 @@ const TS_MEMBER_APPEND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_append,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_append_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_append_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.append`.
@@ -74593,7 +74593,7 @@ fn ts_member_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("append")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("append")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("append")?))?; let _ = v3;
                 Some(v3)
@@ -75586,7 +75586,7 @@ const TS_MEMBER_AT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_at,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_at_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_at_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.at`.
@@ -75833,7 +75833,7 @@ fn ts_member_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("at")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("at")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("at")?))?; let _ = v3;
                 Some(v3)
@@ -79168,7 +79168,7 @@ const TS_MEMBER_CONCAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_concat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_concat_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_concat_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.concat`.
@@ -79415,7 +79415,7 @@ fn ts_member_concat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("concat")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("concat")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("concat")?))?; let _ = v3;
                 Some(v3)
@@ -79579,7 +79579,7 @@ const TS_MEMBER_CONSTRUCTOR: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_constructor,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_constructor_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_constructor_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.constructor`.
@@ -80385,7 +80385,7 @@ fn ts_member_constructor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("constructor")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("constructor")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("constructor")?))?; let _ = v3;
                 Some(v3)
@@ -80460,7 +80460,7 @@ const TS_MEMBER_COPYWITHIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_copywithin,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_copywithin_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_copywithin_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.copyWithin`.
@@ -80675,7 +80675,7 @@ fn ts_member_copywithin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("copyWithin")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("copyWithin")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("copyWithin")?))?; let _ = v3;
                 Some(v3)
@@ -82059,7 +82059,7 @@ const TS_MEMBER_DELETE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_delete,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_delete_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_delete_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.delete`.
@@ -82306,7 +82306,7 @@ fn ts_member_delete_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("delete")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("delete")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("delete")?))?; let _ = v3;
                 Some(v3)
@@ -82870,7 +82870,7 @@ const TS_MEMBER_ENTRIES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_entries,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_entries_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_entries_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.entries`.
@@ -83197,7 +83197,7 @@ fn ts_member_entries_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("entries")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("entries")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("entries")?))?; let _ = v3;
                 Some(v3)
@@ -83489,7 +83489,7 @@ const TS_MEMBER_EVERY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_every,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_every_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_every_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.every`.
@@ -83704,7 +83704,7 @@ fn ts_member_every_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("every")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("every")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("every")?))?; let _ = v3;
                 Some(v3)
@@ -83776,7 +83776,7 @@ const TS_MEMBER_EXEC: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_exec,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_exec_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_exec_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.exec`.
@@ -83959,7 +83959,7 @@ fn ts_member_exec_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("exec")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("exec")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("exec")?))?; let _ = v3;
                 Some(v3)
@@ -84468,7 +84468,7 @@ const TS_MEMBER_FILL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fill,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_fill_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_fill_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.fill`.
@@ -84683,7 +84683,7 @@ fn ts_member_fill_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("fill")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("fill")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("fill")?))?; let _ = v3;
                 Some(v3)
@@ -84758,7 +84758,7 @@ const TS_MEMBER_FILTER: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_filter,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_filter_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_filter_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.filter`.
@@ -84973,7 +84973,7 @@ fn ts_member_filter_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("filter")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("filter")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("filter")?))?; let _ = v3;
                 Some(v3)
@@ -85283,7 +85283,7 @@ const TS_MEMBER_FIND: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_find,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_find_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_find_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.find`.
@@ -85498,7 +85498,7 @@ fn ts_member_find_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("find")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("find")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("find")?))?; let _ = v3;
                 Some(v3)
@@ -85573,7 +85573,7 @@ const TS_MEMBER_FINDINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findindex,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findindex_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findindex_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.findIndex`.
@@ -85788,7 +85788,7 @@ fn ts_member_findindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findIndex")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findIndex")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findIndex")?))?; let _ = v3;
                 Some(v3)
@@ -85863,7 +85863,7 @@ const TS_MEMBER_FINDLAST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlast,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlast_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlast_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.findLast`.
@@ -86078,7 +86078,7 @@ fn ts_member_findlast_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLast")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLast")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLast")?))?; let _ = v3;
                 Some(v3)
@@ -86153,7 +86153,7 @@ const TS_MEMBER_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlastindex,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlastindex_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlastindex_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.findLastIndex`.
@@ -86368,7 +86368,7 @@ fn ts_member_findlastindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLastIndex")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLastIndex")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLastIndex")?))?; let _ = v3;
                 Some(v3)
@@ -86443,7 +86443,7 @@ const TS_MEMBER_FLAT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flat_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flat_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.flat`.
@@ -86658,7 +86658,7 @@ fn ts_member_flat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flat")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flat")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flat")?))?; let _ = v3;
                 Some(v3)
@@ -86733,7 +86733,7 @@ const TS_MEMBER_FLATMAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flatmap,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flatmap_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flatmap_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.flatMap`.
@@ -86948,7 +86948,7 @@ fn ts_member_flatmap_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flatMap")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flatMap")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flatMap")?))?; let _ = v3;
                 Some(v3)
@@ -87255,7 +87255,7 @@ const TS_MEMBER_FOREACH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_foreach,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_foreach_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_foreach_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.forEach`.
@@ -87566,7 +87566,7 @@ fn ts_member_foreach_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("forEach")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("forEach")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("forEach")?))?; let _ = v3;
                 Some(v3)
@@ -88945,7 +88945,7 @@ const TS_MEMBER_GET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_get,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_get_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_get_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.get`.
@@ -89160,7 +89160,7 @@ fn ts_member_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("get")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("get")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("get")?))?; let _ = v3;
                 Some(v3)
@@ -89232,7 +89232,7 @@ const TS_MEMBER_GETALL: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getall,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_getall_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_getall_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.getAll`.
@@ -89415,7 +89415,7 @@ fn ts_member_getall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("getAll")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("getAll")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("getAll")?))?; let _ = v3;
                 Some(v3)
@@ -95374,7 +95374,7 @@ const TS_MEMBER_HAS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_has,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_has_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_has_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.has`.
@@ -95621,7 +95621,7 @@ fn ts_member_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("has")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("has")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("has")?))?; let _ = v3;
                 Some(v3)
@@ -95932,7 +95932,7 @@ const TS_MEMBER_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hasownproperty,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_hasownproperty_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_hasownproperty_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.hasOwnProperty`.
@@ -96324,7 +96324,7 @@ fn ts_member_hasownproperty_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("hasOwnProperty")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("hasOwnProperty")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("hasOwnProperty")?))?; let _ = v3;
                 Some(v3)
@@ -96838,7 +96838,7 @@ const TS_MEMBER_INCLUDES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_includes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_includes_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_includes_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.includes`.
@@ -97085,7 +97085,7 @@ fn ts_member_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("includes")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("includes")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("includes")?))?; let _ = v3;
                 Some(v3)
@@ -97165,7 +97165,7 @@ const TS_MEMBER_INDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_indexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_indexof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_indexof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.indexOf`.
@@ -97412,7 +97412,7 @@ fn ts_member_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("indexOf")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("indexOf")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("indexOf")?))?; let _ = v3;
                 Some(v3)
@@ -99712,7 +99712,7 @@ const TS_MEMBER_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isprototypeof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_isprototypeof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_isprototypeof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.isPrototypeOf`.
@@ -100104,7 +100104,7 @@ fn ts_member_isprototypeof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("isPrototypeOf")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("isPrototypeOf")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("isPrototypeOf")?))?; let _ = v3;
                 Some(v3)
@@ -101083,7 +101083,7 @@ const TS_MEMBER_JOIN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_join,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_join_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_join_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.join`.
@@ -101298,7 +101298,7 @@ fn ts_member_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("join")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("join")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("join")?))?; let _ = v3;
                 Some(v3)
@@ -101393,7 +101393,7 @@ const TS_MEMBER_KEYS: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_keys,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_keys_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_keys_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.keys`.
@@ -101720,7 +101720,7 @@ fn ts_member_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("keys")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("keys")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("keys")?))?; let _ = v3;
                 Some(v3)
@@ -101800,7 +101800,7 @@ const TS_MEMBER_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.lastIndexOf`.
@@ -102047,7 +102047,7 @@ fn ts_member_lastindexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("lastIndexOf")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("lastIndexOf")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("lastIndexOf")?))?; let _ = v3;
                 Some(v3)
@@ -103469,7 +103469,7 @@ const TS_MEMBER_MAP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_map,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_map_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_map_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.map`.
@@ -103684,7 +103684,7 @@ fn ts_member_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("map")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("map")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("map")?))?; let _ = v3;
                 Some(v3)
@@ -107063,7 +107063,7 @@ const TS_MEMBER_POP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_pop_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_pop_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.pop`.
@@ -107278,7 +107278,7 @@ fn ts_member_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("pop")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("pop")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("pop")?))?; let _ = v3;
                 Some(v3)
@@ -108791,7 +108791,7 @@ const TS_MEMBER_PUSH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_push,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_push_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_push_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.push`.
@@ -109006,7 +109006,7 @@ fn ts_member_push_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("push")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("push")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("push")?))?; let _ = v3;
                 Some(v3)
@@ -109732,7 +109732,7 @@ const TS_MEMBER_REDUCE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduce,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduce_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduce_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.reduce`.
@@ -109947,7 +109947,7 @@ fn ts_member_reduce_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduce")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduce")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduce")?))?; let _ = v3;
                 Some(v3)
@@ -110022,7 +110022,7 @@ const TS_MEMBER_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduceright,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduceright_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduceright_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.reduceRight`.
@@ -110237,7 +110237,7 @@ fn ts_member_reduceright_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduceRight")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduceRight")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduceRight")?))?; let _ = v3;
                 Some(v3)
@@ -111451,7 +111451,7 @@ const TS_MEMBER_REVERSE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reverse,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reverse_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reverse_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.reverse`.
@@ -111666,7 +111666,7 @@ fn ts_member_reverse_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reverse")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reverse")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reverse")?))?; let _ = v3;
                 Some(v3)
@@ -112412,7 +112412,7 @@ const TS_MEMBER_SET: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_set_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_set_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.set`.
@@ -112627,7 +112627,7 @@ fn ts_member_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("set")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("set")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("set")?))?; let _ = v3;
                 Some(v3)
@@ -116714,7 +116714,7 @@ const TS_MEMBER_SHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_shift,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_shift_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_shift_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.shift`.
@@ -116929,7 +116929,7 @@ fn ts_member_shift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("shift")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("shift")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("shift")?))?; let _ = v3;
                 Some(v3)
@@ -117891,7 +117891,7 @@ const TS_MEMBER_SLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_slice_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_slice_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.slice`.
@@ -118138,7 +118138,7 @@ fn ts_member_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("slice")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("slice")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("slice")?))?; let _ = v3;
                 Some(v3)
@@ -118213,7 +118213,7 @@ const TS_MEMBER_SOME: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_some,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_some_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_some_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.some`.
@@ -118428,7 +118428,7 @@ fn ts_member_some_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("some")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("some")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("some")?))?; let _ = v3;
                 Some(v3)
@@ -118509,7 +118509,7 @@ const TS_MEMBER_SORT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sort,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_sort_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_sort_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.sort`.
@@ -118756,7 +118756,7 @@ fn ts_member_sort_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("sort")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("sort")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("sort")?))?; let _ = v3;
                 Some(v3)
@@ -118831,7 +118831,7 @@ const TS_MEMBER_SPLICE: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_splice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_splice_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_splice_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.splice`.
@@ -119046,7 +119046,7 @@ fn ts_member_splice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("splice")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("splice")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("splice")?))?; let _ = v3;
                 Some(v3)
@@ -120926,7 +120926,7 @@ const TS_MEMBER_TEST: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_test,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_test_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_test_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.test`.
@@ -121109,7 +121109,7 @@ fn ts_member_test_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("test")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("test")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("test")?))?; let _ = v3;
                 Some(v3)
@@ -123186,7 +123186,7 @@ const TS_MEMBER_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocalestring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tolocalestring_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tolocalestring_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.toLocaleString`.
@@ -123466,7 +123466,7 @@ fn ts_member_tolocalestring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toLocaleString")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toLocaleString")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toLocaleString")?))?; let _ = v3;
                 Some(v3)
@@ -124501,7 +124501,7 @@ const TS_MEMBER_TOREVERSED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toreversed,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_toreversed_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_toreversed_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.toReversed`.
@@ -124716,7 +124716,7 @@ fn ts_member_toreversed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toReversed")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toReversed")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toReversed")?))?; let _ = v3;
                 Some(v3)
@@ -124791,7 +124791,7 @@ const TS_MEMBER_TOSORTED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tosorted,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tosorted_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tosorted_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.toSorted`.
@@ -125006,7 +125006,7 @@ fn ts_member_tosorted_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSorted")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSorted")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSorted")?))?; let _ = v3;
                 Some(v3)
@@ -125081,7 +125081,7 @@ const TS_MEMBER_TOSPLICED: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tospliced,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tospliced_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tospliced_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.toSpliced`.
@@ -125296,7 +125296,7 @@ fn ts_member_tospliced_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSpliced")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSpliced")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSpliced")?))?; let _ = v3;
                 Some(v3)
@@ -125436,7 +125436,7 @@ const TS_MEMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tostring_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tostring_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.toString`.
@@ -126075,7 +126075,7 @@ fn ts_member_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toString")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toString")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toString")?))?; let _ = v3;
                 Some(v3)
@@ -128048,7 +128048,7 @@ const TS_MEMBER_UNSHIFT: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_unshift,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_unshift_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_unshift_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.unshift`.
@@ -128263,7 +128263,7 @@ fn ts_member_unshift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("unshift")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("unshift")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("unshift")?))?; let _ = v3;
                 Some(v3)
@@ -128378,7 +128378,7 @@ const TS_MEMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_valueof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_valueof_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.valueOf`.
@@ -128882,7 +128882,7 @@ fn ts_member_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("valueOf")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("valueOf")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("valueOf")?))?; let _ = v3;
                 Some(v3)
@@ -128976,7 +128976,7 @@ const TS_MEMBER_VALUES: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_values,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_values_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_values_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.values`.
@@ -129303,7 +129303,7 @@ fn ts_member_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("values")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("values")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("values")?))?; let _ = v3;
                 Some(v3)
@@ -129595,7 +129595,7 @@ const TS_MEMBER_WITH: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_with,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_with_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_with_heap, depth: 2, writes: false, callees: &[p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `ts.member.with`.
@@ -129810,7 +129810,7 @@ fn ts_member_with_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("with")?)])?; let _ = v2;
+                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("with")?))?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("with")?))?; let _ = v3;
                 Some(v3)

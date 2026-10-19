@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
-use lash_kernel_doc::plan::TemplateHeap;
+use lash_kernel_doc::plan::{Collection, Table, TemplateHeap};
 use lash_kernel_doc::{
     Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, PreparedAnswer, Value,
     ValueKind, WorkCounter,
@@ -817,4 +817,79 @@ impl TemplateHeap for HeapCx<'_, '_> {
         self.built = true;
         Some(())
     }
+
+    /// Reads the collection as the native's call reads it, through the
+    /// same views, without its call: it builds and reserves nothing.
+    fn len(&mut self, collection: Collection, target: Value) -> Option<Value> {
+        if self.cx.held.is_some() || self.cx.concatenated() {
+            return None;
+        }
+        if !matches!(
+            (collection, target),
+            (Collection::List, Value::List(_))
+                | (Collection::Tuple, Value::Tuple(_))
+                | (Collection::Map, Value::Map(_))
+                | (Collection::Set, Value::Set(_))
+                | (Collection::Record, Value::Record(_))
+        ) {
+            return None;
+        }
+        let semantics = self.cx.arena.semantics().with_limits(self.cx.limits);
+        let args = Args::new(&[], self.cx.arena.objects(), &semantics);
+        let length = match args.sequence(&target).ok()? {
+            Some(sequence) => sequence.len(),
+            None => args.table(&target).ok()??.len(),
+        };
+        Some(Value::Int(length as i64))
+    }
+
+    /// Looks the key up as the native's call does, through the same
+    /// views, without its call: it builds and reserves nothing.
+    fn contains(&mut self, table: Table, target: Value, key: Value) -> Option<Value> {
+        if self.cx.held.is_some() || self.cx.concatenated() {
+            return None;
+        }
+        if !matches!(
+            (table, target),
+            (Table::Map, Value::Map(_))
+                | (Table::Set, Value::Set(_))
+                | (Table::Record, Value::Record(_))
+        ) {
+            return None;
+        }
+        let semantics = self.cx.arena.semantics().with_limits(self.cx.limits);
+        let args = Args::new(&[], self.cx.arena.objects(), &semantics);
+        let view = args.table(&target).ok()??;
+        match table {
+            Table::Record if !matches!(key, Value::Text(_) | Value::LongText(_)) => return None,
+            Table::Record => {}
+            Table::Map | Table::Set => legal_key(&args, &key)?,
+        }
+        Some(Value::Bool(args.lookup(view, &key).ok()?.is_some()))
+    }
+}
+
+/// `key` where it is a legal key as `map.contains` and `set.contains`
+/// check one: `None` where their call raises (`invalid_key`, `too_deep`).
+fn legal_key(args: &Args<'_>, key: &Value) -> Option<()> {
+    // An inline scalar or short text is a legal key by its kind.
+    if matches!(
+        key,
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
+            | Value::Timestamp(_)
+            | Value::Function(_)
+            | Value::TaskRef(_)
+    ) {
+        return Some(());
+    }
+    if matches!(key, Value::Tuple(_))
+        && args.depth(key) as usize > args.limits().value_depth().min(128)
+    {
+        return None;
+    }
+    args.normal_key(key).ok()?.map(|_| ())
 }

@@ -129,6 +129,19 @@ enum Form {
     Field { target: String, field: String },
     /// An element of the target.
     Index { target: String, index: String },
+    /// A collection's length, by the [`lash_kernel_doc::plan::Collection`]
+    /// variant its native names.
+    Len {
+        collection: &'static str,
+        target: String,
+    },
+    /// Whether a table holds a key, by the [`lash_kernel_doc::plan::Table`]
+    /// variant its native names.
+    Contains {
+        table: &'static str,
+        target: String,
+        key: String,
+    },
     /// The general call of a native, with what it answers: an object it
     /// may build, and one only the arena holds.
     Call {
@@ -187,7 +200,10 @@ impl Step {
             Self::Heap { form, .. } => {
                 let (builds, arena) = match form {
                     Form::Tuple(_) => (true, true),
-                    Form::Field { .. } | Form::Index { .. } => (false, true),
+                    Form::Field { .. }
+                    | Form::Index { .. }
+                    | Form::Len { .. }
+                    | Form::Contains { .. } => (false, true),
                     Form::Call { builds, arena, .. } => (*builds, *arena),
                 };
                 Effects {
@@ -227,6 +243,12 @@ impl std::fmt::Display for Form {
             Self::Tuple(items) => write!(f, "heap.tuple(&[{items}])"),
             Self::Field { target, field } => write!(f, "heap.field({target}, {field:?})"),
             Self::Index { target, index } => write!(f, "heap.index({target}, {index})"),
+            Self::Len { collection, target } => {
+                write!(f, "heap.len(p::Collection::{collection}, {target})")
+            }
+            Self::Contains { table, target, key } => {
+                write!(f, "heap.contains(p::Table::{table}, {target}, {key})")
+            }
             Self::Call { callee, args, .. } => write!(f, "heap.call({callee}, &[{args}])"),
         }
     }
@@ -361,6 +383,37 @@ fn captured(block: &[Stmt]) -> std::collections::BTreeSet<Name> {
     let mut captured = BTreeSet::new();
     walk(Node::Block(block), &mut captured);
     captured
+}
+
+/// The arena read that collection native `name`'s call on `args` makes,
+/// where the heap performs it without the call (FIG-6815): a length or a
+/// table's membership test. Every other native's call stays general.
+fn read(name: &str, args: &[Symbol]) -> Option<Form> {
+    let (collection, operation) = name.split_once('.')?;
+    match (operation, args) {
+        ("len", [target]) => Some(Form::Len {
+            collection: match collection {
+                "list" => "List",
+                "tuple" => "Tuple",
+                "map" => "Map",
+                "set" => "Set",
+                "record" => "Record",
+                _ => return None,
+            },
+            target: target.code.clone(),
+        }),
+        ("contains", [target, key]) => Some(Form::Contains {
+            table: match collection {
+                "map" => "Map",
+                "set" => "Set",
+                "record" => "Record",
+                _ => return None,
+            },
+            target: target.code.clone(),
+            key: key.code.clone(),
+        }),
+        _ => None,
+    }
 }
 
 /// Whether `kind`'s values are immediates every prepared entry takes: a
@@ -625,6 +678,15 @@ impl Evaluator<'_> {
             // frame deeper.
             state.depth = state.depth.max(depth + 1);
             return Some(self.general(function, definition, &args, state));
+        }
+        if self.heap
+            && definition.guard.is_none()
+            && registered.native().is_some()
+            && let Some(form) = read(definition.name.as_str(), &args)
+        {
+            let kind = Self::result_kind(definition);
+            let calls = args.iter().map(|arg| arg.calls).sum();
+            return Some(self.heap_step(state, form, (kind, calls)));
         }
         if definition.guard.is_some() {
             if self.heap {

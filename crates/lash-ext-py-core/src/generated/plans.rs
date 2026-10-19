@@ -6232,7 +6232,7 @@ const PY_TRUTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_truth,
-    template: Some(p::HelperTemplate { entry: Some(py_truth_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_truth_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"), p::function("5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(py_truth_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_truth_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `py.truth`.
@@ -6407,7 +6407,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 let v1 = (natives[3].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -6417,7 +6417,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 let v1 = (natives[3].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -6427,7 +6427,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = heap.call(3, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Record, args[0])?; let _ = v0;
                 let v1 = (natives[3].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -8852,7 +8852,7 @@ const PY_CONTAINS: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_contains,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 1, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("93b6bd82b3c1b09672cae1c1d42f431529751cbb77e8b914af0586e86ec8c899"), p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 1, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("93b6bd82b3c1b09672cae1c1d42f431529751cbb77e8b914af0586e86ec8c899"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), ] }) }),
 };
 
 /// `py.contains`.
@@ -9002,7 +9002,7 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(2, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -9019,7 +9019,7 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = heap.call(4, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -9028,7 +9028,7 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
-                let v0 = heap.call(3, &[args[0], args[1], Value::Int(0)])?; let _ = v0;
+                let v0 = heap.call(2, &[args[0], args[1], Value::Int(0)])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -9346,7 +9346,7 @@ const PY_GETITEM: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_getitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("fa6dfe50f424011ef3491844fd47be845cdc45dd2443c56eabe6ad35e69291d6"), p::function("04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), p::function("a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("fa6dfe50f424011ef3491844fd47be845cdc45dd2443c56eabe6ad35e69291d6"), p::function("04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3"), p::function("a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf"), ] }) }),
 };
 
 /// `py.getitem`.
@@ -9559,7 +9559,7 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(2, &[args[1], v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v1;
                 heap.bind(v1, None)?;
@@ -9574,7 +9574,7 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(5, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -9589,7 +9589,7 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(7, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -9654,7 +9654,7 @@ const PY_SETITEM: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_setitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("fa6dfe50f424011ef3491844fd47be845cdc45dd2443c56eabe6ad35e69291d6"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("fa6dfe50f424011ef3491844fd47be845cdc45dd2443c56eabe6ad35e69291d6"), ] }) }),
 };
 
 /// `py.setitem`.
@@ -9734,9 +9734,9 @@ fn py_setitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = heap.call(2, &[args[1], v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), Value::Text(lash_kernel_doc::arena::ShortText::new(" assignment")?)])?; let _ = v1;
+                let v1 = heap.call(1, &[args[1], v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), Value::Text(lash_kernel_doc::arena::ShortText::new(" assignment")?)])?; let _ = v1;
                 heap.bind(v1, None)?;
                 heap.set_index(args[0], v1, args[2])?;
                 Some(Value::Null)
@@ -10422,7 +10422,7 @@ const PY_LENGTH: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 1, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"), p::function("5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 1, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), ] }) }),
 };
 
 /// `py.length`.
@@ -10519,7 +10519,7 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -10528,7 +10528,7 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(3, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -10537,7 +10537,7 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Record, args[0])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -10711,7 +10711,7 @@ const PY_FOR_IN_CHECK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_check,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), ], heap: Some(p::HeapTemplate { entry: py_for_in_check_heap, depth: 1, writes: false, callees: &[p::function("3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38"), p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), ], heap: Some(p::HeapTemplate { entry: py_for_in_check_heap, depth: 1, writes: false, callees: &[] }) }),
 };
 
 /// `py.for_in.check`.
@@ -10780,19 +10780,9 @@ fn py_for_in_check(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 fn py_for_in_check_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Int(_), Value::Int(_), Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
-                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            None
-        },
         [Value::Map(_), Value::Int(_), Value::Int(_), Value::Bool(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
                 let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -10803,11 +10793,21 @@ fn py_for_in_check_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
                 Some(v4)
             })() { return Some(value); }
             if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
                 let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 if !matches!(args[3], Value::Bool(false)) { return None; }
+                Some(args[2])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Int(_), Value::Int(_), Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::Set, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
             None
@@ -11185,7 +11185,7 @@ const PY_UNPACK: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_unpack,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, callees: &[p::function("8ffcaa1d78c1a1b9e8601233a6422fc5a2c1b8991ff6622a20f5caa38ccf025e"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, callees: &[p::function("8ffcaa1d78c1a1b9e8601233a6422fc5a2c1b8991ff6622a20f5caa38ccf025e"), ] }) }),
 };
 
 /// `py.unpack`.
@@ -11290,7 +11290,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11308,7 +11308,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11326,7 +11326,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11344,7 +11344,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11360,7 +11360,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(args[0], None)?;
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 heap.bind(Value::Int(0), None)?;
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, Some(Value::Int(0)))?;
                 let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
@@ -11378,7 +11378,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11396,7 +11396,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11414,7 +11414,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -11432,7 +11432,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
                 heap.bind(Value::Int(0), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, Some(args[0]))?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
                 heap.bind(v1, Some(Value::Int(0)))?;
                 let v2 = (natives[0].entry)(&[args[1], v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -16287,7 +16287,7 @@ const PY_METHOD_APPEND: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_append,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_append_heap, depth: 1, writes: true, callees: &[p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_append_heap, depth: 1, writes: true, callees: &[] }) }),
 };
 
 /// `py.method.append`.
@@ -16324,7 +16324,7 @@ fn py_method_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     match args {
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.set_index(args[0], v0, args[1])?;
                 Some(Value::Null)
             })() { return Some(value); }
@@ -16440,7 +16440,7 @@ const LIST_INSERT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: list_insert,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ], heap: Some(p::HeapTemplate { entry: list_insert_heap, depth: 1, writes: true, callees: &[p::function("0d6cda99f7593bcc65b000bd77734c603b9fcaf09f1901452c51a710b6d4bce6"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ], heap: Some(p::HeapTemplate { entry: list_insert_heap, depth: 1, writes: true, callees: &[p::function("0d6cda99f7593bcc65b000bd77734c603b9fcaf09f1901452c51a710b6d4bce6"), ] }) }),
 };
 
 /// `list.insert`.
@@ -16530,7 +16530,7 @@ fn list_insert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[0]])?; let _ = v1;
+                let v1 = heap.len(p::Collection::List, args[0])?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = (natives[0].entry)(&[v0, v1])?; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
@@ -16755,7 +16755,7 @@ const PY_METHOD_POP: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, callees: &[p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf"), p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, callees: &[p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"), p::function("a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }) }),
 };
 
 /// `py.method.pop`.
@@ -17020,7 +17020,7 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
@@ -17030,7 +17030,7 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v2 = (natives[2].entry)(&[args[2], Value::Absent])?; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
@@ -17042,9 +17042,9 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[2].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(6, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[2].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(4, &[args[2], Value::Absent])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
@@ -18184,7 +18184,7 @@ const PY_METHOD_GET: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_get,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: py_method_get_heap, depth: 1, writes: false, callees: &[p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: py_method_get_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `py.method.get`.
@@ -18279,7 +18279,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18290,7 +18290,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(Value::Null)
@@ -18303,7 +18303,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18314,7 +18314,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[2])
@@ -18327,7 +18327,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18338,7 +18338,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -18350,7 +18350,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -18365,7 +18365,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18376,10 +18376,10 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 Some(Value::Null)
             })() { return Some(value); }
@@ -18388,10 +18388,10 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 heap.bind(Value::Bool(true), None)?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
@@ -18449,7 +18449,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18461,7 +18461,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(Value::Null)
@@ -18475,7 +18475,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18487,7 +18487,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[2])
@@ -18501,7 +18501,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18513,7 +18513,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -18526,7 +18526,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -18542,7 +18542,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
@@ -18554,10 +18554,10 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 Some(Value::Null)
             })() { return Some(value); }
@@ -18567,10 +18567,10 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v0;
                 heap.bind(v0, Some(Value::Bool(false)))?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
@@ -18583,7 +18583,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v0;
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(Value::Null)
             })() { return Some(value); }
@@ -18593,7 +18593,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 heap.bind(Value::Bool(false), None)?;
                 heap.bind(Value::Bool(true), Some(Value::Bool(false)))?;
                 heap.bind(Value::Bool(false), None)?;
-                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(2, &[args[2], Value::Absent])? }; let _ = v0;
+                let v0 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[2])
             })() { return Some(value); }
@@ -19200,7 +19200,7 @@ const PY_METHOD_SETDEFAULT: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_setdefault,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_method_setdefault_heap, depth: 1, writes: true, callees: &[p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_method_setdefault_heap, depth: 1, writes: true, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `py.method.setdefault`.
@@ -19262,14 +19262,14 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
                 heap.bind(args[2], Some(Value::Null))?;
@@ -19281,14 +19281,14 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
                 heap.set_index(args[0], args[1], Value::Null)?;
@@ -19299,14 +19299,14 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -19318,7 +19318,7 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
                 let v2 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v2;
@@ -19332,17 +19332,17 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.index(args[0], args[1])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(1, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
                 if !matches!(v3, Value::Bool(true)) { return None; }
                 heap.bind(args[2], Some(Value::Null))?;
@@ -19351,10 +19351,10 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 heap.bind(Value::Null, None)?;
-                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(1, &[args[2], Value::Absent])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[args[2], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[2], Value::Absent])? }; let _ = v2;
                 let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 heap.set_index(args[0], args[1], Value::Null)?;

@@ -1161,6 +1161,22 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "dict grown while walked",
             "def build():\n    groups = {\"a\": 1, \"b\": 2}\n    seen = []\n    for key in groups:\n        seen.append(key)\n        groups[key + \"x\"] = 0\n    return seen\nresult = build()\n",
         ),
+        // FIG-6815: the heap's own length reads and membership tests,
+        // where each native's call answers and where it raises: inline,
+        // long text and missing keys, keys a lookup normalizes, unhashable
+        // keys, and lists' and dicts' lengths and truth.
+        (
+            "membership with missing, normalized and unhashable keys",
+            "def probe(d, keys, found):\n    for key in keys:\n        found.append(key in d)\n        if key in d:\n            found.append(d[key])\ndef build():\n    d = {\"a\": 1, 3: 3, None: 5, \"a-long-row-label-past-inline\": 4}\n    found = []\n    for keys in [[\"a\", 3, \"b\", 3.0, 2.5, None, True, \"a-long-row-label-past-inline\", \"a-long-row-label-past-other\"], [\"a\", [1]], [3, {}]]:\n        try:\n            probe(d, keys, found)\n        except TypeError:\n            found.append(\"unhashable\")\n    return found\nresult = build()\n",
+        ),
+        (
+            "reads at a missing and an unhashable key",
+            "def fill(d, keys, out):\n    for key in keys:\n        out.append(d[key])\ndef build():\n    d = {\"a\": 1, 3: 3}\n    out = []\n    for keys in [[\"a\", 3, \"a\", \"b\"], [\"a\", [1]], [3, {}]]:\n        try:\n            fill(d, keys, out)\n        except KeyError:\n            out.append(\"missing\")\n        except TypeError:\n            out.append(\"unhashable\")\n    return out\nresult = build()\n",
+        ),
+        (
+            "lengths and truth of lists and dicts",
+            "def build():\n    xs = []\n    d = {}\n    total = 0\n    for i in range(6):\n        if xs and d:\n            total = total + 100\n        xs.append(i)\n        d[\"k\" + str(i % 4)] = i\n        total = total + len(xs) * 1000 + len(d) * 10\n    return total\nresult = build()\n",
+        ),
     ];
     let typescript = [
         (
