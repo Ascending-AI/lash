@@ -3,14 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 #[derive(Clone)]
 pub struct ProcessEngineRegistration {
-    engine: Arc<dyn ProcessEngine>,
-    admission: ProcessEngineAdmission,
-    engine_steps: Option<Arc<dyn lash_execution_contracts::process::EngineSteps>>,
-    document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
-    state_migration: Option<Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
-    succession: Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
-    status_projection: Option<Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
-    inline_starts: Option<Arc<dyn InlineStarts>>,
+    installed: InstalledEngine,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
@@ -18,9 +11,57 @@ pub struct ProcessEngineRegistration {
     >,
 }
 
+/// One installed engine kind: the engine, its checked admission and the
+/// optional capabilities its registration declared. A registry stores it
+/// whole, so replacing a kind replaces every capability with it.
+#[derive(Clone)]
+struct InstalledEngine {
+    engine: Arc<dyn ProcessEngine>,
+    admission: ProcessEngineAdmission,
+    /// The engine's steps; once installed, under the host's retry overrides.
+    engine_steps: Option<Arc<dyn lash_execution_contracts::process::EngineSteps>>,
+    document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
+    state_migration: Option<Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
+    succession: Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
+    status_projection: Option<Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
+    inline_starts: Option<Arc<dyn InlineStarts>>,
+}
+
 impl ProcessEngineRegistration {
+    fn checked(engine: Arc<dyn ProcessEngine>, admission: ProcessEngineAdmission) -> Self {
+        Self {
+            installed: InstalledEngine {
+                engine,
+                admission,
+                engine_steps: None,
+                document_provider: None,
+                state_migration: None,
+                succession: None,
+                status_projection: None,
+                inline_starts: None,
+            },
+            engine_step_retries: BTreeMap::new(),
+        }
+    }
+
+    /// The entry a registry installs: the declared steps under the host's
+    /// retry overrides.
+    fn into_installed(self) -> InstalledEngine {
+        let Self {
+            mut installed,
+            engine_step_retries: retries,
+        } = self;
+        if !retries.is_empty() {
+            installed.engine_steps = installed.engine_steps.map(|steps| {
+                Arc::new(RetriedEngineSteps { steps, retries })
+                    as Arc<dyn lash_execution_contracts::process::EngineSteps>
+            });
+        }
+        installed
+    }
+
     pub fn kind(&self) -> &str {
-        self.engine.kind()
+        self.installed.engine.kind()
     }
     pub fn new(
         engine: Arc<dyn ProcessEngine>,
@@ -35,33 +76,13 @@ impl ProcessEngineRegistration {
                 )),
             );
         }
-        Ok(Self {
-            engine,
-            admission,
-            engine_steps: None,
-            document_provider: None,
-            state_migration: None,
-            succession: None,
-            status_projection: None,
-            inline_starts: None,
-            engine_step_retries: BTreeMap::new(),
-        })
+        Ok(Self::checked(engine, admission))
     }
 
     /// Pair an engine with the default recorded-input admission policy.
     pub fn accepting(engine: Arc<dyn ProcessEngine>) -> Self {
         let admission = ProcessEngineAdmission::accepting(engine.kind());
-        Self {
-            engine,
-            admission,
-            engine_steps: None,
-            document_provider: None,
-            state_migration: None,
-            succession: None,
-            status_projection: None,
-            inline_starts: None,
-            engine_step_retries: BTreeMap::new(),
-        }
+        Self::checked(engine, admission)
     }
 
     /// Declare the engine's own step bodies: what runs a
@@ -72,14 +93,14 @@ impl ProcessEngineRegistration {
         mut self,
         steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
     ) -> Self {
-        self.engine_steps = Some(steps);
+        self.installed.engine_steps = Some(steps);
         self
     }
 
     /// Declare how this engine's definitions read as a language document.
     #[must_use]
     pub fn with_document_provider(mut self, provider: Arc<dyn ProcessDocumentProvider>) -> Self {
-        self.document_provider = Some(provider);
+        self.installed.document_provider = Some(provider);
         self
     }
 
@@ -91,7 +112,7 @@ impl ProcessEngineRegistration {
         mut self,
         migration: Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
     ) -> Self {
-        self.state_migration = Some(migration);
+        self.installed.state_migration = Some(migration);
         self
     }
 
@@ -103,7 +124,7 @@ impl ProcessEngineRegistration {
         mut self,
         succession: Arc<dyn lash_execution_contracts::process::EngineSuccession>,
     ) -> Self {
-        self.succession = Some(succession);
+        self.installed.succession = Some(succession);
         self
     }
 
@@ -115,7 +136,7 @@ impl ProcessEngineRegistration {
         mut self,
         projection: Arc<dyn lash_execution_contracts::process::EngineStatusProjection>,
     ) -> Self {
-        self.status_projection = Some(projection);
+        self.installed.status_projection = Some(projection);
         self
     }
 
@@ -124,7 +145,7 @@ impl ProcessEngineRegistration {
     /// start.
     #[must_use]
     pub fn with_inline_starts(mut self, starts: Arc<dyn InlineStarts>) -> Self {
-        self.inline_starts = Some(starts);
+        self.installed.inline_starts = Some(starts);
         self
     }
 
@@ -142,26 +163,10 @@ impl ProcessEngineRegistration {
     }
 }
 
-/// Each engine kind's optional hooks: kept behind one shared pointer, so a
-/// registry stays the size it is however many a kind declares.
-#[derive(Clone, Default)]
-struct KindHooks {
-    successions: BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
-    status_projections:
-        BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
-    inline_starts: BTreeMap<String, Arc<dyn InlineStarts>>,
-}
-
 #[derive(Clone, Default)]
 pub struct ProcessEngineRegistry {
-    engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
-    admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
-    engine_steps: Arc<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSteps>>>,
-    document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
-    state_migrations:
-        Arc<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStateMigration>>>,
-    /// Each kind's succession and status projection, in one map pair.
-    hooks: Arc<KindHooks>,
+    /// Each installed engine kind, whole, by kind.
+    installed: Arc<BTreeMap<String, InstalledEngine>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     /// The process components a new environment is admitted against and a
     /// process is composed from (FIG-6034).
@@ -171,15 +176,7 @@ pub struct ProcessEngineRegistry {
 /// A [`ProcessEngineRegistry`] held weakly: it keeps no engine alive.
 #[derive(Clone)]
 pub struct WeakProcessEngineRegistry {
-    engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
-    admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
-    engine_steps:
-        std::sync::Weak<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSteps>>>,
-    document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
-    state_migrations: std::sync::Weak<
-        BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
-    >,
-    hooks: std::sync::Weak<KindHooks>,
+    installed: std::sync::Weak<BTreeMap<String, InstalledEngine>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     components: crate::plugin::ProcessComponentRegistry,
 }
@@ -189,12 +186,7 @@ impl WeakProcessEngineRegistry {
     #[must_use]
     pub fn upgrade(&self) -> Option<ProcessEngineRegistry> {
         Some(ProcessEngineRegistry {
-            engines: self.engines.upgrade()?,
-            admissions: self.admissions.upgrade()?,
-            engine_steps: self.engine_steps.upgrade()?,
-            document_providers: self.document_providers.upgrade()?,
-            state_migrations: self.state_migrations.upgrade()?,
-            hooks: self.hooks.upgrade()?,
+            installed: self.installed.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         })
@@ -251,12 +243,7 @@ impl ProcessEngineRegistry {
     #[must_use]
     pub fn downgrade(&self) -> WeakProcessEngineRegistry {
         WeakProcessEngineRegistry {
-            engines: Arc::downgrade(&self.engines),
-            admissions: Arc::downgrade(&self.admissions),
-            engine_steps: Arc::downgrade(&self.engine_steps),
-            document_providers: Arc::downgrade(&self.document_providers),
-            state_migrations: Arc::downgrade(&self.state_migrations),
-            hooks: Arc::downgrade(&self.hooks),
+            installed: Arc::downgrade(&self.installed),
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         }
@@ -295,70 +282,14 @@ impl ProcessEngineRegistry {
     }
 
     pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {
-        let mut engines = (*self.engines).clone();
-        let mut admissions = (*self.admissions).clone();
-        let mut engine_steps = (*self.engine_steps).clone();
-        let mut document_providers = (*self.document_providers).clone();
-        let mut state_migrations = (*self.state_migrations).clone();
-        let mut hooks = (*self.hooks).clone();
-        let ProcessEngineRegistration {
-            engine,
-            admission,
-            engine_steps: steps,
-            document_provider,
-            state_migration,
-            succession,
-            status_projection,
-            inline_starts,
-            engine_step_retries: retries,
-        } = registration;
-        match steps {
-            Some(steps) if retries.is_empty() => {
-                engine_steps.insert(engine.kind().to_string(), steps)
-            }
-            Some(steps) => engine_steps.insert(
-                engine.kind().to_string(),
-                Arc::new(RetriedEngineSteps { steps, retries }),
-            ),
-            None => engine_steps.remove(engine.kind()),
-        };
-        match document_provider {
-            Some(provider) => document_providers.insert(engine.kind().to_string(), provider),
-            None => document_providers.remove(engine.kind()),
-        };
-        match state_migration {
-            Some(migration) => state_migrations.insert(engine.kind().to_string(), migration),
-            None => state_migrations.remove(engine.kind()),
-        };
-        match succession {
-            Some(succession) => hooks
-                .successions
-                .insert(engine.kind().to_string(), succession),
-            None => hooks.successions.remove(engine.kind()),
-        };
-        match status_projection {
-            Some(projection) => hooks
-                .status_projections
-                .insert(engine.kind().to_string(), projection),
-            None => hooks.status_projections.remove(engine.kind()),
-        };
-        match inline_starts {
-            Some(starts) => hooks
-                .inline_starts
-                .insert(engine.kind().to_string(), starts),
-            None => hooks.inline_starts.remove(engine.kind()),
-        };
-        engines.insert(engine.kind().to_string(), engine);
-        admissions.insert(admission.kind().to_string(), admission);
+        let mut installed = (*self.installed).clone();
+        installed.insert(
+            registration.kind().to_owned(),
+            registration.into_installed(),
+        );
         Self {
-            engines: Arc::new(engines),
-            admissions: Arc::new(admissions),
-            engine_steps: Arc::new(engine_steps),
-            document_providers: Arc::new(document_providers),
-            state_migrations: Arc::new(state_migrations),
-            hooks: Arc::new(hooks),
-            artifact_ports: self.artifact_ports,
-            components: self.components,
+            installed: Arc::new(installed),
+            ..self
         }
     }
 
@@ -380,14 +311,16 @@ impl ProcessEngineRegistry {
         lash_execution_contracts::process::EngineStepRefusal,
     > {
         use lash_execution_contracts::process::EngineStepRefusal;
-        if !self.engines.contains_key(engine) {
-            return Err(EngineStepRefusal::UnknownEngine {
-                engine: engine.to_owned(),
-            });
-        }
-        let steps =
-            self.engine_steps
+        let installed =
+            self.installed
                 .get(engine)
+                .ok_or_else(|| EngineStepRefusal::UnknownEngine {
+                    engine: engine.to_owned(),
+                })?;
+        let steps =
+            installed
+                .engine_steps
+                .as_ref()
                 .ok_or_else(|| EngineStepRefusal::NoEngineSteps {
                     engine: engine.to_owned(),
                 })?;
@@ -402,7 +335,7 @@ impl ProcessEngineRegistry {
 
     /// The document provider the `kind` engine was registered with, if any.
     pub fn document_provider(&self, kind: &str) -> Option<Arc<dyn ProcessDocumentProvider>> {
-        self.document_providers.get(kind).cloned()
+        self.installed.get(kind)?.document_provider.clone()
     }
 
     /// Apply one resolved cleanup to every installed engine's own store
@@ -413,13 +346,13 @@ impl ProcessEngineRegistry {
         &self,
         cleanup: &crate::ResolvedArtifactCleanup,
     ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
-        for (kind, engine) in self.engines.iter() {
+        for (kind, installed) in self.installed.iter() {
             let own = lash_core_store::artifact_referrer::ResolvedArtifactCleanup::for_store(
                 &cleanup.referrer,
                 &cleanup.carries,
                 &lash_core_store::artifact_referrer::ArtifactStoreId::Engine(kind.clone()),
             );
-            engine.end_artifact_referrer(&own).await?;
+            installed.engine.end_artifact_referrer(&own).await?;
         }
         Ok(())
     }
@@ -431,11 +364,11 @@ impl ProcessEngineRegistry {
         self,
         registration: ProcessEngineRegistration,
     ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
-        if self.engines.contains_key(registration.engine.kind()) {
+        if self.installed.contains_key(registration.kind()) {
             return Err(
                 lash_execution_contracts::plugin_error::PluginError::Registration(format!(
                     "duplicate process engine kind `{}`; each engine kind may be registered once",
-                    registration.engine.kind()
+                    registration.kind()
                 )),
             );
         }
@@ -452,9 +385,9 @@ impl ProcessEngineRegistry {
             &Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
         ),
     > {
-        self.state_migrations
-            .iter()
-            .map(|(kind, migration)| (kind.as_str(), migration))
+        self.installed.iter().filter_map(|(kind, installed)| {
+            Some((kind.as_str(), installed.state_migration.as_ref()?))
+        })
     }
 
     /// Every registered engine's status projection, by engine kind.
@@ -466,10 +399,9 @@ impl ProcessEngineRegistry {
             &Arc<dyn lash_execution_contracts::process::EngineStatusProjection>,
         ),
     > {
-        self.hooks
-            .status_projections
-            .iter()
-            .map(|(kind, projection)| (kind.as_str(), projection))
+        self.installed.iter().filter_map(|(kind, installed)| {
+            Some((kind.as_str(), installed.status_projection.as_ref()?))
+        })
     }
 
     /// How the `kind` engine carries a process onto a successor pair, when
@@ -478,7 +410,7 @@ impl ProcessEngineRegistry {
         &self,
         kind: &str,
     ) -> Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>> {
-        self.hooks.successions.get(kind).cloned()
+        self.installed.get(kind)?.succession.clone()
     }
 
     /// How the `kind` engine starts a function carried inline.
@@ -491,23 +423,28 @@ impl ProcessEngineRegistry {
         &self,
         kind: &str,
     ) -> Result<Arc<dyn InlineStarts>, lash_execution_contracts::plugin_error::PluginError> {
-        self.hooks.inline_starts.get(kind).cloned().ok_or_else(|| {
-            lash_execution_contracts::plugin_error::PluginError::Runtime(
-                lash_core_store::runtime_error::RuntimeError::new(
-                    lash_core_store::runtime_error::RuntimeErrorCode::DefinitionRefused,
-                    format!("process engine `{kind}` starts no function carried inline"),
-                ),
-            )
-        })
+        self.installed
+            .get(kind)
+            .and_then(|installed| installed.inline_starts.clone())
+            .ok_or_else(|| {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(
+                    lash_core_store::runtime_error::RuntimeError::new(
+                        lash_core_store::runtime_error::RuntimeErrorCode::DefinitionRefused,
+                        format!("process engine `{kind}` starts no function carried inline"),
+                    ),
+                )
+            })
     }
 
     /// Every registered engine, by kind.
     pub fn engines(&self) -> impl Iterator<Item = &Arc<dyn ProcessEngine>> {
-        self.engines.values()
+        self.installed.values().map(|installed| &installed.engine)
     }
 
     pub(crate) fn get(&self, kind: &str) -> Option<Arc<dyn ProcessEngine>> {
-        self.engines.get(kind).cloned()
+        self.installed
+            .get(kind)
+            .map(|installed| Arc::clone(&installed.engine))
     }
 
     /// Have the `kind` engine check the settings a start of `payload`
@@ -563,7 +500,7 @@ impl ProcessEngineRegistry {
     ///
     /// The kinds of the engines registered here.
     pub fn engine_kinds(&self) -> std::collections::BTreeSet<String> {
-        self.engines.keys().cloned().collect()
+        self.installed.keys().cloned().collect()
     }
 
     pub fn require(
@@ -591,9 +528,9 @@ impl ProcessEngineRegistry {
         payload: &serde_json::Value,
     ) -> Result<AdmittedProcessIdentity, lash_execution_contracts::plugin_error::PluginError> {
         let identity = self
-            .admissions
+            .installed
             .get(kind)
-            .copied()
+            .map(|installed| installed.admission)
             .ok_or_else(|| {
                 lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "process engine `{kind}` is not configured"

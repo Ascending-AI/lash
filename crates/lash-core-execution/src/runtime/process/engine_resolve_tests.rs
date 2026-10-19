@@ -1,4 +1,5 @@
 use super::*;
+use lash_execution_contracts::process as contracts;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::ProcessSignature;
 
@@ -355,5 +356,140 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     assert_eq!(
         declared.identity.definition, undeclared.identity.definition,
         "a label never moves the definition reference: it is display metadata, not an identity input"
+    );
+}
+
+/// Every optional capability a registration can declare; none is ever run.
+struct Capabilities;
+
+const CAPABILITY_STEP: &str = "capability-step";
+
+#[async_trait::async_trait]
+impl contracts::EngineSteps for Capabilities {
+    fn kinds(&self) -> Vec<contracts::EngineStepKind> {
+        vec![contracts::EngineStepKind::new(CAPABILITY_STEP)]
+    }
+
+    fn execution(&self, _kind: &contracts::EngineStepKind) -> std::time::Duration {
+        std::time::Duration::from_secs(1)
+    }
+
+    fn retry(&self, _kind: &contracts::EngineStepKind) -> lash_protocol_types::ExecutionPolicy {
+        lash_protocol_types::ExecutionPolicy::default()
+    }
+
+    async fn run(
+        &self,
+        _run: contracts::EngineStepRun,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> contracts::EngineStepAnswer {
+        unreachable!("the registry never runs a step")
+    }
+}
+
+#[async_trait::async_trait]
+impl contracts::EngineStateMigration for Capabilities {
+    fn carries(&self) -> Vec<contracts::EngineStateFormat> {
+        Vec::new()
+    }
+
+    async fn migrate(
+        &self,
+        _process: &contracts::ProcessId,
+        _state: &contracts::EngineState,
+    ) -> Result<Option<contracts::EngineState>, contracts::EngineStateRefusal> {
+        unreachable!("the registry never migrates")
+    }
+}
+
+#[async_trait::async_trait]
+impl contracts::EngineSuccession for Capabilities {
+    async fn carry(
+        &self,
+        _process: &contracts::ProcessId,
+        _from: &serde_json::Value,
+        _to: &serde_json::Value,
+        _state: Option<&contracts::EngineState>,
+    ) -> Result<contracts::SuccessorCarry, contracts::SuccessionError> {
+        unreachable!("the registry never carries")
+    }
+}
+
+impl contracts::EngineStatusProjection for Capabilities {
+    fn status(&self, _state: &contracts::EngineState) -> Option<serde_json::Value> {
+        None
+    }
+}
+
+fn fully_declared() -> ProcessEngineRegistration {
+    let capabilities = Arc::new(Capabilities);
+    ProcessEngineRegistration::accepting(Arc::new(SignedEngine) as Arc<dyn ProcessEngine>)
+        .with_engine_steps(capabilities.clone())
+        .with_state_migration(capabilities.clone())
+        .with_succession(capabilities.clone())
+        .with_status_projection(capabilities)
+}
+
+/// Which optional capabilities `registry` serves for the signed engine.
+fn declared(registry: &ProcessEngineRegistry) -> [bool; 4] {
+    [
+        registry
+            .engine_steps(
+                SIGNED_ENGINE_KIND,
+                &contracts::EngineStepKind::new(CAPABILITY_STEP),
+            )
+            .is_ok(),
+        registry.state_migrations().next().is_some(),
+        registry.succession(SIGNED_ENGINE_KIND).is_some(),
+        registry.status_projections().next().is_some(),
+    ]
+}
+
+/// Replacing an engine kind's registration replaces it whole: every
+/// capability the new registration omits is withdrawn with the old one.
+#[test]
+fn a_replacing_registration_withdraws_every_capability_it_omits() {
+    let declaring = ProcessEngineRegistry::new().with_registration(fully_declared());
+    assert_eq!(declared(&declaring), [true; 4]);
+
+    let replaced = declaring
+        .with_registration(ProcessEngineRegistration::accepting(
+            Arc::new(SignedEngine) as Arc<dyn ProcessEngine>
+        ));
+
+    assert_eq!(declared(&replaced), [false; 4]);
+    assert!(
+        matches!(
+            replaced.engine_steps(
+                SIGNED_ENGINE_KIND,
+                &contracts::EngineStepKind::new(CAPABILITY_STEP)
+            ),
+            Err(contracts::EngineStepRefusal::NoEngineSteps { engine })
+                if engine == SIGNED_ENGINE_KIND
+        ),
+        "a known engine without steps is not an unknown engine"
+    );
+}
+
+/// A weak registry upgrades to the snapshot it was taken from while a holder
+/// keeps that snapshot, and keeps nothing alive on its own.
+#[test]
+fn a_weak_registry_reads_its_own_snapshot_and_keeps_none_alive() {
+    let declaring = ProcessEngineRegistry::new().with_registration(fully_declared());
+    let weak = declaring.downgrade();
+    let replaced = declaring
+        .clone()
+        .with_registration(ProcessEngineRegistration::accepting(
+            Arc::new(SignedEngine) as Arc<dyn ProcessEngine>
+        ));
+
+    let upgraded = weak.upgrade().expect("the declaring registry is held");
+    assert_eq!(declared(&upgraded), [true; 4]);
+    assert_eq!(declared(&replaced), [false; 4]);
+
+    drop((upgraded, declaring));
+    assert!(
+        weak.upgrade().is_none(),
+        "the weak registry keeps no engine alive once its holders drop"
     );
 }
