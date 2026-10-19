@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::llm::types::LlmContentBlock;
 use lash_core::{CellOutcome, CellRecord};
 use lash_core::{Part, SessionHistoryRecord};
 use lash_protocol_types::TurnId;

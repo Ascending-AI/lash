@@ -1,57 +1,28 @@
-use crate::dialect::SessionDialect;
-use std::collections::HashSet;
-use std::fmt::Write as _;
+//! Native-channel prompt history: each prior cell as its captured provider
+//! exchange pair, a refused call's pair where the call stands, and a frame
+//! seed's step as user context. The ordinary-message and prose helpers and
+//! the repaired-failure scrub are the cell channel's
+//! (`crate::driver::history`); only the exchange rendering is this
+//! channel's own.
+
 use std::sync::Arc;
 
-use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
-use lash_core::{
-    facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
+use lash_core::facade_support::BorrowedChronologicalPayload;
+use lash_core::llm::types::{LlmMessage, LlmRole};
+
+pub(super) use crate::driver::history::RlmHistoryRenderInput;
+use crate::driver::history::{
+    ExchangeMessage, PendingProse, append_step_image_blocks, complete_history_messages,
+    flush_pending_prose, ordinary_message, step_output_text, superseded_failure_indices,
 };
-use lash_rlm_types::RlmAttachmentRef;
-
-pub(super) struct RlmHistoryRenderInput<'a> {
-    pub(super) dialect: &'a SessionDialect,
-    pub(super) events: &'a [lash_core::SessionHistoryRecord],
-    pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
-    pub(super) max_output_chars: usize,
-    pub(super) protocol_iteration: usize,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct CurrentIterationMessageInput {
-    pub(super) protocol_iteration: usize,
-}
-
-/// Standalone assistant prose buffered until the next chronological boundary.
-struct PendingProse {
-    text: String,
-    reasoning_blocks: Vec<LlmContentBlock>,
-    image_blocks: Vec<LlmContentBlock>,
-}
 
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
-    let mut messages = render_history_messages(&input)?;
-    let saw_history = !messages.is_empty();
-    if !saw_history {
-        messages.push(LlmMessage::new(
-            LlmRole::User,
-            vec![text_block(
-                "=== HISTORY ===\n\nNo chronological history is available.",
-                false,
-            )],
-        ));
-    } else {
-        mark_last_history_text_cache_breakpoint(&mut messages);
-    }
-    append_current_iteration_message(
-        &mut messages,
-        CurrentIterationMessageInput {
-            protocol_iteration: input.protocol_iteration,
-        },
-    );
-    Ok(messages)
+    Ok(complete_history_messages(
+        render_history_messages(&input)?,
+        input.protocol_iteration,
+    ))
 }
 
 /// The history portion only (no current-iteration tail): each prior step as an
@@ -72,7 +43,15 @@ pub(super) fn render_history_messages(
     let history_projection = input.dialect.projection_index(&chronological)?;
     let mut pending: Option<PendingProse> = None;
     let superseded =
-        superseded_failure_indices(input.dialect, input.events, input.turn_messages, &exchanges);
+        superseded_failure_indices(input.dialect, input.events, input.turn_messages, |index| {
+            exchanges.contains(index).then(|| {
+                if exchanges.refusal(index).is_some() {
+                    ExchangeMessage::Refused
+                } else {
+                    ExchangeMessage::Executed
+                }
+            })
+        });
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         // An exchange message renders only as its pair: a cell's at the
@@ -98,13 +77,7 @@ pub(super) fn render_history_messages(
             {
                 // Keep standalone assistant prose in chronological order.
                 flush_pending_prose(&mut messages, &mut pending);
-                let mut image_blocks = Vec::new();
-                append_borrowed_entry_image_blocks(entry, &mut image_blocks);
-                pending = Some(PendingProse {
-                    text: message_history_text_parts(message.parts),
-                    reasoning_blocks: message_history_reasoning_blocks(message.parts),
-                    image_blocks,
-                });
+                pending = Some(PendingProse::of(entry, message));
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
                 let Some(event) = input
@@ -119,7 +92,7 @@ pub(super) fn render_history_messages(
                     return;
                 };
                 flush_pending_prose(&mut messages, &mut pending);
-                let observation = crate::driver::history::step_output_text(
+                let observation = step_output_text(
                     input.dialect.prompt_vocabulary(),
                     history_projection
                         .projected_index_for_chronological(entry.index)
@@ -142,299 +115,20 @@ pub(super) fn render_history_messages(
                 }
             }
             BorrowedChronologicalPayload::Message(message) => {
-                // User / system / event turn: rendered verbatim by role.
                 flush_pending_prose(&mut messages, &mut pending);
-                let text = message_text(
-                    input.dialect.prompt_vocabulary(),
+                messages.push(ordinary_message(
+                    input,
                     history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
-                    &message_history_text_parts(message.parts),
-                    &message_attachment_refs(message.parts),
-                    input.max_output_chars,
-                );
-                let mut blocks = vec![text_block(text, false)];
-                append_borrowed_entry_image_blocks(entry, &mut blocks);
-                let role = match message.role {
-                    lash_core::MessageRole::User | lash_core::MessageRole::Event => LlmRole::User,
-                    lash_core::MessageRole::System => LlmRole::System,
-                    lash_core::MessageRole::Assistant => LlmRole::Assistant,
-                };
-                let mut projected = LlmMessage::new(role, blocks);
-                projected.starts_user_segment = matches!(
-                    (message.role, message.origin),
-                    (
-                        lash_core::MessageRole::User,
-                        Some(lash_core::MessageOrigin::TurnInput { .. })
-                    )
-                );
-                messages.push(projected);
+                    entry,
+                    message,
+                ));
             }
         }
     });
     flush_pending_prose(&mut messages, &mut pending);
     Ok(messages)
-}
-
-/// Failed semantic steps and refused calls superseded by a later success
-/// in the same turn. A cell's exchange renders only at its semantic step,
-/// so removing that step removes its entire provider exchange atomically.
-/// Host-authored system messages are preserved by provenance.
-#[expect(
-    clippy::expect_used,
-    reason = "the caller validated every event with the fallible history projection"
-)]
-fn superseded_failure_indices(
-    dialect: &SessionDialect,
-    events: &[lash_core::SessionHistoryRecord],
-    turn_messages: &lash_core::facade_support::MessageSequence,
-    exchanges: &super::transport::NativeExchangeIndex<'_>,
-) -> HashSet<usize> {
-    let mut superseded = HashSet::new();
-    // Entries belonging to failures not yet repaired, oldest first.
-    let mut pending_failure_entries: Vec<usize> = Vec::new();
-    // Prose entries seen since the last trajectory entry: they belong to
-    // whichever cell comes next, and only join the pending set if it failed.
-    let mut prose_entries: Vec<usize> = Vec::new();
-    let mut any_failure_pending = false;
-
-    lash_core::facade_support::visit_turn_view(events, turn_messages, |entry| {
-        match entry.payload {
-            BorrowedChronologicalPayload::Message(message) => match message.role {
-                // A refused call's results go with their call.
-                lash_core::MessageRole::User if exchanges.contains(entry.index) => {
-                    if any_failure_pending {
-                        pending_failure_entries.push(entry.index);
-                    }
-                }
-                lash_core::MessageRole::User | lash_core::MessageRole::Event => {
-                    pending_failure_entries.clear();
-                    prose_entries.clear();
-                    any_failure_pending = false;
-                }
-                // A refused call is a failure of its own; a cell's exchange
-                // goes with the cell's step.
-                lash_core::MessageRole::Assistant if exchanges.contains(entry.index) => {
-                    if exchanges.refusal(entry.index).is_some() {
-                        pending_failure_entries.push(entry.index);
-                        any_failure_pending = true;
-                    }
-                }
-                lash_core::MessageRole::Assistant => prose_entries.push(entry.index),
-                // Protocol feedback is repair instruction for the failure it
-                // follows; it goes when the failure goes. Identity, not role:
-                // `System` is a shared channel, and the host puts its own
-                // messages on it — a plugin directive enqueued at a mid-turn
-                // checkpoint lands here too. Scrubbing by role would delete a
-                // policy reminder the host injected between a failed cell and
-                // the next good one, which is not ours to delete and not
-                // recoverable from anywhere.
-                lash_core::MessageRole::System => {
-                    if any_failure_pending
-                        && crate::projection::is_rlm_protocol_output(message.origin)
-                    {
-                        pending_failure_entries.push(entry.index);
-                    }
-                }
-            },
-            BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = dialect
-                    .decode_history_event(event)
-                    .expect("history projection validated every RLM event")
-                    .as_deref()
-                {
-                    if step.result.is_failed() {
-                        pending_failure_entries.append(&mut prose_entries);
-                        pending_failure_entries.push(entry.index);
-                        any_failure_pending = true;
-                    } else {
-                        prose_entries.clear();
-                        superseded.extend(pending_failure_entries.drain(..));
-                        any_failure_pending = false;
-                    }
-                }
-            }
-        }
-    });
-
-    superseded
-}
-
-/// Carries nothing for empty prose with no images.
-fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<PendingProse>) {
-    if let Some(prose) = pending.take() {
-        if prose.text.trim().is_empty()
-            && prose.reasoning_blocks.is_empty()
-            && prose.image_blocks.is_empty()
-        {
-            return;
-        }
-        let mut blocks = prose.reasoning_blocks;
-        if !prose.text.trim().is_empty() {
-            blocks.push(text_block(prose.text, false));
-        }
-        blocks.extend(prose.image_blocks);
-        messages.push(LlmMessage::new(LlmRole::Assistant, blocks));
-    }
-}
-
-/// The current iteration's history prefix: its number only.
-/// All instruction text is supplied by prompt sections (ADR 0133).
-fn append_current_iteration_message(
-    messages: &mut Vec<LlmMessage>,
-    input: CurrentIterationMessageInput,
-) {
-    let current_prompt = format!(
-        "\n\n\n=== CURRENT ITERATION: {} ===",
-        input.protocol_iteration
-    );
-    messages.push(LlmMessage::new(
-        LlmRole::User,
-        vec![text_block(current_prompt, false)],
-    ));
-}
-
-fn text_block(text: impl Into<Arc<str>>, cache_breakpoint: bool) -> LlmContentBlock {
-    LlmContentBlock::Text {
-        text: text.into(),
-        response_meta: None,
-        cache_breakpoint,
-    }
-}
-
-fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
-    for message in messages.iter_mut().rev() {
-        let Some(blocks) = Arc::get_mut(&mut message.blocks) else {
-            continue;
-        };
-        for block in blocks.iter_mut().rev() {
-            if let LlmContentBlock::Text {
-                text,
-                cache_breakpoint,
-                ..
-            } = block
-                && !text.trim().is_empty()
-            {
-                *cache_breakpoint = true;
-                return;
-            }
-        }
-    }
-}
-
-fn append_borrowed_entry_image_blocks(
-    entry: BorrowedChronologicalEntry<'_>,
-    blocks: &mut Vec<LlmContentBlock>,
-) {
-    if let BorrowedChronologicalPayload::Message(message) = entry.payload {
-        for source in message.parts.iter().flat_map(|part| part.attachments()) {
-            blocks.push(LlmContentBlock::Attachment {
-                reference: Box::new(source.clone()),
-            });
-        }
-    }
-}
-
-fn append_step_image_blocks(step: &lash_core::CellRecord, blocks: &mut Vec<LlmContentBlock>) {
-    for image in &step.images {
-        blocks.push(LlmContentBlock::Attachment {
-            reference: Box::new(image.clone()),
-        });
-    }
-}
-
-/// Verbatim content for a plain (non-step) message. No `--- history[N] ---`
-/// wrapper; keeps the truncation re-fetch handle and the attachment listing.
-fn message_text(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    index: usize,
-    content: &str,
-    attachments: &[RlmAttachmentRef],
-    max_output_chars: usize,
-) -> String {
-    let (preview, raw_len) = crate::head_tail_truncate(content, max_output_chars);
-    let mut out = preview.to_string();
-    if raw_len > max_output_chars {
-        let _ = write!(
-            out,
-            "\n\n({})",
-            preview_retained_copy(vocabulary, &format!("history[{index}].content"))
-        );
-    }
-    if !attachments.is_empty() {
-        out.push_str("\n\nAttachments:");
-        for (attachment_index, attachment) in attachments.iter().enumerate() {
-            let rendered = serde_json::to_string(attachment)
-                .unwrap_or_else(|_| "{\"error\":\"unrenderable attachment\"}".to_string());
-            let _ = write!(
-                out,
-                "\n- history[{index}].attachments[{attachment_index}]: {rendered}"
-            );
-        }
-    }
-    out
-}
-
-fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {
-    parts
-        .iter()
-        .flat_map(|part| {
-            part.identified_attachments()
-                .into_iter()
-                .map(|(id, attachment)| RlmAttachmentRef {
-                    id,
-                    reference: attachment.clone(),
-                })
-        })
-        .collect()
-}
-
-fn message_history_text_parts(parts: &[lash_core::Part]) -> String {
-    let chunks = parts
-        .iter()
-        .filter(|part| {
-            matches!(
-                part.kind(),
-                lash_core::PartKind::Text | lash_core::PartKind::Prose
-            )
-        })
-        .filter_map(|part| part.text_content())
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    chunks.join("\n\n")
-}
-
-fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContentBlock> {
-    // Display-only reasoning without provider replay metadata remains durable
-    // for hosts, but is deliberately not rendered back to providers. Only
-    // replay-capable reasoning can safely cross the provider history seam.
-    parts
-        .iter()
-        .filter_map(|part| {
-            if !matches!(part.kind(), lash_core::PartKind::Reasoning) {
-                return None;
-            }
-            let replay = part.reasoning_meta()?;
-            (!replay.is_empty()).then(|| LlmContentBlock::Reasoning {
-                text: part.content().to_string(),
-                replay: Some(replay.clone()),
-            })
-        })
-        .collect()
-}
-
-/// State retention, stated explicitly: a truncated preview is display-only, the
-/// full value is still live and re-readable. Models otherwise misread a short
-/// preview as lost state and stop mid-task.
-pub(crate) fn preview_retained_copy(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    reference: &str,
-) -> String {
-    format!(
-        "preview only — full value retained; re-run `{}` for the rest",
-        vocabulary.print_statement(reference)
-    )
 }
 
 #[cfg(test)]

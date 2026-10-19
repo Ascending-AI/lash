@@ -60,39 +60,66 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
-use lash_core::{
-    facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
+use lash_core::facade_support::{
+    BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
 };
+use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 
-pub(super) struct RlmHistoryRenderInput<'a> {
-    pub(super) dialect: &'a SessionDialect,
-    pub(super) events: &'a [lash_core::SessionHistoryRecord],
-    pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
-    pub(super) max_output_chars: usize,
-    pub(super) protocol_iteration: usize,
+/// What either channel renders its prompt history from. The cell channel
+/// renders here; the native channel (`crate::native::history`) shares this
+/// input, the ordinary-message and prose helpers and the repair scrub, and
+/// keeps its own exchange renderer.
+pub(crate) struct RlmHistoryRenderInput<'a> {
+    pub(crate) dialect: &'a SessionDialect,
+    pub(crate) events: &'a [lash_core::SessionHistoryRecord],
+    pub(crate) turn_messages: &'a lash_core::facade_support::MessageSequence,
+    pub(crate) max_output_chars: usize,
+    pub(crate) protocol_iteration: usize,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct CurrentIterationMessageInput {
-    pub(super) protocol_iteration: usize,
-}
-
-/// Assistant prose awaiting a fold into the next lash_vm step. Buffered because
-/// `visit_turn_view` is a push visitor with no lookahead.
-struct PendingProse {
+/// Assistant prose awaiting the next chronological boundary. Buffered because
+/// `visit_turn_view` is a push visitor with no lookahead: the cell channel
+/// folds it into the next step, and either channel flushes it standalone.
+pub(crate) struct PendingProse {
     text: String,
     reasoning_blocks: Vec<LlmContentBlock>,
     image_blocks: Vec<LlmContentBlock>,
 }
 
+impl PendingProse {
+    /// An assistant message's prose, its replayable reasoning and its images.
+    pub(crate) fn of(
+        entry: BorrowedChronologicalEntry<'_>,
+        message: BorrowedChronologicalMessage<'_>,
+    ) -> Self {
+        let mut image_blocks = Vec::new();
+        append_borrowed_entry_image_blocks(entry, &mut image_blocks);
+        Self {
+            text: message_history_text_parts(message.parts),
+            reasoning_blocks: message_history_reasoning_blocks(message.parts),
+            image_blocks,
+        }
+    }
+}
+
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
-    let mut messages = render_history_messages(&input)?;
-    let saw_history = !messages.is_empty();
-    if !saw_history {
+    Ok(complete_history_messages(
+        render_history_messages(&input)?,
+        input.protocol_iteration,
+    ))
+}
+
+/// A channel's rendered history closed for a request: a placeholder when it
+/// is empty, else a cache fence on its last text, then the current
+/// iteration's prefix.
+pub(crate) fn complete_history_messages(
+    mut messages: Vec<LlmMessage>,
+    protocol_iteration: usize,
+) -> Vec<LlmMessage> {
+    if messages.is_empty() {
         messages.push(LlmMessage::new(
             LlmRole::User,
             vec![text_block(
@@ -103,13 +130,8 @@ pub(super) fn build_rlm_history_messages_from_turn(
     } else {
         mark_last_history_text_cache_breakpoint(&mut messages);
     }
-    append_current_iteration_message(
-        &mut messages,
-        CurrentIterationMessageInput {
-            protocol_iteration: input.protocol_iteration,
-        },
-    );
-    Ok(messages)
+    append_current_iteration_message(&mut messages, protocol_iteration);
+    messages
 }
 
 /// The history portion only (no current-iteration tail): each prior step as an
@@ -126,7 +148,9 @@ pub(super) fn render_history_messages(
         .dialect
         .history_index(input.events, input.turn_messages)?;
     let mut pending: Option<PendingProse> = None;
-    let superseded = superseded_failure_indices(input.dialect, input.events, input.turn_messages);
+    // This channel captures no provider exchange: every message is ordinary.
+    let superseded =
+        superseded_failure_indices(input.dialect, input.events, input.turn_messages, |_| None);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         // A native provider exchange is not prose: this channel shows its
@@ -148,13 +172,7 @@ pub(super) fn render_history_messages(
             {
                 // Assistant prose: buffer to fold into the next lash_vm step.
                 flush_pending_prose(&mut messages, &mut pending);
-                let mut image_blocks = Vec::new();
-                append_borrowed_entry_image_blocks(entry, &mut image_blocks);
-                pending = Some(PendingProse {
-                    text: message_history_text_parts(message.parts),
-                    reasoning_blocks: message_history_reasoning_blocks(message.parts),
-                    image_blocks,
-                });
+                pending = Some(PendingProse::of(entry, message));
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
                 let Some(event) = input
@@ -199,38 +217,62 @@ pub(super) fn render_history_messages(
                 messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
             }
             BorrowedChronologicalPayload::Message(message) => {
-                // User / system / event turn: rendered verbatim by role.
                 flush_pending_prose(&mut messages, &mut pending);
-                let text = message_text(
-                    input.dialect.prompt_vocabulary(),
+                messages.push(ordinary_message(
+                    input,
                     history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
-                    &message_history_text_parts(message.parts),
-                    &message_attachment_refs(message.parts),
-                    input.max_output_chars,
-                );
-                let mut blocks = vec![text_block(text, false)];
-                append_borrowed_entry_image_blocks(entry, &mut blocks);
-                let role = match message.role {
-                    lash_core::MessageRole::User | lash_core::MessageRole::Event => LlmRole::User,
-                    lash_core::MessageRole::System => LlmRole::System,
-                    lash_core::MessageRole::Assistant => LlmRole::Assistant,
-                };
-                let mut projected = LlmMessage::new(role, blocks);
-                projected.starts_user_segment = matches!(
-                    (message.role, message.origin),
-                    (
-                        lash_core::MessageRole::User,
-                        Some(lash_core::MessageOrigin::TurnInput { .. })
-                    )
-                );
-                messages.push(projected);
+                    entry,
+                    message,
+                ));
             }
         }
     });
     flush_pending_prose(&mut messages, &mut pending);
     Ok(messages)
+}
+
+/// A user, system or event turn, rendered verbatim by role at its projected
+/// history `index`. Only real turn input starts a cache segment.
+pub(crate) fn ordinary_message(
+    input: &RlmHistoryRenderInput<'_>,
+    index: usize,
+    entry: BorrowedChronologicalEntry<'_>,
+    message: BorrowedChronologicalMessage<'_>,
+) -> LlmMessage {
+    let text = message_text(
+        input.dialect.prompt_vocabulary(),
+        index,
+        &message_history_text_parts(message.parts),
+        &message_attachment_refs(message.parts),
+        input.max_output_chars,
+    );
+    let mut blocks = vec![text_block(text, false)];
+    append_borrowed_entry_image_blocks(entry, &mut blocks);
+    let role = match message.role {
+        lash_core::MessageRole::User | lash_core::MessageRole::Event => LlmRole::User,
+        lash_core::MessageRole::System => LlmRole::System,
+        lash_core::MessageRole::Assistant => LlmRole::Assistant,
+    };
+    let mut projected = LlmMessage::new(role, blocks);
+    projected.starts_user_segment = matches!(
+        (message.role, message.origin),
+        (
+            lash_core::MessageRole::User,
+            Some(lash_core::MessageOrigin::TurnInput { .. })
+        )
+    );
+    projected
+}
+
+/// What a captured native provider exchange message is to the repair scrub.
+#[derive(Clone, Copy)]
+pub(crate) enum ExchangeMessage {
+    /// Half of a refused call's pair: a failure of its own.
+    Refused,
+    /// Half of an executed cell's pair: it goes with the cell's step.
+    Executed,
 }
 
 /// Chronological indices of failed cells a later success has made obsolete,
@@ -253,15 +295,23 @@ pub(super) fn render_history_messages(
 /// and the protocol feedback message written after it. Dropping only the
 /// trajectory entry would leave its prose to fold into the *next* cell and its
 /// repair instruction pointing at nothing. Feedback is identified by
-/// *provenance*, never by role or position. Only this plugin's own output is the plugin's to delete.
+/// *provenance*, never by role or position: only this plugin's own output is
+/// the plugin's to delete.
+///
+/// The native channel names its captured provider exchange messages through
+/// `exchange`. A refused call's pair is a failure of its own and goes whole;
+/// an exchange's result message is not a turn boundary and goes with its
+/// call; an executed cell's exchange goes with the cell's step, so removing
+/// that step removes the whole exchange.
 #[expect(
     clippy::expect_used,
     reason = "the caller validated every event with the fallible history projection"
 )]
-fn superseded_failure_indices(
+pub(crate) fn superseded_failure_indices(
     dialect: &SessionDialect,
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
+    exchange: impl Fn(usize) -> Option<ExchangeMessage>,
 ) -> HashSet<usize> {
     let mut superseded = HashSet::new();
     // Entries belonging to failures not yet repaired, oldest first.
@@ -274,12 +324,24 @@ fn superseded_failure_indices(
     lash_core::facade_support::visit_turn_view(events, turn_messages, |entry| {
         match entry.payload {
             BorrowedChronologicalPayload::Message(message) => match message.role {
+                lash_core::MessageRole::User if exchange(entry.index).is_some() => {
+                    if any_failure_pending {
+                        pending_failure_entries.push(entry.index);
+                    }
+                }
                 lash_core::MessageRole::User | lash_core::MessageRole::Event => {
                     pending_failure_entries.clear();
                     prose_entries.clear();
                     any_failure_pending = false;
                 }
-                lash_core::MessageRole::Assistant => prose_entries.push(entry.index),
+                lash_core::MessageRole::Assistant => match exchange(entry.index) {
+                    Some(ExchangeMessage::Refused) => {
+                        pending_failure_entries.push(entry.index);
+                        any_failure_pending = true;
+                    }
+                    Some(ExchangeMessage::Executed) => {}
+                    None => prose_entries.push(entry.index),
+                },
                 // Protocol feedback is repair instruction for the failure it
                 // follows; it goes when the failure goes. Identity, not role:
                 // `System` is a shared channel, and the host puts its own
@@ -320,7 +382,10 @@ fn superseded_failure_indices(
 }
 
 /// Carries nothing for empty prose with no images.
-fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<PendingProse>) {
+pub(crate) fn flush_pending_prose(
+    messages: &mut Vec<LlmMessage>,
+    pending: &mut Option<PendingProse>,
+) {
     if let Some(prose) = pending.take() {
         if prose.text.trim().is_empty()
             && prose.reasoning_blocks.is_empty()
@@ -339,14 +404,8 @@ fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<Pend
 
 /// The current iteration's history prefix: its number only.
 /// All instruction text is supplied by prompt sections (ADR 0133).
-fn append_current_iteration_message(
-    messages: &mut Vec<LlmMessage>,
-    input: CurrentIterationMessageInput,
-) {
-    let current_prompt = format!(
-        "\n\n\n=== CURRENT ITERATION: {} ===",
-        input.protocol_iteration
-    );
+fn append_current_iteration_message(messages: &mut Vec<LlmMessage>, protocol_iteration: usize) {
+    let current_prompt = format!("\n\n\n=== CURRENT ITERATION: {protocol_iteration} ===");
     messages.push(LlmMessage::new(
         LlmRole::User,
         vec![text_block(current_prompt, false)],
@@ -394,7 +453,10 @@ fn append_borrowed_entry_image_blocks(
     }
 }
 
-fn append_step_image_blocks(step: &lash_core::CellRecord, blocks: &mut Vec<LlmContentBlock>) {
+pub(crate) fn append_step_image_blocks(
+    step: &lash_core::CellRecord,
+    blocks: &mut Vec<LlmContentBlock>,
+) {
     for image in &step.images {
         blocks.push(LlmContentBlock::Attachment {
             reference: Box::new(image.clone()),
