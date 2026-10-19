@@ -14,7 +14,7 @@ The worked example is the attachment family (FIG-3380):
 
 | | shared | SQLite | PostgreSQL |
 |---|---|---|---|
-| attachment | `crates/lash-store-sql/src/attachment/{manifest,condemnation,blob}.rs` | `crates/lash-sqlite-store/src/{attachments,attachment_store}.rs` | `crates/lash-postgres-store/src/postgres/attachments.rs` |
+| attachment | `crates/lash-store-sql/src/attachment/{edges,condemnation,blob}.rs` | `crates/lash-sqlite-store/src/{attachments,attachment_store}.rs` | `crates/lash-postgres-store/src/postgres/attachments.rs` |
 
 ## The public store-author contract
 
@@ -260,25 +260,24 @@ PostgreSQL has one dialect, so one `LazyLock`:
 ```rust
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
-    AttachmentSql { manifest: ManifestStatements::render(dialect), … }
+    AttachmentSql { edges: AttachmentEdgeStatements::render(dialect), … }
 });
 
 pub(crate) fn attachment_sql() -> &'static AttachmentSql { &ATTACHMENT_SQL }
 ```
 
-A SQLite family whose statements reach only its own database renders once
-against that database's **schema** — `Schema::Main.dialect()` for a
-session-catalog family, `Schema::ProcessRegistry.dialect()` for a registry
-one. A family that reaches *across* databases renders each **deployment
-layout** it can be issued under and picks at the call site:
+A SQLite deployment is one database file
+([ADR 0132 §12](adr/0132-durability-is-state-first-over-the-lash-store.md#12-the-outbox-keeps-two-kinds-and-sqlite-is-one-database-file)):
+the connection's `main` database holds every table the crate owns. A SQLite
+family renders once against it, with `schema_layout::MAIN`
+(`crates/lash-sqlite-store/src/schema_layout.rs`):
 
 ```rust
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
-    let catalog = Dialect::sqlite(CATALOG);
-    let with_registry = Dialect::sqlite(CATALOG_WITH_REGISTRY);
+    let dialect = crate::schema_layout::MAIN;
     AttachmentSql {
-        manifest: ManifestStatements::render(catalog),
-        catalog_registry: CatalogRegistryStatements::render(with_registry),
+        edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
+        pending: PendingWriteStatements::render(dialect),
         …
     }
 });
@@ -286,62 +285,26 @@ static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
 pub(crate) fn attachment_sql() -> &'static AttachmentSql { &ATTACHMENT_SQL }
 ```
 
-`Schema` (`crates/lash-sqlite-store/src/schema_layout.rs`) is `Main` or
-`ProcessRegistry`, and each yields a `Dialect` whose layout places every owned
-table in that one database (FIG-3406). A function that used to take a
-`schema: &str` and `format!` its statement renders once and indexes. Call
-sites read `sql.manifest.select_rooted_ids.sql()`; `.name()` is the
-statement's reported name for tracing and store metrics.
+The complete holder is `crates/lash-sqlite-store/src/attachments.rs`. A
+function that used to take a `schema: &str` and `format!` its statement renders
+once and indexes. Call sites read `sql.edges.insert.sql()`; `.name()` is
+the statement's reported name for tracing and store metrics.
 
-### The schema is a property of the table, under a layout
+`MAIN` carries a `TableLayout` that places every table of
+`lash_store_sql::TABLES` in `main`, and the renderer resolves each table name
+against it: a table the layout does not place is a startup refusal naming the
+table. The renderer's layouts can place tables in several databases; no Lash
+deployment does, so a family declares no layout of its own.
 
-A SQLite `Dialect` carries a [`TableLayout`]: an ordered list of the databases
-this connection reaches and the tables each one holds. The renderer resolves
-**each table name separately**, so one statement can join
-`main.attachment_referrer_edges` to `process_registry.processes`:
-
-```rust
-const CATALOG_TABLES: &[&str] = &[
-    manifest::TABLE,
-    condemnation::TABLE,
-    "deleted_sessions",
-    "graph_nodes",
-    "runtime_turn_commits",
-];
-
-/// The session catalog with a bound process registry attached.
-const CATALOG_WITH_REGISTRY: TableLayout = TableLayout::new(&[
-    SchemaTables::new(Schema::Main.qualifier(), CATALOG_TABLES),
-    SchemaTables::new(Schema::ProcessRegistry.qualifier(), &["processes"]),
-]);
-```
-
-Three consequences worth knowing before you declare one:
-
-* **A table the layout does not place is a startup refusal**, naming the table
-  and the databases the layout does reach. That is a feature, not a hazard: the
-  attachment family renders the probe that proves a process owner dead only
-  under the layout that has a registry, so the statement a connection with no
-  registry must not issue cannot be rendered for it at all. Two production
-  shapes, two named statements, one layout each.
-* **The first placement wins.** If a deployment carries copies of a table in
-  two databases, each statement's layout chooses one copy by declaration
-  order.
-* **A layout may place every table the crate owns** — that is what
-  `Schema::Main` does for a storage connection. It is still per-table
-  resolution; the list is just total.
-
-A family that lives on **one** SQLite connection — the process registry's own
-database — renders once with `Dialect::sqlite_unqualified()` instead, which
-addresses its tables the way they have always been addressed. Keep that: the
-rendered text is what a statement's `INDEXED BY` plan assertions were measured
-against, and the layout machinery buys nothing for a family reached through one
-name.
+The process family renders with `Dialect::sqlite_unqualified()` instead
+(`crates/lash-sqlite-store/src/process_registry/sql.rs`). The registry shares
+the store's connection, so its unqualified names resolve to the same `main`
+database. Keep that spelling: the rendered text is what its statements'
+`INDEXED BY` plan assertions were measured against. Neither spelling means a
+second database.
 
 PostgreSQL has no layout: every table is `lash_<table>` in one database, so
-`Dialect::postgres()` qualifies nothing. A statement whose SQLite half needs
-two databases is still one shared statement, because the difference is a render
-axis.
+`Dialect::postgres()` qualifies nothing.
 
 Attach the vocabulary (§3) to the dialect here, once, if the family's
 statements use tokens: `Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE)`.
@@ -357,17 +320,9 @@ only job was to build the statement goes with it, and so do its tests. Tests
 that duplicated a production statement use the named one; tests of a deleted
 helper are deleted.
 
-Two shapes worth knowing, both visible in the attachment family:
-
-* A statement that was built per call because it needed a schema qualifier
-  becomes a rendered statement per layout, picked by the caller. That is the
-  whole point of rendering per `Schema` or `TableLayout` at startup.
-* A statement that *cannot be rendered* under some layouts is a separate
-  named statement set, not an optional predicate: the attachment family's
-  `manifest_process_owner` statements exist only under the layout that binds
-  a process registry, and a caller with no registry bound simply never reads
-  them. The probe and the write that consults it already ran inside the
-  caller's transaction, so the isolation is unchanged.
+A statement that was built per call because it needed a schema qualifier
+becomes one rendered statement, read from the family's holder. That is the
+whole point of rendering at startup.
 
 ## 7. Prove it
 
