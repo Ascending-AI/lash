@@ -1137,3 +1137,63 @@ fn the_slot_inventory_holds_every_library_reference() {
         }
     }
 }
+
+/// K-LIB-005: callback membership follows the plan's own callee references,
+/// even with repeated sites and a different site order. The first
+/// unanswered callee is refused and an invalid batch installs nothing.
+#[test]
+fn plan_callback_membership_preserves_first_refusal_and_atomic_installation() {
+    use crate::plan::{HelperPlan, PlanSite, SiteCall};
+    let mut base = FunctionRegistry::new();
+    let root = base.register(definition("law.root", false), None).unwrap();
+    let first = base.register(definition("law.first", false), None).unwrap();
+    let second = base
+        .register(definition("law.second", false), None)
+        .unwrap();
+    let callees: &'static [_] = Box::leak(Box::new([first, second]));
+    for (invoked, missing) in [
+        (&[1, 1][..], Some(first)),
+        (&[0, 0][..], Some(second)),
+        (&[1, 0, 1][..], None),
+    ] {
+        let sites = invoked
+            .iter()
+            .map(|callee| PlanSite {
+                path: &[],
+                call: SiteCall::Invoke(*callee),
+                dst: 0,
+                roles: &[],
+                bound: &[],
+                loops: &[],
+            })
+            .collect::<Vec<_>>();
+        let plan = Box::leak(Box::new(HelperPlan {
+            name: "law.root",
+            function: root,
+            callees,
+            literals: &[],
+            fields: &[],
+            records: &[],
+            registers: 1,
+            slots: &[],
+            closures: &[],
+            sites: Box::leak(sites.into_boxed_slice()),
+            run: |_, _| Ok(crate::Value::Null),
+            template: None,
+        }));
+        let mut registry = base.clone();
+        let result = registry.install_plans(&[plan]);
+        match missing {
+            Some(expected) => {
+                assert!(
+                    matches!(result, Err(RegistryError::PlanCalleeUnanswered { callee, .. }) if callee == expected)
+                );
+                assert!(registry.get(&root).unwrap().plan().is_none());
+            }
+            None => {
+                assert_eq!(result, Ok(1));
+                assert!(registry.get(&root).unwrap().plan().is_some());
+            }
+        }
+    }
+}

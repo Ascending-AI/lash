@@ -11,6 +11,24 @@ use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
+/// PLAN-INDEX: a build emits each plan index in strict function identity
+/// order. Filtering it for a registry preserves that registry's order,
+/// so installing the plans has no runtime sorting work to discover.
+#[test]
+fn generated_plan_indexes_are_in_function_identity_order() {
+    for plans in [
+        lash_ext_ts_core::PLANS,
+        lash_ext_py_core::PLANS,
+        control::PLANS,
+    ] {
+        assert!(
+            plans
+                .windows(2)
+                .all(|pair| pair[0].function < pair[1].function)
+        );
+    }
+}
+
 #[allow(
     dead_code,
     reason = "the plan law shares lowering, not the differential's standalone runner"

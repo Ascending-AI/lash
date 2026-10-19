@@ -775,14 +775,24 @@ impl FunctionRegistry {
             answers[*at] |= closed(plan);
         }
         for (at, plan) in &installing {
+            // Callback membership alone answers these callees. Project it
+            // once before looking up the remaining callees in the registry;
+            // wide dispatchers need no registry probe for every callback.
+            let mut callbacks = Vec::new();
+            if !plan.sites.is_empty() {
+                callbacks.resize(plan.callees.len(), false);
+                for site in plan.sites {
+                    if let crate::plan::SiteCall::Invoke(callee) = site.call
+                        && let Some(invoked) = callbacks.get_mut(callee as usize)
+                    {
+                        *invoked = true;
+                    }
+                }
+            }
             for (index, callee) in plan.callees.iter().enumerate() {
-                // A callback site's callee may run its body in a frame.
-                let invoked = || {
-                    plan.sites
-                        .iter()
-                        .any(|site| site.call == crate::plan::SiteCall::Invoke(index as u32))
-                };
-                if self.find(callee).is_ok_and(|callee| answers[callee]) || invoked() {
+                if callbacks.get(index).copied().unwrap_or(false)
+                    || self.find(callee).is_ok_and(|callee| answers[callee])
+                {
                     continue;
                 }
                 return Err(RegistryError::PlanCalleeUnanswered {

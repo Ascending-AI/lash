@@ -19,14 +19,14 @@ use lash_kernel_doc::plan as p;
 #[allow(dead_code)]
 enum Departure { Next, Return(Value), Break, Continue }
 
-/// Every plan, in the order the helpers are registered.
+/// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &LAW_HANDLERS_PLAN,
     &LAW_HALT_PLAN,
-    &LAW_FACTORY_PLAN,
-    &LAW_DECLINING_PLAN,
     &LAW_DECLINE_CALLER_PLAN,
     &LAW_BUDGET_PLAN,
+    &LAW_DECLINING_PLAN,
+    &LAW_HANDLERS_PLAN,
+    &LAW_FACTORY_PLAN,
 ];
 
 const LAW_HANDLERS_PLAN: p::HelperPlan = p::HelperPlan {

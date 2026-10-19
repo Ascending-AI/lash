@@ -165,7 +165,7 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
                 } else {
                     format!("segment of {} sites", plan.sites)
                 };
-                plans.push((ident, plan));
+                plans.push((*function, ident, plan));
                 outcomes.insert(*function, generated);
             }
             Err(reason) => {
@@ -188,13 +188,17 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     rust.push_str(
         "#[allow(dead_code)]\nenum Departure { Next, Return(Value), Break, Continue }\n\n",
     );
-    rust.push_str("/// Every plan, in the order the helpers are registered.\n");
+    rust.push_str("/// Every plan, in function identity order.\n");
     rust.push_str("pub const PLANS: &[&p::HelperPlan] = &[\n");
-    for (ident, _) in &plans {
+    // Registration's identity order is pure build metadata. Keep code
+    // emission in dependency order; only the lookup index needs sorting.
+    let mut index: Vec<_> = plans.iter().collect();
+    index.sort_unstable_by_key(|(function, _, _)| *function);
+    for (_, ident, _) in index {
         let _ = writeln!(rust, "    &{},", plan_const(ident));
     }
     rust.push_str("];\n");
-    for (_, plan) in &plans {
+    for (_, _, plan) in &plans {
         rust.push('\n');
         rust.push_str(&plan.item);
         rust.push('\n');
