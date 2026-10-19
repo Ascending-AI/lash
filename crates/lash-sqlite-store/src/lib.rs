@@ -594,6 +594,8 @@ pub struct StoredSessionCheckpoint {
     pub manifest: SessionCheckpoint,
 }
 
+#[cfg(test)]
+mod compound_read_tests;
 #[cfg(all(test, feature = "testing"))]
 mod fence_tests;
 #[cfg(test)]

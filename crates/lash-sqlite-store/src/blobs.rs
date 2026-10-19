@@ -474,9 +474,22 @@ impl SqliteStore {
         fleet: lash_core_store::store::FleetFormat,
         chunk_size: usize,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-        let Some((record, closure)) = Self::checkpoint_graph_conn(conn, blob_ref)? else {
-            return Ok(None);
-        };
+        Self::checkpoint_graph_conn(conn, blob_ref)?
+            .map(|(record, closure)| {
+                Self::hydrate_checkpoint_conn(conn, record, &closure, fleet, chunk_size)
+            })
+            .transpose()
+    }
+
+    /// The checkpoint `record` names with its component bodies, read in the
+    /// snapshot its manifest graph `closure` was read in.
+    fn hydrate_checkpoint_conn(
+        conn: &Connection,
+        record: SessionCheckpoint,
+        closure: &crate::durable::GraphClosure,
+        fleet: lash_core_store::store::FleetFormat,
+        chunk_size: usize,
+    ) -> Result<HydratedSessionCheckpoint, StoreError> {
         let execution = record
             .execution_ref
             .as_ref()
@@ -491,7 +504,7 @@ impl SqliteStore {
                 // The descriptor alone: its heap pages are read on demand
                 // under a root lease (ADR 0145 §10).
                 let descriptor =
-                    lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &root)
+                    lash_core_store::checkpoint_graph::NodeSource::fetch(closure, &root)
                         .map(|node| std::sync::Arc::from(node.bytes))
                         .ok_or_else(|| {
                             graph_store_error(
@@ -511,7 +524,7 @@ impl SqliteStore {
             let graph_body =
                 lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
                     .and_then(|id| {
-                        lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &id)
+                        lash_core_store::checkpoint_graph::NodeSource::fetch(closure, &id)
                     })
                     .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
             let body =
@@ -532,7 +545,7 @@ impl SqliteStore {
                 ),
             );
         }
-        Ok(Some(HydratedSessionCheckpoint {
+        Ok(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
             components,
             execution,
@@ -548,7 +561,7 @@ impl SqliteStore {
                     )
                     .ok_or_else(|| stored_data_corrupt("plugin namespace", "invalid root"))?;
                     lash_core_store::checkpoint_graph::closure(
-                        &closure,
+                        closure,
                         root,
                         &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
                     )
@@ -558,7 +571,7 @@ impl SqliteStore {
                 .into_iter()
                 .flatten()
                 .collect(),
-        }))
+        })
     }
 
     pub async fn get_blob(&self, blob_ref: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
@@ -612,9 +625,24 @@ impl SqliteStore {
         let blob_ref = blob_ref.clone();
         let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
         let fleet = self.conn.fleet();
+        #[cfg(feature = "testing")]
+        let pauses = self.conn.pauses();
+        // The manifest graph and its component bodies are one snapshot: a
+        // reclamation committed between them cannot leave a selected
+        // component missing.
         self.conn
-            .call(move |conn| {
-                Self::get_checkpoint_conn(conn, &blob_ref, fleet, chunk_size)
+            .read(move |tx| {
+                let Some((record, closure)) =
+                    Self::checkpoint_graph_conn(tx, &blob_ref).map_err(sqlite_conversion_error)?
+                else {
+                    return Ok(None);
+                };
+                #[cfg(feature = "testing")]
+                if let Some(pauses) = pauses.as_ref() {
+                    pauses.reach_compound_read(crate::testing::SqliteCompoundRead::Checkpoint);
+                }
+                Self::hydrate_checkpoint_conn(tx, record, &closure, fleet, chunk_size)
+                    .map(Some)
                     .map_err(sqlite_conversion_error)
             })
             .await

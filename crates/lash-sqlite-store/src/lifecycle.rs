@@ -2,8 +2,11 @@
 //!
 //! * Async public reads return `Result` so SQLite and decode failures cannot be
 //!   mistaken for missing session state.
-//! * A read goes through `self.conn.call(move |c| { ... })`, where the closure
-//!   is a *synchronous* rusqlite body returning `rusqlite::Result<T>`.
+//! * A single-statement read goes through `self.conn.call(move |c| { ... })`,
+//!   where the closure is a *synchronous* rusqlite body returning
+//!   `rusqlite::Result<T>`; a read that hydrates what one statement selected
+//!   with further statements goes through `self.conn.read(move |tx| { ... })`,
+//!   so all of them share one snapshot.
 //! * A read-then-write goes through `self.conn.write(move |tx| { ... })`.
 //! * The shared `*_from_conn` helpers in `lib.rs` are synchronous and take a
 //!   `&rusqlite::Connection`, so they can be called from inside either closure.
@@ -283,14 +286,29 @@ impl SqliteStore {
         let session_id = session_id.clone();
         let fleet = self.fleet_format();
         let configs = Arc::clone(&self.configs);
+        #[cfg(feature = "testing")]
+        let pauses = self.conn.pauses();
+        // The head row and the config it names are one snapshot: a commit
+        // that moves the head and reclaims the old config cannot land
+        // between them.
         self.read_connection()
-            .call(move |conn| {
-                try_load_session_head_meta_from_conn(
-                    conn,
+            .read(move |tx| {
+                let Some(row) = crate::codec::select_session_head_row(tx, &session_id)
+                    .map_err(sqlite_conversion_error)?
+                else {
+                    return Ok(None);
+                };
+                #[cfg(feature = "testing")]
+                if let Some(pauses) = pauses.as_ref() {
+                    pauses.reach_compound_read(crate::testing::SqliteCompoundRead::SessionHead);
+                }
+                row.hydrate(
+                    tx,
                     &session_id,
                     fleet,
                     Some(crate::codec::ConfigRead::Committed(&configs)),
                 )
+                .map(Some)
                 .map_err(sqlite_conversion_error)
             })
             .await

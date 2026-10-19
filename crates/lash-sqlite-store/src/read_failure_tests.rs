@@ -248,20 +248,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("queued-work-snapshot.db");
     let pauses = crate::testing::SqlitePauses::default();
-    let store = Arc::new(
-        SqliteStore::open_at(
-            &crate::location::DatabaseLocation::standalone_file(&path),
-            StoreOptions::standard(crate::SqliteSynchronous::Normal),
-            Arc::new(lash_core_ids::clock::SystemClock),
-            lash_core_store::store::FleetFormat::writable(),
-            crate::testing::ConnectionHooks {
-                pauses: Some(pauses.clone()),
-                inline_calls: false,
-            },
-        )
-        .await
-        .expect("open store with a read seam"),
-    );
+    let store = crate::compound_read_tests::paused_file_store(&path, &pauses).await;
     let session_id = SessionId::fixture(session_id);
     let batch = store
         .enqueue_queued_work(
@@ -290,18 +277,15 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     pause.wait_until_reached().await;
 
     // A second connection consumes the batch after the reader fetched its row.
-    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-    raw.busy_timeout(std::time::Duration::from_millis(15_000))
-        .expect("raw busy timeout");
-    raw.execute_batch("PRAGMA foreign_keys=ON;")
-        .expect("raw foreign keys");
-    let deleted = raw
-        .execute(
-            "DELETE FROM queued_work_batches WHERE batch_id = ?1",
-            params![batch.batch_id.as_str()],
-        )
-        .expect("consume the batch from a second connection");
-    assert_eq!(deleted, 1, "the competing commit must land in the window");
+    crate::compound_read_tests::commit_competing(&path, |tx| {
+        let deleted = tx
+            .execute(
+                "DELETE FROM queued_work_batches WHERE batch_id = ?1",
+                params![batch.batch_id.as_str()],
+            )
+            .expect("consume the batch from a second connection");
+        assert_eq!(deleted, 1, "the competing commit must land in the window");
+    });
     pause.release();
 
     let batches = reader

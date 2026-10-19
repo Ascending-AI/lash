@@ -117,7 +117,7 @@ pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
 mod held;
-mod tool_material;
+pub(crate) mod tool_material;
 
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.
@@ -576,9 +576,14 @@ impl SqliteStore {
         artifact_ref: String,
         missing_diagnostic: String,
     ) -> Result<Option<Vec<u8>>, StoreError> {
+        #[cfg(feature = "testing")]
+        let pauses = self.conn.pauses();
+        // The pointer, its edges and the body it names are one snapshot: a
+        // release that reclaims the pointer and peels its body cannot land
+        // between them.
         let resolved = self
             .conn
-            .call(move |conn| {
+            .read(move |conn| {
                 let stored: Option<(String, Option<i64>)> = conn
                     .prepare_cached(artifact_sql().refs.select_body_ref.sql())
                     .and_then(|mut statement| {
@@ -590,6 +595,10 @@ impl SqliteStore {
                 let Some((blob_ref, encoding)) = stored else {
                     return Ok(None);
                 };
+                #[cfg(feature = "testing")]
+                if let Some(pauses) = pauses.as_ref() {
+                    pauses.reach_compound_read(crate::testing::SqliteCompoundRead::Artifact);
+                }
                 let mut edges =
                     conn.prepare_cached(artifact_sql().edges.select_artifact_edges.sql())?;
                 let mut rows = edges.query(params![namespace, artifact_ref])?;

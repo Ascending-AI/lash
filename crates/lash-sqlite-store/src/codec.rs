@@ -203,7 +203,7 @@ pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> 
     }
 }
 
-/// Synchronous because it runs inside a `conn.call`/`conn.write` closure on the connection
+/// Synchronous because it runs inside a `conn.read`/`conn.write` closure on the connection
 /// thread.
 ///
 /// `fleet` is the store's recorded `F`: the head-meta JSON admits the
@@ -215,34 +215,60 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     fleet: lash_core_store::store::FleetFormat,
     configs: Option<ConfigRead<'_>>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
-    let row = conn
-        .prepare_cached(crate::session_sql::session_sql().head.select_meta.sql())
+    select_session_head_row(conn, session_id)?
+        .map(|row| row.hydrate(conn, session_id, fleet, configs))
+        .transpose()
+}
+
+/// The head row of a session: its revision and the references its config,
+/// leaf, checkpoint and frame are hydrated from in the same snapshot.
+pub(crate) struct SessionHeadRow {
+    head_json: Option<String>,
+    head_revision: i64,
+    leaf_node_id: Option<String>,
+    checkpoint_ref: Option<String>,
+    current_frame_node_id: Option<String>,
+}
+
+pub(crate) fn select_session_head_row(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<SessionHeadRow>, StoreError> {
+    conn.prepare_cached(crate::session_sql::session_sql().head.select_meta.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
+                Ok(SessionHeadRow {
+                    head_json: row.get(0)?,
+                    head_revision: row.get(1)?,
+                    leaf_node_id: row.get(2)?,
+                    checkpoint_ref: row.get(3)?,
+                    current_frame_node_id: row.get(4)?,
+                })
             })
         })
         .optional()
-        .map_err(sqlite_error)?;
-    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref, current_frame_node_id)) = row
-    else {
-        return Ok(None);
-    };
-    assemble_session_head_meta(
-        session_id,
-        || load_config_conn(conn, head_json.as_deref(), fleet, configs),
-        head_revision,
-        leaf_node_id,
-        checkpoint_ref,
-        current_frame_node_id,
-    )
-    .map(Some)
+        .map_err(sqlite_error)
+}
+
+impl SessionHeadRow {
+    /// Hydrate the row's head metadata; `conn` must be in the snapshot the
+    /// row was selected in.
+    pub(crate) fn hydrate(
+        self,
+        conn: &Connection,
+        session_id: &SessionId,
+        fleet: lash_core_store::store::FleetFormat,
+        configs: Option<ConfigRead<'_>>,
+    ) -> Result<SessionHeadMeta, StoreError> {
+        assemble_session_head_meta(
+            session_id,
+            || load_config_conn(conn, self.head_json.as_deref(), fleet, configs),
+            self.head_revision,
+            self.leaf_node_id,
+            self.checkpoint_ref,
+            self.current_frame_node_id,
+        )
+    }
 }
 
 /// Assemble the head metadata a revision row names: its head document, its

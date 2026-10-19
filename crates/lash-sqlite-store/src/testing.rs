@@ -394,6 +394,23 @@ struct ArmedPauses {
     after_fence: Option<Arc<PauseState>>,
     queued_work_hydration: Option<Arc<PauseState>>,
     process_event_page_after_identity: Option<Arc<PauseState>>,
+    compound_reads: std::collections::BTreeMap<SqliteCompoundRead, Arc<PauseState>>,
+}
+
+/// A public read that hydrates what its first statement selected with
+/// further statements, all inside one read snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SqliteCompoundRead {
+    /// `load_session_head_meta`: the head row, then its revision's config.
+    SessionHead,
+    /// `get_checkpoint`: the manifest graph, then its component bodies.
+    Checkpoint,
+    /// An artifact getter: the pointer, then its edges and body.
+    Artifact,
+    /// `read_material`: the holder fence and lease, then pointer and body.
+    ToolMaterial,
+    /// `recent_events`: the process identity, then its event tail.
+    RecentProcessEvents,
 }
 
 /// The pauses a test arms inside one store's connection thread: the in-store
@@ -430,6 +447,17 @@ impl SqlitePauses {
         SqliteReadPause { state }
     }
 
+    /// Pause the next `read` after the statement that selects what it then
+    /// hydrates, until the returned handle is released.
+    pub fn pause_compound_read(&self, read: SqliteCompoundRead) -> SqliteReadPause {
+        let state = Arc::new(PauseState::default());
+        self.armed
+            .lock_recover()
+            .compound_reads
+            .insert(read, Arc::clone(&state));
+        SqliteReadPause { state }
+    }
+
     /// Reach the writer fence of a write transaction, blocking the connection
     /// thread while a pause armed by `pause_after_fence` is outstanding.
     pub(crate) fn reach_after_fence(&self) {
@@ -454,6 +482,15 @@ impl SqlitePauses {
             .lock_recover()
             .process_event_page_after_identity
             .take();
+        if let Some(pause) = armed {
+            pause.hold();
+        }
+    }
+
+    /// Reach `read`'s hydration seam, blocking the connection thread while a
+    /// pause armed by `pause_compound_read` for it is outstanding.
+    pub(crate) fn reach_compound_read(&self, read: SqliteCompoundRead) {
+        let armed = self.armed.lock_recover().compound_reads.remove(&read);
         if let Some(pause) = armed {
             pause.hold();
         }

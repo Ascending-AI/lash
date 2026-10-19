@@ -38,12 +38,18 @@ const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::File;
 #[path = "conformance/schema_refusal.rs"]
 mod schema_refusal;
 
+/// A file store set whose connections carry `pauses`, holding one terminal
+/// process with a nonempty retained event tail: the process's id and the
+/// prune cutoff that makes it eligible.
 #[cfg(feature = "testing")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
-    let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
-    let path = dir.path().to_path_buf();
-    let pauses = lash_sqlite_store::testing::SqlitePauses::default();
+async fn terminal_process_with_a_tail(
+    path: &std::path::Path,
+    pauses: &lash_sqlite_store::testing::SqlitePauses,
+) -> (
+    lash_sqlite_store::SqliteStoreSet,
+    lash_protocol_types::ProcessId,
+    u64,
+) {
     let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
         path.join("lash.db"),
         lash_sqlite_store::SqliteStoreSetOptions {
@@ -89,6 +95,47 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
         )
         .await
         .expect("complete snapshot process");
+    (stores, process_id, terminal.updated_at_ms.saturating_add(1))
+}
+
+/// Prune the store set under `path` from another OS process's connection,
+/// as in a deployment: it shares none of this process's SQLite gates, so a
+/// checkpoint queued behind a paused read cannot hold the prune back.
+#[cfg(feature = "testing")]
+async fn prune_from_another_process(path: &std::path::Path, cutoff_ms: u64) {
+    let pruner = tokio::task::spawn_blocking({
+        let path = path.to_path_buf();
+        move || {
+            std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "lifecycle_snapshot_competing_pruner",
+                    "--include-ignored",
+                    "--nocapture",
+                ])
+                .env(SNAPSHOT_PRUNER_ROOT, &path)
+                .env(SNAPSHOT_PRUNER_CUTOFF_MS, cutoff_ms.to_string())
+                .output()
+                .expect("run the competing pruner")
+        }
+    })
+    .await
+    .expect("join the competing pruner");
+    let stdout = String::from_utf8_lossy(&pruner.stdout);
+    assert!(
+        pruner.status.success() && stdout.contains("pruned_processes=1"),
+        "the competing connection prunes the process: {stdout}\n{}",
+        String::from_utf8_lossy(&pruner.stderr)
+    );
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
+    let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
+    let pauses = lash_sqlite_store::testing::SqlitePauses::default();
+    let (stores, process_id, cutoff_ms) = terminal_process_with_a_tail(dir.path(), &pauses).await;
+    let reader = stores.process_registry();
     let first = reader
         .event_page(
             &process_id,
@@ -122,39 +169,12 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
         }
     });
     pause.wait_until_reached().await;
-    // The competing writer is another OS process's connection, as in a
-    // deployment: it shares none of this process's SQLite gates, so a
-    // checkpoint queued behind the paused read cannot hold the prune back.
-    let cutoff_ms = terminal.updated_at_ms.saturating_add(1);
-    let pruner = tokio::task::spawn_blocking({
-        let path = path.clone();
-        move || {
-            std::process::Command::new(std::env::current_exe().expect("test executable"))
-                .args([
-                    "--exact",
-                    "lifecycle_snapshot_competing_pruner",
-                    "--include-ignored",
-                    "--nocapture",
-                ])
-                .env(SNAPSHOT_PRUNER_ROOT, &path)
-                .env(SNAPSHOT_PRUNER_CUTOFF_MS, cutoff_ms.to_string())
-                .output()
-                .expect("run the competing pruner")
-        }
-    })
-    .await
-    .expect("join the competing pruner");
+    prune_from_another_process(dir.path(), cutoff_ms).await;
     pause.release();
     let outcome = read_task
         .await
         .expect("join paused event-page read")
         .expect("event-page read result");
-    let stdout = String::from_utf8_lossy(&pruner.stdout);
-    assert!(
-        pruner.status.success() && stdout.contains("pruned_processes=1"),
-        "the competing connection prunes the process: {stdout}\n{}",
-        String::from_utf8_lossy(&pruner.stderr)
-    );
     assert!(
         !matches!(
             outcome,
@@ -167,14 +187,59 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
     );
 }
 
+/// COMPOUND-READ-SNAPSHOT: the identity check and the event tail of
+/// `recent_events` are one snapshot, so a prune committed between them
+/// cannot turn a retained tail into an empty success.
+#[cfg(feature = "testing")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recent_event_tail_keeps_its_identity_snapshot_during_prune() {
+    let dir = tempfile::tempdir().expect("recent-events snapshot tempdir");
+    let pauses = lash_sqlite_store::testing::SqlitePauses::default();
+    let (stores, process_id, cutoff_ms) = terminal_process_with_a_tail(dir.path(), &pauses).await;
+    let reader = stores.process_registry();
+    let tail = reader
+        .recent_events(&process_id, 16)
+        .await
+        .expect("read the retained tail");
+    assert!(!tail.is_empty(), "fixture must retain a nonempty tail");
+
+    let pause = pauses
+        .pause_compound_read(lash_sqlite_store::testing::SqliteCompoundRead::RecentProcessEvents);
+    let read_task = tokio::spawn({
+        let reader = Arc::clone(&reader);
+        let process_id = process_id.clone();
+        async move { reader.recent_events(&process_id, 16).await }
+    });
+    pause.wait_until_reached().await;
+    prune_from_another_process(dir.path(), cutoff_ms).await;
+    pause.release();
+    let read = read_task
+        .await
+        .expect("join paused recent-events read")
+        .expect("a prune after the identity check is no failure");
+    assert_eq!(
+        read, tail,
+        "the identity and its event tail come from one snapshot"
+    );
+    assert!(
+        matches!(
+            reader.recent_events(&process_id, 16).await,
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained { .. }
+            )
+        ),
+        "the next read sees the prune"
+    );
+}
+
 const SNAPSHOT_PRUNER_ROOT: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_ROOT";
 const SNAPSHOT_PRUNER_CUTOFF_MS: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_CUTOFF_MS";
 
-/// The competing writer of `a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune`:
-/// prune the law's store set from this process's own connections.
+/// The competing writer of `prune_from_another_process`: prune the law's
+/// store set from this process's own connections.
 #[cfg(feature = "testing")]
 #[tokio::test]
-#[ignore = "spawned by a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune"]
+#[ignore = "spawned by prune_from_another_process"]
 async fn lifecycle_snapshot_competing_pruner() {
     use lash_execution_contracts::process::ProcessRetention as _;
 

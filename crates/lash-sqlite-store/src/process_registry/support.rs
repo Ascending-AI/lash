@@ -102,11 +102,21 @@ pub(super) async fn recent_events(
 ) -> Result<Vec<ProcessEvent>, lash_execution_contracts::plugin_error::PluginError> {
     let process_id = process_id.clone();
     let fleet_format = registry.conn.fleet();
+    #[cfg(feature = "testing")]
+    let pauses = registry.conn.pauses();
+    // Identity and tail are one snapshot: a prune between them cannot turn
+    // a retained process's tail into an empty success.
     registry
         .conn
-        .call(move |conn| {
+        .read(move |conn| {
             Ok((|| {
                 SqliteProcessRegistry::require_process_conn(conn, &process_id)?;
+                #[cfg(feature = "testing")]
+                if let Some(pauses) = pauses.as_ref() {
+                    pauses.reach_compound_read(
+                        crate::testing::SqliteCompoundRead::RecentProcessEvents,
+                    );
+                }
                 let mut stmt = conn
                     .prepare(process_sql().event.list_recent.sql())
                     .map_err(process_sqlite_error)?;

@@ -67,9 +67,11 @@ because both sides are statements on one connection. The list is closed:
 - the writer fence: PostgreSQL's `AfterFence` and SQLite's
   `SqlitePauses::pause_after_fence` hold a transaction that has read the fleet
   epoch and not yet written;
-- SQLite's two read-snapshot pauses, between a parent row's read and its
+- SQLite's read-snapshot pauses, between a parent row's read and its
   children's (`pause_queued_work_hydration`,
-  `pause_process_event_page_after_identity`);
+  `pause_process_event_page_after_identity`, and `pause_compound_read` for
+  each `SqliteCompoundRead`: the session head, the checkpoint, the artifact,
+  the tool material and the recent process events);
 - SQLite's open-time migration steps (`SqliteMigrationHook`) and finalize's
   commit (`SqliteFinalizeHook`).
 

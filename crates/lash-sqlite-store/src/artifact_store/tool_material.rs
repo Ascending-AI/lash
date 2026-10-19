@@ -204,9 +204,13 @@ impl ToolMaterialStore for SqliteStore {
         }
         let referrer = holder.referrer();
         let artifact_ref = artifact.artifact_ref.clone();
+        #[cfg(feature = "testing")]
+        let pauses = self.conn.pauses();
+        // Fence, lease, pointer and body are one snapshot: a release that
+        // lands after the lease check cannot leave the pointer missing.
         let read = self
             .conn
-            .call(move |conn| {
+            .read(move |conn| {
                 if artifact_fenced_tx(conn, &referrer)? {
                     return Ok(Err(LeaseRefusal::HolderEnded));
                 }
@@ -225,6 +229,10 @@ impl ToolMaterialStore for SqliteStore {
                     })?;
                 if !leased {
                     return Ok(Err(LeaseRefusal::BundleMissing));
+                }
+                #[cfg(feature = "testing")]
+                if let Some(pauses) = pauses.as_ref() {
+                    pauses.reach_compound_read(crate::testing::SqliteCompoundRead::ToolMaterial);
                 }
                 let blob_ref: String = conn
                     .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
@@ -250,7 +258,7 @@ impl ToolMaterialStore for SqliteStore {
     }
 }
 
-fn release_material_tx(
+pub(crate) fn release_material_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,
     now_ms: u64,

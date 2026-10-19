@@ -406,3 +406,95 @@ async fn configuration_reuse_keeps_snapshot_and_rollback_isolation() {
         receipt.head_revision
     );
 }
+
+// COMPOUND-READ-SNAPSHOT: a cold head read selects its revision and hydrates
+// that revision's config in one snapshot, so a commit that moves the head and
+// peels the old config between the two cannot fail the read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cold_head_read_keeps_its_snapshot_while_the_old_config_is_peeled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("head-snapshot.db");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("store");
+    let session = SessionId::from("head-snapshot");
+    let mut state = durable_state(&store, &session).await;
+    let selected = store
+        .load_session_head_meta(&session)
+        .await
+        .expect("head")
+        .expect("present");
+    state.policy.max_tool_calls = lash_core_execution::MaxToolCalls::new(7);
+    state.config_revision = 1;
+    let next = store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .expect("publish the next config")
+        .head_revision;
+    drop(store);
+    // The head stands at the selected revision again, with the next one
+    // retained for the competing commit to move it to.
+    let raw = Connection::open(&path).expect("fixture connection");
+    raw.execute(
+        "UPDATE session_head SET head_revision = ?2 WHERE session_id = ?1",
+        params![session.as_str(), selected.head_revision],
+    )
+    .expect("stand the head at the selected revision");
+    let old_root: String = raw
+        .query_row(
+            "SELECT config_ref FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2",
+            params![session.as_str(), selected.head_revision],
+            |row| row.get(0),
+        )
+        .expect("selected config root");
+    drop(raw);
+
+    // A fresh store: its config cache is cold, so the read hydrates the graph.
+    let pauses = crate::testing::SqlitePauses::default();
+    let reader_store = crate::compound_read_tests::paused_file_store(&path, &pauses).await;
+    let pause = pauses.pause_compound_read(crate::testing::SqliteCompoundRead::SessionHead);
+    let reader = tokio::spawn({
+        let store = Arc::clone(&reader_store);
+        let session = session.clone();
+        async move { store.load_session_head_meta(&session).await }
+    });
+    pause.wait_until_reached().await;
+    crate::compound_read_tests::commit_competing(&path, |tx| {
+        tx.execute(
+            "UPDATE session_head SET head_revision = ?2 WHERE session_id = ?1",
+            params![session.as_str(), next],
+        )
+        .expect("move the head");
+        tx.execute(
+            "DELETE FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2",
+            params![session.as_str(), selected.head_revision],
+        )
+        .expect("release the selected revision");
+        crate::durable::peel(tx, std::collections::BTreeSet::from([old_root.clone()]))
+            .expect("peel the released config");
+        assert_eq!(
+            crate::compound_read_tests::blob_rows(tx, &old_root),
+            0,
+            "the peel reclaims the config the paused read selected"
+        );
+    });
+    pause.release();
+
+    let read = reader
+        .await
+        .expect("reader task")
+        .expect("a peel between head and config is no corruption")
+        .expect("present");
+    assert_eq!(read.head_revision, selected.head_revision);
+    assert_eq!(
+        read.config, selected.config,
+        "the head and its config come from one snapshot"
+    );
+    let moved = reader_store
+        .load_session_head_meta(&session)
+        .await
+        .expect("read after the move")
+        .expect("present");
+    assert_eq!(moved.head_revision, next, "the next read sees the move");
+    assert_eq!(moved.config.config_revision, 1);
+}
