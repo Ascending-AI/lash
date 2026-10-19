@@ -2,7 +2,7 @@
 //!
 //! This is TypeScript syntax with kernel semantics: no JavaScript helper,
 //! implicit receiver, coercion, async wrapper or temporary is introduced.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use lash_kernel_dialect::{GeneratedSourceLimits, check_document_depth, check_metadata_uniqueness};
 use lash_kernel_doc as k;
@@ -10,6 +10,7 @@ use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as s;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
+use crate::captions::SourceComments;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod expressions;
@@ -18,6 +19,14 @@ mod readable;
 mod statements;
 
 pub(crate) struct Reader {
+    /// The source's comments and the captions they spell.
+    comments: SourceComments,
+    /// The captions of each block read, by the address of its statements,
+    /// which moving the block into the document keeps: each statement's,
+    /// by its index, and those of its arms, by the arm's child index.
+    captioned: HashMap<*const k::Stmt, Vec<StatementCaptions>>,
+    /// The captions of declared functions.
+    function_captions: Vec<(k::Name, k::Caption)>,
     limits: k::KernelDataLimits,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
@@ -83,15 +92,21 @@ fn syntax_depth(source: &str) -> usize {
 /// source was printed from: printing `base` and reading the result with
 /// `base` gives `base` again, with the same identity.
 ///
-/// The captions are those the source spells: none yet, as the printer
-/// spells none.
+/// The captions are those the source spells, as the printer writes them: a
+/// JSDoc block before a statement, a declared function or an `else`,
+/// `catch` or `finally` keyword. Any other comment is trivia.
 pub fn read(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
 ) -> Result<(k::Document, k::Captions), Diagnostic> {
-    let document = read_document(source, base, limits)?;
-    let captions = k::Captions::empty(document.identity());
+    let (document, entries) = read_document(source, base, limits)?;
+    let captions = if entries.is_empty() {
+        k::Captions::empty(document.identity())
+    } else {
+        k::Captions::new(&document, entries)
+            .map_err(|refused| invalid(format!("misplaced caption: {refused}"), None))?
+    };
     Ok((document, captions))
 }
 
@@ -99,7 +114,7 @@ fn read_document(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
-) -> Result<k::Document, Diagnostic> {
+) -> Result<(k::Document, Vec<k::CaptionEntry>), Diagnostic> {
     if source.len() > limits.max_bytes {
         return Err(Diagnostic::new(
             DiagnosticCode::GeneratedSourceBytes,
@@ -161,8 +176,8 @@ fn read_document(
             .name("kernel-typescript-parse".into())
             .stack_size(stack_size)
             .spawn_scoped(scope, || {
-                let mut document =
-                    parse_module(source).and_then(|module| read_module(module, base))?;
+                let (mut document, captions) = parse_module(source)
+                    .and_then(|(module, comments)| read_module(module, comments, base))?;
                 // Source spells no start adapter: the base keeps them.
                 k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|error| {
@@ -177,7 +192,7 @@ fn read_document(
                         None,
                     )
                 })?;
-                Ok(document)
+                Ok((document, captions))
             })
             .map_err(|error| {
                 Diagnostic::new(
@@ -192,14 +207,15 @@ fn read_document(
     })
 }
 
-fn parse_module(source: &str) -> Result<s::Module, Diagnostic> {
+fn parse_module(source: &str) -> Result<(s::Module, SourceComments), Diagnostic> {
     let end = u32::try_from(source.len())
         .map_err(|_| invalid("source exceeds parser address space", None))?;
+    let comments = swc_common::comments::SingleThreadedComments::default();
     let lexer = Lexer::new(
         Syntax::Typescript(TsSyntax::default()),
         Default::default(),
         StringInput::new(source, BytePos(0), BytePos(end)),
-        None,
+        Some(&comments),
     );
     let mut parser = Parser::new_from(lexer);
     let module = parser
@@ -208,12 +224,20 @@ fn parse_module(source: &str) -> Result<s::Module, Diagnostic> {
     if let Some(error) = parser.take_errors().first() {
         return Err(invalid(format!("{error:?}"), Some(error.span())));
     }
-    Ok(module)
+    drop(parser);
+    Ok((module, SourceComments::collect(source, comments)))
 }
 
-fn read_module(module: s::Module, base: &k::Document) -> Result<k::Document, Diagnostic> {
+fn read_module(
+    module: s::Module,
+    comments: SourceComments,
+    base: &k::Document,
+) -> Result<(k::Document, Vec<k::CaptionEntry>), Diagnostic> {
     let plan = lash_kernel_dialect::NamePlan::new(base, crate::printer::legal_identifier);
     let mut reader = Reader {
+        comments,
+        captioned: HashMap::new(),
+        function_captions: Vec::new(),
         limits: k::KernelDataLimits::standard(),
         names: plan
             .names
@@ -254,6 +278,7 @@ fn read_module(module: s::Module, base: &k::Document) -> Result<k::Document, Dia
             ));
         }
         let function = reader.read_function(&declaration.function)?;
+        let caption = reader.comments.before(item.span().lo.0 as usize).cloned();
         if declaration.ident.sym == "main" {
             if exported {
                 return Err(format_error("main is not an entry and is not exported"));
@@ -273,6 +298,9 @@ fn read_module(module: s::Module, base: &k::Document) -> Result<k::Document, Dia
                     if exported { "not an entry" } else { "an entry" }
                 )));
             }
+            if let Some(caption) = caption {
+                reader.function_captions.push((name.clone(), caption));
+            }
             if document.functions.insert(name, function).is_some() {
                 return Err(format_error("duplicate declaration"));
             }
@@ -281,7 +309,107 @@ fn read_module(module: s::Module, base: &k::Document) -> Result<k::Document, Dia
     if !main_seen {
         return Err(format_error("missing main"));
     }
-    Ok(document)
+    let captions = reader.located(&document);
+    Ok((document, captions))
+}
+
+/// The captions of one statement of a block read: its own, and those of its
+/// arms by their child index.
+struct StatementCaptions {
+    index: u32,
+    caption: Option<k::Caption>,
+    arms: Vec<(u32, k::Caption)>,
+}
+
+impl Reader {
+    /// The captions spelled before `stmt` and before the keywords of its
+    /// clause arms.
+    fn statement_captions(&self, index: u32, stmt: &s::Stmt) -> Option<StatementCaptions> {
+        let caption = self.comments.before(stmt.span().lo.0 as usize).cloned();
+        let mut arms = Vec::new();
+        let mut arm = |child: u32, end: BytePos| {
+            if let Some(caption) = self.comments.before_next(end.0 as usize) {
+                arms.push((child, caption.clone()));
+            }
+        };
+        match stmt {
+            s::Stmt::If(statement) if statement.alt.is_some() => arm(2, statement.cons.span().hi),
+            s::Stmt::Try(statement) => {
+                let mut end = statement.block.span.hi;
+                let mut child = 1;
+                if let Some(handler) = &statement.handler {
+                    arm(child, end);
+                    end = handler.span.hi;
+                    child += 1;
+                }
+                if statement.finalizer.is_some() {
+                    arm(child, end);
+                }
+            }
+            _ => {}
+        }
+        (caption.is_some() || !arms.is_empty()).then_some(StatementCaptions {
+            index,
+            caption,
+            arms,
+        })
+    }
+
+    /// Keeps the captions of `block`, read from `statements`.
+    fn keep_captions(&mut self, block: &k::Block, statements: &[s::Stmt]) {
+        let captions: Vec<_> = (0u32..)
+            .zip(statements)
+            .filter_map(|(index, stmt)| self.statement_captions(index, stmt))
+            .collect();
+        if !captions.is_empty() {
+            self.captioned.insert(block.as_ptr(), captions);
+        }
+    }
+
+    /// Every caption read, at its site in `document`.
+    fn located(&mut self, document: &k::Document) -> Vec<k::CaptionEntry> {
+        let mut entries: Vec<_> = std::mem::take(&mut self.function_captions)
+            .into_iter()
+            .map(|(name, caption)| k::CaptionEntry {
+                site: k::Site::new(k::Unit::Function(name), Vec::new()),
+                caption,
+            })
+            .collect();
+        if self.captioned.is_empty() {
+            return entries;
+        }
+        let roots = std::iter::once((k::Unit::Main, &document.main)).chain(
+            document
+                .functions
+                .iter()
+                .map(|(name, function)| (k::Unit::Function(name.clone()), &function.body)),
+        );
+        for (unit, body) in roots {
+            let mut pending = vec![(k::Node::Block(body), k::Site::new(unit, Vec::new()))];
+            while let Some((node, site)) = pending.pop() {
+                if let k::Node::Block(block) = node
+                    && let Some(captions) = self.captioned.remove(&block.as_ptr())
+                {
+                    for statement in captions {
+                        let at = site.child(statement.index);
+                        for (child, caption) in statement.arms {
+                            entries.push(k::CaptionEntry {
+                                site: at.child(child),
+                                caption,
+                            });
+                        }
+                        if let Some(caption) = statement.caption {
+                            entries.push(k::CaptionEntry { site: at, caption });
+                        }
+                    }
+                }
+                for (index, child) in (0u32..).zip(node.children()) {
+                    pending.push((child, site.child(index)));
+                }
+            }
+        }
+        entries
+    }
 }
 fn format_error(message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(DiagnosticCode::GeneratedSourceFormat, message, None)

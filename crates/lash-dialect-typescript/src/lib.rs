@@ -9,6 +9,7 @@
 
 mod adapter;
 mod builtins;
+mod captions;
 mod diagnostics;
 mod generated_operators;
 mod intrinsics;
@@ -31,9 +32,14 @@ pub use lash_kernel_dialect::{
 pub use package::define_helpers;
 pub use printer::print;
 
-/// The captions the dialect spells: none yet. Its front end and reader
-/// extract none and its printer drops every one.
-pub const CAPTIONS: CaptionSupport = CaptionSupport::NONE;
+/// The captions the dialect spells: every kind, as a JSDoc block before the
+/// statement, function or `else`/`catch`/`finally` keyword it names. A
+/// workflow module's front end, the reader of exported source and the
+/// printer spell them alike; a cell's front end reads none.
+pub const CAPTIONS: CaptionSupport = CaptionSupport {
+    kinds: captions::KINDS,
+    guide: captions::GUIDE,
+};
 
 /// Build provenance for standalone dialect measurement tools.
 #[doc(hidden)]

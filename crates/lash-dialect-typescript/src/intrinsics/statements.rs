@@ -7,7 +7,12 @@ use crate::Diagnostic;
 
 impl Reader {
     pub(super) fn block(&mut self, statements: &[s::Stmt]) -> Result<k::Block, Diagnostic> {
-        statements.iter().map(|stmt| self.statement(stmt)).collect()
+        let block = statements
+            .iter()
+            .map(|stmt| self.statement(stmt))
+            .collect::<Result<k::Block, _>>()?;
+        self.keep_captions(&block, statements);
+        Ok(block)
     }
     fn body(&mut self, stmt: &s::Stmt) -> Result<k::Block, Diagnostic> {
         if let s::Stmt::Block(body) = stmt {

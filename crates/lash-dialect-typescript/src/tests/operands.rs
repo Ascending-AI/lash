@@ -49,6 +49,8 @@ fn native_expression_depth_respects_the_document_limit() {
     let program = ast::Program {
         statements: vec![ast::Stmt::Expr(expr)],
         type_parameters: Default::default(),
+        captions: Default::default(),
+        comments: Vec::new(),
     };
     let environment = lash_kernel_dialect::Environment {
         tool_roots: &Default::default(),

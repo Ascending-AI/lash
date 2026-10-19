@@ -1,9 +1,331 @@
 {
-  "authored": [],
+  "authored": [
+    {
+      "name": "every kind, nearest wins, tags and trivia",
+      "source": "/**\n * Weekly report — 週報\n *\n * Gathers the numbers   \n * and sends them.\n *\n *\n * Twice if needed.\n * @param flag whether to send\n * @returns the result\n */\nexport async function demo(flag: boolean, items: string[]) {\n  /** Fetch the start for t1 */\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  /** Decide */\n  if (flag) {\n    /** Say yes */\n    result = await corpus.echo(\"yes\");\n  }\n  /** Otherwise say no */\n  else {\n    /** Plain no */\n    result = \"no\";\n  }\n  /** Check a */\n  if (result === \"a\") {\n    result = \"b\";\n  } /** Check c instead */ else if (result === \"c\") {\n    result = \"d\";\n  }\n  /** Nothing else */\n  else {}\n  /** Echo twice */\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  /** Try it */\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  /** Recover */\n  catch (error) {\n    result = \"caught\";\n  }\n  /** Always */\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    /** Echo each */ await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  /** Far */\n  /** Near wins */\n  return [result, both];\n}\n",
+      "stripped": "export async function demo(flag: boolean, items: string[]) {\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  if (flag) {\n    result = await corpus.echo(\"yes\");\n  }\n  else {\n    result = \"no\";\n  }\n  if (result === \"a\") {\n    result = \"b\";\n  } else if (result === \"c\") {\n    result = \"d\";\n  }\n  else {}\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  catch (error) {\n    result = \"caught\";\n  }\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  return [result, both];\n}\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            }
+          },
+          "caption": {
+            "title": "Weekly report — 週報",
+            "description": "Gathers the numbers\nand sends them.\n\nTwice if needed."
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              0
+            ]
+          },
+          "caption": {
+            "title": "Fetch the start for t1"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1
+            ]
+          },
+          "caption": {
+            "title": "Decide"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              1,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Say yes"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Otherwise say no"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              2,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Plain no"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              2
+            ]
+          },
+          "caption": {
+            "title": "Check a"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              2,
+              2,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Check c instead"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              2,
+              2,
+              0,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Nothing else"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              3
+            ]
+          },
+          "caption": {
+            "title": "Echo twice"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4
+            ]
+          },
+          "caption": {
+            "title": "Try it"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4,
+              1
+            ]
+          },
+          "caption": {
+            "title": "Recover"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Always"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              5,
+              1,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Echo each"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              7
+            ]
+          },
+          "caption": {
+            "title": "Near wins"
+          }
+        }
+      ]
+    },
+    {
+      "name": "hoisted work and predeclarations",
+      "source": "/** Hoisted work */\nexport async function hoisted(flag: boolean) {\n  /** Read the value later via t1 */\n  const read = () => value;\n  /** Greet first */\n  await greet(\"a\");\n  /** Set the value */\n  let value = await corpus.echo(\"v\");\n  /** Pick one */\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  /** Greet someone */\n  async function greet(name: string) {\n    /** Echo the name */\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n",
+      "stripped": "export async function hoisted(flag: boolean) {\n  const read = () => value;\n  await greet(\"a\");\n  let value = await corpus.echo(\"v\");\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  async function greet(name: string) {\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            }
+          },
+          "caption": {
+            "title": "Hoisted work"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              1
+            ]
+          },
+          "caption": {
+            "title": "Read the value later via t1"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              2
+            ]
+          },
+          "caption": {
+            "title": "Greet someone"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              2,
+              0,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Echo the name"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              3
+            ]
+          },
+          "caption": {
+            "title": "Greet first"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              4
+            ]
+          },
+          "caption": {
+            "title": "Set the value"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoisted"
+            },
+            "path": [
+              5
+            ]
+          },
+          "caption": {
+            "title": "Pick one"
+          }
+        }
+      ]
+    }
+  ],
   "readback": [
     {
       "name": "every captionable kind",
       "source": "export async function demo(flag: boolean, items: string[]) {\n  let result = await corpus.echo(\"start\");\n  if (flag) { result = await corpus.echo(\"yes\"); } else { result = \"no\"; }\n  if (result === \"a\") { result = \"b\"; } else if (result === \"c\") { result = \"d\"; } else {}\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  try { result = await corpus.echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await corpus.echo(\"finally\"); }\n  for (const item of items) { await corpus.echo(item); }\n  while (flag) { flag = false; }\n  return [result, both];\n}\n"
+    },
+    {
+      "name": "closures, hoisted work and predeclarations",
+      "source": "/** Hoisted work */\nexport async function hoisted(flag: boolean) {\n  /** Read the value later via t1 */\n  const read = () => value;\n  /** Greet first */\n  await greet(\"a\");\n  /** Set the value */\n  let value = await corpus.echo(\"v\");\n  /** Pick one */\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  /** Greet someone */\n  async function greet(name: string) {\n    /** Echo the name */\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n"
     }
   ]
 }

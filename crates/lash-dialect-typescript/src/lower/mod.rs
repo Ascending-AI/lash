@@ -27,6 +27,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod async_fn;
 mod calls;
+mod captions;
 pub(crate) use calls::{printed_source_reference, tool_calls};
 mod expressions;
 mod functions;
@@ -331,6 +332,11 @@ pub(crate) struct Lowerer<'a> {
     /// What the closure just emitted is, as its source wrote it, until the
     /// statement that binds it takes it.
     written: Option<lash_kernel_dialect::Written>,
+    /// The captions the source spells, which lowering hands each to the one
+    /// statement that owns its construct.
+    spelled: &'a crate::captions::Spelled,
+    /// The captions of the module's entries.
+    function_captions: BTreeMap<Name, lash_kernel_doc::Caption>,
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
@@ -373,8 +379,18 @@ pub(crate) fn lower(
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
     };
-    let mut taken: HashSet<String> = source
-        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+    // A word of a comment names nothing, so caption text never changes a
+    // generated name (`K-CAP-001`).
+    let mut code = Vec::with_capacity(program.comments.len() + 1);
+    let mut from = 0;
+    for comment in &program.comments {
+        code.push(&source[from..comment.start]);
+        from = comment.end;
+    }
+    code.push(&source[from..]);
+    let mut taken: HashSet<String> = code
+        .into_iter()
+        .flat_map(|code| code.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$')))
         .filter(|word| !word.is_empty())
         .map(str::to_string)
         .collect();
@@ -427,6 +443,8 @@ pub(crate) fn lower(
         saved: cell.functions,
         saved_used: BTreeSet::new(),
         written: None,
+        spelled: &program.captions,
+        function_captions: BTreeMap::new(),
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
@@ -477,14 +495,13 @@ pub(crate) fn lower(
         );
     }
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    // No caption is spelled yet: the notes carry none.
     let layers = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::TypeScript,
         &main.notes,
         &lowerer.declared_notes,
-        &BTreeMap::new(),
+        &lowerer.function_captions,
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {
@@ -1173,17 +1190,26 @@ impl Lowerer<'_> {
     /// Declares `name` with `value`, reusing the statement that computed
     /// the value when it is the last one emitted.
     fn bind(&mut self, name: Name, value: Operand) {
-        let (rhs, blocks, nested_written) = match self.take_binding_of(&value) {
-            Some((rhs, note)) => {
-                self.written = note.written;
-                (rhs, note.blocks, note.nested_written)
+        let (rhs, note) = match self.take_binding_of(&value) {
+            Some((rhs, mut note)) => {
+                self.written = note.written.take();
+                (rhs, note)
             }
-            None => (Rhs::Expr(value.expr()), Vec::new(), Vec::new()),
+            None => (Rhs::Expr(value.expr()), Note::default()),
         };
+        let Note {
+            blocks,
+            nested_written,
+            caption,
+            arm_captions,
+            ..
+        } = note;
         self.push(Stmt::Let { name, value: rhs }, blocks);
         self.note_written();
         if let Some(note) = self.buf.notes.last_mut() {
             note.nested_written = nested_written;
+            note.caption = caption;
+            note.arm_captions = arm_captions;
         }
     }
 
@@ -1194,13 +1220,20 @@ impl Lowerer<'_> {
             Place::Member(lash_kernel_doc::Member::Field { .. }) => 1,
             Place::Member(lash_kernel_doc::Member::Index { .. }) => 2,
         };
-        let (rhs, blocks, nested_written) = match self.take_binding_of(&value) {
-            Some((rhs, note)) => {
-                self.written = note.written;
-                (rhs, note.blocks, note.nested_written)
+        let (rhs, note) = match self.take_binding_of(&value) {
+            Some((rhs, mut note)) => {
+                self.written = note.written.take();
+                (rhs, note)
             }
-            None => (Rhs::Expr(value.expr()), Vec::new(), Vec::new()),
+            None => (Rhs::Expr(value.expr()), Note::default()),
         };
+        let Note {
+            blocks,
+            nested_written,
+            caption,
+            arm_captions,
+            ..
+        } = note;
         self.push(
             Stmt::Assign {
                 place,
@@ -1211,6 +1244,8 @@ impl Lowerer<'_> {
         );
         self.note_written();
         if let Some(note) = self.buf.notes.last_mut() {
+            note.caption = caption;
+            note.arm_captions = arm_captions;
             note.nested_written = nested_written
                 .into_iter()
                 .map(|(mut path, written)| {
@@ -1227,18 +1262,26 @@ impl Lowerer<'_> {
     /// it runs for its effect alone.
     fn discard(&mut self, value: Operand) {
         if let Some((rhs, note)) = self.take_binding_of(&value) {
-            let nested_written = note.nested_written;
+            let Note {
+                blocks,
+                nested_written,
+                caption,
+                arm_captions,
+                ..
+            } = note;
             match rhs {
                 Rhs::Action(action) => self.push(
                     Stmt::Do {
                         value: action.into(),
                     },
-                    note.blocks,
+                    blocks,
                 ),
-                Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, note.blocks),
+                Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, blocks),
             }
             if let Some(note) = self.buf.notes.last_mut() {
                 note.nested_written = nested_written;
+                note.caption = caption;
+                note.arm_captions = arm_captions;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
             self.emit(Stmt::Do { value: value.expr });

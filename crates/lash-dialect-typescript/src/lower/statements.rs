@@ -109,6 +109,7 @@ impl Lowerer<'_> {
         }
         for statement in statements {
             if let ast::Stmt::Function { name, function } = statement.unspanned() {
+                let before = self.buf.stmts.len();
                 let entry = self
                     .binding_mut(name)
                     .and_then(|(_, binding)| binding.positional.clone());
@@ -119,6 +120,11 @@ impl Lowerer<'_> {
                     }
                 };
                 self.initialise(name, closure);
+                // A declaration's caption names the statement that binds
+                // it, where its hoisting put it.
+                if let ast::Stmt::Spanned(span, inner) = statement {
+                    self.own_captions(span.start, inner, before, None);
+                }
             }
         }
         // What an `if` that always leaves showed false holds of every
@@ -169,7 +175,12 @@ impl Lowerer<'_> {
         match statement {
             ast::Stmt::Spanned(span, inner) => {
                 let outer = self.span.replace(*span);
+                let entry = self.declared_entry(inner);
+                let before = self.buf.stmts.len();
                 let result = self.lower_statement(inner);
+                if result.is_ok() {
+                    self.own_captions(span.start, inner, before, entry);
+                }
                 self.span = outer;
                 result
             }

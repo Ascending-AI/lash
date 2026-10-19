@@ -101,12 +101,14 @@ fn the_manifest_lists_functions_reached_through_helpers() {
 }
 
 /// A statement's source span is mapped at the site of the statement that
-/// does the work. A former `@label` doc comment is ordinary trivia: it
-/// locates nothing.
+/// does the work. A former `@label` doc comment is a JSDoc of tags alone:
+/// ordinary trivia that locates nothing and, in a cell or a workflow module,
+/// captions nothing.
 #[test]
 fn spans_map_sites_and_label_comments_are_trivia() {
     let source = "/** @label Greet — say hello */\nconsole.log('hi');\nlet z = 1;";
     let lowered = lower(source).unwrap();
+    assert!(lowered.captions.is_empty());
     let map = lowered.source_map.unwrap();
     assert_eq!(map.language, lash_kernel_doc::SourceLanguage::TypeScript);
     let start = |path: &[u32]| {
@@ -124,6 +126,23 @@ fn spans_map_sites_and_label_comments_are_trivia() {
             .iter()
             .all(|located| located.ranges[0].start >= source.find('\n').unwrap())
     );
+
+    let effects = super::machine::effects();
+    let environment = lash_kernel_dialect::Environment {
+        library: super::library(),
+        effects: &effects,
+        controls: super::controls(),
+        tool_roots: &std::collections::BTreeSet::new(),
+    };
+    let module = |source: &str| {
+        crate::lower(source, &environment, lash_kernel_dialect::Mode::Module)
+            .unwrap()
+            .captions
+    };
+    let labelled = "/** @label Greet — say hello */\nexport async function greet() {\n  /** @label Say it */\n  console.log('hi');\n}\n";
+    assert!(module(labelled).is_empty());
+    // Without its tag, the same block is a caption.
+    assert_eq!(module(&labelled.replace("@label ", "")).entries().len(), 2);
 }
 
 /// A member reference is read before its argument expressions run.

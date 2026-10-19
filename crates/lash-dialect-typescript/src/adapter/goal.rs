@@ -1,14 +1,18 @@
 //! Reading a cell with SWC: which goal symbol it parses under, and the one
 //! lexer defect the front end repairs before the adapter sees the tree.
+//! A workflow module's comments are collected from the parse that succeeds.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+use swc_common::comments::SingleThreadedComments;
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::error::{Error, SyntaxError};
 use swc_ecma_parser::input::Tokens;
 use swc_ecma_parser::{Context, Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
+
+use crate::captions::SourceComments;
 
 /// The goal symbol a cell was read under.
 ///
@@ -38,24 +42,31 @@ pub(super) struct Parsed<'a> {
     /// Every respelled word's position, with the error SWC reported there.
     pub(super) respellings: BTreeMap<u32, Error>,
     pub(super) items: Vec<swc::ModuleItem>,
+    /// The comments of the parse that succeeded, when they were asked for.
+    /// A respelling keeps every byte offset and touches no comment, so
+    /// their offsets index the submitted source too.
+    pub(super) comments: SourceComments,
 }
 
-/// Parses `source` under the first goal, from `first` on, that it satisfies.
-/// The error is the first goal's, when none does.
-pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
+/// Parses `source` under the first goal, from `first` on, that it satisfies,
+/// collecting its comments when `comments` asks. The error is the first
+/// goal's, when none does.
+pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<'_>, Error> {
     let mut text = Cow::Borrowed(source);
     let mut respellings = BTreeMap::new();
     let mut module_errors = None;
     if first == Goal::Module {
         loop {
-            match parse_goal(&text, Goal::Module) {
-                Ok(items) => {
+            match parse_goal(&text, Goal::Module, comments) {
+                Ok((items, collected)) => {
+                    let comments = collect(&text, collected);
                     return Ok(Parsed {
                         goal: Goal::Module,
                         text,
                         respelled_awaits: BTreeSet::new(),
                         respellings,
                         items,
+                        comments,
                     });
                 }
                 Err(errors) if respell_escaped_keywords(&mut text, &errors, &mut respellings) => {}
@@ -68,14 +79,16 @@ pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
     }
     let mut respelled_awaits = BTreeSet::new();
     loop {
-        match parse_goal(&text, Goal::Script) {
-            Ok(items) => {
+        match parse_goal(&text, Goal::Script, comments) {
+            Ok((items, collected)) => {
+                let comments = collect(&text, collected);
                 return Ok(Parsed {
                     goal: Goal::Script,
                     text,
                     respelled_awaits,
                     respellings,
                     items,
+                    comments,
                 });
             }
             Err(errors)
@@ -97,10 +110,17 @@ pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
     }
 }
 
-type GoalResult = Result<Vec<swc::ModuleItem>, Vec<Error>>;
+type GoalResult = Result<(Vec<swc::ModuleItem>, Option<SingleThreadedComments>), Vec<Error>>;
 
-fn parse_goal(text: &str, goal: Goal) -> GoalResult {
+fn collect(text: &str, comments: Option<SingleThreadedComments>) -> SourceComments {
+    comments.map_or_else(SourceComments::default, |comments| {
+        SourceComments::collect(text, comments)
+    })
+}
+
+fn parse_goal(text: &str, goal: Goal, comments: bool) -> GoalResult {
     let end = u32::try_from(text.len()).unwrap_or(u32::MAX);
+    let collected = comments.then(SingleThreadedComments::default);
     let mut lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
             tsx: true,
@@ -109,7 +129,9 @@ fn parse_goal(text: &str, goal: Goal) -> GoalResult {
         }),
         Default::default(),
         StringInput::new(text, BytePos(0), BytePos(end)),
-        None,
+        collected
+            .as_ref()
+            .map(|comments| comments as &dyn swc_common::comments::Comments),
     );
     if goal == Goal::Script {
         // The dialect has one mode: a cell is strict code under either goal.
@@ -124,8 +146,9 @@ fn parse_goal(text: &str, goal: Goal) -> GoalResult {
             .map(|script| script.body.into_iter().map(swc::ModuleItem::Stmt).collect()),
     };
     let mut errors = parser.take_errors();
+    drop(parser);
     match body {
-        Ok(items) if errors.is_empty() => Ok(items),
+        Ok(items) if errors.is_empty() => Ok((items, collected)),
         Ok(_) => Err(errors),
         Err(error) => {
             errors.insert(0, error);

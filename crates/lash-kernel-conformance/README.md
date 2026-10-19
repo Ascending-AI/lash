@@ -147,5 +147,7 @@ with a caption on every captionable site and read back; authored cases pair
 a source with its stripped twin and the exact `(site, caption)` table it
 imports with. A dialect that spells captions declares the kinds in its
 `CaptionSupport` and adds authored cases; the laws stay as they are.
-Rekeying (`K-CAP-004`) and the text domain (`K-CAP-005`) take no dialect and
-run once over kernel documents.
+Rekeying (`K-CAP-004`) runs over kernel documents with one edit of each
+operation, and over each dialect's authored cases with a step inserted ahead
+of the entry's body. The text domain (`K-CAP-005`) takes no dialect and runs
+once.

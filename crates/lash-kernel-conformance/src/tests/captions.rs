@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary, Package, SourceFormat};
+use lash_kernel_dialect::{EffectControl, Environment, Mode, NamedLibrary, Package, SourceFormat};
 use lash_kernel_doc::{
     Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal, Captions, CaptionsRefusal,
     EffectName, Expr, Literal, Name, Param, Signature, Site, Type, Unit, parse_document,
@@ -20,7 +20,10 @@ const PYTHON: &str = include_str!("../../captions/python.json");
 /// The rule's laws, for every dialect where a dialect takes part.
 pub(super) fn verify(rule: &str) {
     match rule {
-        "K-CAP-004" => rekey(),
+        "K-CAP-004" => {
+            rekey();
+            each_dialect(rekey_imported);
+        }
         "K-CAP-005" => {
             text_domain();
             each_dialect(|dialect| dialect.printer_validates());
@@ -543,4 +546,100 @@ fn rekey() {
         .expect("an empty correspondence");
     assert!(foreign.rekey(&identity, &document).is_none());
     assert!(captions.rekey(&identity, &other).is_none());
+}
+
+/// `K-CAP-004`, for the captions a dialect imports: a step inserted ahead of
+/// each authored case's entry body keeps every caption at its step's new
+/// site, and touches only the entry's own, beneath which the step is new.
+fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessError> {
+    for case in &dialect.corpus.authored {
+        let lowered = dialect
+            .package
+            .front_end
+            .lower(&case.source, &dialect.environment, Mode::Module)
+            .map_err(|diagnostic| {
+                crate::HarnessError(format!("K-CAP-004 {}: {diagnostic:?}", case.name))
+            })?;
+        let document = lowered.document.document();
+        let entry = document
+            .entries
+            .keys()
+            .next()
+            .expect("a module has an entry");
+        let root = Site::new(Unit::Function(entry.clone()), Vec::new());
+        let (effect, signature) = dialect
+            .environment
+            .effects
+            .iter()
+            .next()
+            .expect("the corpus tool");
+        let environment = lash_kernel_check::Environment {
+            effects: dialect.environment.effects.clone(),
+            functions: dialect.environment.library,
+            bindings: BTreeSet::new(),
+        };
+        let base = lowered.document.id();
+        let insert = Operation::InsertStep {
+            base,
+            at: Position::before(root.child(0)).expect("a statement of the body"),
+            effect: effect.clone(),
+            args: signature
+                .params
+                .iter()
+                .map(|_| DataValue::Literal(Literal::Text("new".into())))
+                .collect(),
+            result: Type::Any,
+            binding: None,
+        };
+        let mut draft = Draft::open(document.clone()).expect("a draft");
+        let applied = draft
+            .apply(
+                &Transaction {
+                    base,
+                    edits: vec![insert],
+                },
+                &environment,
+            )
+            .unwrap_or_else(|refusal| panic!("{}: {refusal:?}", case.name));
+        let result = draft.document();
+        let rekeyed = lowered
+            .captions
+            .rekey(&applied.correspondence, result)
+            .expect("the correspondence starts at the captions");
+        let mut expected: Vec<CaptionEntry> = lowered
+            .captions
+            .entries()
+            .iter()
+            .map(|entry| CaptionEntry {
+                site: applied
+                    .correspondence
+                    .successor(&entry.site)
+                    .expect("an insertion removes nothing")
+                    .clone(),
+                caption: entry.caption.clone(),
+            })
+            .collect();
+        expected.sort_by(|a, b| a.site.cmp(&b.site));
+        // Every caption in the body moved one statement on.
+        assert_ne!(
+            expected.as_slice(),
+            lowered.captions.entries(),
+            "{}",
+            case.name
+        );
+        assert_eq!(
+            rekeyed.captions.entries(),
+            expected.as_slice(),
+            "{}",
+            case.name
+        );
+        let touched: Vec<Site> = lowered
+            .captions
+            .get(&root)
+            .map(|_| root)
+            .into_iter()
+            .collect();
+        assert_eq!(rekeyed.touched, touched, "{}", case.name);
+    }
+    Ok(())
 }

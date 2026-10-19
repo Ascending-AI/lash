@@ -1,11 +1,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::captions::{SourceComments, Spelled};
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
 mod assignments;
+mod captions;
 mod declarations;
 mod early_errors;
 mod enums;
@@ -40,6 +42,10 @@ pub(crate) struct Program {
     /// Inside that function the name is the parameter, whatever `type` or
     /// `interface` shares it.
     pub(crate) type_parameters: BTreeSet<String>,
+    /// The captions a workflow module spells; a cell's spells none.
+    pub(crate) captions: Spelled,
+    /// Each comment's bytes, ascending; a cell's are not collected.
+    pub(crate) comments: Vec<std::ops::Range<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -457,9 +463,11 @@ fn parse_from_goal(
     workflow: bool,
     limits: SourceLimits,
 ) -> Result<Program, Diagnostic> {
-    let parsed = goal::parse(source, first).map_err(|error| parser_diagnostic(error, source))?;
+    let mut parsed =
+        goal::parse(source, first, workflow).map_err(|error| parser_diagnostic(error, source))?;
     let adapter = Adapter {
         source: &parsed.text,
+        comments: std::mem::take(&mut parsed.comments),
         workflow,
         max_nesting: limits.max_nesting(),
         goal: parsed.goal,
@@ -480,6 +488,8 @@ fn parse_from_goal(
     let program = Program {
         statements: converted?,
         type_parameters: adapter.type_parameters.take(),
+        captions: adapter.captions.take(),
+        comments: adapter.comments.ranges().to_vec(),
     };
     if let Some(diagnostic) = adapter.reserved_identifier.take() {
         return Err(crate::lower::printed_source_reference(&program).unwrap_or(diagnostic));
@@ -499,6 +509,10 @@ struct Adapter<'a> {
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
     workflow: bool,
+    /// A workflow module's comments; none for a cell.
+    comments: SourceComments,
+    /// The captions the comments spell, by what each names.
+    captions: RefCell<Spelled>,
     /// A module's unresolved printed references take priority over `k`.
     reserved_identifier: RefCell<Option<Diagnostic>>,
     goal: Goal,
@@ -560,11 +574,14 @@ impl Adapter<'_> {
             items
                 .iter()
                 .map(|item| match item {
-                    swc::ModuleItem::Stmt(stmt) => self.convert_stmt(stmt),
+                    swc::ModuleItem::Stmt(stmt) => self.convert_listed(stmt, None),
                     swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export))
                         if self.workflow =>
                     {
-                        self.convert_stmt(&swc::Stmt::Decl(export.decl.clone()))
+                        self.convert_listed(
+                            &swc::Stmt::Decl(export.decl.clone()),
+                            Some(export.span.lo),
+                        )
                     }
                     swc::ModuleItem::ModuleDecl(decl) => Err(reject(
                         DiagnosticCode::ImportExportUnsupported,
@@ -580,7 +597,7 @@ impl Adapter<'_> {
         self.with_enum_scope(|| {
             statements
                 .iter()
-                .map(|stmt| self.convert_stmt(stmt))
+                .map(|stmt| self.convert_listed(stmt, None))
                 .collect()
         })
     }
@@ -642,15 +659,18 @@ impl Adapter<'_> {
                     .map(|expr| self.convert_expr(expr))
                     .transpose()?,
             ),
-            swc::Stmt::If(stmt) => Stmt::If {
-                test: self.convert_expr(&stmt.test)?,
-                consequent: Box::new(self.convert_body_stmt(&stmt.cons)?),
-                alternate: stmt
-                    .alt
-                    .as_deref()
-                    .map(|stmt| self.convert_body_stmt(stmt).map(Box::new))
-                    .transpose()?,
-            },
+            swc::Stmt::If(stmt) => {
+                self.caption_else(stmt);
+                Stmt::If {
+                    test: self.convert_expr(&stmt.test)?,
+                    consequent: Box::new(self.convert_body_stmt(&stmt.cons)?),
+                    alternate: stmt
+                        .alt
+                        .as_deref()
+                        .map(|stmt| self.convert_body_stmt(stmt).map(Box::new))
+                        .transpose()?,
+                }
+            }
             swc::Stmt::While(stmt) => Stmt::While {
                 test: self.convert_expr(&stmt.test)?,
                 body: Box::new(self.convert_body_stmt(&stmt.body)?),
@@ -658,28 +678,31 @@ impl Adapter<'_> {
             swc::Stmt::Break(_) => Stmt::Break,
             swc::Stmt::Continue(_) => Stmt::Continue,
             swc::Stmt::Throw(stmt) => Stmt::Throw(self.convert_expr(&stmt.arg)?),
-            swc::Stmt::Try(stmt) => Stmt::Try {
-                body: self.convert_statements(&stmt.block.stmts)?,
-                catch: stmt
-                    .handler
-                    .as_ref()
-                    .map(|handler| {
-                        Ok(Catch {
-                            binding: handler
-                                .param
-                                .as_ref()
-                                .map(|pattern| self.convert_pattern(pattern))
-                                .transpose()?,
-                            body: self.convert_statements(&handler.body.stmts)?,
+            swc::Stmt::Try(stmt) => {
+                self.caption_clauses(stmt);
+                Stmt::Try {
+                    body: self.convert_statements(&stmt.block.stmts)?,
+                    catch: stmt
+                        .handler
+                        .as_ref()
+                        .map(|handler| {
+                            Ok(Catch {
+                                binding: handler
+                                    .param
+                                    .as_ref()
+                                    .map(|pattern| self.convert_pattern(pattern))
+                                    .transpose()?,
+                                body: self.convert_statements(&handler.body.stmts)?,
+                            })
                         })
-                    })
-                    .transpose()?,
-                finally: stmt
-                    .finalizer
-                    .as_ref()
-                    .map(|block| self.convert_statements(&block.stmts))
-                    .transpose()?,
-            },
+                        .transpose()?,
+                    finally: stmt
+                        .finalizer
+                        .as_ref()
+                        .map(|block| self.convert_statements(&block.stmts))
+                        .transpose()?,
+                }
+            }
             swc::Stmt::Decl(decl) => return self.convert_decl(decl),
             swc::Stmt::With(_) => {
                 return Err(reject(

@@ -13,8 +13,9 @@ use lash_kernel_doc as k;
 /// Print without compilation, library lookup or admission. The manifest,
 /// entries' result types, private bindings, helper identities and name
 /// renames are not written: [`crate::read`] takes them from the base document.
-/// Captions are not yet spelled in this dialect: every one is reported in
-/// [`PrintedSource::dropped`].
+/// Each caption is a JSDoc block before what it names; an `else` arm with a
+/// caption is written even when it is empty. The dialect spells every kind,
+/// so [`PrintedSource::dropped`] is empty.
 pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
@@ -33,6 +34,10 @@ pub fn print(
         types: Default::default(),
     };
     for (name, function) in &document.functions {
+        let root = k::Site::new(k::Unit::Function(name.clone()), Vec::new());
+        if let Some(caption) = renderer.out.take_caption(&root) {
+            renderer.caption(&caption);
+        }
         renderer.out.write(if document.entries.contains_key(name) {
             "export async function "
         } else {
@@ -204,6 +209,9 @@ impl Renderer<'_> {
                 self.indent += 1;
                 for stmt in body {
                     self.indentation();
+                    if let Some(caption) = self.next_caption() {
+                        self.caption(&caption);
+                    }
                     self.node(k::Node::Stmt(stmt), None);
                     self.out.write("\n");
                 }
@@ -223,6 +231,33 @@ impl Renderer<'_> {
     fn indentation(&mut self) {
         for _ in 0..self.indent {
             self.out.write("  ");
+        }
+    }
+    /// The JSDoc block of `caption`, before the construct it names at the
+    /// current indentation.
+    fn caption(&mut self, caption: &k::Caption) {
+        let spelled = crate::captions::spell(caption, &"  ".repeat(self.indent));
+        self.out.write(&spelled);
+    }
+    /// The caption of the node the writer opens next, taken to be spelled.
+    fn next_caption(&mut self) -> Option<k::Caption> {
+        let site = self.out.next_site(None)?;
+        self.out.take_caption(&site)
+    }
+    /// A clause's keyword after the arm before it, with the caption of the
+    /// arm it opens on the lines before it.
+    fn clause(&mut self, keyword: &str, caption: Option<k::Caption>) {
+        match caption {
+            Some(caption) => {
+                self.out.write("\n");
+                self.indentation();
+                self.caption(&caption);
+                self.out.write(keyword);
+            }
+            None => {
+                self.out.write(" ");
+                self.out.write(keyword);
+            }
         }
     }
     fn expr(&mut self, expr: &k::Expr) {
@@ -308,12 +343,13 @@ impl Renderer<'_> {
                 let saved = self.types.narrow(condition, self.operators.functions());
                 self.block(then_block);
                 self.types.restore(saved);
-                if else_block.is_empty() {
+                let caption = self.next_caption();
+                if else_block.is_empty() && caption.is_none() {
                     // The omitted empty else is the sole implicit TS node rule.
                     self.out.begin_node(None);
                     self.out.end_node();
                 } else {
-                    self.out.write(" else ");
+                    self.clause("else ", caption);
                     self.block(else_block);
                 }
             }
@@ -411,13 +447,15 @@ impl Renderer<'_> {
                 self.out.write("try ");
                 self.block(&scope.body);
                 if let Some(catch) = &scope.catch {
-                    self.out.write(" catch (");
+                    let caption = self.next_caption();
+                    self.clause("catch (", caption);
                     self.name(&catch.binding);
                     self.out.write(") ");
                     self.block(&catch.body);
                 }
                 if let Some(finally) = &scope.finally {
-                    self.out.write(" finally ");
+                    let caption = self.next_caption();
+                    self.clause("finally ", caption);
                     self.block(finally);
                 }
             }
