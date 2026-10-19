@@ -1152,6 +1152,11 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
             Ok(int(7)),
         ),
         ("list.get_or".into(), "[7], 2, 9".into(), Ok(int(9))),
+        (
+            "list.sort_by_keys".into(),
+            "[7, 9, 3], [2, 1, 2], false".into(),
+            Ok(list(&[9, 7, 3])),
+        ),
         ("bool.not".into(), "true".into(), Ok(Datum::Bool(false))),
         (
             "error.new".into(),
