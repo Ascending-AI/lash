@@ -118,9 +118,24 @@ struct Drive {
     /// At its `n`th park the run is asked to cancel, and nothing more is
     /// delivered.
     cancel_at: Option<usize>,
+    /// The layout the run starts in.
+    layout: Layout,
+    /// The layouts a reopening run opens in, alternately, from the first;
+    /// [`hop`]'s when `None`.
+    alternate: Option<[Layout; 2]>,
 }
 
 impl Drive {
+    /// The layout and registry the run reopens in at hop `hops`, counted
+    /// from 1.
+    fn hop(&self, hops: u64) -> (Layout, bool) {
+        let (layout, native_twice) = hop(hops);
+        match self.alternate {
+            Some(layouts) => (layouts[((hops - 1) % 2) as usize], native_twice),
+            None => (layout, native_twice),
+        }
+    }
+
     fn new(slice: u64, reopens: bool) -> Self {
         Self {
             slice,
@@ -131,16 +146,23 @@ impl Drive {
             reads: false,
             reopen_delivered: false,
             cancel_at: None,
+            layout: Layout(0),
+            alternate: None,
         }
     }
 }
 
 /// Where a run's frames stood at its reopens: the phases of nested
-/// actions and the headers of protocol loops.
+/// actions and the headers of protocol loops; and how many `perform`s its
+/// generated plans made.
 #[derive(Default)]
 struct Seen {
     phases: Vec<PhaseRecord>,
     headers: Vec<HeaderRecord>,
+    /// How many `perform`s generated plans made, and how many were made
+    /// in all.
+    planned: u64,
+    performed: u64,
 }
 
 /// Runs `text`, answering parks with the requests `order` names and then
@@ -150,6 +172,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     let mut setup = Setup {
         bounds: drive.bounds,
         probes: Some(drive.probes),
+        layout: drive.layout,
         ..setup(drive.slice)
     };
     if let Some((entry, arg)) = drive.entry {
@@ -202,6 +225,8 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         }
         if drive.reopens {
             hops += 1;
+            seen.planned += embedder.machine.planned_performs();
+            seen.performed += embedder.machine.performs();
             seen.phases.extend(
                 embedder
                     .machine
@@ -210,7 +235,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
                     .map(|(_, _, phase)| phase),
             );
             seen.headers.extend(embedder.machine.loop_headers());
-            let (layout, native_twice) = hop(hops);
+            let (layout, native_twice) = drive.hop(hops);
             if let Err(error) = embedder.try_reopen(layout, native_twice) {
                 break format!("reopen refused: {error}");
             }
@@ -233,13 +258,17 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             embedder.deliver(&next);
             if drive.reopens && drive.reopen_delivered {
                 hops += 1;
-                let (layout, native_twice) = hop(hops);
+                seen.planned += embedder.machine.planned_performs();
+                seen.performed += embedder.machine.performs();
+                let (layout, native_twice) = drive.hop(hops);
                 if let Err(error) = embedder.try_reopen(layout, native_twice) {
                     break format!("reopen refused after delivery: {error}");
                 }
             }
         }
     };
+    seen.planned += embedder.machine.planned_performs();
+    seen.performed += embedder.machine.performs();
     let trace = Trace {
         checkpoints,
         end,

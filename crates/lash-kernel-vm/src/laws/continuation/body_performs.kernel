@@ -1,0 +1,62 @@
+# Library bodies that perform (K-LIB-004), for the body-perform laws
+# (FIG-6914) and their plans (FIG-6916). `list.len` is the laws' library's.
+# The helper compiler records the plans of these bodies in
+# body_performs_plans.rs: `kiln run //crates/lash-ext-helper-compiler:regenerate__bin`.
+use list.len
+use pkg.fetch
+
+function pkg.fetch(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { let v = perform echo(x) as Any return v }
+
+function pkg.fetch_nested(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { let v = [perform echo(x) as Any] return v[0] }
+
+function pkg.wrap(x: Any) -> Any
+kernel 1
+charge 1
+body { let v = invoke pkg.fetch(x) return v }
+
+function pkg.fetch_yield(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { let v = perform echo(x) as Any then yield return v }
+
+function pkg.await(x: Any) -> Any
+kernel 1
+charge 1
+body { do yield return x }
+
+function pkg.each(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { let out = [] for item in x { let v = perform echo(item) as Any set out[list.len(out)] = v } return out }
+
+function pkg.guarded(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { try { let v = perform echo(x) as Any return v } finally { do perform echo("cleanup") as Any } }
+
+function pkg.start(x: Any) -> Any
+kernel 1
+charge 1
+body { let h = spawn invoke pkg.fetch(x) return h }
+
+function pkg.discard(x: Any) -> Any
+kernel 1
+charge 1
+effect echo(x?: Any) -> Any
+body { do perform echo(x) as Any return null }
+
+function pkg.noop(x: Any) -> Any
+kernel 1
+charge 1
+body { return null }

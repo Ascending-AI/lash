@@ -62,6 +62,33 @@ lash_rust_unit_test(
 )
 
 filegroup(
+    name = "body_perform_law_source",
+    srcs = [
+        "src/laws/continuation/body_performs.kernel",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "body_perform_law_plans",
+    srcs = [
+        "src/laws/continuation/body_performs_plans.rs",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "dataframe_law_plans",
+    srcs = [
+        "src/laws/continuation/dataframe_plans.rs",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
     copy = False,

@@ -471,13 +471,13 @@ pub(crate) fn answer(request: &Request) -> Outcome {
     answer_effect(effect.effect.as_str(), &effect.args)
 }
 
-/// What `effect` answers `args` with: `echo` its first argument, `num`
-/// its first text as a number, anything else an error named by the first
-/// text.
+/// What `effect` answers `args` with: `echo` and the `dataframe`
+/// fixture's `dataframe.run` their first argument, `num` its first text as
+/// a number, anything else an error named by the first text.
 fn answer_effect(effect: &str, args: &[Datum]) -> Outcome {
     let first = args.first().cloned().unwrap_or(Datum::Null);
     match effect {
-        "echo" => Outcome::Completed(first),
+        "echo" | "dataframe.run" => Outcome::Completed(first),
         "num" => match first {
             Datum::Text(text) => Outcome::Completed(Datum::Number(NumberToken::new(text).unwrap())),
             other => Outcome::Completed(other),

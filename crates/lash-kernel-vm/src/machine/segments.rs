@@ -1,6 +1,6 @@
 //! Resumable segments (FIG-6709): a generated plan of a helper that can
-//! reach guest code, yielding to the machine at its callback sites
-//! (`docs/design/kernel-end-state.md` §J).
+//! reach guest code or the host, yielding to the machine at its callback
+//! sites (`docs/design/kernel-end-state.md` §J).
 //!
 //! At a callback site whose callee runs in a frame (a closure, or a
 //! library body), the plan yields. Every plan standing at a callback site
@@ -20,16 +20,26 @@
 //! coordinate. A callback that raises unwinds the frame as the body's own
 //! frame unwinds; a segment stands in a `try`'s body or handler, never in
 //! its `finally`.
+//!
+//! A `perform` in the body is a callback site too (FIG-6916). The plan
+//! copies its arguments out where the body's action does and yields; its
+//! frames stand, and the innermost waits in the effect: a recorded one is
+//! issued from that frame, through the body's own path, and its outcome is
+//! consumed there when delivered, then goes back into the plan as a
+//! callee's return does. A read-bound one is answered before the step
+//! ends, with nothing sealed between, so the task keeps its turn
+//! (`K-EFF-012`). Requests, identities, origins, values and charge are the
+//! body's, since what issues, names and consumes them is the frame.
 
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::PlanExit;
-use lash_kernel_doc::{TaskId, Value};
+use lash_kernel_doc::{Datum, EffectName, Site, TaskId, Type, Value};
 use lash_kernel_state::paged::PhaseRecord;
 
 use super::actions::Target;
-use super::exec::Call;
+use super::exec::{Call, ResultOrigin};
 use super::frames::Role;
 use super::islands::Ran;
 use super::loops::Header;
@@ -39,7 +49,7 @@ use super::plans::{PlanRun, Steady, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
 use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{CodeId, Executable, LibId, LibRun, PreparedPlan};
-use crate::interface::Host;
+use crate::interface::{EffectMode, Host};
 use crate::observe::Event;
 
 /// What the body's frame keeps of a plan's call's arguments.
@@ -82,14 +92,35 @@ pub(super) enum Callee {
     /// The callee ran as an island and exited, leaving these virtual
     /// frames, innermost first.
     Island(Vec<super::islands::Level>),
+    /// The site is the body's `perform`, on these arguments, copied out
+    /// (`K-EFF-002`).
+    Perform(Vec<Datum>),
 }
 
-/// The plans standing at callback sites of a call being offered, and what
-/// a yield calls.
+/// A read-bound `perform` a standing frame waits in, answered before the
+/// step ends (`K-EFF-012`).
+pub(super) struct Read {
+    /// The task whose frame stands in it: a spawn may stand a child's.
+    task: TaskId,
+    effect: EffectName,
+    result: Type,
+    site: Site,
+    args: Vec<Datum>,
+}
+
+/// The plans standing at callback sites of a call being offered, what a
+/// yield calls, and the read a standing frame waits in.
 #[derive(Default)]
 pub(super) struct Yielding {
     standing: Vec<Standing>,
     callee: Option<Callee>,
+    read: Option<Read>,
+    /// How many `perform`s a plan has made in this machine, and how many
+    /// were made in all, issued or answered as reads.
+    #[cfg(test)]
+    planned: u64,
+    #[cfg(test)]
+    performed: u64,
 }
 
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
@@ -187,6 +218,35 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         }
     }
 
+    /// The body's `perform` at callback site `site`, on the `count`
+    /// arguments from `at`, copied out as the body's action copies them
+    /// (`K-EFF-002`): the plan yields, and its frames stand to wait in the
+    /// effect.
+    pub(super) fn perform_at(&mut self, site: u32, at: Reg, count: usize) -> Result<(), PlanExit> {
+        // A statement's own `perform` reads its arguments as atoms, each a
+        // boundary charge of 1 (`K-CHG-002`, `K-CHG-007`); a nested one's
+        // are its statement's operands, covered by the formula.
+        let own = segment_of(self.exe, self.lib, self.owner)
+            .map(|(segment, _)| segment.sites[site as usize].act.is_none());
+        if self.held(own)? {
+            let charged = self.machine.charge_boundary(count as u64);
+            self.held(charged)?;
+        }
+        let mut copied = Vec::with_capacity(count);
+        for at in at..at + count {
+            let value = self.machine.take(at);
+            let datum = self.machine.copy_out_tool_arg(&value);
+            copied.push(self.check(datum)?);
+        }
+        #[cfg(test)]
+        {
+            self.machine.segments.planned += 1;
+        }
+        self.stand(site);
+        self.machine.segments.callee = Some(Callee::Perform(copied));
+        Err(PlanExit::Yield)
+    }
+
     /// [`Self::apply_at`] at a region's steady site (`super::plan_regions`):
     /// the callback its variable holds for the whole walk is resolved once,
     /// at the walk's first call of a closure, as [`Self::apply_at`]
@@ -275,6 +335,25 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
 }
 
 impl KernelMachine {
+    /// How many `perform`s a generated plan has made in this machine: the
+    /// laws' check that a layout selected the plan.
+    #[cfg(test)]
+    pub(crate) fn planned_performs(&self) -> u64 {
+        self.segments.planned
+    }
+
+    /// How many `perform`s this machine issued or answered as reads.
+    #[cfg(test)]
+    pub(crate) fn performs(&self) -> u64 {
+        self.segments.performed
+    }
+
+    /// Counts a `perform` issued or answered as a read.
+    #[cfg(test)]
+    pub(super) fn count_perform(&mut self) {
+        self.segments.performed += 1;
+    }
+
     /// The plans that yielded stand as their bodies' frames, outermost
     /// first, the caller's frame waiting in statement `awaiting`, if any;
     /// then the innermost site's callee runs: `Step`.
@@ -342,7 +421,59 @@ impl KernelMachine {
                 self.stand_island(task, exe, levels)?;
                 Ok(Flow::Step)
             }
+            Callee::Perform(args) => {
+                // The innermost frame stands at the body's `perform`, and
+                // what it performs is that action's.
+                let frame = self.frame(task)?;
+                let stmt = frame.awaiting;
+                let (Some(stmt), Some((site, Some((effect, result))))) =
+                    (stmt, super::actions::waiting(exe, frame))
+                else {
+                    return Err(fault("a segment performed at no `perform`").into());
+                };
+                if self.effect_mode(&effect)? == EffectMode::Read {
+                    self.segments.read = Some(Read {
+                        task,
+                        effect,
+                        result,
+                        site,
+                        args,
+                    });
+                } else {
+                    self.issue_effect(task, stmt, &site, effect, args)?;
+                }
+                Ok(Flow::Step)
+            }
         }
+    }
+
+    /// Answers the read-bound `perform` a frame stood at in this step, if
+    /// any, and runs its plan on with the answer (`K-EFF-012`): the task
+    /// it stands in, which a spawn may have started in this step, and what
+    /// the step goes on to settle for it. Nothing seals between.
+    pub(super) fn segment_read(
+        &mut self,
+        host: &mut dyn Host,
+        exe: &Executable,
+    ) -> Option<(TaskId, super::Eval<Completion>)> {
+        let read = self.segments.read.take()?;
+        let task = read.task;
+        let answered = self.perform_read(
+            task,
+            host,
+            exe,
+            &read.effect,
+            &read.args,
+            &read.site,
+            &read.result,
+        );
+        let outcome = answered.and_then(|value| {
+            match self.segment_returned(task, host, exe, value, ResultOrigin::Delivered)? {
+                Ok(departure) => Ok(departure.unwrap_or(Completion::Normal)),
+                Err(_) => Err(fault("a read's frame stands at no segment site").into()),
+            }
+        });
+        Some((task, outcome))
     }
 
     /// Pushes the frame `standing`'s body stands in at its site, the
@@ -430,18 +561,19 @@ impl KernelMachine {
         if let Some(act) = site.act {
             // The roles stay in the plan's registers as well: the frame
             // holds a copy of each.
-            let pending = self.continuation(
-                &site.pending,
-                PhaseRecord::Called,
-                site.roles.len(),
-                |machine, at| {
+            let phase = if site.performs {
+                PhaseRecord::Waiting
+            } else {
+                PhaseRecord::Called
+            };
+            let pending =
+                self.continuation(&site.pending, phase, site.roles.len(), |machine, at| {
                     let (path, reg) = &site.roles[at];
                     Role {
                         site: Arc::clone(path),
                         value: machine.regs[base + *reg as usize],
                     }
-                },
-            )?;
+                })?;
             frame.stand_at(act, pending);
         }
         let args = match kept {
@@ -492,15 +624,17 @@ impl KernelMachine {
             .map(|site| (call.lib, Arc::clone(plan), *site)))
     }
 
-    /// `value` returned to the task's top frame: when it stands at a
-    /// callback site of a segment this layout runs, the plan runs on after
-    /// the site and gives the departure its frame is left with.
+    /// `value` returned to the task's top frame, or was delivered to it as
+    /// its `perform`'s outcome: when it stands at a callback site of a
+    /// segment this layout runs, the plan runs on after the site and gives
+    /// the departure its frame is left with.
     pub(super) fn segment_returned(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         value: Value,
+        origin: ResultOrigin,
     ) -> Result<Result<Option<Completion>, Value>, Halt> {
         let Some((lib, plan, site)) = self.standing_site(task, exe)? else {
             return Ok(Err(value));
@@ -512,9 +646,9 @@ impl KernelMachine {
             .ok_or_else(|| fault("a standing frame is missing"))?;
         self.refresh_charging(task)?;
         let resumed = if plan.shared.is_some() {
-            self.resume_plan::<true>(task, exe, lib, &plan, site, &frame, value)
+            self.resume_plan::<true>(task, exe, lib, &plan, site, &frame, (value, origin))
         } else {
-            self.resume_plan::<false>(task, exe, lib, &plan, site, &frame, value)
+            self.resume_plan::<false>(task, exe, lib, &plan, site, &frame, (value, origin))
         };
         let result = match resumed {
             Ok(Some(result)) => result,
@@ -530,8 +664,9 @@ impl KernelMachine {
     }
 
     /// Runs `plan` on after site `site`, from `frame`, the body's frame
-    /// standing there, with `value` the site's: what the call ends with,
-    /// or `None` when the plan yielded again and its frames stand.
+    /// standing there, with `value` the site's, returned or delivered as
+    /// `origin` says: what the call ends with, or `None` when the plan
+    /// yielded again and its frames stand.
     #[allow(clippy::too_many_arguments)]
     fn resume_plan<const SHARED: bool>(
         &mut self,
@@ -541,7 +676,7 @@ impl KernelMachine {
         plan: &Arc<PreparedPlan>,
         site: u32,
         frame: &Frame,
-        value: Value,
+        (value, origin): (Value, ResultOrigin),
     ) -> Eval<Option<Result<Value, Value>>> {
         let (segment, _) = segment_of(exe, lib, plan)?;
         let stood = &segment.sites[site as usize];
@@ -677,9 +812,22 @@ impl KernelMachine {
                         }
                     }
                 }
-                // The value is in no variable until the statement uses it.
-                run.machine.borrow_value(value);
-                run.machine.put(base + stood.dst as usize, value);
+                // The value is in no variable until the statement uses it;
+                // a delivered outcome is held as the body's statement holds
+                // it.
+                let dst = base + stood.dst as usize;
+                match origin {
+                    ResultOrigin::Returned => {
+                        run.machine.borrow_value(value);
+                        run.machine.put(dst, value);
+                    }
+                    ResultOrigin::Delivered => {
+                        run.machine.put(dst, value);
+                        if let Err(halt) = run.machine.pin(dst) {
+                            run.halt = Some(Box::new(halt));
+                        }
+                    }
+                }
                 if run.halt.is_some() {
                     Err(PlanExit::Halt)
                 } else {

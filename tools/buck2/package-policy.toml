@@ -777,8 +777,27 @@ kinds = ["bin-unit-test"]
 targets = ["regenerate"]
 compile_data = ["//crates/lash-ext-helper-compiler:control_law_source", "//crates/lash-kernel-conformance:control_law_plans"]
 
+# FIG-6916: the body-perform laws' bodies, compiled by the plan recorder,
+# and the plans (theirs and the dataframe fixture's `collect_rows`) its
+# drift law compares with what the compiler gives.
+[[rule]]
+packages = ["lash-ext-helper-compiler"]
+kinds = ["bin"]
+targets = ["regenerate"]
+compile_data = ["//crates/lash-kernel-vm:body_perform_law_source"]
+
+[[rule]]
+packages = ["lash-ext-helper-compiler"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-kernel-vm:body_perform_law_source", "//crates/lash-kernel-vm:body_perform_law_plans", "//crates/lash-kernel-vm:dataframe_law_plans"]
+
 [filegroups.lash-ext-helper-compiler]
 control_law_source = { srcs = ["tests/control.kernel"] }
+
+[filegroups.lash-kernel-vm]
+body_perform_law_source = { srcs = ["src/laws/continuation/body_performs.kernel"] }
+body_perform_law_plans = { srcs = ["src/laws/continuation/body_performs_plans.rs"] }
+dataframe_law_plans = { srcs = ["src/laws/continuation/dataframe_plans.rs"] }
 
 [filegroups.lash-kernel-conformance]
 control_law_plans = { srcs = ["src/helper_plan_control_generated.rs"] }

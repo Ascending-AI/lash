@@ -2167,6 +2167,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-package",
  "lash-kernel-vm",
 ]
 
@@ -3387,6 +3388,8 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",
+ "lash-kernel-lib",
+ "lash-kernel-package",
  "lash-kernel-state",
  "num-bigint",
  "num-traits",

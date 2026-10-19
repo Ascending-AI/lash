@@ -203,6 +203,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         }
     },
@@ -1538,6 +1539,8 @@ PACKAGE_DEPS = {
     "lash-kernel-vm": {
         "build": {},
         "dev": {
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
         },
         "normal": {

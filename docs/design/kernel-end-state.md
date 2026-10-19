@@ -874,9 +874,21 @@ and the callee runs as ordinary code; the coordinate is that frame's, so
 projection and restore are the frame's own. A callee that returns to a frame
 standing at a site of a segment the layout runs resumes the plan there; a
 raise unwinds the frame as the body's. A segment stands in a `try`'s body or
-handler, never in its `finally`. Helpers that reach the host or a task, print,
-or act other than by a call stay interpreted, as the manifests beside each
-dialect's plans list.
+handler, never in its `finally`. Helpers that reach a task, read the host,
+print, or act other than by a call or a `perform` stay interpreted, as the
+manifests beside each dialect's plans list.
+
+**Performing bodies (FIG-6916).** A body's `perform` is a callback site
+(`SiteCall::Perform`); what it performs, its result type and `then yield` stay
+the body's action's, read from the body at the site. The plan copies the
+arguments out where the body's action does and yields; its frames stand, the
+innermost at the `perform` in phase `Waiting`, and that frame waits in the
+effect through the interpreter's own path. A recorded effect is issued from
+the frame, so its occurrence, identity and origin are the frame's; a delivered
+outcome is consumed by the frame and then goes back into the plan as a
+callee's return does. A read-bound effect is answered before the step ends, so
+nothing seals between and the task keeps its turn (`K-EFF-012`). A park at a
+plan's `perform` reopens into the body and the reverse (PLAN-INDEP).
 
 ## 4. Stage-2 and stage-3 briefs
 

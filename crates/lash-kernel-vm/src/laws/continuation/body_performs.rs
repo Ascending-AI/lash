@@ -10,17 +10,37 @@
 //! - K-CHG-007: a body perform pays its atoms, its arguments' copy-out and
 //!   crossed function bytes, and its result's decode or consumption, once,
 //!   whether or not the run was sealed between delivery and consumption.
+//! - PLAN-INDEP (FIG-6916): a performing body and its plan are
+//!   indistinguishable in requests (origin included), identities, values
+//!   and charge, across delivery before consumption, then-yield, loops,
+//!   both cancels, spawns, recursion and reads. Each case runs under a
+//!   layout that runs the generated plans, which it asserts it selected,
+//!   and under one that runs the bodies, and reopens from each into the
+//!   other at every slice, park and delivery.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, Name, Site, Unit, parse_definition};
+use lash_kernel_dialect::{NamedLibrary, define_functions};
+use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, Name, Site, Unit};
+use lash_kernel_package::Package;
 
 use super::embedder::{Embedder, Setup, wait_of};
-use super::{Drive, Trace, bodies, everywhere, int, list, text};
-use crate::{End, Machine, Outcome, Request, Step};
+use super::{Drive, Trace, bodies, drive, everywhere, int, list, text};
+use crate::{End, Layout, Machine, Outcome, Request, Step};
+
+#[rustfmt::skip]
+#[path = "body_performs_plans.rs"]
+mod plans;
+
+#[rustfmt::skip]
+#[path = "dataframe_plans.rs"]
+mod dataframe_plans;
 
 /// Library functions whose bodies perform, each with only a kernel body
-/// and the completion formula 1:
+/// and the completion formula 1, from `body_performs.kernel`, with the
+/// plans the helper compiler gives for them installed beside them
+/// (FIG-6916):
 /// - `pkg.fetch(x)` performs `echo(x)` as a statement and gives the result;
 /// - `pkg.fetch_nested(x)` performs it nested in an expression;
 /// - `pkg.wrap(x)` gives what `pkg.fetch(x)` gives, a library call between;
@@ -29,7 +49,8 @@ use crate::{End, Machine, Outcome, Request, Step};
 ///   is not a promise;
 /// - `pkg.each(xs)` performs `echo` once per item, in a loop;
 /// - `pkg.guarded(x)` performs `echo(x)` in a `try` whose `finally`
-///   performs `echo("cleanup")`;
+///   performs `echo("cleanup")`: no plan, since a segment never stands in
+///   a `finally`;
 /// - `pkg.start(x)` spawns `pkg.fetch(x)` and gives the task;
 /// - `pkg.discard(x)` performs `echo(x)` and drops its result;
 ///   `pkg.noop(x)` does nothing.
@@ -38,64 +59,69 @@ fn packages(
     ids: &BTreeMap<&'static str, FunctionId>,
 ) -> Vec<(&'static str, FunctionId)> {
     let mut out = bodies(registry, ids);
-    let mut defined: BTreeMap<&'static str, FunctionId> = BTreeMap::new();
-    let mut register = |name: &'static str, uses: &[&'static str], body: &str| {
-        let mut header = format!(
-            "function {name}(x: Any) -> Any\nkernel 1\ncharge 1\nuse list.len = @{}\n",
-            ids["list.len"]
-        );
-        for used in uses {
-            header.push_str(&format!("use {used} = @{}\n", defined[used]));
-        }
-        // A body lists the operations it performs itself (`K-LIB-004`),
-        // under the requirement the laws' documents state for `echo`.
-        if body.contains("perform ") {
-            header.push_str("effect echo(x?: Any) -> Any\n");
-        }
-        let definition = parse_definition(&format!("{header}body {{ {body} }}\n")).unwrap();
-        let id = registry.register(definition, None).unwrap();
-        defined.insert(name, id);
-        (name, id)
-    };
-    out.extend([
-        register("pkg.fetch", &[], "let v = perform echo(x) as Any return v"),
-        register(
-            "pkg.fetch_nested",
-            &[],
-            "let v = [perform echo(x) as Any] return v[0]",
-        ),
-        register(
-            "pkg.wrap",
-            &["pkg.fetch"],
-            "let v = invoke pkg.fetch(x) return v",
-        ),
-        register(
-            "pkg.fetch_yield",
-            &[],
-            "let v = perform echo(x) as Any then yield return v",
-        ),
-        register("pkg.await", &[], "do yield return x"),
-        register(
-            "pkg.each",
-            &[],
-            "let out = [] for item in x { let v = perform echo(item) as Any \
-             set out[list.len(out)] = v } return out",
-        ),
-        register(
-            "pkg.guarded",
-            &[],
-            "try { let v = perform echo(x) as Any return v } \
-             finally { do perform echo(\"cleanup\") as Any }",
-        ),
-        register(
-            "pkg.start",
-            &["pkg.fetch"],
-            "let h = spawn invoke pkg.fetch(x) return h",
-        ),
-        register("pkg.discard", &[], "do perform echo(x) as Any return null"),
-        register("pkg.noop", &[], "return null"),
-    ]);
+    let mut names = NamedLibrary::from_registry(registry).unwrap();
+    for definition in define_functions(include_str!("body_performs.kernel"), &mut names).unwrap() {
+        let name: &'static str = Box::leak(definition.name.to_string().into_boxed_str());
+        out.push((name, registry.register(definition, None).unwrap()));
+    }
+    assert_eq!(
+        registry.install_plans(plans::PLANS).unwrap(),
+        plans::PLANS.len(),
+        "the compiled body-perform plans match their admitted bodies"
+    );
     out
+}
+
+/// lash's kernel library, natives included, as the helper compiler's
+/// recorder registers it for the `dataframe` fixture's kernel package.
+fn register_kernel(registry: &mut FunctionRegistry) -> Result<(), String> {
+    crate::register_machine_functions(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_collections(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_brands(registry).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// The `dataframe` fixture (FIG-6917) over a kernel package of lash's
+/// kernel library, registered with the kernel library's natives and with
+/// the plan the helper compiler gives for its `collect_rows`, which
+/// performs `dataframe.run`: `read_text`, `limit` and `collect_rows`.
+fn dataframe(
+    registry: &mut FunctionRegistry,
+    _: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    // Built once: every run and reopen registers the same artifacts.
+    static BUILT: OnceLock<(Package, Package, FunctionRegistry)> = OnceLock::new();
+    let (kernel, dataframe, natives) = BUILT.get_or_init(|| {
+        let (kernel, dataframe) =
+            lash_kernel_package::testing::kernel_and_dataframe(&register_kernel).unwrap();
+        let mut natives = FunctionRegistry::new();
+        register_kernel(&mut natives).unwrap();
+        (kernel, dataframe, natives)
+    });
+    for package in [kernel, dataframe] {
+        package
+            .code()
+            .register_into(registry, &|function| {
+                natives
+                    .get(function)
+                    .and_then(|registered| registered.native().cloned())
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        registry.install_plans(dataframe_plans::PLANS).unwrap(),
+        1,
+        "the compiled `collect_rows` plan matches the built fixture"
+    );
+    [
+        "dataframe.data_quanta.read_text",
+        "dataframe.data_quanta.limit",
+        "dataframe.data_quanta.collect_rows",
+    ]
+    .map(|name| (name, dataframe.function(name).unwrap()))
+    .to_vec()
 }
 
 fn base() -> Drive {
@@ -340,4 +366,188 @@ fn a_body_perform_pays_its_boundary_once() {
         assert!(bytes > 0);
         assert_eq!(crossed, null + bytes, "sealed after delivery: {sealed}");
     }
+}
+
+/// A layout that runs the bodies' generated plans.
+const PLANS: Layout = Layout(0);
+/// A layout that runs every body that stands beside no native as a body:
+/// one leaving 3 modulo 4.
+const BODIES: Layout = Layout(3);
+
+/// PLAN-INDEP of one case: `text` under `base`, delivered by `order`, runs
+/// under [`PLANS`], where every `perform` it makes is a generated plan's,
+/// and leaves what it leaves under [`BODIES`], where none is. Sliced and
+/// sealed and reopened at every slice, park and delivery, alternating
+/// between the two layouts from either, it leaves that again. Gives the
+/// trace.
+fn independent(base: Drive, text: &str, order: &[&str]) -> Trace {
+    let at = |layout, alternate, slice, reopens| Drive {
+        layout,
+        alternate,
+        slice,
+        reopens,
+        ..base
+    };
+    let (planned, by_plans) = drive(text, order, at(PLANS, None, u64::MAX, false));
+    let (interpreted, by_bodies) = drive(text, order, at(BODIES, None, u64::MAX, false));
+    assert!(
+        by_plans.planned > 0,
+        "the plan layout ran no plan's `perform`: {text}"
+    );
+    assert_eq!(
+        by_plans.planned, by_plans.performed,
+        "a `perform` ran outside a plan: {text}"
+    );
+    assert_eq!(by_bodies.planned, 0, "the body layout ran a plan: {text}");
+    assert_eq!(by_bodies.performed, by_plans.performed, "{text}");
+    assert_eq!(planned, interpreted, "a body and its plan differ: {text}");
+    for slice in [u64::MAX, 1, 0] {
+        for (layout, alternate) in [(PLANS, [BODIES, PLANS]), (BODIES, [PLANS, BODIES])] {
+            let (reopened, _) = drive(text, order, at(layout, Some(alternate), slice, true));
+            assert_eq!(
+                reopened, planned,
+                "reopened at slice {slice} from {layout:?}: {text}"
+            );
+        }
+    }
+    planned
+}
+
+/// PLAN-INDEP (a): the generated plan of the `dataframe` fixture's
+/// `collect_rows`, as the package builder makes it (its slot's shape check
+/// first), performs `dataframe.run` as its body does.
+#[test]
+fn the_dataframe_fixtures_collect_rows_plan_performs_as_its_body() {
+    const SOURCE: &str = "main { let q = invoke dataframe.data_quanta.read_text(\"t\")\n\
+        let l = invoke dataframe.data_quanta.limit(q, 2)\n\
+        let rows = invoke dataframe.data_quanta.collect_rows(l)\n\
+        return rows }\n";
+    let trace = independent(
+        Drive {
+            probes: dataframe,
+            ..base()
+        },
+        SOURCE,
+        &["dataframe.run"],
+    );
+    assert!(trace.end.starts_with("Finished("), "{trace:?}");
+    assert!(trace.end.contains("limit"), "{trace:?}");
+    assert_eq!(trace.origins, [main_at(2)]);
+}
+
+/// PLAN-INDEP (b): statement, wrapped and nested performs, each sealed
+/// after its delivery and before its consumption, in the other layout.
+#[test]
+fn planned_performs_resume_as_their_bodies_across_delivery_before_consumption() {
+    let trace = independent(base(), ENTERED, &["a", "b", "c"]);
+    finished(&trace, &list(&[text("a"), text("b"), text("c")]));
+    assert_eq!(trace.origins, [main_at(0), main_at(1), main_at(2)]);
+}
+
+/// PLAN-INDEP (c): a planned `then yield` perform, awaited through a
+/// policy that takes one turn, beside a task that prints when it runs.
+#[test]
+fn a_planned_then_yield_perform_resumes_as_its_body() {
+    const SOURCE: &str = "fn tick() { print \"tick\" return 0 }\n\
+        main { let h = spawn call tick()\n\
+        let p = invoke pkg.fetch_yield(\"c\")\n\
+        print \"after\"\n\
+        let v = await p via pkg.await\n\
+        let d = join h\n\
+        return v }\n";
+    let trace = independent(base(), SOURCE, &["c"]);
+    finished(&trace, &text("c"));
+    assert_eq!(trace.origins, [main_at(1)]);
+}
+
+/// PLAN-INDEP (d): a plan's loop performs once per iteration, each wait
+/// named by the body's loop coordinates.
+#[test]
+fn a_planned_loop_performs_as_its_body_per_iteration() {
+    const SOURCE: &str = "main { let r = invoke pkg.each([\"d0\", \"d1\"]) return r }\n";
+    let trace = independent(base(), SOURCE, &["d0", "d1"]);
+    finished(&trace, &list(&[text("d0"), text("d1")]));
+    assert_ne!(trace.requests[0], trace.requests[1]);
+}
+
+/// PLAN-INDEP (e): a task cancelled while a plan waits unwinds the plan's
+/// frame as its body's, into an authored `finally` that waits in a
+/// planned perform in turn. A body's own `finally` holds no callback
+/// site of a segment (FIG-6709), so the waiting `finally` is the
+/// declared function's.
+#[test]
+fn a_task_cancelled_in_a_planned_wait_runs_a_waiting_finally() {
+    const SOURCE: &str = "fn work(x) { try { let v = invoke pkg.fetch(x) return v } \
+        finally { do invoke pkg.fetch(\"cleanup\") } }\n\
+        main { let h = spawn call work(\"e\")\n\
+        do cancel h\n\
+        let r = \"none\"\n\
+        try { let v = join h\n\
+        set r = v } catch e { set r = e.kind }\n\
+        return r }\n";
+    let trace = independent(base(), SOURCE, &["cleanup"]);
+    finished(&trace, &text("cancelled"));
+}
+
+/// PLAN-INDEP (f): a run cancelled while a plan waits ends cancelled, and
+/// the `finally` around it runs no cleanup.
+#[test]
+fn a_run_cancelled_in_a_planned_wait_runs_no_cleanup() {
+    const SOURCE: &str = "main { try { let v = invoke pkg.fetch(\"f\") return v } \
+        finally { do invoke pkg.fetch(\"cleanup\") } }\n";
+    let trace = independent(
+        Drive {
+            cancel_at: Some(1),
+            ..base()
+        },
+        SOURCE,
+        &[],
+    );
+    assert_eq!(trace.end, format!("{:?}", End::Cancelled));
+    assert_eq!(trace.origins.len(), 1, "{trace:?}");
+}
+
+/// PLAN-INDEP (g): a task a library body spawns runs the plan of the
+/// function it spawns, its perform under the spawner's statement.
+#[test]
+fn a_library_spawned_task_runs_its_plan_as_its_body() {
+    const SOURCE: &str = "main { let h = invoke pkg.start(\"g\")\n\
+        print \"spawned\"\n\
+        let v = join h\n\
+        return v }\n";
+    let trace = independent(base(), SOURCE, &["g"]);
+    finished(&trace, &text("g"));
+    assert_eq!(trace.origins, [main_at(0)]);
+}
+
+/// PLAN-INDEP (h): each activation of a recursive declared function waits
+/// in a plan under its own statement.
+#[test]
+fn a_recursive_declared_call_performs_through_its_plan_as_its_body() {
+    const SOURCE: &str = "fn rec(n) { let v = invoke pkg.fetch(n)\n\
+        if num.lt(0, n) { let r = call rec(num.add(n, -1)) return [v, r] }\n\
+        return [v] }\n\
+        main { let r = call rec(1) return r }\n";
+    let trace = independent(base(), SOURCE, &["echo", "echo"]);
+    finished(&trace, &list(&[int(1), list(&[int(0)])]));
+    assert_ne!(trace.requests[0], trace.requests[1]);
+}
+
+/// PLAN-INDEP (i): read-bound performs a plan reaches are answered inside
+/// the step, with the body's origin and the recorded performs' charge
+/// (`K-EFF-012`).
+#[test]
+fn read_bound_planned_performs_answer_as_their_bodies() {
+    let reads = independent(
+        Drive {
+            reads: true,
+            ..base()
+        },
+        ENTERED,
+        &[],
+    );
+    finished(&reads, &list(&[text("a"), text("b"), text("c")]));
+    assert!(reads.requests.is_empty(), "{reads:?}");
+    let recorded = independent(base(), ENTERED, &["a", "b", "c"]);
+    assert_eq!(reads.charged, recorded.charged);
 }

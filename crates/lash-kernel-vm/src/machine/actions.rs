@@ -120,15 +120,7 @@ impl KernelMachine {
                     self.pin(out)?;
                     return Ok(Flow::Done);
                 }
-                let wait = self.request(task, stmt, &action.site)?;
-                self.issue(
-                    task,
-                    wait,
-                    lash_kernel_state::AdmittedRequest::Effect {
-                        effect: effect.clone(),
-                        args: copied,
-                    },
-                )?;
+                self.issue_effect(task, stmt, &action.site, effect.clone(), copied)?;
                 Ok(Flow::Step)
             }
             ActionKind::Sleep { duration, .. } => {
@@ -283,15 +275,7 @@ impl KernelMachine {
                     return Ok(Flow::Done);
                 }
                 self.capture(task, entry, act, PhaseRecord::Waiting)?;
-                let wait = self.request(task, stmt, site)?;
-                self.issue(
-                    task,
-                    wait,
-                    lash_kernel_state::AdmittedRequest::Effect {
-                        effect: effect.clone(),
-                        args: copied,
-                    },
-                )?;
+                self.issue_effect(task, stmt, site, effect.clone(), copied)?;
                 Ok(Flow::Step)
             }
             NestedKind::Join => {
@@ -765,6 +749,28 @@ impl KernelMachine {
         })
     }
 
+    /// A recorded `perform` of `effect` at `site` of statement `stmt`, its
+    /// arguments copied out: the task waits in it from here (`K-EFF-001`,
+    /// `K-EFF-008`). The top frame stands at the action. A body's frame
+    /// and the plan standing as that frame issue it here alike.
+    pub(super) fn issue_effect(
+        &mut self,
+        task: TaskId,
+        stmt: StmtId,
+        site: &Site,
+        effect: EffectName,
+        args: Vec<Datum>,
+    ) -> Result<(), Halt> {
+        let wait = self.request(task, stmt, site)?;
+        #[cfg(test)]
+        self.count_perform();
+        self.issue(
+            task,
+            wait,
+            lash_kernel_state::AdmittedRequest::Effect { effect, args },
+        )
+    }
+
     /// A read-bound `perform`, answered by the host at once: its result
     /// decoded by the `perform`'s type, or the error the host answered
     /// raised here, each charged as a recorded `perform`'s outcome is
@@ -773,7 +779,7 @@ impl KernelMachine {
         clippy::too_many_arguments,
         reason = "a read is its task, its effect, its copied arguments, its site and its type"
     )]
-    fn perform_read(
+    pub(super) fn perform_read(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
@@ -784,6 +790,8 @@ impl KernelMachine {
         result: &Type,
     ) -> Eval<Value> {
         let origin = self.origin(task)?;
+        #[cfg(test)]
+        self.count_perform();
         self.report_ran(host);
         match host.perform(effect, args, &site.position(), &origin) {
             Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),
@@ -1042,7 +1050,12 @@ impl KernelMachine {
         spawner.wake(Incoming::Value(PageValue::Task(child)), false);
         self.frame(task)?.awaiting = Some(stmt);
         self.ready.push_front(task)?;
-        self.current = Some(child);
+        // A child whose plan already waits in its `perform` (FIG-6916) has
+        // taken its first turn, as its body's frame would have: the
+        // spawner goes on.
+        if self.task(child)?.wait().is_none() {
+            self.current = Some(child);
+        }
         Ok(Flow::Step)
     }
 

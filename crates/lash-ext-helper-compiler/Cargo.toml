@@ -29,4 +29,5 @@ lash-ext-url-whatwg = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-lib = { workspace = true }
+lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-kernel-vm = { workspace = true }

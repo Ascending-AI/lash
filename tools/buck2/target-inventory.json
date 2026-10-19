@@ -90127,6 +90127,7 @@
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-lib",
+        "lash-kernel-package",
         "lash-kernel-vm"
       ],
       "doc": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__doc",
@@ -91132,6 +91133,8 @@
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-exec",
+        "lash-kernel-lib",
+        "lash-kernel-package",
         "lash-kernel-state",
         "num-bigint",
         "num-traits",

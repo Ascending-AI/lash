@@ -3,10 +3,11 @@
 //! order, into the registers the body's own evaluation would use.
 //! Control flow is Rust's; every value stays in the machine.
 //!
-//! A body that can reach guest code compiles to a resumable segment
-//! (FIG-6709). Each action of the body that may run guest code or a body in
-//! a frame is a callback site: the plan calls through the context there,
-//! which may yield. The code takes an entry: 0 runs from the start, and
+//! A body that can reach guest code or the host compiles to a resumable
+//! segment (FIG-6709). Each action of the body that may run guest code or a
+//! body in a frame, or that performs an effect (FIG-6916), is a callback
+//! site: the plan calls or performs through the context there, which may
+//! yield. The code takes an entry: 0 runs from the start, and
 //! `k + 1` runs on after site `k`, its frame's state restored into the
 //! plan's variables and registers. Resuming, every form before the site is
 //! skipped (`r` is the entry still sought; it is 0 once the site is
@@ -329,7 +330,7 @@ impl Emitter<'_> {
             Expr::Act(act) => {
                 let own = match &act.kind {
                     ActKind::Call(Callee::Library(function)) => !self.answers(function),
-                    ActKind::Call(_) => true,
+                    ActKind::Call(_) | ActKind::Perform { .. } => true,
                     _ => false,
                 };
                 u32::from(own) + all(&act.args)
@@ -349,7 +350,7 @@ impl Emitter<'_> {
                 callee: Callee::Library(function),
                 ..
             }) => u32::from(!self.answers(function)),
-            Rhs::Action(Action::Call { .. }) => 1,
+            Rhs::Action(Action::Call { .. } | Action::Perform { .. }) => 1,
             Rhs::Action(_) => 0,
         }
     }
@@ -644,6 +645,14 @@ impl Emitter<'_> {
                     let site = self.site("p::SiteCall::Apply".into(), &roles, dst);
                     self.site_call(site, &format!("ctx.apply({site}, {dst}, {len})?;"));
                 }
+                // The body's frame waits in its `perform` here: the effect
+                // and its result type are the body's (`K-EFF-001`).
+                ActKind::Perform { .. } if self.segment => {
+                    let roles = self.roles();
+                    let len = self.exprs(&act.args, dst)?;
+                    let site = self.site("p::SiteCall::Perform".into(), &roles, dst);
+                    self.site_call(site, &format!("ctx.perform({site}, {dst}, {len})?;"));
+                }
                 _ => {
                     return Err(Unsupported(
                         "nests an action that is not a library call".into(),
@@ -729,6 +738,16 @@ impl Emitter<'_> {
                 let len = args.len();
                 let site = self.site("p::SiteCall::Apply".into(), &[], 0);
                 self.site_call(site, &format!("ctx.apply({site}, 0, {len})?;"));
+                Ok(())
+            }
+            Rhs::Action(Action::Perform { args, .. }) if self.segment => {
+                self.reg(0);
+                for (index, atom) in args.iter().enumerate() {
+                    self.atom(atom, index as u32)?;
+                }
+                let len = args.len();
+                let site = self.site("p::SiteCall::Perform".into(), &[], 0);
+                self.site_call(site, &format!("ctx.perform({site}, 0, {len})?;"));
                 Ok(())
             }
             Rhs::Action(_) => Err(Unsupported("acts other than by a library call".into())),

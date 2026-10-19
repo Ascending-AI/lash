@@ -523,7 +523,7 @@ impl KernelMachine {
         }
         Ok(match result {
             Ok(value) => match self
-                .segment_returned(task, host, exe, value)
+                .segment_returned(task, host, exe, value, ResultOrigin::Returned)
                 .map_err(Interrupt::from)
                 .and_then(|returned| match returned {
                     // A segment the caller stands in ran on (FIG-6709).

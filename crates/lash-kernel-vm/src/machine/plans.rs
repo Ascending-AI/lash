@@ -11,7 +11,7 @@
 //! formula is, when the call returns (`K-CHG-003`, `K-CHG-007`).
 //!
 //! A segment's callback sites yield where the body would stand in a frame
-//! (`super::segments`, FIG-6709).
+//! (`super::segments`, FIG-6709), its `perform`s among them (FIG-6916).
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
@@ -542,6 +542,10 @@ impl<const SHARED: bool> PlanContext for PlanRun<'_, SHARED> {
 
     fn apply(&mut self, site: u32, at: u32, count: u32) -> Result<(), PlanExit> {
         self.apply_at(site, self.base + at as usize, count as usize)
+    }
+
+    fn perform(&mut self, site: u32, args: u32, count: u32) -> Result<(), PlanExit> {
+        self.perform_at(site, self.base + args as usize, count as usize)
     }
 
     fn lost(&mut self, entry: u32) -> PlanExit {

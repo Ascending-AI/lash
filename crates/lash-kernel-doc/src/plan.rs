@@ -14,14 +14,16 @@
 //! call it is offered: it never declines. The body remains what runs under
 //! layouts that force the fallback.
 //!
-//! A body that can reach guest code compiles to a resumable segment: at each
-//! callback site ([`PlanSite`]) the plan may yield ([`PlanExit::Yield`]).
-//! The machine then holds the body's frame standing at that site, exactly
-//! as the interpreted body would stand there, and runs the callee as
-//! ordinary code. When the callee returns, the machine runs the frame on in
-//! the body or re-enters the plan after that site (`run`'s entry), as its
-//! layout chooses: the saved state is the body's coordinate, never a Rust
-//! stack, so a frame parked by one restores into the other.
+//! A body that can reach guest code or the host compiles to a resumable
+//! segment: at each callback site ([`PlanSite`]) the plan may yield
+//! ([`PlanExit::Yield`]). The machine then holds the body's frame standing
+//! at that site, exactly as the interpreted body would stand there, and
+//! runs the callee as ordinary code, or waits in the site's `perform` as
+//! the body's frame waits. When the callee returns or the outcome is
+//! delivered, the machine runs the frame on in the body or re-enters the
+//! plan after that site (`run`'s entry), as its layout chooses: the saved
+//! state is the body's coordinate, never a Rust stack, so a frame parked by
+//! one restores into the other.
 //!
 //! Registers are the plan's own operand file, numbered from 0, laid out as
 //! a body's operands are: operands evaluate left to right into successive
@@ -61,12 +63,13 @@ pub struct HelperPlan {
     /// Canonical paths of the closure expressions this plan evaluates.
     pub closures: &'static [&'static [u32]],
     /// The callback sites a segment yields at, by index; empty for a body
-    /// that reaches no guest code.
+    /// that reaches neither guest code nor the host.
     pub sites: &'static [PlanSite],
     /// The code: from the call's start (entry 0), or after the callee of
-    /// site `entry - 1` returned, with the frame's state restored into the
-    /// plan's variables and registers. It reads its parameters through the
-    /// context and returns the body's result.
+    /// site `entry - 1` returned or its outcome was delivered, with the
+    /// frame's state restored into the plan's variables and registers. It
+    /// reads its parameters through the context and returns the body's
+    /// result.
     pub run: fn(&mut dyn PlanContext, u32) -> Result<Value, PlanExit>,
     /// The body's build-staged immediate paths, when any reduce to
     /// certified native entries. The helper's own formula charges them.
@@ -194,6 +197,9 @@ pub enum SiteCall {
     Apply,
     /// Callee `index` of the plan, which may run its body in a frame.
     Invoke(u32),
+    /// The body's `perform` at the site: the effect, its result type and
+    /// its arguments are the body's action's, read from the body.
+    Perform,
 }
 
 /// An operand an action's statement holds when the action is reached.
@@ -246,7 +252,8 @@ pub enum PlanExit {
     /// the plan catches it.
     Halt,
     /// The plan stopped at a callback site: the machine holds the body's
-    /// frame standing there and runs the callee. Nothing in the plan
+    /// frame standing there and runs the callee, or waits in the site's
+    /// `perform`. Nothing in the plan
     /// catches it, and no plan state survives it outside the machine.
     Yield,
 }
@@ -334,6 +341,10 @@ pub trait PlanContext {
     /// Callback site `site`: applies the value in `at` to the `count`
     /// arguments after it, its value into `at`, or yields there.
     fn apply(&mut self, site: u32, at: u32, count: u32) -> Result<(), PlanExit>;
+    /// Callback site `site`: the body's `perform` there, on the `count`
+    /// arguments from `args`. A read-bound effect answers at once, its
+    /// value into `args`; any other yields, the body's frame waiting in it.
+    fn perform(&mut self, site: u32, args: u32, count: u32) -> Result<(), PlanExit>;
     /// Field `field` of the record or error in `at`, into `at`.
     fn field(&mut self, at: u32, field: u32) -> Result<(), PlanExit>;
     /// What `at` holds at the index in the register after, into `at`.

@@ -1033,14 +1033,50 @@ impl KernelMachine {
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
                 self.refresh_charging(task)?;
-                self.resume(task, exe, incoming)
-                    .and_then(|value| {
-                        self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)
-                    })
-                    .and_then(|ran| self.resumed(task, exe, ran))
+                self.delivered(task, host, exe, incoming)
             }
             None => self.advance(task, host, exe),
         };
+        let mut settled = self.settled(task, host, exe, outcome);
+        // A segment that stood in this step at a read-bound `perform` is
+        // answered before the step ends (FIG-6916).
+        while settled.is_ok()
+            && let Some((stands, outcome)) = self.segment_read(host, exe)
+        {
+            settled = self.settled(stands, host, exe, outcome);
+        }
+        settled
+    }
+
+    /// The statement the top frame waits in goes on with what was
+    /// delivered to it, or the segment standing as that frame does
+    /// (FIG-6916).
+    fn delivered(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        incoming: Incoming,
+    ) -> Eval<Completion> {
+        let value = self.resume(task, exe, incoming)?;
+        match self.segment_returned(task, host, exe, value, exec::ResultOrigin::Delivered)? {
+            Ok(departure) => Ok(departure.unwrap_or(Completion::Normal)),
+            Err(value) => {
+                let ran =
+                    self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)?;
+                self.resumed(task, exe, ran)
+            }
+        }
+    }
+
+    /// Settles a step's outcome, then runs on what an island left standing.
+    fn settled(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        outcome: Eval<Completion>,
+    ) -> Result<(), Halt> {
         match self.settle(task, host, exe, outcome) {
             Ok(()) if !self.islands.runs_on() => Ok(()),
             settled => self.island_run_on(task, host, exe, settled),

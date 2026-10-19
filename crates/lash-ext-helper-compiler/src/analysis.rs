@@ -1,8 +1,10 @@
-//! What each library body can reach: guest code, task actions, host reads
-//! and writes to objects, through the bodies it calls. A helper is closed
-//! when it reaches none of the first three; only a closed helper's body is
-//! compiled, and the facts are the per-helper manifest the callback lane
-//! and admission read.
+//! What each library body can reach: guest code, task actions, the host
+//! (its reads and the effects the body performs) and writes to objects,
+//! through the bodies it calls. A helper is closed when it reaches none of
+//! the first three. A closed body compiles to a plan that answers at once;
+//! one that reaches guest code or performs compiles to a resumable segment.
+//! The facts are the per-helper manifest the callback lane and admission
+//! read.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,6 +24,9 @@ struct Own {
     tasks: Vec<String>,
     /// Clock, random and projection reads.
     host: Vec<String>,
+    /// The `perform`s the body states: it reaches the host there, where a
+    /// segment waits as the body's frame does.
+    performs: Vec<String>,
     /// Closures the body makes, which run as ordinary charged code.
     closures: usize,
     /// Whether the body writes or removes a member of an object.
@@ -46,6 +51,8 @@ pub struct Facts {
     pub reaching: Vec<String>,
     /// Whether one of them reaches guest code.
     reaching_guest: bool,
+    /// Whether the body or one of them performs.
+    performing: bool,
 }
 
 impl Facts {
@@ -65,20 +72,29 @@ impl Facts {
         &self.own.callees
     }
 
-    /// Every site the body itself enters guest code, acts on tasks or reads
-    /// the host at, then every callee it reaches one through.
+    /// Every site the body itself enters guest code, acts on tasks, reads
+    /// the host or performs at, then every callee it reaches one through.
     pub fn callback_sites(&self) -> Vec<String> {
         let own = &self.own;
         own.guest
             .iter()
             .chain(&own.tasks)
             .chain(&own.host)
+            .chain(&own.performs)
             .cloned()
             .chain(self.reaching.iter().map(|name| format!("invoke {name}")))
             .collect()
     }
 
-    /// The manifest's kind: `closed`, or what the body can reach.
+    /// Whether the body compiles to a resumable segment: it is not closed,
+    /// and guest code or a `perform` is among what it reaches. The emitter
+    /// refuses any other form that leaves the plan.
+    pub fn segment(&self) -> bool {
+        !self.closed && (self.kind() == "callback" || self.performing)
+    }
+
+    /// The manifest's kind: `closed`, or what the body can reach. A
+    /// performing body reaches the host.
     pub fn kind(&self) -> &'static str {
         if self.closed {
             "closed"
@@ -117,10 +133,14 @@ impl Analysis {
             return;
         }
         let own = own(definition);
-        let mut closed = own.guest.is_empty() && own.tasks.is_empty() && own.host.is_empty();
+        let mut closed = own.guest.is_empty()
+            && own.tasks.is_empty()
+            && own.host.is_empty()
+            && own.performs.is_empty();
         let mut mutates = own.writes;
         let mut reaching = Vec::new();
         let mut reaching_guest = false;
+        let mut performing = !own.performs.is_empty();
         for callee in &own.callees {
             let Some(definition) = library.definition(callee) else {
                 // A function the registry lacks reaches what it may.
@@ -143,6 +163,7 @@ impl Analysis {
             if !facts.closed {
                 closed = false;
                 reaching_guest |= facts.kind() == "callback";
+                performing |= facts.performing;
                 reaching.push(definition.name.to_string());
             }
         }
@@ -154,6 +175,7 @@ impl Analysis {
                 mutates,
                 reaching,
                 reaching_guest,
+                performing,
             },
         );
     }
@@ -230,7 +252,7 @@ fn action_facts(action: &Action, own: &mut Own) {
             callee_facts(callee, own);
             own.tasks.push("spawn".into());
         }
-        Action::Perform { effect, .. } => own.tasks.push(format!("perform {effect}")),
+        Action::Perform { effect, .. } => own.performs.push(format!("perform {effect}")),
         Action::Sleep { .. } => own.tasks.push("sleep".into()),
         Action::Join { .. } | Action::JoinMany { .. } => own.tasks.push("join".into()),
         Action::Yield => own.tasks.push("yield".into()),
@@ -249,7 +271,7 @@ fn act_facts(kind: &ActKind, own: &mut Own) {
             callee_facts(callee, own);
             own.tasks.push("spawn".into());
         }
-        ActKind::Perform { effect, .. } => own.tasks.push(format!("perform {effect}")),
+        ActKind::Perform { effect, .. } => own.performs.push(format!("perform {effect}")),
         ActKind::Sleep { .. } => own.tasks.push("sleep".into()),
         ActKind::Join | ActKind::JoinMany(_) => own.tasks.push("join".into()),
         ActKind::Yield => own.tasks.push("yield".into()),

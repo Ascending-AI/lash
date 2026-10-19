@@ -6,16 +6,18 @@
 //! statement the action is nested in, the blocks and loops the frame's
 //! control holds to stand there, and the action's resume entry and its
 //! roles. A plan one of whose sites or variables the body does not state
-//! is refused: the machine runs the body.
+//! is refused: the machine runs the body. So is one that states a
+//! `perform` where the body has another action, or the reverse: what a
+//! performing site performs is always the body's own action (FIG-6916).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::plan::{HelperPlan, PlanLoop};
+use lash_kernel_doc::plan::{HelperPlan, PlanLoop, SiteCall};
 use lash_kernel_doc::{Site, Unit};
 use lash_kernel_exec::ActIx;
 
-use super::{Base, BlockId, CodeId, Form, Local, StmtId, Suffix, Tables};
+use super::{ActionKind, Base, BlockId, CodeId, Form, Local, NestedKind, StmtId, Suffix, Tables};
 
 /// A segment's sites and variables under one layout.
 pub(crate) struct Segment {
@@ -43,6 +45,9 @@ pub(crate) struct SegmentSite {
     pub(crate) dst: u32,
     /// The plan variables in scope there.
     pub(crate) bound: Vec<u32>,
+    /// Whether the site is the body's `perform`, where the frame waits in
+    /// the effect rather than in a call.
+    pub(crate) performs: bool,
 }
 
 /// One entry of a frame's control at a callback site.
@@ -208,7 +213,7 @@ fn resolve_site(
     let form = &tables.stmts[(stmt.0 - base.stmts) as usize].form;
     let statement = &path[..index];
     let full = Site::new(unit.clone(), path);
-    let (act, pending, roles) = if let Some(act) = tables.stream.nested_at.get(&full) {
+    let (act, pending, roles, performs) = if let Some(act) = tables.stream.nested_at.get(&full) {
         let nested = &tables.stream.nested[act.ix()];
         if nested.depth as usize != index {
             return Err("the action is nested in another statement".into());
@@ -233,7 +238,8 @@ fn resolve_site(
         if roles.len() != site.roles.len() {
             return Err("the site states a role the body does not hold".into());
         }
-        (Some(*act), Arc::clone(&nested.suffix), roles)
+        let performs = matches!(nested.kind, NestedKind::Perform { .. });
+        (Some(*act), Arc::clone(&nested.suffix), roles, performs)
     } else {
         // The statement's own action: its frame holds no role there.
         let Form::Action(action) = form else {
@@ -242,8 +248,12 @@ fn resolve_site(
         if action.site != full || path.len() != statement.len() + 1 || !site.roles.is_empty() {
             return Err("the statement's action is elsewhere".into());
         }
-        (None, Suffix::from([]), Vec::new())
+        let performs = matches!(action.kind, ActionKind::Perform { .. });
+        (None, Suffix::from([]), Vec::new(), performs)
     };
+    if performs != (site.call == SiteCall::Perform) {
+        return Err("the site's action is not the body's".into());
+    }
     if loops.next().is_some() {
         return Err("the site states a loop the body does not hold".into());
     }
@@ -255,5 +265,6 @@ fn resolve_site(
         roles,
         dst: site.dst,
         bound: site.bound.to_vec(),
+        performs,
     })
 }

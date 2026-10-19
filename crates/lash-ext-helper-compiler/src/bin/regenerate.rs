@@ -30,6 +30,25 @@ fn main() -> ExitCode {
         }
         println!("{}: {} plans", dialect.name(), generated.planned);
     }
+    // The plan of the `dataframe` fixture's `collect_rows`, for the same
+    // laws (FIG-6916).
+    let path = lash_ext_helper_compiler::DATAFRAME_PLANS;
+    if let Err(error) = lash_ext_helper_compiler::dataframe_plans()
+        .and_then(|rust| std::fs::write(root.join(path), rust).map_err(|error| error.to_string()))
+    {
+        eprintln!("{path}: {error}");
+        return ExitCode::FAILURE;
+    }
+    // The plans of the kernel's body-perform laws (FIG-6916).
+    let path = lash_ext_helper_compiler::BODY_PERFORM_PLANS;
+    if let Err(error) = lash_ext_helper_compiler::body_perform_plans(include_str!(
+        "../../../lash-kernel-vm/src/laws/continuation/body_performs.kernel"
+    ))
+    .and_then(|rust| std::fs::write(root.join(path), rust).map_err(|error| error.to_string()))
+    {
+        eprintln!("{path}: {error}");
+        return ExitCode::FAILURE;
+    }
     // The same compiler records the synthetic bodies of the kernel laws;
     // no hand-written plan is used to test control flow or captures.
     match control_fixture().and_then(|rust| {
