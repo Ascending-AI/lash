@@ -161,24 +161,6 @@ pub struct ResponseTextMeta {
     /// introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<ProviderRouteIdentity>,
-    /// LLM Provider kind decoded from the pre-route-identity JSON vocabulary.
-    ///
-    /// This is identity-compatibility material only. Because the legacy pair
-    /// has no endpoint, it never certifies replay for a current route.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "origin_provider"
-    )]
-    pub legacy_origin_provider: Option<String>,
-    /// Model decoded from the pre-route-identity JSON vocabulary. See
-    /// [`ResponseTextMeta::legacy_origin_provider`].
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "origin_model"
-    )]
-    pub legacy_origin_model: Option<String>,
 }
 
 impl ResponseTextMeta {

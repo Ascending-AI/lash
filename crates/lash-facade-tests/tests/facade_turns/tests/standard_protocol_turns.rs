@@ -736,7 +736,6 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
         phase: Some(lash_core::llm::types::ResponsePhase::FinalAnswer),
         provider_payload: Some("opaque-text".to_string()),
         origin: Some(origin),
-        ..Default::default()
     };
     assert_eq!(final_parts[1].response_meta(), Some(&expected_text));
     assert_eq!(tool_parts[1].response_meta(), Some(&expected_text));

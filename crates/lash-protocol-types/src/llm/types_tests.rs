@@ -199,7 +199,6 @@ fn replay_gate_covers_response_text_metadata_and_omits_empty_reasoning_fallbacks
                 phase: Some(ResponsePhase::FinalAnswer),
                 provider_payload: Some("signature".to_string()),
                 origin: Some(foreign.clone()),
-                ..Default::default()
             }),
             cache_breakpoint: false,
         },
@@ -222,44 +221,6 @@ fn replay_gate_covers_response_text_metadata_and_omits_empty_reasoning_fallbacks
         &request.messages[0].blocks[0],
         LlmContentBlock::Text { response_meta: None, text, .. } if text.as_ref() == "answer"
     ));
-}
-
-#[test]
-fn base_response_text_identity_decodes_without_becoming_native_provenance() {
-    let base_json = r#"{
-        "id":"response-id",
-        "status":"complete",
-        "phase":"final_answer",
-        "provider_payload":"signature",
-        "origin_provider":"google_oauth",
-        "origin_model":"gemini-base"
-    }"#;
-    let meta: ResponseTextMeta = serde_json::from_str(base_json).expect("base JSON");
-    assert!(
-        meta.origin.is_none(),
-        "endpoint-less legacy identity is not provenance"
-    );
-    assert_eq!(meta.legacy_origin_provider.as_deref(), Some("google_oauth"));
-    assert_eq!(meta.legacy_origin_model.as_deref(), Some("gemini-base"));
-    assert_eq!(
-        serde_json::to_value(&meta).expect("legacy metadata reserializes"),
-        serde_json::from_str::<serde_json::Value>(base_json).expect("base JSON value"),
-        "base-era identity leaves survive a JSON decode/encode round trip"
-    );
-
-    let mut request = replay_request(vec![LlmContentBlock::Text {
-        text: "answer".into(),
-        response_meta: Some(meta),
-        cache_breakpoint: false,
-    }]);
-    let serving = route(
-        "google_oauth",
-        "https://cloudcode-pa.googleapis.com/v1internal",
-        "gemini-base",
-    );
-    let drops = request.drop_foreign_replay(&serving);
-    assert_eq!(drops.len(), 1);
-    assert_eq!(drops[0].reason, ProviderReplayDropReason::Unstamped);
 }
 
 #[test]

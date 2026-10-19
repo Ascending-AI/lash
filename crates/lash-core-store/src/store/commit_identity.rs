@@ -481,8 +481,6 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
             phase,
             provider_payload,
             origin,
-            legacy_origin_provider,
-            legacy_origin_model,
         } = response;
         for value in [
             id.as_deref(),
@@ -493,12 +491,6 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
             identity.optional(value, crate::stable_identity::IdentityEncoder::string);
         }
         identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-        identity.optional(legacy_origin_provider.as_ref(), |identity, value| {
-            identity.string(value)
-        });
-        identity.optional(legacy_origin_model.as_ref(), |identity, value| {
-            identity.string(value)
-        });
     });
 }
 

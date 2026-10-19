@@ -4,11 +4,6 @@ pub struct BatchResultRow {
     pub index: usize,
     pub tool: String,
     pub success: bool,
-    /// Rows journaled before durations left recorded content still carry this
-    /// field; `deny_unknown_fields` would otherwise refuse them. It decodes
-    /// and discards — never read, never re-emitted.
-    #[serde(rename = "duration_ms", default, skip_serializing)]
-    legacy_duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -21,7 +16,6 @@ impl BatchResultRow {
             index,
             tool: tool.into(),
             success: true,
-            legacy_duration_ms: None,
             result: Some(result),
             error: None,
         }
@@ -32,7 +26,6 @@ impl BatchResultRow {
             index,
             tool: tool.into(),
             success: false,
-            legacy_duration_ms: None,
             result: None,
             error: Some(error),
         }

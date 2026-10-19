@@ -602,11 +602,6 @@
           "const": "session",
           "description": "Any other session-layer failure; `message` carries the detail.",
           "type": "string"
-        },
-        {
-          "const": "erased",
-          "description": "A journal entry written before the reason was typed: only the human\nmessage survived the erasure, so no closed reason can be recovered.",
-          "type": "string"
         }
       ]
     },
@@ -1678,20 +1673,6 @@
             }
           ],
           "description": "Exact LLM Provider route that minted this provider-owned response\nmetadata. Missing on sessions persisted before replay provenance was\nintroduced."
-        },
-        "origin_model": {
-          "description": "Model decoded from the pre-route-identity JSON vocabulary. See\n[`ResponseTextMeta::legacy_origin_provider`].",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin_provider": {
-          "description": "LLM Provider kind decoded from the pre-route-identity JSON vocabulary.\n\nThis is identity-compatibility material only. Because the legacy pair\nhas no endpoint, it never certifies replay for a current route.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "phase": {
           "anyOf": [

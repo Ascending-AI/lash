@@ -18,31 +18,6 @@ mod settlement_order_journal_tests {
             "the refusal must name the retired tag: {error}"
         );
     }
-
-    /// FIG-2362: a journal entry written before the exec-code failure was typed
-    /// journaled only the erased message string; it still decodes, under the
-    /// honest `erased` reason.
-    #[test]
-    fn a_legacy_erased_exec_code_failure_still_decodes() {
-        let legacy = serde_json::json!({
-            "type": "exec_code",
-            "result": { "Err": "code execution is not available in this session" },
-        });
-        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy)
-            .expect("legacy erased exec-code failure decodes");
-        let RuntimeEffectOutcome::ExecCode { result } = decoded else {
-            panic!("decoded the wrong outcome kind");
-        };
-        let failure = result.expect_err("the journaled failure survives");
-        assert_eq!(
-            failure.reason,
-            lash_core_execution::ExecCodeFailureReason::Erased
-        );
-        assert_eq!(
-            failure.message,
-            "code execution is not available in this session"
-        );
-    }
 }
 
 mod envelope_hash_tests {
