@@ -627,23 +627,15 @@ fn read_candidates(
         .collect()
 }
 
-/// The bounds a cell's run is held to: the session's instruction and
-/// memory bounds over the worker pool's own, which also state the rest.
+/// The bounds a cell's run asks for: the session's instruction and memory
+/// bounds under the worker pool's ceiling, and the pool's own for the rest.
 fn cell_bounds(services: &CellServices) -> Bounds {
     let pool = services.workers.config().run_bounds;
     Bounds {
         memory_meter: services.execution_bounds.memory_meter,
         charge: services.execution_bounds.charge,
-        charge_limit: services
-            .execution_bounds
-            .instruction_limit
-            .limit()
-            .map_or(u64::MAX, std::num::NonZeroU64::get),
-        memory: services
-            .execution_bounds
-            .memory_limit
-            .limit()
-            .map_or(u64::MAX, std::num::NonZeroU64::get),
+        charge_limit: services.execution_bounds.charge_limit_under(&pool),
+        memory: services.execution_bounds.memory_under(&pool),
         call_depth: pool.call_depth,
         live_tasks: pool.live_tasks,
         requests_per_park: pool.requests_per_park,

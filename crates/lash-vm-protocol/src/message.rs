@@ -297,6 +297,39 @@ pub struct RunBounds {
     pub join_members: u32,
 }
 
+impl RunBounds {
+    /// The refusal of a run that asks for more of a bound than `ceiling`
+    /// admits, naming the first such bound; `None` when every bound fits.
+    pub fn past(&self, ceiling: &Self) -> Option<crate::RunRefusal> {
+        use crate::RunBound::{CallDepth, Charge, JoinMembers, LiveTasks, Memory, RequestsPerPark};
+        [
+            (Charge, self.charge_limit, ceiling.charge_limit),
+            (Memory, self.memory, ceiling.memory),
+            (CallDepth, self.call_depth.into(), ceiling.call_depth.into()),
+            (LiveTasks, self.live_tasks.into(), ceiling.live_tasks.into()),
+            (
+                RequestsPerPark,
+                self.requests_per_park.into(),
+                ceiling.requests_per_park.into(),
+            ),
+            (
+                JoinMembers,
+                self.join_members.into(),
+                ceiling.join_members.into(),
+            ),
+        ]
+        .into_iter()
+        .find(|&(_, requested, ceiling)| requested > ceiling)
+        .map(
+            |(bound, requested, ceiling)| crate::RunRefusal::AboveCeiling {
+                bound,
+                requested,
+                ceiling,
+            },
+        )
+    }
+}
+
 /// What a run starts from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

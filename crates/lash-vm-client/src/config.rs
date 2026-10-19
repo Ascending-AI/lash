@@ -302,7 +302,10 @@ pub struct PoolConfig {
     pub max_queue_bytes: usize,
     pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     pub protocol: ProtocolBounds,
-    /// The most any run's bounds may allow.
+    /// The ceiling the pool admits each run's bounds up to. A run states
+    /// its own bounds; one asking for more of any is refused with
+    /// [`lash_vm_protocol::RunRefusal::AboveCeiling`], naming the bound,
+    /// what it asked and this ceiling, never clamped to it (FIG-6827).
     pub run_bounds: RunBounds,
     /// What one code-mode cell may grow to over its life.
     pub cell_lifetime: CellLifetime,

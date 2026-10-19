@@ -384,6 +384,41 @@ pub enum RunRefusal {
     /// The parked run is not one this machine resumes.
     #[error("the machine refuses to resume the run: {detail}")]
     Resume { detail: Detail },
+    /// The run asks for more of a bound than its worker pool admits
+    /// (FIG-6827): the pool's run bounds are a ceiling, never a clamp.
+    /// Refused before anything runs.
+    #[error("the run asks for a {bound} of {requested}, past the {ceiling} its worker pool admits")]
+    AboveCeiling {
+        bound: RunBound,
+        requested: u64,
+        ceiling: u64,
+    },
+}
+
+/// One of the bounds a run states and its worker pool admits up to: a
+/// field of [`crate::RunBounds`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunBound {
+    Charge,
+    Memory,
+    CallDepth,
+    LiveTasks,
+    RequestsPerPark,
+    JoinMembers,
+}
+
+impl std::fmt::Display for RunBound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Charge => "charge limit",
+            Self::Memory => "memory bound",
+            Self::CallDepth => "call depth",
+            Self::LiveTasks => "live-task bound",
+            Self::RequestsPerPark => "per-park request bound",
+            Self::JoinMembers => "join-member bound",
+        })
+    }
 }
 
 /// What a worker may say of its own failure: that the protocol was broken,

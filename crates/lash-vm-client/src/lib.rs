@@ -31,7 +31,7 @@ pub use lash_vm_protocol::{
     CodecRefusal, DecodeLimits, Detail, DetailLimit, Exchange, ExecutionLease, FrameEpoch,
     HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome, KernelRestoreRefusal,
     LimitDecision, LimitedBound, MemoryMeter, OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds,
-    ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal,
+    ProtocolBreach, ProtocolVersionRefusal, RunBound, RunBounds, RunInput, RunMeters, RunRefusal,
     SequenceFault, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault,
     WorkerLimit, WorkerWork,
     page::{HeapFault, HostResource, PageRefusal},

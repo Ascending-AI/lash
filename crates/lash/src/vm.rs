@@ -117,9 +117,10 @@ pub use lash_vm_client::{
     FrameTraffic, HeaderRefusal, HeapFault, HostReadKind, InfrastructureOutcome, IpcTraffic,
     KernelRestoreRefusal, LimitDecision as RunLimitDecision, LimitedBound,
     MemoryMeter as RunMemoryMeter, OwnerEpoch, PageRefusal, PayloadKind, PoolCounters, PoolError,
-    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
-    RunChargeLimiter, RunInput, RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault, SpoolRoot,
-    SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
+    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBound,
+    RunBounds, RunChargeLimiter, RunInput, RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault,
+    SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
+    WorkerWork,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

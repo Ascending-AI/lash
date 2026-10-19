@@ -77,6 +77,7 @@ under_each_embedding!(
     an_observed_run_names_its_last_entered_site_on_its_next_frame,
     a_run_cancel_is_observed_where_a_slice_returns,
     a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
+    a_start_past_the_pools_ceiling_is_refused_and_one_at_it_runs_to_its_own_limit,
     a_refusing_parent_limiter_ends_the_run_where_no_limiter_does,
     a_limit_the_parent_grows_is_saved_and_a_resumed_run_keeps_it,
     worker_crash_mid_run_leaves_the_parent_running,
@@ -1012,6 +1013,56 @@ fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
     assert_eq!(exceeded.limit, 500);
     worker.release().expect("reset");
     assert_eq!(checkout(&pool).pid(), Some(pid));
+}
+
+/// FIG-6827: the pool's run bounds are the ceiling it admits, never a
+/// clamp. A start asking more charge or memory than the ceiling is refused
+/// with the typed refusal naming the bound and both numbers, and nothing
+/// runs; a start asking exactly the ceiling runs to its own limit.
+fn a_start_past_the_pools_ceiling_is_refused_and_one_at_it_runs_to_its_own_limit() {
+    let mut config = config("");
+    config.run_bounds.charge_limit = 1_000;
+    let memory_ceiling = config.run_bounds.memory;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document("main { while true { } }");
+    for (bound, past) in [
+        (RunBound::Charge, (2_000, memory_ceiling)),
+        (RunBound::Memory, (1_000, memory_ceiling + 1)),
+    ] {
+        let mut worker = checkout(&pool);
+        let mut start = fresh(&document, Target::Main, Vec::new());
+        (start.bounds.charge_limit, start.bounds.memory) = past;
+        let refused = worker
+            .start(start, &identity, ExecutionClass::Cell)
+            .expect_err("a start past the ceiling is refused");
+        let (requested, ceiling) = match bound {
+            RunBound::Charge => (2_000, 1_000),
+            _ => (memory_ceiling + 1, memory_ceiling),
+        };
+        assert!(
+            matches!(
+                refused,
+                PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
+                    refusal: RunRefusal::AboveCeiling { bound: refused, requested: asked, ceiling: held },
+                }) if refused == bound && asked == requested && held == ceiling
+            ),
+            "{refused:?}"
+        );
+        worker.release().expect("reset");
+    }
+    let mut worker = checkout(&pool);
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.bounds.charge_limit = 1_000;
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("a start at the ceiling");
+    let End::Error(RunError::Bound(exceeded)) = ended(worker.run(SLICE, false).expect("run"))
+    else {
+        panic!("the charge bound ends the run")
+    };
+    assert_eq!(exceeded.bound, Bound::Charge);
+    assert_eq!(exceeded.limit, 1_000);
+    worker.release().expect("reset");
 }
 
 /// `step`, past the bound reads it asks the parent: each is answered from

@@ -48,7 +48,7 @@ pub use message::{
 };
 pub use outcome::{
     BootstrapFault, CgroupController, CgroupRefusal, Detail, DetailLimit, Exchange,
-    InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach, RunInput, RunRefusal,
+    InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach, RunBound, RunInput, RunRefusal,
     SequenceFault, SupervisorEvidence, WorkerDeploymentFault, WorkerFrameKind, WorkerLimit,
     WorkerRefusal,
 };

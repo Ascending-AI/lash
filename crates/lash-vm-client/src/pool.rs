@@ -519,25 +519,23 @@ impl Checkout {
     /// the parent knows the document by, which a parked state must name;
     /// `class` is what the pool's receipts call the execution. A lease
     /// whose `prepare` lowered the run's document starts it with no reset
-    /// between.
+    /// between. A start asking for more of a bound than the pool's
+    /// [`PoolConfig::run_bounds`] admit is refused with
+    /// [`RunRefusal::AboveCeiling`] before anything crosses.
     pub fn start(
         &mut self,
-        mut start: Start,
+        start: Start,
         document: &str,
         class: ExecutionClass,
     ) -> Result<(), PoolError> {
         if self.started {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
-        // The host configuration is the ceiling, never a caller's assertion.
-        let ceiling = self.pool.config.run_bounds;
-        let bounds = &mut start.bounds;
-        bounds.charge_limit = bounds.charge_limit.min(ceiling.charge_limit);
-        bounds.memory = bounds.memory.min(ceiling.memory);
-        bounds.call_depth = bounds.call_depth.min(ceiling.call_depth);
-        bounds.live_tasks = bounds.live_tasks.min(ceiling.live_tasks);
-        bounds.requests_per_park = bounds.requests_per_park.min(ceiling.requests_per_park);
-        bounds.join_members = bounds.join_members.min(ceiling.join_members);
+        // The host configuration is the ceiling the pool admits, never a
+        // clamp: a run asking more is refused, naming both (FIG-6827).
+        if let Some(refusal) = start.bounds.past(&self.pool.config.run_bounds) {
+            return Err(PoolError::refused(refusal));
+        }
         // The start crosses within what the checkout reserved for it, as
         // if it crossed alone.
         let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;

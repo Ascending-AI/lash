@@ -128,8 +128,10 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    /// The bounds a new process's run is held to: the deployment's
-    /// instruction and memory bounds over the worker pool's own.
+    /// The bounds a new process's run asks for: the deployment's
+    /// instruction and memory bounds under the worker pool's ceiling
+    /// ([`super::ExecutionBounds::charge_limit_under`]), and the pool's
+    /// own for the rest.
     fn process_bounds(&self) -> lash_vm_client::RunBounds {
         let pool = self.workers.config().run_bounds;
         let bounds = self.config.execution_bounds();
@@ -142,14 +144,8 @@ impl RlmProtocolPluginFactory {
                 crate::Charge::Exact => lash_vm_client::Charge::Exact,
                 crate::Charge::Off => lash_vm_client::Charge::Off,
             },
-            charge_limit: bounds
-                .instruction_limit
-                .limit()
-                .map_or(u64::MAX, std::num::NonZeroU64::get),
-            memory: bounds
-                .memory_limit
-                .limit()
-                .map_or(u64::MAX, std::num::NonZeroU64::get),
+            charge_limit: bounds.charge_limit_under(&pool),
+            memory: bounds.memory_under(&pool),
             call_depth: pool.call_depth,
             live_tasks: pool.live_tasks,
             requests_per_park: pool.requests_per_park,
@@ -282,6 +278,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
         lash_core::plugin::PluginRecipe,
         lash_execution_contracts::plugin_error::PluginError,
     > {
+        // A deployment whose bounds its worker pool refuses is refused
+        // here, at assembly, rather than at each run (FIG-6827).
+        self.config
+            .execution_bounds()
+            .admitted_under(&self.workers.config().run_bounds)?;
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
@@ -304,6 +305,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
                     let behaviour =
                         self.session_behaviour(&ctx.plugin_config.config, ctx.materialization)?;
                     let config = self.config.clone().under_recorded_behaviour(&behaviour);
+                    // A session recorded bounds past this host's worker
+                    // ceiling is refused when it opens here.
+                    config
+                        .execution_bounds()
+                        .admitted_under(&self.workers.config().run_bounds)?;
                     let recorded = recorded_config(&ctx.plugin_config.config)?;
                     super::channel::validate_channel(
                         recorded.as_ref(),
@@ -512,6 +518,57 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             3
         );
+    }
+
+    /// FIG-6827: a deployment's instruction limit is what its runs ask
+    /// for, and the worker pool's charge limit is the ceiling the pool
+    /// admits. A limit past the ceiling refuses the plugin when it is
+    /// assembled, naming both numbers; one at the ceiling is every run's
+    /// own limit.
+    #[test]
+    fn an_instruction_limit_past_the_worker_ceiling_refuses_the_plugin_at_assembly() {
+        let host = |limit| {
+            let config = RlmProtocolPluginConfig::standard()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(limit)
+                .memory_limit(crate::MemoryBound::mebibytes(64))
+                .build();
+            Arc::new(RlmProtocolPluginFactory::new(
+                config,
+                CellDialect::typescript(),
+            ))
+        };
+        let ceiling = host(crate::InstructionBound::standard())
+            .workers
+            .config()
+            .run_bounds
+            .charge_limit;
+        assert_eq!(ceiling, 50_000_000, "the standard pool's ceiling");
+        let Err(refused) = host(crate::InstructionBound::instructions(100_000_000)).recipe() else {
+            panic!("a 100M instruction limit on a 50M pool is refused at assembly")
+        };
+        let PluginError::Runtime(error) = &refused else {
+            panic!("the refusal is a typed runtime error: {refused:?}")
+        };
+        assert!(
+            matches!(
+                error.cause.as_ref(),
+                Some(lash_core::RuntimeErrorCause::VmWorker { outcome }) if matches!(
+                    outcome.as_ref(),
+                    lash_vm_protocol::InfrastructureOutcome::RunRefused {
+                        refusal: lash_vm_protocol::RunRefusal::AboveCeiling {
+                            bound: lash_vm_protocol::RunBound::Charge,
+                            requested: 100_000_000,
+                            ceiling: 50_000_000,
+                        },
+                    }
+                )
+            ),
+            "{error:?}"
+        );
+        let at = host(crate::InstructionBound::instructions(ceiling));
+        assert_eq!(at.process_bounds().charge_limit, ceiling);
+        assert!(at.recipe().is_ok(), "a limit at the ceiling is admitted");
     }
 
     fn factory() -> RlmProtocolPluginFactory {

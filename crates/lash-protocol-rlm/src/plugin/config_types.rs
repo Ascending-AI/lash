@@ -84,8 +84,9 @@ impl InstructionBound {
         Self::instructions(20_000_000)
     }
 
-    /// An explicit opt-out: the host takes responsibility for stopping runaway
-    /// executions by some other means.
+    /// No instruction budget of the deployment's own: a run asks for the
+    /// worker pool's charge ceiling (`PoolConfig::run_bounds.charge_limit`),
+    /// the only bound it meets.
     pub const fn unbounded() -> Self {
         Self(None)
     }
@@ -134,8 +135,9 @@ impl MemoryBound {
         }
     }
 
-    /// An explicit opt-out: the execution may grow its logical heap without a
-    /// protocol-enforced ceiling.
+    /// No logical heap limit of the deployment's own: a run asks for the
+    /// worker pool's memory ceiling (`PoolConfig::run_bounds.memory`), the
+    /// only bound it meets.
     pub const fn unbounded() -> Self {
         Self(None)
     }
@@ -188,6 +190,51 @@ impl ExecutionBounds {
 
     pub const fn unbounded() -> Self {
         Self::new(InstructionBound::unbounded(), MemoryBound::unbounded())
+    }
+
+    /// The charge limit a run asks for under a worker pool admitting
+    /// `ceiling` (FIG-6827): this instruction limit, or the ceiling's own
+    /// where it is unbounded.
+    pub(crate) fn charge_limit_under(&self, ceiling: &lash_vm_client::RunBounds) -> u64 {
+        self.instruction_limit
+            .limit()
+            .map_or(ceiling.charge_limit, NonZeroU64::get)
+    }
+
+    /// The memory bound a run asks for under a worker pool admitting
+    /// `ceiling`: this memory limit, or the ceiling's own where it is
+    /// unbounded.
+    pub(crate) fn memory_under(&self, ceiling: &lash_vm_client::RunBounds) -> u64 {
+        self.memory_limit
+            .limit()
+            .map_or(ceiling.memory, NonZeroU64::get)
+    }
+
+    /// Whether a worker pool admitting `ceiling` admits runs under these
+    /// bounds.
+    ///
+    /// # Errors
+    ///
+    /// A finite limit past the ceiling: the typed refusal every run under
+    /// it would meet, naming the bound, what it asks and the ceiling
+    /// ([`lash_vm_client::RunRefusal::AboveCeiling`]).
+    pub(crate) fn admitted_under(
+        &self,
+        ceiling: &lash_vm_client::RunBounds,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        let asked = lash_vm_client::RunBounds {
+            charge_limit: self.charge_limit_under(ceiling),
+            memory: self.memory_under(ceiling),
+            ..*ceiling
+        };
+        match asked.past(ceiling) {
+            Some(refusal) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(
+                    lash_vm_client::PoolError::refused(refusal).into_runtime_error(),
+                ),
+            ),
+            None => Ok(()),
+        }
     }
 }
 
