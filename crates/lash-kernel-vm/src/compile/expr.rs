@@ -122,15 +122,24 @@ pub(crate) enum Kind {
         /// sites, which island formation numbers; `u32::MAX` until then.
         site: u32,
     },
-    /// A tuple, list, set or map of its members.
-    Make { make: Make, items: Box<[Expr]> },
+    /// A tuple, list, set or map of its members: `miss` is where an exit
+    /// at it resumes.
+    Make {
+        make: Make,
+        items: Box<[Expr]>,
+        miss: u32,
+    },
     /// A record of the fields `fields` names.
     Record {
         fields: FieldListIx,
         values: Box<[Expr]>,
     },
-    /// `target.field`.
-    Field { target: Box<Expr>, field: FieldIx },
+    /// `target.field`: `miss` is where an exit at it resumes.
+    Field {
+        target: Box<Expr>,
+        field: FieldIx,
+        miss: u32,
+    },
     /// `target[index]`: `miss` is where an exit at it resumes.
     Index {
         target: Box<Expr>,
@@ -416,10 +425,10 @@ impl<'s> Reader<'s> {
                     },
                 ),
                 Op::Nested { act, args } => (args.start, self.nested(act, args)?),
-                Op::MakeTuple { items } => (items.start, self.make(Make::Tuple, items)?),
-                Op::MakeList { items } => (items.start, self.make(Make::List, items)?),
-                Op::MakeSet { items } => (items.start, self.make(Make::Set, items)?),
-                Op::MakeMap { entries } => (entries.start, self.make(Make::Map, entries)?),
+                Op::MakeTuple { items } => (items.start, self.make(Make::Tuple, items, pc)?),
+                Op::MakeList { items } => (items.start, self.make(Make::List, items, pc)?),
+                Op::MakeSet { items } => (items.start, self.make(Make::Set, items, pc)?),
+                Op::MakeMap { entries } => (entries.start, self.make(Make::Map, entries, pc)?),
                 Op::MakeRecord { fields, values } => (
                     values.start,
                     Kind::Record {
@@ -432,6 +441,7 @@ impl<'s> Reader<'s> {
                     Kind::Field {
                         target: Box::new(self.take(at)?),
                         field,
+                        miss: self.miss(pc),
                     },
                 ),
                 Op::Index { at, site } => {
@@ -525,10 +535,11 @@ impl<'s> Reader<'s> {
         Some(())
     }
 
-    fn make(&mut self, make: Make, items: RegRange) -> Option<Kind> {
+    fn make(&mut self, make: Make, items: RegRange, pc: u32) -> Option<Kind> {
         Some(Kind::Make {
             make,
             items: self.operands(items)?,
+            miss: self.miss(pc),
         })
     }
 

@@ -30,6 +30,27 @@ impl Lib {
         self.operation
     }
 
+    /// Whether it is the kernel's `same`, whose test of a value against the
+    /// empty tuple (`same(x, ())`, TypeScript's record guard and hole
+    /// test) is whether the value is a tuple of no members: a plan region
+    /// and an island answer that test without building the tuple.
+    pub(crate) fn is_same(&self) -> bool {
+        self.definition.name.as_str() == "same"
+            && matches!(self.run, LibRun::Native { .. })
+            && self.arity == 2
+    }
+
+    /// Whether it is `list.get`, whose answer on a list and a position the
+    /// list has is the item there: a plan region reads it from the arena
+    /// where the list is resident, as the native's own call reads it.
+    pub(crate) fn item_read(&self) -> bool {
+        self.definition.name.as_str() == "list.get"
+            && matches!(self.run, LibRun::Native { .. })
+            && self.arity == 2
+            && self.limit.is_none()
+            && self.prepared.is_none()
+    }
+
     /// What a call of `list.len` charges, whose answer on a list is that
     /// list's length: a region reads it from the arena where the list is
     /// resident, as the native's own call reads it, and charges the units

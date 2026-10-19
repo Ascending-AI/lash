@@ -23,8 +23,9 @@
 //! The callback's island is entered inline, from the region's own site.
 //!
 //! Its expressions are fused (FIG-6847): a variable or a constant operand
-//! is read in place rather than put in its register, and a call whose
-//! prepared entry answers is handed the values directly. What a form
+//! is read in place rather than put in its register, a call whose
+//! prepared entry answers is handed the values directly, and `list.len`
+//! and `list.get` of a resident list read the arena (FIG-6903). What a form
 //! computes goes to its register as the plan's code puts it, and a
 //! variable or constant operand goes to its register where the plan's
 //! general call reads it or where the plan may stand, so that what the
@@ -280,6 +281,51 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         Ok(self.machine.regs[at])
     }
 
+    /// `list.get` by `lib` on `args`, the list and the position, its value
+    /// to register `reg` where the plan's general call answers it: a
+    /// resident list's item at a position it has is read from the arena,
+    /// as that call's native reads it, at that call's verdict points, and
+    /// pinned where the call's register would hold it, as a fused call's
+    /// answer is. Out of line, so that the walk's hot forms keep their
+    /// code.
+    #[inline(never)]
+    fn item(&mut self, reg: u32, lib: LibId, args: &[Node]) -> Result<Value, PlanExit> {
+        let [list, index] = args else {
+            return Err(self.lost_form("a plan region's item read has no operands"));
+        };
+        let target = self.value(list)?;
+        let at = self.value(index)?;
+        let item = match (target, at) {
+            (Value::List(handle), Value::Int(position))
+                if position >= 0 && !self.machine.charging && self.machine.observer.is_none() =>
+            {
+                self.machine
+                    .arena
+                    .borrow()
+                    .item(handle, position as u64)
+                    .ok()
+                    .flatten()
+            }
+            _ => None,
+        };
+        if let Some(item) = item {
+            let verdicts = self
+                .machine
+                .reserve(0)
+                .and_then(|()| self.machine.capacity_check());
+            self.held(verdicts)?;
+            let pinned = self.machine.pin_value(&item);
+            self.held(pinned)?;
+            return Ok(item);
+        }
+        self.widen();
+        self.machine.put(self.base + list.reg as usize, target);
+        self.machine.put(self.base + index.reg as usize, at);
+        let out = self.base + reg as usize;
+        self.call_at(lib, out, 2)?;
+        Ok(self.machine.regs[out])
+    }
+
     /// The hole test `same(value, ())` by `lib` on `args`, its value to
     /// register `reg` where it builds the tuple.
     #[inline(always)]
@@ -338,6 +384,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             | NodeKind::Pin(_)
             | NodeKind::IsUnit { .. }
             | NodeKind::Length { .. } => return self.computed(node),
+            NodeKind::Item { lib, args } => return self.item(node.reg, *lib, args),
             NodeKind::Unit => self.tuple(node.reg, 0)?,
             NodeKind::Call { lib, args, .. } => {
                 self.operands(args)?;

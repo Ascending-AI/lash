@@ -9,7 +9,7 @@ use lash_kernel_exec::ActIx;
 use super::{Answer, Island, MAX_ARGS, Slots};
 use crate::compile::expr::{Arm, Callee, Close, Expr, Kind};
 use crate::compile::islands::{
-    Block, IslandPlan, Kind as StatementKind, MAX_SLOTS, Statement, held,
+    Block, IslandPlan, Kind as StatementKind, MAX_SLOTS, Statement, held, unit_test,
 };
 use crate::compile::{BlockId, CodeId, Entry, Executable, LibId, LibRun, ScalarTable, StmtId};
 
@@ -88,6 +88,8 @@ pub(super) enum CKind {
         close: Option<Close>,
         reg: u32,
     },
+    /// A statement no island runs: reaching it exits at its first op.
+    Cold { pc: u32 },
 }
 
 /// The depth check an operator's call makes (`K-BND-002`).
@@ -126,6 +128,17 @@ pub(super) struct NativeSite {
     /// What the call charges where it is `list.len`, whose answer on a
     /// resident list is read from the arena ([`crate::compile::Lib::length_read`]).
     pub(super) length: Option<u64>,
+}
+
+/// A compiled test `same(x, ())` of a value against the empty tuple,
+/// answered without building the tuple.
+pub(super) struct UnitSite {
+    pub(super) lib: LibId,
+    pub(super) close: Option<Close>,
+    /// Where an exit before it resumes: where the tuple's construction
+    /// resumes, the head of the region `close` closes when it has one.
+    pub(super) miss: u32,
+    pub(super) reg: u32,
 }
 
 /// A compiled island call.
@@ -201,6 +214,9 @@ fn statement(statement: &Statement, exe: &Executable) -> Option<CStatement> {
             close: *close,
             reg: *reg,
         },
+        StatementKind::Cold => CKind::Cold {
+            pc: exe.stmt(statement.id).ops.start,
+        },
     };
     Some(CStatement {
         id: statement.id,
@@ -230,6 +246,27 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             });
         }
         Kind::Const(value) => return Some(Operand::Const(*value)),
+        Kind::Operator {
+            lib, args, closes, ..
+        } if unit_test(Some(exe.lib(*lib)), args) => {
+            let [value, unit] = &args[..] else {
+                return None;
+            };
+            let Kind::Make { miss, .. } = unit.kind else {
+                return None;
+            };
+            let site = UnitSite {
+                lib: *lib,
+                close: closes.first().copied(),
+                miss,
+                reg,
+            };
+            let value = self::expr(value, exe)?;
+            Box::new(move |island, slots| {
+                let x = value.eval(island, slots)?;
+                island.unit_test(&site, x)
+            })
+        }
         Kind::Operator {
             lib,
             invoke,
@@ -283,6 +320,21 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 length: exe.lib(*lib).length_read(),
             };
             native(site, operands(args)?)
+        }
+        Kind::Field {
+            target,
+            field,
+            miss,
+        } => {
+            let target = self::expr(target, exe)?;
+            let (field, miss) = (field.ix(), *miss);
+            Box::new(move |island, slots| {
+                let x = target.eval(island, slots)?;
+                match island.field(x, field) {
+                    Some(value) => Ok(value),
+                    None => Err(island.at_held(miss, reg, x)),
+                }
+            })
         }
         Kind::Index {
             target,
@@ -378,7 +430,7 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 Ok(value)
             })
         }
-        Kind::Act | Kind::Make { .. } | Kind::Record { .. } | Kind::Field { .. } | Kind::Pin(_) => {
+        Kind::Act | Kind::Make { .. } | Kind::Record { .. } | Kind::Pin(_) => {
             return None;
         }
     }))

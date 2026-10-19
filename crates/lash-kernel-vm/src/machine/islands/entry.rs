@@ -19,6 +19,7 @@ use lash_kernel_state::paged::PhaseRecord;
 
 use super::super::ops::Flow;
 use super::super::session::Session;
+use super::super::sites::SiteCaches;
 use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
@@ -262,6 +263,7 @@ impl KernelMachine {
         let ground = Ground {
             exe,
             arena: &mut arena,
+            sites: &mut self.sites,
             session: &self.session,
             tape: recorder.filter(|_| charging),
             recorder,
@@ -470,6 +472,7 @@ impl KernelMachine {
 struct Ground<'a> {
     exe: &'a Executable,
     arena: &'a mut Arena,
+    sites: &'a mut SiteCaches,
     session: &'a Session,
     tape: Option<&'a ChargeTape>,
     recorder: Option<&'a ChargeTape>,
@@ -507,6 +510,7 @@ fn enter(
         exe,
         stream: exe.document_stream(),
         arena: ground.arena,
+        sites: ground.sites,
         session: ground.session,
         tape: ground.tape,
         recorder: ground.recorder,
@@ -655,6 +659,7 @@ impl Guests for RegionGuests<'_> {
         let ground = Ground {
             exe: self.exe,
             arena: &mut *cx.arena,
+            sites: &mut *cx.sites,
             session: self.session,
             tape: self.tape,
             recorder: self.recorder,

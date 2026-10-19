@@ -1746,6 +1746,50 @@ fn typescript_for_of_over_an_array_runs_in_its_region_as_python_for_in_does() {
     );
 }
 
+/// FIG-6903: TypeScript callbacks that read a record's field run as
+/// islands (`docs/design/kernel-regions.md` §1, call island): the
+/// comparator a sort applies and the callbacks map and filter apply read
+/// the field in place behind the lowering's record guard, its
+/// `same(x.__ts_brand, ())` answered without building the tuple, and its
+/// fallback statements cold. Each forms an island, its natural run enters
+/// them, and under PLAN-INDEP's sweep it runs as the reference runs it:
+/// end, charge, tape and images, where the callbacks stay in their islands
+/// and where they leave them (no record, a branded one, a missing field, a
+/// field no island frame holds, a raise).
+#[test]
+fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (lowered, program, callbacks) in crate::helper_plans::record_field_island_programs() {
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        let plans = formed_alike(&on, &off, &case);
+        assert!(
+            plans.1 >= callbacks,
+            "{}: {} call islands form for its {callbacks} record callbacks",
+            case.name,
+            plans.1
+        );
+        for call_depth in [3, 16] {
+            case.environment.bounds.call_depth = call_depth;
+            let work = check(&on, &off, &case, &mut counts, &mut failures);
+            if call_depth == 16 {
+                ran(&case.name, plans, work, &mut failures);
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+}
+
 macro_rules! program_shards {
     ($($name:ident: $shard:expr),+ $(,)?) => {
         $(

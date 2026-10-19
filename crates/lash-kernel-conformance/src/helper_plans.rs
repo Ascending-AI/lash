@@ -1516,9 +1516,48 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "function negate(value) { return -value; }\nfunction run() {\n  const obj = {};\n  obj.push = Array.prototype.push;\n  const length = obj.push(negate(1), negate(2));\n  return [length, obj.length, obj[0], obj[1]];\n}\nconst result = run();\n",
         ),
     ];
-    sources
+    lowered_islands(&sources)
+}
+
+/// FIG-6903: lowered TypeScript programs whose callbacks read a record's
+/// field, each a `(dialect, name, source)` with how many of its callbacks
+/// do: a comparator a sort applies and the callbacks map and filter apply
+/// run as islands, reading the field in place behind the lowering's record
+/// guard, and leave them where the reference reads it (no record, a
+/// branded one, a field no island frame holds) or raises.
+pub(crate) fn record_field_island_programs() -> Vec<(runner::Case, Program, usize)> {
+    let sources = [
+        (
+            (
+                "typescript",
+                "record field comparators and maps",
+                "function run() {\n  const xs = [{ id: 0, key: 2 }, { key: 1, id: 1 }, { id: 2, key: 2 }, { id: 3, key: 0 }];\n  xs.sort((p, q) => p.key - q.key);\n  return [xs.map((r) => r.id), xs.filter((r) => r.key < 2).length];\n}\nconst result = run();\n",
+            ),
+            3,
+        ),
+        (
+            (
+                "typescript",
+                "record field callbacks leaving their islands",
+                "function run() {\n  const keys = [{ key: 3 }, 7, new Date(5), { other: 2 }, { key: \"a text longer than fourteen bytes\" }].map((r) => r.key);\n  let raised = \"none\";\n  try { [{ key: 1 }].map((r) => r.key.z.w); } catch (e) { raised = \"caught\"; }\n  return [keys, raised];\n}\nconst result = run();\n",
+            ),
+            2,
+        ),
+    ];
+    let (sources, callbacks): (Vec<_>, Vec<_>) = sources.into_iter().unzip();
+    lowered_islands(&sources)
         .into_iter()
-        .map(|(dialect, name, source)| {
+        .zip(callbacks)
+        .map(|((case, program), callbacks)| (case, program, callbacks))
+        .collect()
+}
+
+/// Each `(dialect, name, source)` of `sources`, lowered as an island
+/// program.
+fn lowered_islands(sources: &[(&str, &str, &str)]) -> Vec<(runner::Case, Program)> {
+    sources
+        .iter()
+        .map(|&(dialect, name, source)| {
             let runner = runner::Runner::new(dialect).unwrap();
             let case = runner::Case {
                 id: format!("{dialect} islands: {name}"),

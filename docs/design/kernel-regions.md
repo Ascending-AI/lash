@@ -76,7 +76,15 @@ of region are built from one unit.
   measured formulas, natives with no operation by their prepared entry or a
   call that builds nothing, list and tuple item reads, and reads of session
   bindings (§3.6), so a top-level function that calls itself through its
-  binding runs as an island.
+  binding runs as an island. It reads a record's field through the read
+  site's property cache, as the reference reads it, where the record has
+  resolved the key, and answers `same(x, ())`, TypeScript's record guard,
+  as whether `x` is the empty tuple, without building the tuple, charging
+  `same`'s formula with the tuple measured as the empty construction it is
+  (FIG-6903). A statement of an `if`'s block that is no region statement
+  is cold, as a conditional arm of other ops is: reaching it exits at its
+  first op once its unit is charged, so a guard's fallback (`ts.read` of a
+  record the island cannot read in place) leaves the body an island.
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host
@@ -258,7 +266,8 @@ opcode fast path outside regions too.
     would pass the bound, the frames stand at that step end and the step
     ends. At an op the island cannot run (a guard miss, a value that would
     raise or that no island frame holds (§3.5), a charge that would pass the
-    bound, a callee with no island, a depth bound), the top frame stands in its statement at that
+    bound, a callee with no island, a depth bound, a field the record has
+    not resolved, the first op of a cold statement), the top frame stands in its statement at that
     op with the registers it holds there, and the reference runs the
     statement on from that op in the same step, with islands held off until
     the step ends. The v1 all-or-nothing exit, with its per-slice abort

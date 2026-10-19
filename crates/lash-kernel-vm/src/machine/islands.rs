@@ -42,15 +42,17 @@ use lash_kernel_state::arena::Arena;
 
 use super::frames::Role;
 use super::session::Session;
+use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{CBlock, CKind, CStatement, CallSite, Depth, NativeSite, OperatorSite};
+use compiled::{CBlock, CKind, CStatement, CallSite, Depth, NativeSite, OperatorSite, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_SLOTS, held};
 use crate::compile::{
-    BlockId, Charge, CodeId, Executable, Fast, Lib, LibRun, measured_formula, position, scalar,
+    BlockId, Charge, CodeId, Executable, Fast, Fresh, Lib, LibRun, find_property, measured_formula,
+    position, scalar,
 };
 use crate::compile::{StmtId, Stream};
 use crate::observe::ChargeTape;
@@ -193,6 +195,9 @@ struct Island<'a> {
     stream: &'a Stream,
     /// The run's arena: a closure whose code a call finds keeps it there.
     arena: &'a mut Arena,
+    /// The machine's property caches, which a field read reads and keeps
+    /// as the reference's does.
+    sites: &'a mut SiteCaches,
     /// The session overlay its binding reads take resident values from.
     session: &'a Session,
     tape: Option<&'a ChargeTape>,
@@ -432,7 +437,14 @@ impl Island<'_> {
         if !self.charging {
             return Some((value, 0));
         }
-        let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
+        // As a loop region charges a prepared answer: the units its guard
+        // certified, the formula over values that carry their measurements,
+        // or the formula measured in the arena.
+        let units = match answer
+            .scalar_sizes
+            .and_then(|mask| fast.scalar_units(mask))
+            .or_else(|| fast.immediate(args, Fresh::default(), &value))
+        {
             Some(units) => units,
             None => match fast.charge(&function.charge, args, &value) {
                 Charge::Units(units) => units,
@@ -554,6 +566,65 @@ impl Island<'_> {
         };
         let value = self.arena.item(object, position(&at)?).ok()??;
         held(&value).then_some(value)
+    }
+
+    /// The field of `target` that the stream's field read `field` names,
+    /// when the frame may hold it;
+    /// `None` where the reference reads it: no record, a key the record
+    /// has not resolved, or a value the arena cannot read where it is. A
+    /// record's field is read through its site's property cache, as the
+    /// reference reads it.
+    #[inline(always)]
+    fn field(&mut self, target: Value, field: usize) -> Option<Value> {
+        let Value::Record(record) = target else {
+            return None;
+        };
+        let field = self.stream.fields.get(field)?;
+        if self.arena.unresolved_key(record, &field.key).ok()? {
+            return None;
+        }
+        let slot = field.site.and_then(|site| self.sites.slot(site));
+        let (value, found) = find_property(self.arena, record, slot, &field.key).ok()?;
+        if let Some(site) = field.site
+            && found != slot
+        {
+            self.sites.keep(site, found);
+        }
+        let value = value.unwrap_or(Value::Absent);
+        held(&value).then_some(value)
+    }
+
+    /// The test `same(value, ())` of `site`: false for any value but a
+    /// tuple, which `same` compares member by member, charged its region
+    /// and its formula with the tuple measured as the empty construction
+    /// it is; or a stop where the tuple's construction resumes, before
+    /// anything is charged, where the value is a tuple, its formula
+    /// measures what the arena holds, or the charge would pass the bound.
+    #[inline(always)]
+    fn unit_test(&mut self, site: &UnitSite, value: Value) -> Answer {
+        let answer = Value::Bool(false);
+        let units = if matches!(value, Value::Tuple(_)) {
+            None
+        } else if self.charging {
+            self.exe
+                .lib(site.lib)
+                .prepared
+                .as_ref()
+                .and_then(|(_, fast)| {
+                    fast.immediate(&[value, Value::Absent], Fresh::of(0b10), &answer)
+                })
+        } else {
+            Some(0)
+        };
+        let fixed = site.close.map_or(0, |close| u64::from(close.total));
+        let Some(units) = units.filter(|units| self.fits(fixed.saturating_add(*units))) else {
+            return Err(self.at_held(site.miss, site.reg, value));
+        };
+        if let Some(close) = &site.close {
+            self.close(close);
+        }
+        self.formula(units);
+        Ok(answer)
     }
 
     /// A stop at op `pc`, the frame holding operands `args` from register
@@ -968,6 +1039,10 @@ fn run_statement(
                 return Err(island.stand(stmt, stop));
             }
             Ok(Next::Done(statement.leaves))
+        }
+        CKind::Cold { pc } => {
+            let stop = island.at(*pc);
+            Err(island.stand(stmt, stop))
         }
     }
 }

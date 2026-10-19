@@ -130,6 +130,11 @@ pub(crate) enum NodeKind {
     /// answers by its general call: a resident list's length is read from
     /// the arena ([`Lib::length_read`]), with that call's verdict points.
     Length { lib: LibId, list: Box<Node> },
+    /// `list.get` by `lib` on its two arguments, the list and the
+    /// position, which the plan answers by its general call: a resident
+    /// list's item at a position it has is read from the arena
+    /// ([`Lib::item_read`]), with that call's verdict points.
+    Item { lib: LibId, args: Box<[Node]> },
     /// The statement's root action: the callback in plan variable
     /// `callee`, applied at site `site` to the arguments after it. The
     /// region writes that variable nowhere when `steady`: it holds the
@@ -163,6 +168,7 @@ impl Node {
                 return value.span().max(self.reg + 1);
             }
             NodeKind::IsUnit { args, .. }
+            | NodeKind::Item { args, .. }
             | NodeKind::Call { args, .. }
             | NodeKind::Apply { args, .. }
             | NodeKind::Invoke { args, .. } => args,
@@ -178,6 +184,7 @@ impl Node {
             NodeKind::Local(_) | NodeKind::Const(_) => 0,
             // The tuple it compares with is built only where it widens.
             NodeKind::IsUnit { args, .. } => args.first().map_or(0, Node::fused),
+            NodeKind::Item { args, .. } => args.iter().map(Node::fused).max().unwrap_or(0),
             NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => value.fused(),
             NodeKind::Call {
                 args,
@@ -198,9 +205,9 @@ impl Node {
             NodeKind::Local(_) | NodeKind::Const(_) | NodeKind::Unit => false,
             NodeKind::Apply { .. } | NodeKind::Invoke { .. } => true,
             NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => value.stands(),
-            NodeKind::IsUnit { args, .. } | NodeKind::Call { args, .. } => {
-                args.iter().any(Node::stands)
-            }
+            NodeKind::IsUnit { args, .. }
+            | NodeKind::Item { args, .. }
+            | NodeKind::Call { args, .. } => args.iter().any(Node::stands),
         }
     }
 }
@@ -269,6 +276,7 @@ impl Node {
                 }
             }
             NodeKind::IsUnit { args, .. }
+            | NodeKind::Item { args, .. }
             | NodeKind::Call { args, .. }
             | NodeKind::Invoke { args, .. } => {
                 for arg in args {
@@ -651,6 +659,7 @@ impl Former<'_, '_> {
             Kind::Make {
                 make: Make::Tuple,
                 items,
+                ..
             } if items.is_empty() => NodeKind::Unit,
             Kind::Operator { lib, args, .. } if site.is_some() => {
                 self.invoked(id, site?, expr.reg, lib, args)?
@@ -673,7 +682,7 @@ impl Former<'_, '_> {
         let node = self.node(id, expr)?;
         Some(match node.kind {
             NodeKind::Call { lib, args, .. }
-                if (self.lib)(lib).is_some_and(|lib| lib.definition.name.as_str() == "same")
+                if (self.lib)(lib).is_some_and(Lib::is_same)
                     && args.len() == 2
                     && matches!(args[1].kind, NodeKind::Unit) =>
             {
@@ -694,7 +703,8 @@ impl Former<'_, '_> {
     }
 
     /// The general call of `lib` on `args`: a resident list's length read
-    /// where it is `list.len`; otherwise fused by the prepared entry it
+    /// where it is `list.len`, and its item read where it is `list.get`;
+    /// otherwise fused by the prepared entry it
     /// takes first, where it takes one (a call of every parameter, no
     /// operation, whose entry answers at the plan's depth) and no operand
     /// stands the plan at a site.
@@ -707,6 +717,9 @@ impl Former<'_, '_> {
                 lib,
                 list: Box::new(list),
             });
+        }
+        if function.item_read() && in_place && args.len() == 2 {
+            return Some(NodeKind::Item { lib, args });
         }
         let direct = function
             .prepared

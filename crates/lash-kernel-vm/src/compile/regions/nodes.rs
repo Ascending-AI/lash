@@ -333,7 +333,7 @@ pub(super) fn compile(
             };
             guest_call(guest?.clone(), read, nodes(args, &mut node)?)?
         }
-        Kind::Make { make, items } => {
+        Kind::Make { make, items, .. } => {
             let items = nodes(items, &mut node)?;
             match make {
                 Make::Tuple => tuple(items),
@@ -351,7 +351,7 @@ pub(super) fn compile(
                 .collect::<Option<Box<[Value]>>>()?;
             record(names, nodes(values, &mut node)?)
         }
-        Kind::Field { target, field } => {
+        Kind::Field { target, field, .. } => {
             let field = stream.fields.get(field.ix())?;
             self::field(field, node(target)?)
         }

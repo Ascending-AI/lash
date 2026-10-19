@@ -67,7 +67,7 @@ impl Entry {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn answer(
         &self,
         args: &[Value],

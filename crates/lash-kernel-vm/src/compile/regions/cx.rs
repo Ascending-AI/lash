@@ -148,6 +148,7 @@ impl Cx<'_> {
     /// anything is collected where the room does not admit that least,
     /// which leaves the statement to the reference, whose verdict decides
     /// (FIG-6791).
+    #[inline(always)]
     pub(super) fn collecting<T>(
         &mut self,
         kind: ValueKind,
@@ -304,6 +305,7 @@ impl Cx<'_> {
     /// evaluated in place, `fresh` those of them that are constructions of
     /// no members: its prepared entry answers them directly, and only a
     /// general call after a decline takes an operand window.
+    #[inline(always)]
     pub(super) fn operate_on(
         &mut self,
         function: &Lib,
@@ -355,6 +357,7 @@ impl Cx<'_> {
     /// ([`Lib::length_read`]): a resident list's length read from the
     /// arena, as the native's call reads it, and charged as
     /// [`Self::general`] charges it; its general call otherwise.
+    #[inline(always)]
     pub(super) fn length(&mut self, function: &Lib, units: u64, value: Value) -> Option<Value> {
         if let Value::List(list) = value
             && let Ok(length) = self.arena.len(list)

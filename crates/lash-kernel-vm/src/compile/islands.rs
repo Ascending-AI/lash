@@ -22,22 +22,27 @@
 //! or `Op::Nested` of an operator), helper calls whose prepared entry has a
 //! scalar table (`call lib`, counted), general calls of natives that build
 //! nothing (`Op::Call`), reads of a list's or a tuple's items, calls of
-//! closures and declared functions (counted), conditional expressions and
-//! expression locals. A
+//! closures and declared functions (counted), conditional expressions,
+//! expression locals, field reads of records whose key is resolved, and
+//! `same(x, ())`, the test of a value against the empty tuple, answered
+//! without building the tuple. A
 //! conditional arm of other ops is cold: taking it exits there. Every other
 //! op is a barrier, which no plan contains. Island statements are `return`,
 //! `set` and `let` of unshared variables, `if`, and `do`, which discards
-//! its value.
+//! its value. Inside an `if`'s block, any other statement is cold: reaching
+//! it exits at its first op, after its unit, as a cold arm exits, so a
+//! guard's fallback (TypeScript's `ts.read` of a record it cannot read in
+//! place) leaves the body an island.
 
 use std::sync::OnceLock;
 
 use lash_kernel_doc::{Unit, Value};
 use lash_kernel_exec::{Op, Reg};
 
-use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind};
+use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind, Make};
 use super::{
-    BlockId, CodeId, Executable, Form, LibId, LibRun, NestedCallee, NestedKind, Prepared, Stmt,
-    StmtId, Tables,
+    BlockId, CodeId, Executable, Form, Lib, LibId, LibRun, NestedCallee, NestedKind, Prepared,
+    Stmt, StmtId, Tables,
 };
 use crate::machine::islands::Compiled;
 
@@ -116,6 +121,9 @@ pub(crate) enum Kind {
         close: Option<Close>,
         reg: u32,
     },
+    /// A statement of an `if`'s block that no island runs: reaching it
+    /// exits at its first op, which the reference runs as its step does.
+    Cold,
 }
 
 #[derive(Clone)]
@@ -202,7 +210,7 @@ pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32
             readable,
             writable,
         };
-        let Some(body) = former.block(code.body) else {
+        let Some(body) = former.block(code.body, false) else {
             continue;
         };
         let plan = IslandPlan {
@@ -262,6 +270,19 @@ struct Former<'a> {
     writable: Vec<bool>,
 }
 
+/// Whether `lib` called on `args` is `same(x, ())`, the test of a value
+/// against the empty tuple its second operand builds, which an island
+/// answers without building it: the kernel's `same`, with its prepared
+/// entry's charge.
+pub(crate) fn unit_test(function: Option<&Lib>, args: &[Expr]) -> bool {
+    function.is_some_and(|function| function.is_same() && function.prepared.is_some())
+        && matches!(
+            args,
+            [_, Expr { kind: ExprKind::Make { make: Make::Tuple, items, .. }, .. }]
+                if items.is_empty()
+        )
+}
+
 /// Whether an island op closes at most one region: a head closes the
 /// region before it with nothing charged between, which no island charges.
 fn single(closes: &[Close]) -> Option<Option<Close>> {
@@ -273,12 +294,29 @@ fn single(closes: &[Close]) -> Option<Option<Close>> {
 }
 
 impl Former<'_> {
-    fn block(&mut self, id: BlockId) -> Option<Block> {
+    /// Block `id`'s plan: an `if`'s block when `nested`, whose statements
+    /// no island runs are cold; a body's otherwise, which has none.
+    fn block(&mut self, id: BlockId, nested: bool) -> Option<Block> {
         let block = &self.tables.blocks[(id.0 - self.blocks) as usize];
         let statements = block
             .stmts
             .iter()
-            .map(|stmt| self.statement(*stmt))
+            .map(|stmt| {
+                let (calls, sites) = (self.calls.len(), self.sites);
+                match self.statement(*stmt) {
+                    Some(statement) => Some(statement),
+                    None if nested => {
+                        self.calls.truncate(calls);
+                        self.sites = sites;
+                        Some(Statement {
+                            id: *stmt,
+                            leaves: 0,
+                            kind: Kind::Cold,
+                        })
+                    }
+                    None => None,
+                }
+            })
             .collect::<Option<_>>()?;
         Some(Block {
             id,
@@ -325,8 +363,8 @@ impl Former<'_> {
                     close,
                     pc: end,
                     reg: cond.0,
-                    then_: self.block(then_block)?,
-                    else_: self.block(else_block)?,
+                    then_: self.block(then_block, true)?,
+                    else_: self.block(else_block, true)?,
                 }
             }
             (Form::Plain, Op::End) => Kind::Discard {
@@ -374,6 +412,19 @@ impl Former<'_> {
                 invoke,
                 args,
                 closes,
+            } if unit_test(self.library.get_lib(*lib), args) => {
+                single(closes)?;
+                // An operator's own op, or its invoke that counts nothing.
+                if invoke.is_some_and(|invoke| invoke.call || !invoke.operator) {
+                    return None;
+                }
+                self.admit(&mut args[0])
+            }
+            ExprKind::Operator {
+                lib,
+                invoke,
+                args,
+                closes,
             } => {
                 for arg in args.iter_mut() {
                     self.admit(arg)?;
@@ -403,6 +454,7 @@ impl Former<'_> {
                 self.admit(target)?;
                 self.admit(index)
             }
+            ExprKind::Field { target, .. } => self.admit(target),
             ExprKind::Call {
                 invoke,
                 callee,
@@ -447,11 +499,9 @@ impl Former<'_> {
                 self.admit(value)?;
                 self.admit(body)
             }
-            ExprKind::Act
-            | ExprKind::Make { .. }
-            | ExprKind::Record { .. }
-            | ExprKind::Field { .. }
-            | ExprKind::Pin(_) => None,
+            ExprKind::Act | ExprKind::Make { .. } | ExprKind::Record { .. } | ExprKind::Pin(_) => {
+                None
+            }
         }
     }
 
@@ -608,6 +658,7 @@ fn verify_block(
                 verify_block(then_, stream, calls)?;
                 verify_block(else_, stream, calls)?;
             }
+            Kind::Cold => {}
         }
     }
     Ok(())
