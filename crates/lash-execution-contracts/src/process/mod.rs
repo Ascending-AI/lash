@@ -42,7 +42,7 @@ pub use engine::{
     AdmittedProcessIdentity, InlineDefinition, InlineStarts, InspectedProcessDefinition,
     PerformedEffects, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
     ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessExecutionDocumentRead,
-    ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
+    ProcessInfraError, ProcessRunOutcome, ProcessTraceClass, SettledRan,
 };
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,

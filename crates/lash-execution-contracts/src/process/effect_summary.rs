@@ -540,7 +540,7 @@ pub(super) fn vocabulary_version_schema() -> serde_json::Value {
 }
 
 /// The engine owns the occurrence token; admission only bounds its envelope.
-fn occurrence_schema() -> serde_json::Value {
+pub(super) fn occurrence_schema() -> serde_json::Value {
     serde_json::json!({ "type": "string", "pattern": "^e:([0-9a-f]{2})+$" })
 }
 

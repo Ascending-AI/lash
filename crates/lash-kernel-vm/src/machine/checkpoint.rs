@@ -53,6 +53,9 @@ impl Machine for KernelMachine {
     fn take_path(&mut self) -> Result<crate::ExecutionPath, HeapFault> {
         KernelMachine::take_execution_path(self)
     }
+    fn take_caught(&mut self) -> Vec<WaitId> {
+        KernelMachine::take_caught(self)
+    }
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         if self.ended {
             return Err(MachineError::Ended);
@@ -390,6 +393,7 @@ impl KernelMachine {
             observer: None,
             ran: Vec::new(),
             raised: None,
+            catches: Default::default(),
             #[cfg(test)]
             boundary: None,
             #[cfg(test)]

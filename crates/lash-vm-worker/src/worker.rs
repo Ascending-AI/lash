@@ -729,6 +729,7 @@ impl<'embedding> Server<'embedding> {
             printed: Vec::new(),
             ran: lash_kernel_vm::SiteCounts::new(),
             path: lash_kernel_vm::ExecutionPath::default(),
+            caught: Vec::new(),
             sites: hosted
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
@@ -744,6 +745,9 @@ impl<'embedding> Server<'embedding> {
             })?;
         if hosted.observe_sites || !matches!(step, Step::Slice) {
             host.ran.extend(hosted.machine.take_counts());
+        }
+        if !matches!(step, Step::Slice) {
+            host.caught = lash_kernel_vm::Machine::take_caught(&mut hosted.machine);
         }
         if hosted.path.is_some() {
             host.path = lash_kernel_vm::Machine::take_path(&mut hosted.machine)

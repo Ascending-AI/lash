@@ -99,19 +99,22 @@ fn effect_class(
 }
 
 /// Record the statement starts the engine step `step` counted on `tx`, the
-/// transaction that hands its settled output to the engine: once, under the
-/// step, so a recomputed pass appends nothing new (FIG-6370).
+/// transaction that hands its settled output to the engine, with the
+/// occurrences it recovered from: once, under the step, so a recomputed
+/// pass appends nothing new (FIG-6370, FIG-6817). A step that counted
+/// nothing records nothing.
 pub(super) fn record_ran(
     tx: &mut ActorTx,
     process: &ProcessId,
     step: &lash_execution_contracts::process::StepName,
-    ran: Vec<(u32, u64)>,
+    settled: lash_execution_contracts::process::SettledRan,
     fleet: crate::FleetFormat,
 ) {
-    if ran.is_empty() {
+    if settled.ran.is_empty() {
         return;
     }
-    let ran = lash_execution_contracts::process::ProcessRan::new(ran, fleet);
+    let ran = lash_execution_contracts::process::ProcessRan::new(settled.ran, fleet)
+        .with_caught(settled.caught);
     append_event(
         tx,
         process,

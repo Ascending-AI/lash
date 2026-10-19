@@ -227,6 +227,10 @@ pub trait Machine: Sized {
     /// Takes exact counts since the previous take or live observer delivery.
     fn take_counts(&mut self) -> crate::SiteCounts;
     fn take_path(&mut self) -> Result<crate::ExecutionPath, HeapFault>;
+    /// Takes the waits whose failed outcome a `catch` recovered from since
+    /// the previous take, in order (FIG-6817). Taken at a park or an end:
+    /// a catch block still running there has recovered.
+    fn take_caught(&mut self) -> Vec<WaitId>;
 
     /// Exact slices count charge units; Off slices count machine steps.
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;

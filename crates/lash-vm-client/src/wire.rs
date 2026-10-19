@@ -197,6 +197,10 @@ pub struct Sites {
         skip_serializing_if = "lash_kernel_vm::ExecutionPath::is_empty"
     )]
     pub path: lash_kernel_vm::ExecutionPath,
+    /// The waits whose failed outcome a `catch` recovered from, carried by
+    /// the frame of a park or an end (FIG-6817).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub caught: Vec<lash_kernel_vm::WaitId>,
 }
 
 /// How a carried session names one of its pages: under a capability the

@@ -447,11 +447,13 @@
       ]
     },
     "ActionState": {
+      "description": "What an occurrence of an action did. `Recovered` is a failure whose\nerror a `catch` took, so the run went on (FIG-6817): the process\noverlay's `recovered` row. `Failed` is a failure nothing recovered from.",
       "enum": [
         "running",
         "waiting",
         "completed",
         "failed",
+        "recovered",
         "cancelled",
         "incomplete"
       ],

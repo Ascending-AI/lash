@@ -154,7 +154,12 @@ export type ActionObservation = {
  */
 export type ActionRole = ("effect" | "wait" | "sub_workflow" | "library" | "task");
 
-export type ActionState = ("running" | "waiting" | "completed" | "failed" | "cancelled" | "incomplete");
+/**
+ * What an occurrence of an action did. `Recovered` is a failure whose
+ * error a `catch` took, so the run went on (FIG-6817): the process
+ * overlay's `recovered` row. `Failed` is a failure nothing recovered from.
+ */
+export type ActionState = ("running" | "waiting" | "completed" | "failed" | "recovered" | "cancelled" | "incomplete");
 
 /**
  * One action.

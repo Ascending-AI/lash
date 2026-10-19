@@ -1710,8 +1710,12 @@ fn engine_failure(
 
 #[async_trait::async_trait]
 impl lash_execution_contracts::process::ProcessEngine for StateEngine {
-    fn settled_ran(&self, _kind: &EngineStepKind, _output: &SettledOutput) -> Vec<(u32, u64)> {
-        Vec::new()
+    fn settled_ran(
+        &self,
+        _kind: &EngineStepKind,
+        _output: &SettledOutput,
+    ) -> lash_execution_contracts::process::SettledRan {
+        Default::default()
     }
 
     fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {

@@ -478,6 +478,35 @@ means the process ended without an observed terminal for that action. Its first
 committed entry and latest settlement name event sequences; hosts read times
 from those events. Tasks spawned at one site remain separate rows.
 
+A failed occurrence whose error a `catch` took, so the run went on, is
+`recovered` (`ActionState::Recovered` in the view); draw it as a handled
+failure, not as the one that ended the run. Lash reports it directly, so do
+not infer it from a catch block's coverage. The error a call fails with is
+raised at its wait action and unwinds to the first `catch` that takes it,
+the same rule that names a run's failing site. That catch recovered from it
+when its block is left by anything but a raise (it ends, returns, breaks or
+continues out) or when its block waits, for example on a fallback call.
+The occurrence stays `failed` when:
+
+- nothing took the error, so it ended its task;
+- the catch that took it raised again before its block waited: `throw
+  error`, a bare `raise`, or a Python `except` none of whose clauses
+  matched. When it raised the same error again, an outer `catch` that takes
+  it recovers from it;
+- the call failed inside a catch block with no `try` around it of its own:
+  the enclosing `try` already took its error;
+- it ended a spawned task: the `join` that observes that task raises its
+  own error at the join.
+
+The evidence is committed. The `process.ran` of the run segment that caught
+the error names the occurrence in its `caught` list, and the occurrence's
+own `process.effect_outcome`, committed before that segment ran, stays a
+failure. Until that segment commits, the row reads `failed`. A recovered
+row survives a feed gap and a reload like any committed fact. Only a run
+observed at `counts` records its catches: at `off`, as coverage reports
+nothing, a caught failure reads `failed`. Across several occurrences of
+one action, the view's activity state shows a failure over a recovery.
+
 Lash stores no wall time on an occurrence, and a row's `first_entered` and
 `last_settled` span all its occurrences. One effect attempt joins on its
 `EffectId` across the process events you store, each timed by its own

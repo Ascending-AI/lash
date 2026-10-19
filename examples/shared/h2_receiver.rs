@@ -36,8 +36,8 @@ impl ProcessEngine for ReceiverEngine {
         &self,
         _kind: &lash::plugins::EngineStepKind,
         _output: &lash::plugins::SettledOutput,
-    ) -> Vec<(u32, u64)> {
-        Vec::new()
+    ) -> lash::plugins::SettledRan {
+        Default::default()
     }
 
     fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
@@ -180,8 +180,8 @@ impl ProcessEngine for SourceEngine {
         &self,
         _kind: &lash::plugins::EngineStepKind,
         _output: &lash::plugins::SettledOutput,
-    ) -> Vec<(u32, u64)> {
-        Vec::new()
+    ) -> lash::plugins::SettledRan {
+        Default::default()
     }
 
     fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
@@ -333,8 +333,8 @@ impl ProcessEngine for SleeperEngine {
         &self,
         _kind: &lash::plugins::EngineStepKind,
         _output: &lash::plugins::SettledOutput,
-    ) -> Vec<(u32, u64)> {
-        Vec::new()
+    ) -> lash::plugins::SettledRan {
+        Default::default()
     }
 
     fn trace_class(&self) -> lash::plugins::ProcessTraceClass {

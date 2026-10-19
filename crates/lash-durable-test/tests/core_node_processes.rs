@@ -1154,8 +1154,8 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
-    ) -> Vec<(u32, u64)> {
-        Vec::new()
+    ) -> lash_execution_contracts::process::SettledRan {
+        Default::default()
     }
 
     fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {

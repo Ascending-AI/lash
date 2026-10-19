@@ -116,6 +116,7 @@ pub(crate) fn start(
         observer: None,
         ran: Vec::new(),
         raised: None,
+        catches: Default::default(),
         #[cfg(test)]
         boundary: None,
         #[cfg(test)]

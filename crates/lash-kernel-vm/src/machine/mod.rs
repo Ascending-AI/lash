@@ -10,6 +10,7 @@
 //! step.
 
 mod actions;
+mod catches;
 mod checkpoint;
 mod exec;
 mod frames;
@@ -467,6 +468,9 @@ pub struct KernelMachine {
     /// The task whose raise the running step carries, and where it
     /// stands (`raises`): never saved.
     raised: Option<(TaskId, raises::Coordinate)>,
+    /// The failed waits of this run segment and the catches that took
+    /// them (`catches`): never saved.
+    catches: catches::Catches,
     /// What a law has the run do at each statement boundary (FIG-6318).
     #[cfg(test)]
     pub(crate) boundary: Option<Box<dyn FnMut(u64) -> Boundary>>,

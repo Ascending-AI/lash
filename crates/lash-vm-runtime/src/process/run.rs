@@ -229,6 +229,7 @@ fn ended(
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
             ran: lash_kernel_vm::SiteCounts::new(),
+            caught: Vec::new(),
             reads: None,
             start: None,
         },
@@ -319,9 +320,16 @@ async fn kernel_run(
             trace.delivered(delivery);
         }
     }
-    let start = (settings.observe == lash_kernel_vm::ObservationMode::Counts)
+    let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
+    let start = counts
         .then(|| recorded_start(process_input.document, &input))
         .flatten();
+    // A recovered wait is reported by the occurrence it was delivered as.
+    let delivered: Vec<(lash_protocol_types::WaitId, lash_kernel_doc::EffectId)> = input
+        .deliver
+        .iter()
+        .map(|delivery| (delivery.wait, delivery.identity.clone()))
+        .collect();
     let host = Arc::new(StepHost {
         trace: trace.clone(),
         now_ms: run.now.0,
@@ -371,10 +379,24 @@ async fn kernel_run(
         step,
         parked: state,
         ran,
+        caught,
         ..
     } = match driven {
         Ok(driven) => driven,
         Err(failure) => return worker_failure(failure),
+    };
+    let caught = if counts {
+        caught
+            .iter()
+            .filter_map(|wait| {
+                delivered
+                    .iter()
+                    .find(|(delivered, _)| delivered == wait)
+                    .map(|(_, at)| at.clone())
+            })
+            .collect()
+    } else {
+        Vec::new()
     };
     let reads = host.tape();
     let start = start.map(Box::new);
@@ -388,6 +410,7 @@ async fn kernel_run(
                 KernelRunOutput::Ended {
                     outcome: Box::new(outcome),
                     ran,
+                    caught,
                     reads,
                     start,
                 },
@@ -422,6 +445,7 @@ async fn kernel_run(
                     issued,
                     withdrawn,
                     ran,
+                    caught,
                     reads,
                     start,
                 },
@@ -486,6 +510,8 @@ pub(super) struct Driven {
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
     pub(super) ran: lash_kernel_vm::SiteCounts,
     pub(super) path: lash_kernel_vm::ExecutionPath,
+    /// The waits whose failed outcome a `catch` recovered from.
+    pub(super) caught: Vec<lash_protocol_types::WaitId>,
 }
 
 /// Starts or resumes the machine over a page activation of the process's
@@ -591,7 +617,11 @@ pub(super) async fn run_machine(
             }
             MachineStep::Ended(_) => None,
         };
-        let (ran, path) = (machine.take_ran(), machine.take_path());
+        let (ran, path, caught) = (
+            machine.take_ran(),
+            machine.take_path(),
+            machine.take_caught(),
+        );
         if !matches!(step, MachineStep::Slice) {
             machine.release().await?;
         }
@@ -600,6 +630,7 @@ pub(super) async fn run_machine(
             parked,
             ran,
             path,
+            caught,
         });
     }
 }

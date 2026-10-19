@@ -374,13 +374,16 @@ pub(crate) enum StartedFrom {
 }
 
 /// What a segment recorded for observation at `observe: counts`: its
-/// statement-start delta, its host reads and its start. Every part is empty
-/// at `off`, and in an output recorded before they existed.
+/// statement-start delta, the occurrences it recovered from, its host
+/// reads and its start. Every part is empty at `off`, and in an output
+/// recorded before they existed.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Observed<'a> {
     /// The segment's statement starts and empty-block entries, by document
     /// site ordinal.
     pub(crate) ran: &'a lash_kernel_vm::SiteCounts,
+    /// The occurrences whose failed outcome a `catch` recovered from.
+    pub(crate) caught: &'a [EffectId],
     pub(crate) reads: Option<&'a HostReads>,
     pub(crate) start: Option<&'a RecordedStart>,
 }
@@ -449,6 +452,10 @@ pub(crate) enum KernelRunOutput {
         /// document site ordinal, at `observe: counts` (FIG-6370).
         #[serde(default, skip_serializing_if = "lash_kernel_vm::SiteCounts::is_empty")]
         ran: lash_kernel_vm::SiteCounts,
+        /// The occurrences whose failed outcome a `catch` in the segment
+        /// recovered from, at `observe: counts` (FIG-6817).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        caught: Vec<EffectId>,
         /// The segment's host reads, at `observe: counts`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reads: Option<HostReads>,
@@ -464,6 +471,10 @@ pub(crate) enum KernelRunOutput {
         /// document site ordinal, at `observe: counts` (FIG-6370).
         #[serde(default, skip_serializing_if = "lash_kernel_vm::SiteCounts::is_empty")]
         ran: lash_kernel_vm::SiteCounts,
+        /// The occurrences whose failed outcome a `catch` in the segment
+        /// recovered from, at `observe: counts` (FIG-6817).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        caught: Vec<EffectId>,
         /// The segment's host reads, at `observe: counts`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reads: Option<HostReads>,
@@ -478,12 +489,21 @@ impl KernelRunOutput {
     pub(crate) fn observed(&self) -> Observed<'_> {
         match self {
             Self::Parked {
-                ran, reads, start, ..
+                ran,
+                caught,
+                reads,
+                start,
+                ..
             }
             | Self::Ended {
-                ran, reads, start, ..
+                ran,
+                caught,
+                reads,
+                start,
+                ..
             } => Observed {
                 ran,
+                caught,
                 reads: reads.as_ref(),
                 start: start.as_deref(),
             },

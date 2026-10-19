@@ -324,6 +324,7 @@ impl RemoteMachines {
             candidate: None,
             ran: Default::default(),
             path: lash_kernel_vm::ExecutionPath::default(),
+            caught: Vec::new(),
         })
     }
 }
@@ -432,6 +433,7 @@ pub struct RemoteMachine {
     candidate: Option<NodeId>,
     ran: std::collections::BTreeMap<u32, u64>,
     path: lash_kernel_vm::ExecutionPath,
+    caught: Vec<lash_kernel_vm::WaitId>,
 }
 
 /// Where a worker's exchange stopped once its host reads and page
@@ -460,6 +462,13 @@ impl RemoteMachine {
     /// frames, in order, when the host traces it.
     pub fn take_path(&mut self) -> lash_kernel_vm::ExecutionPath {
         std::mem::take(&mut self.path)
+    }
+
+    /// Takes and resets the waits whose failed outcome a `catch` recovered
+    /// from, as this run segment's park or end frame carried them
+    /// (FIG-6817).
+    pub fn take_caught(&mut self) -> Vec<lash_kernel_vm::WaitId> {
+        std::mem::take(&mut self.caught)
     }
 
     /// The candidate root a worker named, when this activation staged it.
@@ -655,6 +664,7 @@ impl RemoteMachine {
                 self.host.ran(&sites.ran);
             }
             self.path.append(sites.path);
+            self.caught.extend(sites.caught);
         }
         Ok(())
     }

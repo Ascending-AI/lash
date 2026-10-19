@@ -275,6 +275,9 @@ impl<const L: u64> Machine for Plan<L> {
     ) -> Result<lash_kernel_vm::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
         self.0.take_path()
     }
+    fn take_caught(&mut self) -> Vec<lash_kernel_vm::WaitId> {
+        self.0.take_caught()
+    }
     fn run(
         &mut self,
         host: &mut dyn lash_kernel_vm::Host,

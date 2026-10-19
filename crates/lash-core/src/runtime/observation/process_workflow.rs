@@ -19,6 +19,14 @@ use lash_execution_contracts::process::WaitKind;
 
 /// What was observed at a site's latest occurrence. An unobserved terminal
 /// does not claim the action succeeded: the process ended without that fact.
+///
+/// `Recovered` is a failed occurrence whose error a `catch` took, so the
+/// run went on (FIG-6817): the committed `process.ran` of the run segment
+/// that caught it names the occurrence, and its `process.effect_outcome`
+/// stays a failure. `Failed` is a failure no `catch` recovered from: it
+/// ended its task, or the catch that took it raised again before it
+/// waited. Only a run observed at `counts` records its catches; at `off`
+/// a caught failure stays `Failed`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessWorkflowSiteState {
@@ -26,6 +34,7 @@ pub enum ProcessWorkflowSiteState {
     Waiting { kind: ProcessWorkflowWaitKind },
     Completed,
     Failed,
+    Recovered,
     Cancelled,
     TerminalUnobserved,
 }
@@ -308,6 +317,22 @@ impl ProcessWorkflowOverlayAccumulator {
         }
     }
 
+    /// A `catch` recovered from the failure of occurrence `at`: its row,
+    /// while it shows that failed occurrence, shows it recovered. An
+    /// occurrence past the evidence cap has no row of its own.
+    fn recovered(&mut self, at: &EffectId) {
+        let key = lash_trace::WorkflowTaskSite {
+            task: at.task(),
+            site: at.position(),
+        };
+        if let Some(held) = self.sites.get_mut(&key)
+            && held.value.at == *at
+            && held.value.state == ProcessWorkflowSiteState::Failed
+        {
+            held.value.state = ProcessWorkflowSiteState::Recovered;
+        }
+    }
+
     /// A host's stored, typed lifecycle event, in sequence order. An already
     /// folded sequence is ignored, including commits replayed after a snapshot.
     ///
@@ -355,7 +380,12 @@ impl ProcessWorkflowOverlayAccumulator {
                 };
                 self.site(&outcome.at, now, state, true, Some(event.sequence));
             }
-            ProcessLifecycleFact::Ran(ran) => self.counted(&ran.ran, true),
+            ProcessLifecycleFact::Ran(ran) => {
+                self.counted(&ran.ran, true);
+                for at in &ran.caught {
+                    self.recovered(at);
+                }
+            }
             // Ordinals from here on refer to the successor's document.
             ProcessLifecycleFact::Succeeded(_) => self.ran.clear(),
             ProcessLifecycleFact::Terminal { .. } => self.finish(),

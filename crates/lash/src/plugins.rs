@@ -398,6 +398,7 @@ pub use lash_execution_contracts::process::ProcessExecutionDocumentRead;
 pub use lash_execution_contracts::process::ProcessInfraError;
 pub use lash_execution_contracts::process::ProcessRunOutcome;
 pub use lash_execution_contracts::process::ProcessTraceClass;
+pub use lash_execution_contracts::process::SettledRan;
 pub use lash_execution_contracts::process::StepCandidate;
 pub use lash_execution_contracts::process::StepName;
 pub use lash_execution_contracts::process::StepPages;

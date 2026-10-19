@@ -207,6 +207,7 @@ impl KernelMachine {
         exe: &Executable,
     ) -> Eval<Completion> {
         let frame = self.frame(task)?;
+        let index = frame.control.len().wrapping_sub(1);
         match frame.control.last_mut() {
             None => Ok(Completion::Return(Box::new(Value::Null))),
             Some(Control::Block { .. }) => Ok(Completion::Normal),
@@ -219,21 +220,28 @@ impl KernelMachine {
                     Form::Try { finally, .. } => *finally,
                     _ => None,
                 };
-                match (std::mem::replace(phase, TryPhase::Body), finally) {
+                let was = std::mem::replace(phase, TryPhase::Body);
+                // A catch block that ends recovered from what it took.
+                let caught = matches!(was, TryPhase::Catch);
+                let completion = match (was, finally) {
                     (TryPhase::Finally(departure), _) => {
                         frame.control.pop();
-                        Ok(departure)
+                        departure
                     }
                     (_, Some(finally)) => {
                         *phase = TryPhase::Finally(Completion::Normal);
                         self.push_block(task, finally)?;
-                        Ok(Completion::Normal)
+                        Completion::Normal
                     }
                     (_, None) => {
                         frame.control.pop();
-                        Ok(Completion::Normal)
+                        Completion::Normal
                     }
+                };
+                if caught {
+                    self.catch_left(task, index, None)?;
                 }
+                Ok(completion)
             }
         }
     }
@@ -283,6 +291,7 @@ impl KernelMachine {
             {
                 frame.control.clear();
             }
+            let index = frame.control.len().wrapping_sub(1);
             let Some(control) = frame.control.last_mut() else {
                 if let Completion::ReturnVia { value, stmt } = departure {
                     let Form::ReturnVia { site, policy } = &exe.stmt(stmt).form else {
@@ -362,6 +371,12 @@ impl KernelMachine {
                         Form::Try { catch, finally, .. } => (*catch, *finally),
                         _ => (None, None),
                     };
+                    // A departure out of a catch block decides what it
+                    // took: a raise undoes the take, anything else keeps it.
+                    let leaving = matches!(phase, TryPhase::Catch).then(|| match &departure {
+                        Completion::Throw(value) => Some(**value),
+                        _ => None,
+                    });
                     match (&*phase, catch, finally, &departure) {
                         (TryPhase::Body, Some((binding, block)), _, Completion::Throw(value)) => {
                             let value = **value;
@@ -369,6 +384,7 @@ impl KernelMachine {
                             self.push_block(task, block)?;
                             self.bind(task, binding.at, binding.shared, value)?;
                             self.raise_held();
+                            self.catch_took(task, index, &value)?;
                             departure = Completion::Normal;
                         }
                         (TryPhase::Body | TryPhase::Catch, _, Some(finally), _) => {
@@ -382,6 +398,9 @@ impl KernelMachine {
                         _ => {
                             frame.control.pop();
                         }
+                    }
+                    if let Some(raised) = leaving {
+                        self.catch_left(task, index, raised.as_ref())?;
                     }
                 }
             }
@@ -1043,7 +1062,7 @@ impl KernelMachine {
 
     fn resume_outcome(
         &mut self,
-        _task: TaskId,
+        task: TaskId,
         _exe: &Executable,
         wait: crate::interface::WaitId,
     ) -> Eval<Value> {
@@ -1082,6 +1101,7 @@ impl KernelMachine {
         self.waits.remove(&key, self.heap.pages())?;
         let value = self.admit_page(&value)?;
         if failed {
+            self.wait_raised(task, wait, &value);
             Err(Interrupt::raised(value))
         } else {
             Ok(value)

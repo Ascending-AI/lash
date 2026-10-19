@@ -662,21 +662,28 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
             })
     }
 
-    /// A `kernel_run`'s counts, which it records at `observe: counts`.
+    /// A `kernel_run`'s counts and the occurrences it recovered from,
+    /// which it records at `observe: counts`.
     fn settled_ran(
         &self,
         kind: &lash_execution_contracts::process::EngineStepKind,
         output: &lash_core_store::tool_run::SettledOutput,
-    ) -> Vec<(u32, u64)> {
+    ) -> lash_execution_contracts::process::SettledRan {
         match output {
             lash_core_store::tool_run::SettledOutput::Completed(material)
                 if kind.0 == KERNEL_RUN_STEP =>
             {
                 serde_json::from_str::<state::KernelRunOutput>(material.payload())
-                    .map(|output| output.observed().ran.iter().copied().collect())
+                    .map(|output| {
+                        let observed = output.observed();
+                        lash_execution_contracts::process::SettledRan {
+                            ran: observed.ran.iter().copied().collect(),
+                            caught: observed.caught.to_vec(),
+                        }
+                    })
                     .unwrap_or_default()
             }
-            _ => Vec::new(),
+            _ => Default::default(),
         }
     }
 

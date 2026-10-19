@@ -144,7 +144,7 @@
       "type": "object"
     },
     "ProcessWorkflowSiteState": {
-      "description": "What was observed at a site's latest occurrence. An unobserved terminal\ndoes not claim the action succeeded: the process ended without that fact.",
+      "description": "What was observed at a site's latest occurrence. An unobserved terminal\ndoes not claim the action succeeded: the process ended without that fact.\n\n`Recovered` is a failed occurrence whose error a `catch` took, so the\nrun went on (FIG-6817): the committed `process.ran` of the run segment\nthat caught it names the occurrence, and its `process.effect_outcome`\nstays a failure. `Failed` is a failure no `catch` recovered from: it\nended its task, or the catch that took it raised again before it\nwaited. Only a run observed at `counts` records its catches; at `off`\na caught failure stays `Failed`.",
       "oneOf": [
         {
           "properties": {
@@ -190,6 +190,18 @@
           "properties": {
             "state": {
               "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "recovered",
               "type": "string"
             }
           },

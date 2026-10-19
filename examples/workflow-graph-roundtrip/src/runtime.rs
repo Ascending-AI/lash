@@ -611,7 +611,11 @@ impl Overlay {
                 ActionState::Running => RunStatus::Started,
                 ActionState::Waiting => RunStatus::Waiting,
                 ActionState::Completed => RunStatus::Succeeded,
-                ActionState::Failed | ActionState::Cancelled => RunStatus::Failed,
+                // A cell's overlay reports no recovery: only a process
+                // records the catches its run segments took.
+                ActionState::Failed | ActionState::Recovered | ActionState::Cancelled => {
+                    RunStatus::Failed
+                }
                 ActionState::Incomplete => RunStatus::Incomplete,
             };
             let error = node

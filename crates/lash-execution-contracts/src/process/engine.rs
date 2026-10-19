@@ -107,6 +107,18 @@ pub enum ProcessTraceClass {
     Workflow,
 }
 
+/// What one settled engine step recorded for its process's
+/// `process.ran` (FIG-6370, FIG-6817).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SettledRan {
+    /// The document statement starts and empty-block entries the step
+    /// counted, by document site ordinal.
+    pub ran: Vec<(u32, u64)>,
+    /// The effect occurrences whose failed outcome a `catch` in the step
+    /// recovered from, in order.
+    pub caught: Vec<lash_protocol_types::EffectId>,
+}
+
 /// Every engine answers every execution question
 /// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
 /// `External`) are not registered here.
@@ -150,17 +162,19 @@ pub trait ProcessEngine: Send + Sync {
         payload: &serde_json::Value,
     ) -> Result<Option<EngineSettings>, crate::PluginError>;
 
-    /// The document statement starts and empty-block entries a settled
-    /// engine step of `kind` counted, by document site ordinal, as its
-    /// committed `output` records them (FIG-6370): pure, like `advance`.
-    /// Lash appends them as one `process.ran` in the transaction that hands
-    /// the step to `advance`. An engine whose steps count nothing, and a
-    /// step that counted nothing, answer none.
+    /// What a settled engine step of `kind` recorded for its process's
+    /// `process.ran`, as its committed `output` records it: the document
+    /// statement starts and empty-block entries it counted, by document
+    /// site ordinal (FIG-6370), and the effect occurrences whose failed
+    /// outcome a `catch` in it recovered from (FIG-6817). Pure, like
+    /// `advance`. Lash appends them as one `process.ran` in the
+    /// transaction that hands the step to `advance`. An engine whose steps
+    /// count nothing, and a step that counted nothing, answer none.
     fn settled_ran(
         &self,
         kind: &super::engine_state::EngineStepKind,
         output: &lash_core_store::tool_run::SettledOutput,
-    ) -> Vec<(u32, u64)>;
+    ) -> SettledRan;
 
     /// The next state and action for `event` over `state`: synchronous and
     /// effect-free. The same state and event always give the same answer.

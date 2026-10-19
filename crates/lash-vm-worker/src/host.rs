@@ -239,6 +239,9 @@ pub(crate) struct WireHost {
     /// The statement path since the run's previous frame, as document
     /// ordinals, when the parent records it.
     pub path: lash_kernel_vm::ExecutionPath,
+    /// The waits whose failed outcome a `catch` recovered from, taken at a
+    /// park or an end.
+    pub caught: Vec<lash_kernel_vm::WaitId>,
 }
 
 /// Each task's last entered document site since the run's previous frame.
@@ -278,10 +281,20 @@ impl WireHost {
             .unwrap_or_default();
         let ran = std::mem::take(&mut self.ran);
         let path = std::mem::take(&mut self.path);
-        if entered.is_empty() && ran.is_empty() && path.is_empty() {
+        let caught = std::mem::take(&mut self.caught);
+        if entered.is_empty() && ran.is_empty() && path.is_empty() && caught.is_empty() {
             return Ok(None);
         }
-        wire::encode(PayloadKind::Sites, &wire::Sites { entered, ran, path }).map(Some)
+        wire::encode(
+            PayloadKind::Sites,
+            &wire::Sites {
+                entered,
+                ran,
+                path,
+                caught,
+            },
+        )
+        .map(Some)
     }
 
     #[expect(

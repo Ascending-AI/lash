@@ -93,6 +93,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome),
                 ran: Default::default(),
+                caught: Vec::new(),
                 reads: None,
                 start: None,
             })
@@ -130,6 +131,7 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> S
             issued,
             withdrawn,
             ran: Default::default(),
+            caught: Vec::new(),
             reads: None,
             start: None,
         })
@@ -302,6 +304,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome.clone()),
                 ran: Default::default(),
+                caught: Vec::new(),
                 reads: None,
                 start: None,
             })

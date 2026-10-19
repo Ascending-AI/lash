@@ -162,7 +162,8 @@ has received the child's records.
 `Counts { counts }` carries a closed `TraceCountObservation`: `Process`
 owns its process id, segment, frame and provisional delta; `Cell` owns its
 effect address and id, activation segment, frame and cumulative totals.
-Process overlays add deltas until committed `process.ran` replaces them.
+Process overlays add deltas until committed `process.ran` replaces them;
+its `caught` list turns the failed occurrences a `catch` took `recovered`.
 Cell overlays take elementwise maxima within each segment and sum segments.
 Count event keys derive from those typed subjects and coordinates; decoding
 refuses a conflicting key. The common execution identity holds scope and

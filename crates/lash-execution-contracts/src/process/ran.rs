@@ -1,16 +1,23 @@
 //! The runtime-owned `process.ran` record (FIG-6370): the statement starts
-//! one committed run segment of an observed process counted.
+//! one committed run segment of an observed process counted, and the
+//! effect occurrences whose failure a `catch` in it recovered from
+//! (FIG-6817).
 
 use serde::{Deserialize, Serialize};
 
 use super::effect_summary::{
     PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectReportError, admit_vocabulary_version,
-    require_vocabulary_version, vocabulary_version_schema,
+    occurrence_schema, require_vocabulary_version, vocabulary_version_schema,
 };
 use super::events::ProcessEventAppendRequest;
 
 /// Runtime-owned event recording one committed run segment's document
-/// statement starts and empty-block entries, by document site ordinal.
+/// statement starts and empty-block entries, by document site ordinal, and
+/// the effect occurrences whose failed outcome a `catch` in the segment
+/// recovered from: the `catch` took the error and its block was not left
+/// by a raise before the segment parked or ended. The occurrence's own
+/// `process.effect_outcome`, committed before the segment ran, stays a
+/// failure.
 ///
 /// Written only by the runtime, in the transaction that hands the settled
 /// segment to its engine, under the replay key
@@ -22,12 +29,15 @@ use super::events::ProcessEventAppendRequest;
 pub const PROCESS_RAN_EVENT_TYPE: &str = super::events::ProcessEventKind::Ran.as_str();
 
 /// Strict durable payload of one segment's counts: ordinals strictly
-/// ascending, every count nonzero, at least one.
+/// ascending, every count nonzero, at least one. `caught` is absent when
+/// the segment recovered from nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "ProcessRanFields")]
 pub struct ProcessRan {
     pub vocabulary_version: u32,
     pub ran: Vec<(u32, u64)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub caught: Vec<lash_protocol_types::EffectId>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +45,8 @@ pub struct ProcessRan {
 struct ProcessRanFields {
     vocabulary_version: u32,
     ran: Vec<(u32, u64)>,
+    #[serde(default)]
+    caught: Vec<lash_protocol_types::EffectId>,
 }
 
 impl TryFrom<ProcessRanFields> for ProcessRan {
@@ -44,6 +56,7 @@ impl TryFrom<ProcessRanFields> for ProcessRan {
         let ran = Self {
             vocabulary_version: fields.vocabulary_version,
             ran: fields.ran,
+            caught: fields.caught,
         };
         ran.check()?;
         Ok(ran)
@@ -58,7 +71,15 @@ impl ProcessRan {
                 PROCESS_EVENT_VOCABULARY_VERSION
             )),
             ran,
+            caught: Vec::new(),
         }
+    }
+
+    /// This record with the occurrences its segment recovered from.
+    #[must_use]
+    pub fn with_caught(mut self, caught: Vec<lash_protocol_types::EffectId>) -> Self {
+        self.caught = caught;
+        self
     }
 
     /// The fleet-window counterpart of
@@ -115,6 +136,11 @@ pub(super) fn ran_payload_schema() -> crate::JsonSchema {
         "required": ["vocabulary_version", "ran"],
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
+            "caught": {
+                "type": "array",
+                "minItems": 1,
+                "items": occurrence_schema()
+            },
             "ran": {
                 "type": "array",
                 "minItems": 1,

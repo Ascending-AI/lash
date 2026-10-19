@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{WorkflowNodeKind, WorkflowView};
 
+/// What an occurrence of an action did. `Recovered` is a failure whose
+/// error a `catch` took, so the run went on (FIG-6817): the process
+/// overlay's `recovered` row. `Failed` is a failure nothing recovered from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionState {
@@ -14,6 +17,7 @@ pub enum ActionState {
     Waiting,
     Completed,
     Failed,
+    Recovered,
     Cancelled,
     Incomplete,
 }
@@ -57,8 +61,9 @@ pub enum ActivityRefusal {
 
 impl WorkflowView {
     /// Attribute a snapshot of occurrence evidence for this document. A wait
-    /// wins over completed occurrences; no sibling or enclosing action inherits
-    /// its state. Declared callees are inspected through their own views.
+    /// wins over completed occurrences, and a failure over a recovered
+    /// one; no sibling or enclosing action inherits its state. Declared
+    /// callees are inspected through their own views.
     pub fn activity<T: Clone>(
         &self,
         document: DocumentId,
@@ -94,7 +99,8 @@ impl WorkflowView {
                         ActionState::Waiting => 6,
                         ActionState::Running => 5,
                         ActionState::Failed | ActionState::Cancelled => 4,
-                        ActionState::Incomplete => 3,
+                        ActionState::Recovered => 3,
+                        ActionState::Incomplete => 2,
                         ActionState::Completed => 1,
                     })
                     .map(|observation| observation.state);

@@ -3,6 +3,9 @@
 //! its cause, the error's own message, never a dump of the value. A
 //! library call has no activity state of its own: coverage counts it, and
 //! the terminal names the statement it raised in.
+//!
+//! FIG-6817: a failed effect whose error a `catch` took reports itself
+//! recovered; one nothing recovered from stays failed.
 
 use super::*;
 use lash::tools::{ToolCallOutcome, ToolFailure, ToolFailureCause};
@@ -355,6 +358,196 @@ async fn a_library_call_has_no_activity_state_and_its_coverage_counts_it() {
                 .iter()
                 .any(|statement| statement.site == raised),
             "{language:?}: the terminal names a statement of the entry, {raised}"
+        );
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+/// `guarded` catches `tools.echo`'s failure and returns; `nested` raises
+/// it again unchanged from an inner catch (TypeScript) or an `except` that
+/// does not match it (Python), and an outer catch takes it; `rethrown`
+/// catches it and raises it again; `fallback` catches it and calls
+/// `tools.echo` again from its catch, uncaught; `unguarded` catches
+/// nothing. Each hands `tools.echo` a text where its schema takes an
+/// object, so every call fails.
+const RECOVERING_TYPESCRIPT: &str = "export async function nested(note: string) {\n  try {\n    try {\n      await tools.echo(note);\n    } catch (error) {\n      throw error;\n    }\n  } catch (error) {\n    return \"recovered\";\n  }\n  return \"sent\";\n}\n\nexport async function guarded(note: string) {\n  try {\n    await tools.echo(note);\n  } catch (error) {\n    return \"recovered\";\n  }\n  return \"sent\";\n}\n\nexport async function rethrown(note: string) {\n  try {\n    await tools.echo(note);\n  } catch (error) {\n    throw error;\n  }\n  return \"sent\";\n}\n\nexport async function fallback(note: string) {\n  try {\n    await tools.echo(note);\n  } catch (error) {\n    await tools.echo(note);\n  }\n  return \"sent\";\n}\n\nexport async function unguarded(note: string) {\n  const sent = await tools.echo(note);\n  return sent;\n}\n";
+const RECOVERING_PYTHON: &str = "async def nested(note: str):\n    try:\n        try:\n            await tools.echo(note)\n        except KeyError:\n            return \"wrong\"\n    except Exception:\n        return \"recovered\"\n    return \"sent\"\n\n\nasync def guarded(note: str):\n    try:\n        await tools.echo(note)\n    except Exception:\n        return \"recovered\"\n    return \"sent\"\n\n\nasync def rethrown(note: str):\n    try:\n        await tools.echo(note)\n    except Exception:\n        raise\n    return \"sent\"\n\n\nasync def fallback(note: str):\n    try:\n        await tools.echo(note)\n    except Exception:\n        await tools.echo(note)\n    return \"sent\"\n\n\nasync def unguarded(note: str):\n    sent = await tools.echo(note)\n    return sent\n";
+
+/// Runs `entry` of `module` to its end, `tools.echo` linked, and answers
+/// whether it succeeded, with the overlay state of each `tools.echo` call
+/// in `entry`, in document order, and the activity a host attributes from
+/// those rows.
+async fn echo_states(
+    core: &lash::LashCore,
+    module: &Module,
+    entry: &str,
+) -> (
+    bool,
+    Vec<lash::workflow::ProcessWorkflowSiteState>,
+    Vec<Option<view::ActionState>>,
+) {
+    use lash::workflow::ProcessWorkflowSiteState;
+    let (publication, process) = module
+        .start(
+            core,
+            entry,
+            &["tools.echo"],
+            serde_json::json!({"note": "hello"}),
+        )
+        .await;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        core.processes().await_output(&process),
+    )
+    .await
+    .expect("the process settles")
+    .expect("the output reads");
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process settles with an output: {output:?}");
+    };
+    let succeeded = matches!(output.outcome, ToolCallOutcome::Success(_));
+    let document = publication_document(core, &publication).await;
+    let view = view::derive(&document).expect("the entry's view");
+    let performs: Vec<Site> = view
+        .execution_sites
+        .iter()
+        .filter(|action| {
+            action.kind == view::SiteKind::Perform
+                && action.site.unit == Unit::Function(Name::new(entry))
+        })
+        .map(|action| action.site.clone())
+        .collect();
+    let snapshot = core
+        .processes()
+        .observe(&process)
+        .snapshot()
+        .await
+        .expect("snapshot");
+    let lash::process::ProcessReadView::Retained(read) = snapshot.read_view else {
+        panic!("retained");
+    };
+    let overlay = read.workflow.expect("the process's workflow overlay");
+    let rows: Vec<_> = performs
+        .iter()
+        .map(|site| {
+            overlay
+                .sites
+                .iter()
+                .find(|row| site.position() == row.at.position())
+                .unwrap_or_else(|| panic!("{entry}: no row at {site}: {overlay:?}"))
+        })
+        .collect();
+    let observations: Vec<_> = rows
+        .iter()
+        .map(|row| view::ActionObservation {
+            identity: row.at.clone(),
+            state: match row.state {
+                ProcessWorkflowSiteState::Failed => view::ActionState::Failed,
+                ProcessWorkflowSiteState::Recovered => view::ActionState::Recovered,
+                ref other => panic!("{entry}: every call fails: {other:?}"),
+            },
+            outcome: None::<()>,
+        })
+        .collect();
+    let activity = view
+        .activity(view.document, &observations)
+        .expect("the rows name this document's actions");
+    let drawn = performs
+        .iter()
+        .map(|site| {
+            activity
+                .iter()
+                .find(|node| &node.site == site)
+                .and_then(|node| node.state)
+        })
+        .collect();
+    (
+        succeeded,
+        rows.into_iter().map(|row| row.state.clone()).collect(),
+        drawn,
+    )
+}
+
+/// A failed call whose error a `catch` took, so the run went on, reports
+/// `recovered` in the process overlay and in the activity drawn from it,
+/// also when an inner catch raised the same error again for an outer one
+/// to take. Both dialects.
+#[tokio::test]
+async fn a_caught_failure_reports_recovered() {
+    use lash::workflow::ProcessWorkflowSiteState;
+    let core = core().await;
+    for (language, source) in [
+        (SourceLanguage::TypeScript, RECOVERING_TYPESCRIPT),
+        (SourceLanguage::Python, RECOVERING_PYTHON),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        for entry in ["guarded", "nested"] {
+            assert_eq!(
+                echo_states(&core, &module, entry).await,
+                (
+                    true,
+                    vec![ProcessWorkflowSiteState::Recovered],
+                    vec![Some(view::ActionState::Recovered)],
+                ),
+                "{language:?} {entry}"
+            );
+        }
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+/// A failed call no `catch` took stays `failed`, in both dialects.
+#[tokio::test]
+async fn an_uncaught_failure_stays_failed() {
+    use lash::workflow::ProcessWorkflowSiteState;
+    let core = core().await;
+    for (language, source) in [
+        (SourceLanguage::TypeScript, RECOVERING_TYPESCRIPT),
+        (SourceLanguage::Python, RECOVERING_PYTHON),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        assert_eq!(
+            echo_states(&core, &module, "unguarded").await,
+            (
+                false,
+                vec![ProcessWorkflowSiteState::Failed],
+                vec![Some(view::ActionState::Failed)],
+            ),
+            "{language:?}"
+        );
+    }
+    core.shutdown().await.expect("shutdown");
+}
+
+/// A `catch` that raises the error again has not recovered from it, and a
+/// call that fails inside a `catch` with nothing around it to take its
+/// error is not recovered by the `try` it sits in: both stay `failed`,
+/// while the call that catch took is `recovered`. Both dialects.
+#[tokio::test]
+async fn a_failure_a_catch_raises_again_is_not_recovered() {
+    use lash::workflow::ProcessWorkflowSiteState::{Failed, Recovered};
+    let core = core().await;
+    for (language, source) in [
+        (SourceLanguage::TypeScript, RECOVERING_TYPESCRIPT),
+        (SourceLanguage::Python, RECOVERING_PYTHON),
+    ] {
+        let module = Module::import(&core, language, source).await;
+        assert_eq!(
+            echo_states(&core, &module, "rethrown").await,
+            (false, vec![Failed], vec![Some(view::ActionState::Failed)]),
+            "{language:?}"
+        );
+        assert_eq!(
+            echo_states(&core, &module, "fallback").await,
+            (
+                false,
+                vec![Recovered, Failed],
+                vec![
+                    Some(view::ActionState::Recovered),
+                    Some(view::ActionState::Failed)
+                ],
+            ),
+            "{language:?}"
         );
     }
     core.shutdown().await.expect("shutdown");
