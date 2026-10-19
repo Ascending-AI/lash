@@ -296,7 +296,7 @@ fn request_batch(request: &crate::page::PageRequest) -> (usize, u64) {
         crate::page::PageRequest::Read { pages } => (pages.len(), 0),
         crate::page::PageRequest::Seal { pages, .. } => (
             pages.len(),
-            pages.iter().map(|page| page.envelope.len() as u64).sum(),
+            pages.iter().map(|page| page.envelope().len() as u64).sum(),
         ),
     }
 }
@@ -335,7 +335,7 @@ fn worker_batch(message: &crate::WorkerMessage) -> Result<(), CodecRefusal> {
             batch
                 .pages
                 .iter()
-                .map(|page| page.envelope.len() as u64)
+                .map(|page| page.envelope().len() as u64)
                 .sum(),
         )),
         _ => Ok(()),
@@ -348,7 +348,7 @@ fn read_batch(pages: &[crate::page::ReadPage]) -> (usize, u64) {
         pages.len(),
         pages
             .iter()
-            .map(|read| read.page.envelope.len() as u64)
+            .map(|read| read.page.envelope().len() as u64)
             .sum(),
     )
 }
@@ -361,7 +361,7 @@ fn reply_batch(reply: &crate::page::PageReply) -> (usize, u64) {
             pages
                 .iter()
                 .filter_map(|page| page.as_ref().ok())
-                .map(|read| read.page.envelope.len() as u64)
+                .map(|read| read.page.envelope().len() as u64)
                 .sum(),
         ),
         crate::page::PageReply::Sealed { pages } => (pages.len(), 0),

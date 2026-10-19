@@ -303,7 +303,9 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         tokens: lash_kernel_doc::graph_tokens::encode_body(&0_u64),
         children: Vec::new(),
     })
-    .unwrap();
+    .unwrap()
+    .named()
+    .into_node();
     let session_id = session.id;
     staging.adopt(session).unwrap();
     let end = CellEnd {

@@ -1273,10 +1273,7 @@ mod tests {
         let (config, codec, embedding, mut server, mut parent) = ready_server();
         let (_document, mut start) = work_start(&config, embedding);
         start.warm = vec![page::ReadPage {
-            page: page::PageEnvelope {
-                id: [9; 32],
-                envelope: vec![0xde, 0xad],
-            },
+            page: page::PageEnvelope::new(vec![0xde, 0xad]),
             children: Vec::new(),
         }];
         let error = server

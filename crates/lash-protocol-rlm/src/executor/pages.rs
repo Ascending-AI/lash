@@ -484,7 +484,7 @@ impl PageSource for ParentPages {
         if self.demands.is_closed() {
             return Err(abandoned());
         }
-        let node = frame_page(&page)?;
+        let node = frame_page(&page)?.named();
         let id = PageId(node.id.0);
         let Some(spool) = &mut self.spool else {
             return Err(HeapFault::Malformed(

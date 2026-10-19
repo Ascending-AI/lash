@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use lash_core_store::checkpoint_graph::node::frame_direct;
+use lash_core_store::checkpoint_graph::node::{VerifiedNode, frame_semantic};
 use lash_core_store::checkpoint_graph::stage::{
     ManifestEntry, StageFault, StageLeaseId, StageSpool,
 };
@@ -36,19 +36,20 @@ use super::{
 };
 
 /// A sequence leaf naming `children`, told apart by `label`.
-fn page(label: &str, children: &[NodeId]) -> EncodedNode {
+fn page(label: &str, children: &[NodeId]) -> VerifiedNode {
     let mut tokens = TokenWriter::new();
     tokens.seq(children.len() as u64 + 1);
     tokens.text(label);
     for child in children {
         tokens.child(child.child_ref());
     }
-    frame_direct(
+    frame_semantic(
         NodeKind(PageKind::SEQUENCE_LEAF.0),
         tokens.as_bytes(),
         MAX_NODE_BYTES,
     )
     .expect("a leaf frames")
+    .named()
 }
 
 /// The committed pages behind a root lease.
@@ -141,10 +142,7 @@ async fn seal(
 ) -> PageReply {
     pages
         .serve(PageRequest::Seal {
-            pages: vec![PageEnvelope {
-                id: node.id.0,
-                envelope: node.bytes.to_vec(),
-            }],
+            pages: vec![PageEnvelope::new(node.bytes.to_vec())],
             children,
         })
         .await
@@ -323,8 +321,8 @@ fn small_manifest_bounded() {
         for entry in entries {
             match entry {
                 ManifestEntry::Fresh(node) => assert_eq!(
-                    node,
-                    *nodes
+                    &node,
+                    nodes
                         .iter()
                         .find(|known| known.id == node.id)
                         .expect("fresh page")
@@ -488,7 +486,7 @@ fn a_cell_within_the_resident_bound_opens_no_file_per_page() {
         let entries: Vec<(NodeId, Option<Arc<[u8]>>)> = drain(manifest.as_mut(), None, 64)
             .into_iter()
             .map(|entry| match entry {
-                ManifestEntry::Fresh(node) => (node.id, Some(node.bytes)),
+                ManifestEntry::Fresh(node) => (node.id, Some(node.into_node().bytes)),
                 ManifestEntry::External(id) => (id, None),
             })
             .collect();
@@ -528,10 +526,66 @@ fn a_cell_within_the_resident_bound_opens_no_file_per_page() {
     assert_eq!(moved.2, resident.2, "one manifest wherever the pages are");
 }
 
+/// The file under `dir`, at any depth, named `name`.
+fn find(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .expect("dir")
+        .map(|entry| entry.expect("entry").path())
+        .find_map(|path| {
+            if path.is_dir() && !path.is_symlink() {
+                find(&path, name)
+            } else {
+                (path.file_name() == Some(std::ffi::OsStr::new(name))).then_some(path)
+            }
+        })
+}
+
+/// FIG-6932: a store takes a manifest's fresh pages as checked, so only a
+/// resident page is handed on as its seal checked it. A spool past its
+/// resident bound keeps its pages in files the parent's memory no longer
+/// vouches for, and its manifest checks each one again as it reads it
+/// back: bytes that changed on disk never reach a store.
+#[test]
+fn a_page_read_back_from_disk_is_checked_again() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20)
+        .expect("root")
+        .resident_within(0);
+    let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+    let leaf = page("leaf", &[]);
+    let top = page("top", &[leaf.id]);
+    spool.seal(leaf.clone(), &|_| false).expect("staged");
+    spool.seal(top.clone(), &|_| false).expect("staged");
+    assert!(spool.on_disk(), "the spool moved to its directory");
+    let mut manifest = spool
+        .candidate(top.id, None, CommitId([5; 32]))
+        .expect("candidate");
+    let mut intact = vec![
+        ManifestEntry::Fresh(leaf.clone()),
+        ManifestEntry::Fresh(top.clone()),
+    ];
+    intact.sort_by_key(id_of);
+    assert_eq!(
+        drain(manifest.as_mut(), None, 8),
+        intact,
+        "intact pages read back checked"
+    );
+    let file = find(dir.path(), &leaf.id.to_hex()).expect("the leaf's file");
+    let mut bytes = std::fs::read(&file).expect("read");
+    *bytes.last_mut().expect("a byte") ^= 1;
+    std::fs::write(&file, bytes).expect("write");
+    assert_eq!(
+        manifest.entries(None, 8),
+        Err(StageFault::HashMismatch(leaf.id))
+    );
+}
+
 /// A staged page may name only committed pages a capability protects or
 /// pages staged before it: anything else is refused, so the staged graph
 /// is a DAG by construction. A forged capability protects nothing, and
-/// bytes that do not hash to their identity never stage.
+/// bytes that do not frame never stage: the page service checks each
+/// sealed page once, by the digest its envelope was decoded under and its
+/// framing (FIG-6932).
 #[tokio::test]
 async fn staging_refuses_an_unprotected_child() {
     let dir = tempfile::tempdir().expect("dir");
@@ -545,18 +599,6 @@ async fn staging_refuses_an_unprotected_child() {
             page: parent.id,
             child: stranger.id
         })
-    );
-    let mut forged = parent.bytes.to_vec();
-    *forged.last_mut().expect("a byte") ^= 1;
-    assert_eq!(
-        spool.seal(
-            EncodedNode {
-                id: parent.id,
-                bytes: forged.into()
-            },
-            &|_| true
-        ),
-        Err(StageFault::HashMismatch(parent.id))
     );
     assert_eq!(spool.usage().pages, 0);
 
@@ -594,6 +636,28 @@ async fn staging_refuses_an_unprotected_child() {
             .await,
         PageReply::Refused(PageRefusal::Unauthorized)
     );
+
+    // A page whose envelope does not frame, cut short or naming a slot its
+    // table lacks, is refused as corrupt before anything stages.
+    let mut cut = parent.bytes.to_vec();
+    cut.pop();
+    let mut stray = parent.bytes.to_vec();
+    *stray.last_mut().expect("a byte") = 1;
+    for corrupt in [cut, stray] {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        let mut pages = activation(&store, &root, base.id);
+        assert_eq!(
+            pages
+                .serve(PageRequest::Seal {
+                    pages: vec![PageEnvelope::new(corrupt)],
+                    children: Vec::new(),
+                })
+                .await,
+            PageReply::Refused(PageRefusal::Corrupt)
+        );
+        assert_eq!(pages.usage().pages, 0);
+    }
 }
 
 /// A child's capability is its provenance (FIG-6197 F2): a staged page's
@@ -643,8 +707,8 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
         panic!("the reused child resolves")
     };
     assert_eq!(
-        leaf[0].as_ref().expect("page reads").page.envelope,
-        reused.bytes.to_vec()
+        leaf[0].as_ref().expect("page reads").page.envelope(),
+        &reused.bytes[..]
     );
     let top = page("top", &[parent.id, reused.id]);
     let top_capability = sealed(seal(&mut pages, &top, vec![staged, again]).await);
@@ -740,7 +804,7 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
     else {
         panic!("a committed candidate's page reads from the store")
     };
-    assert_eq!(read[0].as_ref().expect("page reads").page.id, top.id.0);
+    assert_eq!(read[0].as_ref().expect("page reads").page.id(), top.id.0);
 
     // Another activation's candidate loses to a root it did not build on.
     let mut loser = ActivationPages::new(
@@ -1141,7 +1205,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         else {
             panic!("{cut}: the committed root reads")
         };
-        assert_eq!(read[0].as_ref().expect("page reads").page.id, base.id.0);
+        assert_eq!(read[0].as_ref().expect("page reads").page.id(), base.id.0);
         drop(fresh);
         drop(next);
     }
@@ -1277,7 +1341,9 @@ fn spool_bytes_exclude_an_overlapping_runtime() {
     let page = |kind, text: &str| {
         let mut tokens = TokenWriter::new();
         tokens.text(text);
-        frame_direct(NodeKind(kind), tokens.as_bytes(), MAX_NODE_BYTES).unwrap()
+        frame_semantic(NodeKind(kind), tokens.as_bytes(), MAX_NODE_BYTES)
+            .unwrap()
+            .named()
     };
     let own_page = page(1002, "measured");
     let other_page = page(1005, &"foreign".repeat(4096));

@@ -1022,8 +1022,20 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
                     .sum(),
                 external: 0,
             };
-            let mut entries: Vec<ManifestEntry> =
-                fresh.into_iter().map(ManifestEntry::Fresh).collect();
+            let mut entries: Vec<ManifestEntry> = fresh
+                .into_iter()
+                .map(|node| {
+                    ManifestEntry::Fresh(
+                        lash_core_store::checkpoint_graph::node::VerifiedNode::check(
+                            node,
+                            &lash_core_store::checkpoint_graph::DecodeLimits::within_total(
+                                u64::MAX,
+                            ),
+                        )
+                        .expect("a staged page checks"),
+                    )
+                })
+                .collect();
             entries.sort_by_key(|entry| match entry {
                 ManifestEntry::External(id) => *id,
                 ManifestEntry::Fresh(node) => node.id,

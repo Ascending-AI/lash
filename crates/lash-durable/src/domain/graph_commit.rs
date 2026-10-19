@@ -662,13 +662,15 @@ fn reaches(checked: &CheckedGraph, from: NodeId, to: NodeId) -> bool {
 ///
 /// The store reads it once to lock what the commit names and insert what it
 /// supplies, then takes its [`edges`](Self::edges) to insert every supplied
-/// node's edges once all node rows exist. Each supplied manifest node's
-/// envelope is checked against its digest; content addressing makes a
-/// storage cycle unbuildable from checked digests, so the stream needs no
-/// cycle check. Nothing a named node reaches is read.
+/// node's edges once all node rows exist. Each supplied manifest node
+/// arrives checked against its digest where it was staged
+/// ([`VerifiedNode`](lash_core_store::checkpoint_graph::node::VerifiedNode),
+/// FIG-6932); content addressing makes a storage cycle unbuildable from
+/// checked digests, so the stream needs no cycle check. Nothing a named
+/// node reaches is read.
 ///
-/// Each body is read and checked once (FIG-6596): as it checks a manifest
-/// node with children, the install appends a record of it to the
+/// Each body is checked once (FIG-6596): as it takes a manifest node with
+/// children, the install appends a record of it to the
 /// manifest's [`EdgeLog`], authenticated under a key this install alone
 /// holds, and its edge pass reads back only those records and the child
 /// tables they name.
@@ -813,18 +815,17 @@ impl<'a> CandidateInstall<'a> {
             .sum()
     }
 
-    /// The manifest's next entry, checked, and where a supplied node's
-    /// child table starts.
+    /// The manifest's next entry, and where a supplied node's child table
+    /// starts. A supplied node arrives checked where it was staged: its
+    /// framing is read, never parsed again (FIG-6932).
     fn take_manifest(&mut self) -> Result<(InstallEntry, u8), GraphRefusal> {
+        use lash_core_store::checkpoint_graph::SizeBound;
         use lash_core_store::checkpoint_graph::stage::ManifestEntry;
-        use lash_core_store::checkpoint_graph::{DecodeLimits, SizeBound, check_envelope};
         match self.page.pop_front() {
             Some(ManifestEntry::External(id)) => Ok((InstallEntry::Named { id, root: false }, 0)),
             Some(ManifestEntry::Fresh(node)) => {
-                let limits = DecodeLimits::within_total(u64::MAX);
-                let envelope = check_envelope(&node.bytes, node.id, &limits)?;
                 if node.id == self.summary.root
-                    && let Some(spec) = envelope.kind.spec()
+                    && let Some(spec) = node.kind().spec()
                     && spec.bound == SizeBound::Root
                     && node.bytes.len() as u64 > SizeBound::Root.bytes()
                 {
@@ -834,10 +835,11 @@ impl<'a> CandidateInstall<'a> {
                     });
                 }
                 let table = lash_core_store::checkpoint_graph::node::child_table_offset(
-                    envelope.kind,
-                    envelope.children.len(),
+                    node.kind(),
+                    node.children().len(),
                 );
-                let children = envelope.children.iter().collect();
+                let children = node.children().iter().collect();
+                let node = node.into_node();
                 Ok((
                     InstallEntry::Supplied(CheckedNode {
                         id: node.id,

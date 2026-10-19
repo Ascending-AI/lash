@@ -177,8 +177,8 @@ retain their prefix-only demand path (FIG-6595).
 
 Validation is inductive and on demand:
 
-- The worker re-hashes and re-frames every answered envelope before the
-  kernel decodes it, and checks a page's local shape, summaries and child
+- The worker hashes every answered envelope as it decodes it, once, and
+  re-frames it before the kernel decodes it (FIG-6932), and checks a page's local shape, summaries and child
   membership when the page is first read. A bad page is refused before its
   contents are used.
 - Changed pages are validated by the worker that produced them before they

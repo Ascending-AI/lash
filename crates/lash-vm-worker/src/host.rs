@@ -17,7 +17,7 @@ use lash_kernel_doc::heap::{
 use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum, Handle, TaskLabel, Timestamp};
 use lash_kernel_state::paged::PagePortLimits;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
-use lash_vm_broker::kernel::pages::{answer_page, frame_page};
+use lash_vm_broker::kernel::pages::{answer_crossed, frame_page};
 use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
 use lash_vm_client::{
     PoolError,
@@ -731,7 +731,7 @@ impl PagePort {
         // reads it under its own.
         let mut grants: HashMap<PageId, PageGrant> = HashMap::new();
         for got in pages {
-            let id = PageId(got.page.id);
+            let id = PageId(got.page.id());
             let page = PageRef {
                 id,
                 grant: grants.get(&id).copied().unwrap_or(PageGrant::NONE),
@@ -779,12 +779,13 @@ impl Port {
         (self.exchanger)(request)
     }
 
-    /// `got` as the answer for `wanted`, re-hashed and re-framed here, its
-    /// children under the capabilities that came with it; held resident.
+    /// `got` as the answer for `wanted`, its framing checked here (its
+    /// decoder named it), its children under the capabilities that came
+    /// with it; held resident.
     fn accept(&mut self, wanted: PageRef, got: &ReadPage) -> Result<PageAnswer, HeapFault> {
         let mut children = got.children.iter();
         let mut mismatch = false;
-        let answer = answer_page(wanted, &got.page.envelope, |child| {
+        let answer = answer_crossed(wanted, &got.page, |child| {
             Ok(match children.next() {
                 Some(capability) if capability.page == child.0 => grant_of(capability),
                 _ => {
@@ -800,7 +801,7 @@ impl Port {
             });
         }
         self.resident
-            .insert(answer.clone(), got.page.envelope.len() as u64);
+            .insert(answer.clone(), got.page.envelope().len() as u64);
         Ok(answer)
     }
 
@@ -840,7 +841,7 @@ impl Port {
             for (wanted, got) in missing.iter().zip(&read) {
                 fetched.push(match got {
                     Err(refusal) => Err(refused(refusal.clone(), wanted.id)),
-                    Ok(got) if got.page.id != wanted.id.0 => Err(HeapFault::Corrupt {
+                    Ok(got) if got.page.id() != wanted.id.0 => Err(HeapFault::Corrupt {
                         page: wanted.id,
                         reason: "the parent answered another page".to_owned(),
                     }),
@@ -993,7 +994,7 @@ impl Port {
             || sealed
                 .iter()
                 .zip(&carried.pages)
-                .any(|(capability, (page, _))| capability.page != page.id)
+                .any(|(capability, (page, _))| capability.page != page.id())
         {
             return Err(breach("a run's grants are not its carried batch's"));
         }
@@ -1016,7 +1017,7 @@ impl Port {
                     },
                     ..own
                 },
-                page.envelope.len() as u64,
+                page.envelope().len() as u64,
             );
         }
     }
@@ -1034,7 +1035,7 @@ impl Port {
                     && pages
                         .iter()
                         .zip(&batch.pages)
-                        .all(|(sealed, (page, _))| sealed.page == page.id) =>
+                        .all(|(sealed, (page, _))| sealed.page == page.id()) =>
             {
                 pages
             }
@@ -1098,8 +1099,17 @@ impl PageSource for WirePageSource {
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
-        let node = frame_page(&page)?;
-        let id = PageId(node.id.0);
+        // Framed once and named once, by the envelope that crosses: the
+        // parent checks the framing, and the worker never reads its own
+        // framing back (FIG-6932).
+        let framed = frame_page(&page)?;
+        let children: Vec<PageId> = framed
+            .children()
+            .iter()
+            .map(|child| PageId(child.0))
+            .collect();
+        let envelope = PageEnvelope::new(framed.into_bytes());
+        let id = PageId(envelope.id());
         let port = &mut *self.port.borrow_mut();
         if port.ungranted(&id) {
             return Ok(PageRef {
@@ -1120,17 +1130,25 @@ impl PageSource for WirePageSource {
             .iter()
             .map(|child| (child.id, child.grant))
             .collect();
-        // Our own framing read back: its children, each with the grant the
-        // heap holds for it, and the answer a later read of it returns.
-        let own = answer_page(
-            PageRef {
+        // The answer a later read of it returns: its own body, and its
+        // children in the envelope's order, each with the grant the heap
+        // holds for it.
+        let own = PageAnswer {
+            page: PageRef {
                 id,
                 grant: PageGrant::NONE,
             },
-            &node.bytes,
-            |child| Ok(grants.get(&child).copied().unwrap_or(PageGrant::NONE)),
-        )?;
-        let size = node.bytes.len() as u64;
+            kind: page.kind,
+            tokens: page.tokens.into(),
+            children: children
+                .into_iter()
+                .map(|child| PageRef {
+                    id: child,
+                    grant: grants.get(&child).copied().unwrap_or(PageGrant::NONE),
+                })
+                .collect(),
+        };
+        let size = envelope.envelope().len() as u64;
         let batch = &port.batch;
         if !batch.pages.is_empty()
             && (batch.pages.len() == SEAL_BATCH_PAGES
@@ -1143,13 +1161,7 @@ impl PageSource for WirePageSource {
         batch.index.insert(id, batch.pages.len());
         batch.bytes += size;
         batch.children += own.children.len();
-        batch.pages.push((
-            PageEnvelope {
-                id: node.id.0,
-                envelope: node.bytes.to_vec(),
-            },
-            own,
-        ));
+        batch.pages.push((envelope, own));
         Ok(PageRef {
             id,
             grant: PageGrant::NONE,

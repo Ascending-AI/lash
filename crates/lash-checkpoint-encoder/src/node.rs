@@ -272,34 +272,172 @@ pub fn is_semantic(kind: NodeKind) -> bool {
 /// references are full digests: the body's distinct children become the
 /// sorted child table and each reference its slot. Nothing is placed: a
 /// body that does not fit `bound` (at most [`MAX_NODE_BYTES`]) is refused,
-/// never split.
+/// never split. The body is read once and the envelope written once, and
+/// nothing is hashed: whoever sends or stages the page names it
+/// ([`FramedPage::named`], FIG-6932).
 ///
 /// # Errors
 ///
 /// [`GraphRefusal::UnsupportedKind`] outside [`SEMANTIC_KINDS`], a token
 /// refusal for a body that is not canonical, and
 /// [`GraphRefusal::EncodedNodeTooLarge`] past the bound.
+pub fn frame_semantic(
+    kind: NodeKind,
+    logical: &[u8],
+    bound: u64,
+) -> Result<FramedPage, GraphRefusal> {
+    if !SEMANTIC_KINDS.contains(&kind.0) {
+        return Err(GraphRefusal::UnsupportedKind(kind.0));
+    }
+    let references = super::encode::References::scan(logical, kind)?;
+    let children = references.children.len();
+    let body = references.physical_len(logical.len());
+    let len = envelope_len(kind, children, body);
+    let limit = bound.min(MAX_NODE_BYTES);
+    if len as u64 > limit {
+        return Err(GraphRefusal::EncodedNodeTooLarge {
+            bytes: len as u64,
+            limit,
+        });
+    }
+    let mut bytes = Vec::with_capacity(len);
+    bytes.extend_from_slice(&MAGIC);
+    put_varint(&mut bytes, u64::from(kind.0));
+    put_varint(&mut bytes, children as u64);
+    let table = bytes.len();
+    for child in &references.children {
+        bytes.extend_from_slice(child);
+    }
+    put_varint(&mut bytes, body as u64);
+    references.write_physical(logical, &mut bytes);
+    debug_assert_eq!(bytes.len(), len);
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::record_graph_encode(bytes.len());
+    Ok(FramedPage {
+        bytes,
+        framing: Framing {
+            kind,
+            children_start: table,
+            children_len: children * 32,
+            body_start: len - body,
+        },
+    })
+}
+
+/// [`frame_semantic`], named by its digest.
+///
+/// # Errors
+///
+/// As [`frame_semantic`].
 pub fn frame_direct(
     kind: NodeKind,
     logical: &[u8],
     bound: u64,
 ) -> Result<EncodedNode, GraphRefusal> {
-    if !SEMANTIC_KINDS.contains(&kind.0) {
-        return Err(GraphRefusal::UnsupportedKind(kind.0));
+    Ok(frame_semantic(kind, logical, bound)?.named().into_node())
+}
+
+/// A semantic page [`frame_semantic`] framed, not yet named: its envelope
+/// and where its sorted child table is. Canonical by construction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FramedPage {
+    bytes: Vec<u8>,
+    framing: Framing,
+}
+
+impl FramedPage {
+    #[must_use]
+    pub fn kind(&self) -> NodeKind {
+        self.framing.kind
     }
-    let (children, body) = super::encode::to_physical(logical, kind)?;
-    let bytes = write_envelope(kind, &children, &body);
-    let limit = bound.min(MAX_NODE_BYTES);
-    if bytes.len() as u64 > limit {
-        return Err(GraphRefusal::EncodedNodeTooLarge {
-            bytes: bytes.len() as u64,
-            limit,
-        });
+
+    /// The page's children, ascending by digest.
+    #[must_use]
+    pub fn children(&self) -> ChildTable<'_> {
+        self.framing.children(&self.bytes)
     }
-    Ok(EncodedNode {
-        id: NodeId::of_envelope(&bytes),
-        bytes: bytes.into(),
-    })
+
+    /// The envelope.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    /// The page, named by the digest of its envelope: the one hash of it
+    /// its framer takes.
+    #[must_use]
+    pub fn named(self) -> VerifiedNode {
+        let id = NodeId::of_envelope(&self.bytes);
+        VerifiedNode {
+            node: EncodedNode {
+                id,
+                bytes: self.bytes.into(),
+            },
+            framing: self.framing,
+        }
+    }
+}
+
+/// A node whose envelope checked, carried intact from that check to every
+/// consumer (FIG-6932): its bytes hash to its identity and frame
+/// canonically within the format bound, and its child table is read where
+/// the check found it, never parsed again. Only a check or this module's
+/// framing makes one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedNode {
+    node: EncodedNode,
+    framing: Framing,
+}
+
+impl VerifiedNode {
+    /// Checks `node` with [`check_envelope`].
+    ///
+    /// # Errors
+    ///
+    /// As [`check_envelope`].
+    pub fn check(node: EncodedNode, limits: &DecodeLimits) -> Result<Self, GraphRefusal> {
+        let framing = Framing::of(&node.bytes, check_envelope(&node.bytes, node.id, limits)?);
+        Ok(Self { node, framing })
+    }
+
+    /// [`check_decoded`] of `node`.
+    ///
+    /// # Errors
+    ///
+    /// As [`check_decoded`].
+    pub fn check_decoded(node: EncodedNode, limits: &DecodeLimits) -> Result<Self, GraphRefusal> {
+        let framing = Framing::of(&node.bytes, check_decoded(&node.bytes, node.id, limits)?);
+        Ok(Self { node, framing })
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> NodeKind {
+        self.framing.kind
+    }
+
+    /// The node's children, ascending by digest, from its checked framing.
+    #[must_use]
+    pub fn children(&self) -> ChildTable<'_> {
+        self.framing.children(&self.node.bytes)
+    }
+
+    #[must_use]
+    pub fn into_node(self) -> EncodedNode {
+        self.node
+    }
+}
+
+impl std::ops::Deref for VerifiedNode {
+    type Target = EncodedNode;
+
+    fn deref(&self) -> &EncodedNode {
+        &self.node
+    }
 }
 
 /// A checked semantic page's logical body: each child slot written back as
@@ -354,7 +492,40 @@ pub fn check_envelope<'a>(
     expected: NodeId,
     limits: &DecodeLimits,
 ) -> Result<NodeEnvelope<'a>, GraphRefusal> {
-    let len = bytes.len() as u64;
+    check_size(bytes.len() as u64, limits)?;
+    if let Some(envelope) = IMMUTABLE_CATALOG
+        .get()
+        .and_then(|catalog| catalog.get(expected, bytes))
+    {
+        return Ok(envelope);
+    }
+    if NodeId::of_envelope(bytes) != expected {
+        return Err(GraphRefusal::HashMismatch(expected));
+    }
+    parse_envelope(bytes, Some(expected))
+}
+
+/// [`check_envelope`] of `bytes` whose identity `expected` their receiver
+/// derived from exactly these bytes as it decoded them: a page envelope
+/// that crossed between a worker and its parent (FIG-6321). The digest is
+/// not taken again (FIG-6932); the size bounds and [`parse_envelope`] run
+/// as [`check_envelope`] runs them.
+///
+/// # Errors
+///
+/// As [`check_envelope`], never [`GraphRefusal::HashMismatch`].
+pub fn check_decoded<'a>(
+    bytes: &'a [u8],
+    expected: NodeId,
+    limits: &DecodeLimits,
+) -> Result<NodeEnvelope<'a>, GraphRefusal> {
+    check_size(bytes.len() as u64, limits)?;
+    parse_envelope(bytes, Some(expected))
+}
+
+/// The format's and the host's node-size bounds on an envelope of `len`
+/// bytes.
+fn check_size(len: u64, limits: &DecodeLimits) -> Result<(), GraphRefusal> {
     if len > MAX_NODE_BYTES {
         return Err(GraphRefusal::EncodedNodeTooLarge {
             bytes: len,
@@ -368,16 +539,7 @@ pub fn check_envelope<'a>(
             limit: limits.node_bytes,
         });
     }
-    if let Some(envelope) = IMMUTABLE_CATALOG
-        .get()
-        .and_then(|catalog| catalog.get(expected, bytes))
-    {
-        return Ok(envelope);
-    }
-    if NodeId::of_envelope(bytes) != expected {
-        return Err(GraphRefusal::HashMismatch(expected));
-    }
-    parse_envelope(bytes, Some(expected))
+    Ok(())
 }
 
 /// The process's finite, immutable build catalog: its nodes' bytes by
@@ -397,11 +559,33 @@ struct CatalogEntry {
     closure: OnceLock<Option<CatalogClosure>>,
 }
 
+/// Where a checked envelope's parts are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Framing {
     kind: NodeKind,
     children_start: usize,
     children_len: usize,
     body_start: usize,
+}
+
+impl Framing {
+    /// The framing of `envelope`, parsed from `bytes`.
+    fn of(bytes: &[u8], envelope: NodeEnvelope<'_>) -> Self {
+        Self {
+            kind: envelope.kind,
+            children_start: envelope.children.0.as_ptr().addr() - bytes.as_ptr().addr(),
+            children_len: envelope.children.len() * 32,
+            body_start: bytes.len() - envelope.body.len(),
+        }
+    }
+
+    fn children<'a>(&self, bytes: &'a [u8]) -> ChildTable<'a> {
+        ChildTable(
+            bytes[self.children_start..self.children_start + self.children_len]
+                .as_chunks::<32>()
+                .0,
+        )
+    }
 }
 
 /// A member of the build catalog and every node it reaches, each a checked
@@ -429,23 +613,16 @@ impl CatalogEntry {
                     return None;
                 }
                 let envelope = parse_framed(&self.bytes, Some(self.id)).ok()?;
-                Some(Framing {
-                    kind: envelope.kind,
-                    children_start: envelope.children.0.as_ptr().addr()
-                        - self.bytes.as_ptr().addr(),
-                    children_len: envelope.children.len() * 32,
-                    body_start: self.bytes.len() - envelope.body.len(),
-                })
+                Some(Framing::of(&self.bytes, envelope))
             })
             .as_ref()
     }
 
     fn envelope<'a>(&self, bytes: &'a [u8]) -> Option<NodeEnvelope<'a>> {
         let framing = self.framing()?;
-        let table = &bytes[framing.children_start..framing.children_start + framing.children_len];
         Some(NodeEnvelope {
             kind: framing.kind,
-            children: ChildTable(table.as_chunks::<32>().0),
+            children: framing.children(bytes),
             body: &bytes[framing.body_start..],
         })
     }
@@ -768,5 +945,97 @@ mod catalog_tests {
                 reason: CanonicalFault::ChildSlotOutOfRange(1)
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// The framing a logical body's envelope had before FIG-6932, built
+    /// apart from [`frame_semantic`]: two passes over the body, a set of
+    /// children, and each reference rewritten to its slot.
+    fn reference(kind: NodeKind, logical: &[u8]) -> Vec<u8> {
+        let mut children = BTreeSet::new();
+        let mut reader = TokenReader::new(logical);
+        while !reader.is_empty() {
+            if let TokenEvent::Child(child) = reader.next_event().expect("canonical") {
+                children.insert(child.0);
+            }
+        }
+        let children: Vec<[u8; 32]> = children.into_iter().collect();
+        let mut body = TokenWriter::new();
+        let mut reader = TokenReader::new(logical);
+        while !reader.is_empty() {
+            match reader.next_event().expect("canonical") {
+                TokenEvent::Child(child) => {
+                    body.slot(children.binary_search(&child.0).expect("a child") as u64);
+                }
+                event => body.event(&event),
+            }
+        }
+        write_envelope(kind, &children, body.as_bytes())
+    }
+
+    /// FIG-6932: a page is framed once, in one pass over its body, and its
+    /// framing is canonical by construction: the envelope is the one the
+    /// two-pass framing wrote, it checks under the digest its framer names
+    /// it by, and its child table is the one that check reads. So whoever
+    /// frames a page never reads its own framing back, and the parent's
+    /// one check is the check.
+    #[test]
+    fn a_framed_page_is_the_envelope_its_check_reads() {
+        let kind = NodeKind(1_002);
+        let digest = |at: u32| {
+            let mut digest = [0_u8; 32];
+            digest[..4].copy_from_slice(&at.to_be_bytes());
+            digest[31] = 7;
+            ChildRef(digest)
+        };
+        let bodies: Vec<Vec<u8>> = vec![
+            // No children.
+            {
+                let mut body = TokenWriter::new();
+                body.seq(2);
+                body.text("leaf");
+                body.unsigned(1 << 40);
+                body.into_bytes()
+            },
+            // Repeated references, out of digest order.
+            {
+                let mut body = TokenWriter::new();
+                body.seq(4);
+                for at in [9, 3, 9, 1] {
+                    body.child(digest(at));
+                }
+                body.into_bytes()
+            },
+            // More children than a one-byte slot holds, in reverse order.
+            {
+                let mut body = TokenWriter::new();
+                body.seq(300);
+                for at in (0..300).rev() {
+                    body.child(digest(at));
+                }
+                body.into_bytes()
+            },
+        ];
+        for logical in bodies {
+            let framed = frame_semantic(kind, &logical, MAX_NODE_BYTES).expect("frames");
+            assert_eq!(framed.bytes(), reference(kind, &logical).as_slice());
+            let node = framed.named();
+            let checked =
+                check_envelope(&node.bytes, node.id, &DecodeLimits::within_total(u64::MAX))
+                    .expect("a framed page checks");
+            assert_eq!(node.id, NodeId::of_envelope(&node.bytes));
+            assert_eq!(node.kind(), checked.kind);
+            assert_eq!(node.children(), checked.children);
+            assert_eq!(
+                direct_logical(&checked, node.id).expect("logical"),
+                logical,
+                "the framed body reads back as the body framed"
+            );
+        }
     }
 }

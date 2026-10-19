@@ -63,7 +63,7 @@ impl<C: CommittedPages> PageSource for LocalPages<C> {
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
-        let node = frame_page(&page)?;
+        let node = frame_page(&page)?.named();
         let id = PageId(node.id.0);
         let committed = &self.committed;
         self.spool

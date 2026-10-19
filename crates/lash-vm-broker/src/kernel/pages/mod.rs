@@ -12,10 +12,12 @@
 //! - A read is authorized by capability alone ([`capability`]): the root's,
 //!   or one issued for a child of a page read or sealed earlier. Committed
 //!   pages are read in one bounded batch from the store under the lease;
-//!   staged pages from the spool. Every page is re-hashed and its envelope
+//!   staged pages from the spool. Every page is hashed and its envelope
 //!   checked before it crosses, and its answer carries a capability for
 //!   exactly the children its envelope declares.
-//! - A seal is checked the same way and staged in the spool ([`spool`]): its
+//! - A sealed page is named by the digest its decoder took of exactly its
+//!   bytes; its framing is checked once, here, and the check travels with
+//!   it into the spool ([`spool`]) and on to the store (FIG-6932). Its
 //!   children must be committed pages a capability authorizes or pages the
 //!   activation staged before. Staging publishes nothing.
 //! - Every exchange runs the authority check first: the lease is renewed
@@ -46,13 +48,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lash_core_execution::runtime::Clock;
-use lash_core_store::checkpoint_graph::node::{SEMANTIC_KINDS, direct_logical, frame_direct};
+use lash_core_store::checkpoint_graph::node::{
+    FramedPage, SEMANTIC_KINDS, VerifiedNode, check_decoded, direct_logical, frame_semantic,
+};
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, ManifestSummary, StageFault, StageSpool, StageUsage,
 };
 use lash_core_store::checkpoint_graph::{
-    CommitId, DecodeLimits, EncodedNode, GraphRefusal, MAX_ROOT_BYTES, NodeId, NodeKind,
-    check_envelope,
+    CommitId, DecodeLimits, EncodedNode, GraphRefusal, MAX_ROOT_BYTES, NodeEnvelope, NodeId,
+    NodeKind, check_envelope,
 };
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{PageStore, RootLease, StoredPage};
@@ -746,7 +750,8 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                     .ok_or(PageRefusal::Missing)?
                     .as_ref()
                     .map_err(Clone::clone)?;
-                self.answer(id, page).map(|read| (read, page.len() as u64))
+                let (crossing, node) = crossing(id, page)?;
+                Ok((self.answer(crossing, &node), page.len() as u64))
             });
             match read {
                 Ok((read, size)) => {
@@ -778,25 +783,20 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         Ok(PageReply::Read { pages })
     }
 
-    /// `page`, read as `id`, as it crosses: its envelope checked, with a
-    /// capability for each child it declares. A child's authority is its
-    /// provenance: a staged child reads and seals under the spool's, a
-    /// committed child (a committed page's, or one a staged page reuses)
-    /// under the root lease that protects it.
-    fn answer(&self, id: NodeId, page: &[u8]) -> Result<ReadPage, PageRefusal> {
-        let envelope = check_envelope(page, id, &DecodeLimits::within_total(u64::MAX))
-            .map_err(|_| PageRefusal::Corrupt)?;
-        Ok(ReadPage {
-            page: PageEnvelope {
-                id: id.0,
-                envelope: page.to_vec(),
-            },
-            children: envelope
-                .children
+    /// A checked page as it crosses, with a capability for each child it
+    /// declares. A child's authority is its provenance: a staged child
+    /// reads and seals under the spool's, a committed child (a committed
+    /// page's, or one a staged page reuses) under the root lease that
+    /// protects it.
+    fn answer(&self, crossing: PageEnvelope, node: &VerifiedNode) -> ReadPage {
+        ReadPage {
+            page: crossing,
+            children: node
+                .children()
                 .iter()
                 .map(|child| self.key.issue(child, self.provenance(&child), self.epoch))
                 .collect(),
-        })
+        }
     }
 
     /// The pages a fresh activation reads first, as a read of them answers:
@@ -873,27 +873,24 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                 if size > left || warm.len() == self.limits.batch_pages {
                     continue;
                 }
-                let envelope = check_envelope(page, id, &DecodeLimits::within_total(u64::MAX))
-                    .map_err(|_| PageRefusal::Corrupt)?;
+                let (crossing, node) = crossing(id, page)?;
                 // A host node under a root (a release, an owner binding) is
                 // never a heap read.
-                if !SEMANTIC_KINDS.contains(&envelope.kind.0) {
+                if !SEMANTIC_KINDS.contains(&node.kind().0) {
                     continue;
                 }
-                let read = self.answer(id, page)?;
                 left -= size;
                 next.extend(
-                    envelope
-                        .children
+                    node.children()
                         .iter()
                         .filter(|child| hinted.contains(child) && seen.insert(*child)),
                 );
-                warm.push(read);
+                warm.push(self.answer(crossing, &node));
             }
             level = next;
         }
         if let Some(hints) = &self.hints {
-            hints.extend(warm.iter().map(|read| NodeId(read.page.id)));
+            hints.extend(warm.iter().map(|read| NodeId(read.page.id())));
         }
         self.stats.pages_read += warm.len() as u64;
         Ok(warm)
@@ -904,7 +901,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         pages: Vec<PageEnvelope>,
         children: &[PageCapability],
     ) -> Result<PageReply, PageRefusal> {
-        let bytes: u64 = pages.iter().map(|page| page.envelope.len() as u64).sum();
+        let bytes: u64 = pages.iter().map(|page| page.envelope().len() as u64).sum();
         if pages.len() > self.limits.batch_pages || bytes > self.limits.batch_bytes {
             return Err(self.too_large());
         }
@@ -920,18 +917,19 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         }
         let mut sealed = Vec::with_capacity(pages.len());
         for page in pages {
-            let id = NodeId(page.id);
-            if NodeId::of_envelope(&page.envelope) != id {
-                return Err(PageRefusal::Corrupt);
-            }
+            // The page's identity is the digest its decoder took of exactly
+            // these bytes: its framing is checked here, once (FIG-6932).
+            let id = NodeId(page.id());
+            let node = VerifiedNode::check_decoded(
+                EncodedNode {
+                    id,
+                    bytes: page.into_envelope().into(),
+                },
+                &DecodeLimits::within_total(u64::MAX),
+            )
+            .map_err(|_| PageRefusal::Corrupt)?;
             self.spool
-                .seal(
-                    EncodedNode {
-                        id,
-                        bytes: page.envelope.into(),
-                    },
-                    &|child| protected.contains(child),
-                )
+                .seal(node, &|child| protected.contains(child))
                 .map_err(stage_refusal)?;
             sealed.push(self.key.issue(id, self.stage_authority(), self.epoch));
         }
@@ -1073,15 +1071,36 @@ pub fn page_bound(kind: PageKind) -> u64 {
     }
 }
 
-/// Frames a page the heap seals: its envelope and identity. A body that is
-/// not canonical, or does not fit its kind's bound, is the heap's defect.
+/// Frames a page the heap seals, once: its envelope and sorted child
+/// table, which whoever stages or sends it names
+/// ([`FramedPage::named`], [`PageEnvelope::new`]). A body that is not
+/// canonical, or does not fit its kind's bound, is the heap's defect.
 ///
 /// # Errors
 ///
 /// [`HeapFault::Malformed`].
-pub fn frame_page(body: &PageBody) -> Result<EncodedNode, HeapFault> {
-    frame_direct(NodeKind(body.kind.0), &body.tokens, page_bound(body.kind))
+pub fn frame_page(body: &PageBody) -> Result<FramedPage, HeapFault> {
+    frame_semantic(NodeKind(body.kind.0), &body.tokens, page_bound(body.kind))
         .map_err(|refusal| HeapFault::Malformed(format!("a sealed page does not frame: {refusal}")))
+}
+
+/// `page`, read as `id`, checked as it crosses to a worker: named by the
+/// digest of exactly its bytes, which must be `id`, and framed
+/// canonically. The digest is taken once, by the envelope that crosses.
+fn crossing(id: NodeId, page: &Arc<[u8]>) -> Result<(PageEnvelope, VerifiedNode), PageRefusal> {
+    let crossing = PageEnvelope::new(page.to_vec());
+    if crossing.id() != id.0 {
+        return Err(PageRefusal::Corrupt);
+    }
+    let node = VerifiedNode::check_decoded(
+        EncodedNode {
+            id,
+            bytes: Arc::clone(page),
+        },
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .map_err(|_| PageRefusal::Corrupt)?;
+    Ok((crossing, node))
 }
 
 /// Checks a page read under `page` and hands it to the heap: its bytes
@@ -1095,30 +1114,77 @@ pub fn frame_page(body: &PageBody) -> Result<EncodedNode, HeapFault> {
 pub fn answer_page(
     page: PageRef,
     bytes: &[u8],
+    grant: impl FnMut(PageId) -> Result<PageGrant, HeapFault>,
+) -> Result<PageAnswer, HeapFault> {
+    let envelope = check_envelope(
+        bytes,
+        NodeId(page.id.0),
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .map_err(|refusal| corrupt(page, refusal.to_string()))?;
+    answer_checked(page, bytes, &envelope, grant)
+}
+
+/// [`answer_page`] of a page that crossed as `crossed`, which its decoder
+/// named by the digest of exactly its bytes: it must be `page`, and its
+/// framing is checked without hashing it again (FIG-6932).
+///
+/// # Errors
+///
+/// [`HeapFault::Corrupt`].
+pub fn answer_crossed(
+    page: PageRef,
+    crossed: &PageEnvelope,
+    grant: impl FnMut(PageId) -> Result<PageGrant, HeapFault>,
+) -> Result<PageAnswer, HeapFault> {
+    if crossed.id() != page.id.0 {
+        return Err(corrupt(page, "the parent answered another page".to_owned()));
+    }
+    let bytes = crossed.envelope();
+    let envelope = check_decoded(
+        bytes,
+        NodeId(page.id.0),
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .map_err(|refusal| corrupt(page, refusal.to_string()))?;
+    answer_checked(page, bytes, &envelope, grant)
+}
+
+fn corrupt(page: PageRef, reason: String) -> HeapFault {
+    HeapFault::Corrupt {
+        page: page.id,
+        reason,
+    }
+}
+
+/// The answer of `page`, whose envelope of `bytes` checked: a semantic
+/// kind within its bound, its body written back logical.
+fn answer_checked(
+    page: PageRef,
+    bytes: &[u8],
+    envelope: &NodeEnvelope<'_>,
     mut grant: impl FnMut(PageId) -> Result<PageGrant, HeapFault>,
 ) -> Result<PageAnswer, HeapFault> {
     let id = NodeId(page.id.0);
-    let corrupt = |reason: String| HeapFault::Corrupt {
-        page: page.id,
-        reason,
-    };
-    let envelope = check_envelope(bytes, id, &DecodeLimits::within_total(u64::MAX))
-        .map_err(|refusal| corrupt(refusal.to_string()))?;
     if !SEMANTIC_KINDS.contains(&envelope.kind.0) {
-        return Err(corrupt(format!(
-            "kind {} is not a semantic page",
-            envelope.kind.0
-        )));
+        return Err(corrupt(
+            page,
+            format!("kind {} is not a semantic page", envelope.kind.0),
+        ));
     }
     let kind = PageKind(envelope.kind.0);
     if bytes.len() as u64 > page_bound(kind) {
-        return Err(corrupt(format!(
-            "{} bytes exceed its kind's bound of {}",
-            bytes.len(),
-            page_bound(kind)
-        )));
+        return Err(corrupt(
+            page,
+            format!(
+                "{} bytes exceed its kind's bound of {}",
+                bytes.len(),
+                page_bound(kind)
+            ),
+        ));
     }
-    let tokens = direct_logical(&envelope, id).map_err(|refusal| corrupt(refusal.to_string()))?;
+    let tokens =
+        direct_logical(envelope, id).map_err(|refusal| corrupt(page, refusal.to_string()))?;
     let children = envelope
         .children
         .iter()

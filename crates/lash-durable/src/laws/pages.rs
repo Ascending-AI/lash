@@ -13,13 +13,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_core_store::checkpoint_graph::node::VerifiedNode;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
     node_range,
 };
 use lash_core_store::checkpoint_graph::{
-    CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
-    NodeKind, TokenWriter, TypedBody,
+    CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging,
+    NodeId, NodeKind, TokenWriter, TypedBody,
 };
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
@@ -124,6 +125,12 @@ fn encoded(kind: NodeKind, tag: &str, children: &[NodeId]) -> EncodedNode {
         .unwrap_or_else(|| panic!("a law's page is staged"))
 }
 
+/// A law's page as a spool hands it on: checked.
+fn verified(node: EncodedNode) -> VerifiedNode {
+    VerifiedNode::check(node, &DecodeLimits::within_total(u64::MAX))
+        .unwrap_or_else(|error| panic!("a law's page checks: {error}"))
+}
+
 fn children_of(node: &EncodedNode) -> Vec<NodeId> {
     node.children()
         .unwrap_or_else(|error| panic!("a law's page parses: {error}"))
@@ -188,7 +195,7 @@ impl ScriptedManifest {
             .fresh
             .values()
             .cloned()
-            .map(ManifestEntry::Fresh)
+            .map(|node| ManifestEntry::Fresh(verified(node)))
             .chain(external.iter().copied().map(ManifestEntry::External))
             .collect();
         entries.sort_by_key(entry_id);

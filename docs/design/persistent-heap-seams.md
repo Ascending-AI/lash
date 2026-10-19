@@ -422,8 +422,10 @@ Invariants:
   activation.
 - Full payload projections batch only authenticated siblings they must
   consume. A visitor that may stop early fetches only its demanded prefix.
-- Every answered envelope is re-hashed and re-framed by the worker before
-  the kernel decodes it. Every sealed envelope is re-hashed by the parent.
+- Every answered envelope is named by the digest the worker derives as it
+  decodes it and re-framed before the kernel decodes it. Every sealed
+  envelope is named by the digest the parent derives as it decodes it, and
+  its framing is checked there once (FIG-6932).
 - The parent authorizes each child of a sealed page by a capability or an
   earlier page in the same batch.
 - Reading page P yields capabilities for exactly P's envelope children.
@@ -520,7 +522,7 @@ spool in `lash-vm-broker`. hp-publish consumes the manifest.
 
 ```rust
 pub trait StageSpool: Send {
-    fn seal(&mut self, page: EncodedNode, protected: &dyn Fn(&NodeId) -> bool) -> Result<(), StageFault>;
+    fn seal(&mut self, page: VerifiedNode, protected: &dyn Fn(&NodeId) -> bool) -> Result<(), StageFault>;
     fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault>;
     fn candidate(&mut self, root: NodeId, base: Option<NodeId>, commit: CommitId)
         -> Result<Box<dyn CandidateManifest>, StageFault>;
@@ -550,6 +552,15 @@ Invariants:
   edges and again on a retry.
 - Spilling neither publishes nor admits.
 - Spool lifetime follows D-SPOOL.
+- A page is checked once, where it crosses into the parent (FIG-6932). The
+  worker frames each page in one pass and never reads its framing back; its
+  page envelope is named by the digest of exactly its bytes, which the
+  parent derives as it decodes them, so the page service checks only the
+  framing. The spool keeps that check as a `VerifiedNode`, and a manifest's
+  `Fresh` entries carry it to the store, which reads each page's child
+  table from it and neither hashes nor parses the page again. A page a
+  spool reads back from its directory is checked again before it is handed
+  on.
 
 Errors: `StageFault`. All of them are host outcomes; none is a guest memory
 bound.
@@ -563,6 +574,10 @@ Laws: unit, `//crates/lash-vm-broker:lash-vm-broker__unit_test`, in
 - `a_quota_failure_is_a_host_outcome`
 - `a_cell_within_the_resident_bound_opens_no_file_per_page`
 - `a_crashed_parents_spool_is_reaped_and_the_committed_root_stands`
+- `a_page_read_back_from_disk_is_checked_again`
+
+and in `lash-checkpoint-encoder`'s `node::frame_tests`:
+`a_framed_page_is_the_envelope_its_check_reads`.
 
 ### S6 Store publication
 

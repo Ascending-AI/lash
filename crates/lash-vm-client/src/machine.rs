@@ -489,7 +489,7 @@ impl RemoteMachine {
         let Some(batch) = seal else {
             return Ok(Vec::new());
         };
-        let carried: Vec<NodeId> = batch.pages.iter().map(|page| NodeId(page.id)).collect();
+        let carried: Vec<NodeId> = batch.pages.iter().map(|page| NodeId(page.id())).collect();
         let admitted = self.pages.lock().await.admit(batch).await;
         match admitted {
             Ok(grants) => {

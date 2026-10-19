@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use super::commit::CommitId;
-use super::node::{EncodedNode, NodeId};
+use super::node::{EncodedNode, NodeId, VerifiedNode};
 
 /// One activation's stage lease: it scopes the spool and every stage
 /// capability; reset or expiry ends it.
@@ -63,8 +63,10 @@ pub enum ManifestEntry {
     /// A committed node the candidate references directly: the store
     /// key-share locks it and checks it exists, never walking its closure.
     External(NodeId),
-    /// A node the candidate supplies: inserted before any edge.
-    Fresh(EncodedNode),
+    /// A node the candidate supplies, checked where it was staged: inserted
+    /// before any edge, its child table read from that check's framing
+    /// (FIG-6932).
+    Fresh(VerifiedNode),
 }
 
 /// What a manifest states before it is streamed.
@@ -180,12 +182,12 @@ pub fn node_range(node: &EncodedNode, offset: u64, len: usize) -> Result<Vec<u8>
 /// the store (hp-publish, FIG-6191) consumes its manifests.
 pub trait StageSpool: Send {
     fn lease(&self) -> StageLeaseId;
-    /// Seals `page` into the spool after checking its digest and that each
-    /// child is `protected` or already staged. Sealing an identical page
-    /// twice is one page.
+    /// Seals `page`, which its producer checked, into the spool after
+    /// checking that each child is `protected` or already staged. Sealing
+    /// an identical page twice is one page.
     fn seal(
         &mut self,
-        page: EncodedNode,
+        page: VerifiedNode,
         protected: &dyn Fn(&NodeId) -> bool,
     ) -> Result<(), StageFault>;
     /// Reads a page this activation staged.

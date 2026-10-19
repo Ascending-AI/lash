@@ -129,7 +129,7 @@ impl CandidateManifest for GeneratedManifest {
         Ok(self.order[start..]
             .iter()
             .take(limit)
-            .map(|(_, recipe)| ManifestEntry::Fresh(self.build(*recipe)))
+            .map(|(_, recipe)| ManifestEntry::Fresh(super::verified(self.build(*recipe))))
             .collect())
     }
 

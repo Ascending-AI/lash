@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
-    logical_digest, varint_len,
+    logical_digest, put_varint, varint_len,
 };
 
 use super::node::{
@@ -626,34 +626,67 @@ pub fn to_physical(
     logical: &[u8],
     kind: NodeKind,
 ) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
-    let refuse = |error| GraphRefusal::from_token(error, None, Some(kind.0));
-    let mut children = BTreeSet::new();
-    let mut reader = TokenReader::new(logical);
-    while !reader.is_empty() {
-        if let TokenEvent::Child(ChildRef(digest)) = reader.next_event().map_err(refuse)? {
-            children.insert(digest);
-        }
-    }
-    let children: Vec<[u8; 32]> = children.into_iter().collect();
-    let mut out = TokenWriter::with_capacity(logical.len());
-    let mut reader = TokenReader::new(logical);
-    while !reader.is_empty() {
-        let start = reader.position();
-        match reader.next_event().map_err(refuse)? {
-            TokenEvent::Child(ChildRef(digest)) => {
-                let slot =
-                    children
-                        .binary_search(&digest)
-                        .map_err(|_| GraphRefusal::NonCanonical {
-                            node: None,
-                            reason: CanonicalFault::ChildSlotOutOfRange(0),
-                        })?;
-                out.slot(slot as u64);
+    let references = References::scan(logical, kind)?;
+    let mut body = Vec::with_capacity(references.physical_len(logical.len()));
+    references.write_physical(logical, &mut body);
+    Ok((references.children, body))
+}
+
+/// A logical reference's length: its tag and its child's digest.
+const LOGICAL_REF_LEN: usize = 1 + 32;
+
+/// The child references of a logical body, read in one pass: where each
+/// starts and what it names, and the body's children, sorted and unique.
+pub(crate) struct References {
+    at: Vec<(usize, [u8; 32])>,
+    pub(crate) children: Vec<[u8; 32]>,
+}
+
+impl References {
+    /// Reads every token of `logical`, each of which must be canonical.
+    pub(crate) fn scan(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
+        let mut at = Vec::new();
+        let mut reader = TokenReader::new(logical);
+        while !reader.is_empty() {
+            let start = reader.position();
+            if let TokenEvent::Child(ChildRef(digest)) = reader
+                .next_event()
+                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?
+            {
+                at.push((start, digest));
             }
-            _ => out.raw(&logical[start..reader.position()]),
         }
+        let mut children: Vec<[u8; 32]> = at.iter().map(|(_, digest)| *digest).collect();
+        children.sort_unstable();
+        children.dedup();
+        Ok(Self { at, children })
     }
-    Ok((children, out.into_bytes()))
+
+    fn slot(&self, digest: &[u8; 32]) -> u64 {
+        self.children.partition_point(|child| child < digest) as u64
+    }
+
+    /// The length of the physical form of `logical`, `logical_len` bytes:
+    /// each reference its tag and its child's slot.
+    pub(crate) fn physical_len(&self, logical_len: usize) -> usize {
+        self.at.iter().fold(logical_len, |len, (_, digest)| {
+            len - LOGICAL_REF_LEN + 1 + varint_len(self.slot(digest))
+        })
+    }
+
+    /// Appends the physical form of `logical`, the body these references
+    /// were read from, to `out`.
+    pub(crate) fn write_physical(&self, logical: &[u8], out: &mut Vec<u8>) {
+        let mut copied = 0;
+        for (start, digest) in &self.at {
+            out.extend_from_slice(&logical[copied..*start]);
+            // The reference's own tag, then its slot in place of its digest.
+            out.push(logical[*start]);
+            put_varint(out, self.slot(digest));
+            copied = start + LOGICAL_REF_LEN;
+        }
+        out.extend_from_slice(&logical[copied..]);
+    }
 }
 
 /// One token event of a logical body: its byte range and, for a

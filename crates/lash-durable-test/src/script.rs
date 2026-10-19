@@ -349,7 +349,7 @@ impl Shared {
                 ManifestEntry::Fresh(node) => node.id,
             });
             fresh.extend(entries.into_iter().filter_map(|entry| match entry {
-                ManifestEntry::Fresh(node) => Some(node),
+                ManifestEntry::Fresh(node) => Some(node.into_node()),
                 ManifestEntry::External(_) => None,
             }));
         }

@@ -54,6 +54,10 @@ struct Scripted {
 }
 
 impl Scripted {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: a page the script builds always checks"
+    )]
     fn new(
         root: NodeId,
         base: Option<NodeId>,
@@ -75,7 +79,15 @@ impl Scripted {
         };
         let mut entries: Vec<ManifestEntry> = fresh
             .into_iter()
-            .map(ManifestEntry::Fresh)
+            .map(|node| {
+                ManifestEntry::Fresh(
+                    lash_core_store::checkpoint_graph::node::VerifiedNode::check(
+                        node,
+                        &lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
+                    )
+                    .expect("a staged page checks"),
+                )
+            })
             .chain(external.into_iter().map(ManifestEntry::External))
             .collect();
         entries.sort_by_key(entry_id);

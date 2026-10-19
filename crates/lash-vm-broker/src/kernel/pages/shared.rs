@@ -10,10 +10,11 @@
 
 use std::sync::{Arc, Mutex};
 
+use lash_core_store::checkpoint_graph::node::VerifiedNode;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, StageFault, StageLeaseId, StageSpool, StageUsage,
 };
-use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
+use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 use lash_durable::domain::pages::PageStore;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -46,7 +47,7 @@ impl StageSpool for SharedSpool {
 
     fn seal(
         &mut self,
-        page: EncodedNode,
+        page: VerifiedNode,
         protected: &dyn Fn(&NodeId) -> bool,
     ) -> Result<(), StageFault> {
         self.lock().seal(page, protected)
@@ -114,7 +115,7 @@ impl PageSource for ParentSeal<'_> {
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
-        let node = frame_page(&page)?;
+        let node = frame_page(&page)?.named();
         let id = PageId(node.id.0);
         self.0.seal(node, &|_| true).map_err(staging)?;
         Ok(PageRef {

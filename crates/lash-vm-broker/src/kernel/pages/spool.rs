@@ -53,12 +53,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use lash_core_store::checkpoint_graph::node::VerifiedNode;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EDGE_RECORD_BYTES, EdgeLog, ManifestEntry, ManifestSummary, StageFault,
     StageLeaseId, StageSpool, StageUsage,
 };
 use lash_core_store::checkpoint_graph::{
-    CommitId, DecodeLimits, EncodedNode, NodeId, check_envelope, parse_envelope,
+    CommitId, DecodeLimits, EncodedNode, NodeId, parse_envelope,
 };
 
 /// The name of the file each process directory holds locked while its
@@ -367,10 +368,10 @@ struct Candidate {
 }
 
 /// The staged pages and reference counts of a spool within its resident
-/// bound.
+/// bound. Each page keeps the framing its seal checked.
 #[derive(Debug, Default)]
 struct Resident {
-    pages: HashMap<NodeId, Arc<[u8]>>,
+    pages: HashMap<NodeId, VerifiedNode>,
     refs: HashMap<NodeId, u64>,
 }
 
@@ -383,23 +384,42 @@ enum Tier {
     Files,
 }
 
-/// Where a candidate's manifest reads its fresh pages: the bytes its walk
-/// reached in memory, or the spool's page files.
+/// Where a candidate's manifest reads its fresh pages: the checked pages
+/// its walk reached in memory, or the spool's page files.
 #[derive(Clone, Debug)]
 enum Pages {
-    Resident(Arc<HashMap<NodeId, Arc<[u8]>>>),
+    Resident(Arc<HashMap<NodeId, VerifiedNode>>),
     Files(PathBuf),
 }
 
 impl Pages {
     fn read(&self, id: &NodeId) -> Result<Arc<[u8]>, StageFault> {
         match self {
-            Self::Resident(pages) => pages.get(id).cloned().ok_or(StageFault::Missing(*id)),
+            Self::Resident(pages) => pages
+                .get(id)
+                .map(|page| Arc::clone(&page.bytes))
+                .ok_or(StageFault::Missing(*id)),
             Self::Files(dir) => match fs::read(dir.join(id.to_hex())) {
                 Ok(bytes) => Ok(bytes.into()),
                 Err(error) if error.kind() == ErrorKind::NotFound => Err(StageFault::Missing(*id)),
                 Err(error) => Err(io(&error)),
             },
+        }
+    }
+
+    /// The fresh page `id`, checked: a resident page as its seal checked
+    /// it, a page on disk checked again as it is read back from its file.
+    fn checked(&self, id: &NodeId) -> Result<VerifiedNode, StageFault> {
+        match self {
+            Self::Resident(pages) => pages.get(id).cloned().ok_or(StageFault::Missing(*id)),
+            Self::Files(_) => VerifiedNode::check(
+                EncodedNode {
+                    id: *id,
+                    bytes: self.read(id)?,
+                },
+                &DecodeLimits::within_total(u64::MAX),
+            )
+            .map_err(|_| StageFault::HashMismatch(*id)),
         }
     }
 }
@@ -520,13 +540,34 @@ impl DiskSpool {
         }
     }
 
-    /// Stages `bytes` as the page `id`, which is not staged yet.
-    fn write(&mut self, id: NodeId, bytes: Arc<[u8]>) -> Result<(), StageFault> {
+    /// Stages `page`, which is not staged yet.
+    fn write(&mut self, page: VerifiedNode) -> Result<(), StageFault> {
         let Tier::Resident(resident) = &mut self.tier else {
-            return write_page(&self.page(&id), &bytes);
+            return write_page(&self.page(&page.id), &page.bytes);
         };
-        resident.pages.insert(id, bytes);
+        resident.pages.insert(page.id, page);
         Ok(())
+    }
+
+    /// A staged page's bytes and children. A resident page's children are
+    /// read from the framing its seal checked; a page on disk is parsed
+    /// from its file again.
+    fn staged_page(&self, id: &NodeId) -> Result<(Arc<[u8]>, Vec<NodeId>), StageFault> {
+        match &self.tier {
+            Tier::Resident(resident) => {
+                let page = resident.pages.get(id).ok_or(StageFault::Missing(*id))?;
+                Ok((Arc::clone(&page.bytes), page.children().iter().collect()))
+            }
+            Tier::Files => {
+                let bytes = Pages::Files(self.pages()).read(id)?;
+                let children = parse_envelope(&bytes, Some(*id))
+                    .map_err(|_| StageFault::HashMismatch(*id))?
+                    .children
+                    .iter()
+                    .collect();
+                Ok((bytes, children))
+            }
+        }
     }
 
     /// Moves every resident page and count into the spool's directory, the
@@ -539,8 +580,8 @@ impl DiskSpool {
         let written = (|| {
             fs::create_dir(self.pages()).map_err(|error| io(&error))?;
             fs::create_dir(self.dir.join("refs")).map_err(|error| io(&error))?;
-            for (id, bytes) in &resident.pages {
-                write_page(&self.page(id), bytes)?;
+            for (id, page) in &resident.pages {
+                write_page(&self.page(id), &page.bytes)?;
             }
             for (id, count) in &resident.refs {
                 std::os::unix::fs::symlink(count.to_string(), self.refs(id))
@@ -580,13 +621,11 @@ impl DiskSpool {
 
     /// Deletes the staged page `id`, if staged.
     fn remove(&mut self, id: &NodeId) -> Result<(), StageFault> {
-        let bytes = match self.read(id) {
-            Ok(bytes) => bytes,
+        let (bytes, children) = match self.staged_page(id) {
+            Ok(page) => page,
             Err(StageFault::Missing(_)) => return Ok(()),
             Err(fault) => return Err(fault),
         };
-        let envelope =
-            parse_envelope(&bytes, Some(*id)).map_err(|_| StageFault::HashMismatch(*id))?;
         match &mut self.tier {
             Tier::Resident(resident) => {
                 resident.pages.remove(id);
@@ -594,7 +633,7 @@ impl DiskSpool {
             Tier::Files => fs::remove_file(self.page(id)).map_err(|error| io(&error))?,
         }
         self.entries -= u64::from(self.references(id)? == 0);
-        for child in envelope.children.iter() {
+        for child in children {
             let old = self.references(&child)?;
             // Only the last edge's removal asks whether the child is staged.
             let staged = old == 1 && self.staged(&child);
@@ -650,19 +689,17 @@ impl StageSpool for DiskSpool {
 
     fn seal(
         &mut self,
-        page: EncodedNode,
+        page: VerifiedNode,
         protected: &dyn Fn(&NodeId) -> bool,
     ) -> Result<(), StageFault> {
-        let envelope = check_envelope(&page.bytes, page.id, &DecodeLimits::within_total(u64::MAX))
-            .map_err(|_| StageFault::HashMismatch(page.id))?;
         if self.staged(&page.id) {
             return Ok(());
         }
         // Each child is looked up once: whether it is staged, then its
         // count. The canonical child table is distinct, so no child's count
         // moves before its own update below.
-        let mut counted = Vec::with_capacity(envelope.children.len());
-        for child in envelope.children.iter() {
+        let mut counted = Vec::with_capacity(page.children().len());
+        for child in page.children().iter() {
             let staged = self.staged(&child);
             if !staged && !protected(&child) {
                 return Err(StageFault::Unauthorized {
@@ -695,7 +732,7 @@ impl StageSpool for DiskSpool {
         if charged > self.resident {
             self.move_to_disk()?;
         }
-        self.write(page.id, page.bytes)?;
+        self.write(page)?;
         self.entries += own_entry;
         for (child, staged, old) in counted {
             self.reference(&child, old, true, staged)?;
@@ -712,7 +749,7 @@ impl StageSpool for DiskSpool {
             Tier::Resident(resident) => resident
                 .pages
                 .get(page)
-                .cloned()
+                .map(|page| Arc::clone(&page.bytes))
                 .ok_or(StageFault::Missing(*page)),
             Tier::Files => Pages::Files(self.pages()).read(page),
         }
@@ -731,10 +768,8 @@ impl StageSpool for DiskSpool {
             reached.mark(id)?;
         }
         while let Some(id) = stack.pop() {
-            let bytes = self.read(&id)?;
-            let envelope =
-                parse_envelope(&bytes, Some(id)).map_err(|_| StageFault::HashMismatch(id))?;
-            for child in envelope.children.iter() {
+            let (_, children) = self.staged_page(&id)?;
+            for child in children {
                 if self.staged(&child) && reached.mark(&child)? {
                     stack.push(child);
                 }
@@ -840,16 +875,15 @@ impl StageSpool for DiskSpool {
             if !fresh {
                 continue;
             }
-            let bytes = self.read(&id)?;
-            let envelope =
-                parse_envelope(&bytes, Some(id)).map_err(|_| StageFault::HashMismatch(id))?;
-            if let Some(reached) = &mut reached {
-                reached.insert(id, Arc::clone(&bytes));
-            }
+            let (bytes, children) = self.staged_page(&id)?;
             summary.fresh_nodes += 1;
             summary.fresh_bytes += bytes.len() as u64;
-            summary.fresh_edges += envelope.children.len() as u64;
-            for child in envelope.children.iter() {
+            summary.fresh_edges += children.len() as u64;
+            if let (Some(reached), Tier::Resident(resident)) = (&mut reached, &self.tier) {
+                let page = resident.pages.get(&id).ok_or(StageFault::Missing(id))?;
+                reached.insert(id, page.clone());
+            }
+            for child in children {
                 let fresh = self.staged(&child);
                 // A child's count is the staged pages naming it, so a child
                 // only this page names is reached once, here: only a shared
@@ -1044,10 +1078,7 @@ impl CandidateManifest for DiskManifest {
             let (id, fresh) = parse(record);
             last = Some(id);
             entries.push(if fresh {
-                ManifestEntry::Fresh(EncodedNode {
-                    id,
-                    bytes: self.pages.read(&id)?,
-                })
+                ManifestEntry::Fresh(self.pages.checked(&id)?)
             } else {
                 ManifestEntry::External(id)
             });
@@ -1061,7 +1092,7 @@ impl CandidateManifest for DiskManifest {
     fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
         let dir = match &self.pages {
             Pages::Resident(pages) => {
-                let bytes = pages.get(id).ok_or(StageFault::Missing(*id))?;
+                let bytes = &pages.get(id).ok_or(StageFault::Missing(*id))?.bytes;
                 return usize::try_from(offset)
                     .ok()
                     .and_then(|start| bytes.get(start..start.checked_add(len)?))

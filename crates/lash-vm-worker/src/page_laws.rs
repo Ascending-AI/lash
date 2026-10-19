@@ -734,11 +734,11 @@ fn a_committed_child_resealed_after_its_namer_keeps_its_grant() {
     assert_eq!(witness.batches.len(), 1, "one outgoing seal batch");
     let batch = &witness.batches[0];
     assert_eq!(
-        batch.iter().map(|page| page.id).collect::<Vec<_>>(),
+        batch.iter().map(PageEnvelope::id).collect::<Vec<_>>(),
         vec![namer.0, child.id.0],
         "rare-state witness: the wire batch contains namer then committed child"
     );
-    assert_eq!(batch[1].envelope.as_slice(), child.bytes.as_ref());
+    assert_eq!(batch[1].envelope(), child.bytes.as_ref());
     let back = read_back.expect("the namer stages with its child's grant and both pages read back");
     assert_eq!(back.kind, PageKind::PAYLOAD_LEAF);
     assert_eq!(

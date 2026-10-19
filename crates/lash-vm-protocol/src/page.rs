@@ -172,13 +172,15 @@ impl<'de> Deserialize<'de> for PageCapability {
 /// One page as it crosses: its complete envelope, with its digest.
 ///
 /// Only the envelope crosses (FIG-6321): a page is named by the digest of
-/// its envelope, so the receiver derives the digest as it decodes, and a
-/// decoded page's `id` is its envelope's digest by construction.
+/// its envelope, so the receiver derives the digest as it decodes. Every
+/// page envelope, decoded or built, is named by its envelope's digest by
+/// construction, so a receiver checks its framing and never hashes it
+/// again (FIG-6932).
 #[derive(Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[schemars(with = "Vec<u8>")]
 pub struct PageEnvelope {
-    pub id: [u8; 32],
-    pub envelope: Vec<u8>,
+    id: [u8; 32],
+    envelope: Vec<u8>,
 }
 
 /// The domain a page's digest is hashed in: a page is stored as the blob of
@@ -205,6 +207,22 @@ impl PageEnvelope {
     #[must_use]
     pub fn digest(envelope: &[u8]) -> [u8; 32] {
         lash_protocol_types::core_support::blake3_domain_hash(PAGE_DIGEST_DOMAIN, envelope)
+    }
+
+    /// The digest of the envelope: the page's identity.
+    #[must_use]
+    pub fn id(&self) -> [u8; 32] {
+        self.id
+    }
+
+    #[must_use]
+    pub fn envelope(&self) -> &[u8] {
+        &self.envelope
+    }
+
+    #[must_use]
+    pub fn into_envelope(self) -> Vec<u8> {
+        self.envelope
     }
 }
 
