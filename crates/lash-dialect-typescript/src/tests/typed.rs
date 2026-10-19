@@ -573,6 +573,100 @@ fn plain_record_restored_brand_markers_keep_admission() {
     );
 }
 
+/// TS-PLAIN-FUNCTION-LOCAL, TS-PLAIN-NUMERIC-KEY: a function's own
+/// record spine is proven like the program's, and a write keyed by a
+/// number keeps every proof but those of fields a number's text can name.
+#[test]
+fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
+    let source = "function body() {\n\
+         const tree = { level: { rows: [[0], [1], [2]], counters: { c: 0 } } };\n\
+         for (let n = 0; n < 5; n++) {\n\
+           tree.level.rows[n % 3] = [n];\n\
+           tree.level.counters['c'] = tree.level.counters['c'] + 1;\n\
+         }\n\
+         return tree;\n\
+       }\n\
+       let result = null;\n\
+       for (let repeat = 0; repeat < 2; repeat++) { result = body(); }\n\
+       await finish(result);";
+    let text = super::main_text_with_effects(source);
+    assert!(!text.contains("__ts_brand"), "{text}");
+    assert!(!text.contains("kind("), "{text}");
+    let guarded = source.replace(
+        "const tree = {",
+        "function opaque(x) { return x; } const tree = opaque({",
+    );
+    let guarded = guarded.replace("} } };", "} } });");
+    assert!(super::main_text_with_effects(&guarded).contains("__ts_brand"));
+    assert_eq!(super::machine::end(source), super::machine::end(&guarded));
+}
+
+/// TS-PLAIN-NUMERIC-KEY: a key is a number only when every value it can
+/// take is one, never because an annotation says so. Anything else may
+/// write the internal brand; a number may still replace a numeric field.
+#[test]
+fn plain_record_keys_that_may_be_text_keep_brand_admission() {
+    let bindings = super::pages::Session::seeded([(
+        lash_kernel_doc::Name::new("marker"),
+        lash_kernel_doc::Datum::Tuple(Vec::new()),
+    )]);
+    for key in [
+        "const key: number = ('__ts_brand' as any);",
+        "let key = 0; key = '__ts_brand';",
+        "let key = 0; const change = () => { key = '__ts_brand'; }; change();",
+        "const prefix = '__ts_'; const key = prefix + 'brand';",
+        "const flag = false; const key = flag ? 0 : '__ts_brand';",
+        "let key = 0; key += '__ts_brand';",
+    ] {
+        let source = format!(
+            "function body() {{ const r = {{}}; r.__ts_type = 'brand:date'; {key} r[key] = marker; \
+             return r.__ts_brand === undefined; }} await finish(body());"
+        );
+        let text = super::main_of(lower_against(
+            &source,
+            &["marker"],
+            &super::machine::effects(),
+        ));
+        assert!(text.contains(".__ts_brand, ())"), "{key}\n{text}");
+        assert_eq!(
+            super::machine::end_with_bindings(&source, bindings.clone()),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+            "{key}"
+        );
+    }
+    plain_fallback(
+        "function body() { const r = { 0: {}, next: {} }; const n = 3; r[n % 3] = new Date(7); \
+         return r['0'].__ts_brand === undefined; } await finish(body());",
+    );
+}
+
+/// TS-PLAIN-CAPTURE: a closure can outlive its function and read a binding
+/// whose record left through the function's result, where code the source
+/// cannot see changes it.
+#[test]
+fn plain_record_captured_function_locals_keep_admission() {
+    for change in [
+        "Object.assign(made.r, { next: new Date(7) });",
+        "const change = () => { Object.assign(made.r, { next: new Date(7) }); }; change();",
+    ] {
+        plain_fallback(&format!(
+            "function make() {{ const r = {{ next: {{}} }}; \
+             return {{ r: r, check: () => r.next.__ts_brand === undefined }}; }} \
+             const made = make(); {change} await finish(made.check());"
+        ));
+    }
+}
+
+/// TS-PLAIN-ALIAS-WRITE: a text-keyed write through a function's alias
+/// may replace any field of that function's records.
+#[test]
+fn plain_record_text_keyed_function_local_writes_keep_admission() {
+    plain_fallback(
+        "function body() { const r = { next: {} }; const alias = r; let key = 'next'; \
+         alias[key] = new Date(7); return r.next.__ts_brand === undefined; } await finish(body());",
+    );
+}
+
 fn stable_path_matches_guarded(source: &str) {
     let guarded = source
         .replace("const r =", "var r =")

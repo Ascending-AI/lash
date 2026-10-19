@@ -1,7 +1,13 @@
 //! Closed plain-record definitions and their primitive fields, alongside the
 //! ordinary (trusted) types.
-//! Facts are compiler-only. Mutated property names are deliberately global:
-//! a write through an unknown alias must invalidate the same nested proof.
+//! Facts are compiler-only and belong to bindings, as the type facts do, so
+//! a function's own bindings are proven like the program's. Mutated property
+//! names are deliberately global: a write through an unknown alias must
+//! invalidate the same nested proof.
+//!
+//! A binding read or written from a function nested inside the one that
+//! declares it is never proven: such a closure can run after its function
+//! returned and its record was handed to code this source cannot see.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -40,11 +46,61 @@ impl PlainRecord {
     }
 }
 
+/// What a name the source spells stands for: one of its bindings, or a
+/// name it does not declare (a session binding or a global).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Key {
+    Binding(usize),
+    Free(String),
+}
+
+/// The binding a spelling of the program names, if the source declares it.
+pub(super) type Resolve<'r> = &'r dyn Fn(&str) -> Option<usize>;
+
+fn key(name: &str, resolve: Resolve<'_>) -> Key {
+    resolve(name).map_or_else(|| Key::Free(name.to_string()), Key::Binding)
+}
+
+/// Property names something may have written or exposed.
+#[derive(Clone, Debug, Default)]
+struct Names {
+    names: BTreeSet<String>,
+    /// A number keyed a write or an escaped read. It names only what a
+    /// number's text can be, never the internal brand.
+    numeric: bool,
+}
+
+impl Names {
+    fn contains(&self, name: &str) -> bool {
+        self.names.contains(name) || (self.numeric && numeric_name(name))
+    }
+
+    fn insert(&mut self, name: &str) {
+        self.names.insert(name.to_string());
+    }
+}
+
+/// Whether `name` may be the text of a number, as a property key spells it:
+/// `NaN`, `Infinity`, `-Infinity`, or a digit, after an optional minus
+/// sign. This admits more than the canonical spellings, never fewer.
+fn numeric_name(name: &str) -> bool {
+    let digits = name.strip_prefix('-').unwrap_or(name);
+    matches!(name, "NaN" | "Infinity" | "-Infinity")
+        || digits.as_bytes().first().is_some_and(u8::is_ascii_digit)
+}
+
 #[derive(Default)]
 pub(super) struct Collector<'a> {
-    definitions: HashMap<&'a str, Vec<Option<&'a Expr>>>,
-    excluded: BTreeSet<String>,
-    mutated: BTreeSet<String>,
+    /// Each binding's spelling and every value it is given, `None` where
+    /// the analysis does not follow it.
+    definitions: HashMap<usize, (&'a str, Vec<Option<&'a Expr>>)>,
+    /// Every name the source declares or assigns, in any scope.
+    defined: BTreeSet<&'a str>,
+    excluded: BTreeSet<Key>,
+    mutated: Names,
+    /// The computed keys of writes; what each may name is settled once the
+    /// numeric bindings are known.
+    keys: Vec<&'a Expr>,
     dynamic: bool,
     representation_written: bool,
     escapes: Vec<&'a Expr>,
@@ -55,10 +111,10 @@ pub(super) struct Collector<'a> {
 #[derive(Debug, Default)]
 pub(super) struct Facts {
     enabled: bool,
-    names: HashMap<String, PlainRecord>,
-    primitives: HashMap<String, Ty>,
-    mutated: BTreeSet<String>,
-    written: BTreeSet<String>,
+    names: HashMap<usize, PlainRecord>,
+    primitives: HashMap<usize, Ty>,
+    mutated: Names,
+    written: Names,
     dynamic: bool,
     definitions: HashMap<String, Expr>,
 }
@@ -68,13 +124,13 @@ impl Facts {
         self.definitions.get(name)
     }
 
-    pub(super) fn of(&self, expr: &Expr) -> Option<PlainRecord> {
+    pub(super) fn of(&self, expr: &Expr, resolve: Resolve<'_>) -> Option<PlainRecord> {
         if !self.enabled {
             return None;
         }
         match expr {
-            Expr::Ident(name, _) => self.names.get(name).cloned(),
-            Expr::As { value, .. } => self.of(value),
+            Expr::Ident(name, _) => self.names.get(&resolve(name)?).cloned(),
+            Expr::As { value, .. } => self.of(value, resolve),
             Expr::Object(properties) => {
                 let mut fields = BTreeMap::new();
                 let mut primitives = BTreeMap::new();
@@ -96,13 +152,13 @@ impl Facts {
                     // escaped parents and record spines are rejected below.
                     if !self.dynamic
                         && !self.written.contains(key)
-                        && let Some(ty) = self.primitive(value)
+                        && let Some(ty) = self.primitive(value, resolve)
                     {
                         primitives.insert(key.clone(), ty);
                     }
                     if !self.dynamic
                         && !self.mutated.contains(key)
-                        && let Some(plain) = self.of(value)
+                        && let Some(plain) = self.of(value, resolve)
                     {
                         fields.insert(key.clone(), plain);
                     }
@@ -118,49 +174,71 @@ impl Facts {
             }
             Expr::Member {
                 object, property, ..
-            } => self.of(object)?.0.get(property_name(property)?).cloned(),
+            } => self
+                .of(object, resolve)?
+                .0
+                .get(property_name(property)?)
+                .cloned(),
             _ => None,
         }
     }
 
-    pub(super) fn primitive(&self, expr: &Expr) -> Option<Ty> {
+    pub(super) fn primitive(&self, expr: &Expr, resolve: Resolve<'_>) -> Option<Ty> {
         if !self.enabled {
             return None;
         }
         match expr {
             Expr::String(_) => Some(Ty::Text),
             Expr::Array(_) => Some(Ty::Array),
-            Expr::Ident(name, _) => self.primitives.get(name).cloned(),
-            Expr::As { value, .. } => self.primitive(value),
+            Expr::Ident(name, _) => self.primitives.get(&resolve(name)?).cloned(),
+            Expr::As { value, .. } => self.primitive(value, resolve),
             Expr::Member {
                 object, property, ..
-            } => self.of(object)?.2.get(property_name(property)?).cloned(),
+            } => self
+                .of(object, resolve)?
+                .2
+                .get(property_name(property)?)
+                .cloned(),
             _ => None,
         }
     }
 }
 
 impl<'a> Collector<'a> {
-    pub(super) fn name(&mut self, name: &'a str, value: Option<&'a Expr>) {
-        self.definitions.entry(name).or_default().push(value);
-    }
-
-    pub(super) fn exclude(&mut self, name: &str) {
-        self.excluded.insert(name.to_string());
-    }
-
-    pub(super) fn write(&mut self, property: &MemberProperty) {
-        // An unknown key might be the internal brand field. Such a write
-        // can change representation, not just a nested value, through any
-        // alias; conservatively retain admission throughout this source.
-        if property_name(property).is_none_or(|name| name == "__ts_brand") {
-            self.representation_written = true;
-        }
-        match property_name(property) {
-            Some(name) => {
-                self.mutated.insert(name.to_string());
+    /// A declaration of, or an assignment to, `binding`, the binding
+    /// `name` spells; `None` is a name the source does not declare, whose
+    /// value leaves the source's view.
+    pub(super) fn name(&mut self, name: &'a str, binding: Option<usize>, value: Option<&'a Expr>) {
+        self.defined.insert(name);
+        match binding {
+            Some(binding) => {
+                self.definitions
+                    .entry(binding)
+                    .or_insert_with(|| (name, Vec::new()))
+                    .1
+                    .push(value);
             }
-            None => self.dynamic = true,
+            None => {
+                self.excluded.insert(Key::Free(name.to_string()));
+                self.escapes.extend(value);
+            }
+        }
+    }
+
+    pub(super) fn exclude(&mut self, key: Key) {
+        self.excluded.insert(key);
+    }
+
+    pub(super) fn write(&mut self, property: &'a MemberProperty) {
+        match (property_name(property), property) {
+            // The internal brand can change representation, not just a
+            // nested value, through any alias.
+            (Some(name), _) => {
+                self.representation_written |= name == "__ts_brand";
+                self.mutated.insert(name);
+            }
+            (None, MemberProperty::Index(key)) => self.keys.push(key),
+            (None, MemberProperty::Field(_)) => {}
         }
     }
 
@@ -176,7 +254,26 @@ impl<'a> Collector<'a> {
         self.awaits.push(value);
     }
 
-    pub(super) fn finish(mut self, session: &BTreeSet<Name>, terminal: &BTreeSet<String>) -> Facts {
+    /// `resolve` gives the binding a spelling names, and `numeric` whether
+    /// an expression's value is always a number.
+    pub(super) fn finish(
+        mut self,
+        session: &BTreeSet<Name>,
+        terminal: &BTreeSet<String>,
+        resolve: Resolve<'_>,
+        numeric: &dyn Fn(&Expr) -> bool,
+    ) -> Facts {
+        // A key that is always a number names only a number's text. Any
+        // other might be the internal brand field: such a write can change
+        // representation through any alias, so retain admission throughout
+        // this source.
+        for key in &self.keys {
+            if numeric(key) {
+                self.mutated.numeric = true;
+            } else {
+                return Facts::default();
+            }
+        }
         if self.representation_written {
             return Facts::default();
         }
@@ -184,7 +281,7 @@ impl<'a> Collector<'a> {
         let terminal_call = |callee: &Expr| {
             global_path(callee).is_some_and(|(root, path)| {
                 terminal.contains(&path)
-                    && !self.definitions.contains_key(root)
+                    && !self.defined.contains(root)
                     && !session.contains(&Name::new(root))
             })
         };
@@ -210,49 +307,54 @@ impl<'a> Collector<'a> {
             }
         }
         for name in session {
-            self.excluded.insert(name.as_str().to_string());
+            self.excluded.insert(Key::Free(name.as_str().to_string()));
         }
+        let mut escaped = Escaped {
+            names: &mut self.excluded,
+            fields: &mut self.mutated,
+            dynamic: &mut self.dynamic,
+            resolve,
+            numeric,
+        };
         for value in &self.escapes {
-            escape(
-                value,
-                &mut self.excluded,
-                &mut self.mutated,
-                &mut self.dynamic,
-            );
+            escaped.escape(value);
         }
         // Close exclusions in both directions across aliases/structural
         // links. Unknown input anywhere in a connected component rejects it.
         let mut links = Vec::new();
-        for (name, definitions) in &self.definitions {
+        for (binding, (_, definitions)) in &self.definitions {
             for value in definitions {
                 match value {
                     Some(value) => {
                         let mut referenced = BTreeSet::new();
-                        references(value, &mut referenced);
+                        references(value, &mut referenced, resolve);
                         links.extend(
                             referenced
                                 .into_iter()
-                                .map(|other| ((*name).to_string(), other)),
+                                .map(|other| (Key::Binding(*binding), other)),
                         );
                     }
                     None => {
-                        self.excluded.insert((*name).to_string());
+                        self.excluded.insert(Key::Binding(*binding));
                     }
                 }
             }
         }
         // Escaping a field can expose any local stored in it. Globally
         // reject those aliases, including ones hidden by an outer literal.
-        for definitions in self.definitions.values() {
+        let exposed = |value: &Expr, excluded: &mut BTreeSet<Key>| {
+            escaped_fields(value, &self.mutated, self.dynamic, excluded, resolve);
+        };
+        for (_, definitions) in self.definitions.values() {
             for value in definitions.iter().flatten() {
-                escaped_fields(value, &self.mutated, self.dynamic, &mut self.excluded);
+                exposed(value, &mut self.excluded);
             }
         }
         // An escaped member can expose an alias inside a fresh, unnamed
         // literal too: `call(({ inner: local }).inner)` has no wrapper
         // definition for the pass above to inspect.
         for value in &self.escapes {
-            escaped_fields(value, &self.mutated, self.dynamic, &mut self.excluded);
+            exposed(value, &mut self.excluded);
         }
         loop {
             let before = self.excluded.len();
@@ -266,6 +368,12 @@ impl<'a> Collector<'a> {
                 break;
             }
         }
+        // A path is resolved by its root's name: keep a definition only
+        // where one binding has that name.
+        let mut spelled: HashMap<&str, usize> = HashMap::new();
+        for (name, _) in self.definitions.values() {
+            *spelled.entry(name).or_default() += 1;
+        }
         let mut facts = Facts {
             enabled: true,
             names: HashMap::new(),
@@ -276,10 +384,11 @@ impl<'a> Collector<'a> {
             definitions: self
                 .definitions
                 .iter()
-                .filter_map(|(name, values)| {
+                .filter_map(|(binding, (name, values))| {
                     if let [Some(value)] = values.as_slice()
                         && matches!(value, Expr::Ident(..) | Expr::Member { .. })
-                        && !self.excluded.contains(*name)
+                        && !self.excluded.contains(&Key::Binding(*binding))
+                        && spelled.get(name) == Some(&1)
                     {
                         Some(((*name).to_string(), (*value).clone()))
                     } else {
@@ -294,13 +403,13 @@ impl<'a> Collector<'a> {
         for _ in 0..32 {
             let mut next = HashMap::new();
             let mut primitives = HashMap::new();
-            for (name, definitions) in &self.definitions {
-                if self.excluded.contains(*name) {
+            for (binding, (_, definitions)) in &self.definitions {
+                if self.excluded.contains(&Key::Binding(*binding)) {
                     continue;
                 }
                 let mut primitive = None;
                 for value in definitions {
-                    let part = value.and_then(|value| facts.primitive(value));
+                    let part = value.and_then(|value| facts.primitive(value, resolve));
                     if part.is_none()
                         || primitive
                             .as_ref()
@@ -312,19 +421,19 @@ impl<'a> Collector<'a> {
                     primitive = part;
                 }
                 if let Some(ty) = primitive {
-                    primitives.insert((*name).to_string(), ty);
+                    primitives.insert(*binding, ty);
                 }
                 let mut shape: Option<PlainRecord> = None;
                 let mut proven = true;
                 for value in definitions {
-                    let Some(part) = value.and_then(|value| facts.of(value)) else {
+                    let Some(part) = value.and_then(|value| facts.of(value, resolve)) else {
                         proven = false;
                         break;
                     };
                     shape = Some(shape.map_or_else(|| part.clone(), |shape| shape.meet(&part)));
                 }
                 if proven && let Some(shape) = shape {
-                    next.insert((*name).to_string(), shape);
+                    next.insert(*binding, shape);
                 }
             }
             if next == facts.names && primitives == facts.primitives {
@@ -364,16 +473,18 @@ fn global_path(expr: &Expr) -> Option<(&str, String)> {
 
 /// Only value-carrying forms can create aliases. Other expressions are
 /// opaque definitions; their calls/captures are handled by the main collector.
-fn references(expr: &Expr, names: &mut BTreeSet<String>) {
+fn references(expr: &Expr, names: &mut BTreeSet<Key>, resolve: Resolve<'_>) {
     match expr {
         Expr::Ident(name, _) => {
-            names.insert(name.clone());
+            names.insert(key(name, resolve));
         }
-        Expr::Member { object, .. } | Expr::As { value: object, .. } => references(object, names),
+        Expr::Member { object, .. } | Expr::As { value: object, .. } => {
+            references(object, names, resolve);
+        }
         Expr::Object(properties) => {
             for property in properties {
                 let (ObjectProperty::KeyValue(_, value) | ObjectProperty::Spread(value)) = property;
-                references(value, names);
+                references(value, names, resolve);
             }
         }
         Expr::Array(elements) => {
@@ -381,7 +492,7 @@ fn references(expr: &Expr, names: &mut BTreeSet<String>) {
                 if let crate::adapter::ArrayElement::Value(value)
                 | crate::adapter::ArrayElement::Spread(value) = element
                 {
-                    references(value, names);
+                    references(value, names, resolve);
                 }
             }
         }
@@ -395,71 +506,81 @@ fn references(expr: &Expr, names: &mut BTreeSet<String>) {
             right: alternate,
             ..
         } => {
-            references(consequent, names);
-            references(alternate, names);
+            references(consequent, names, resolve);
+            references(alternate, names, resolve);
         }
-        Expr::Assign { value, .. } => references(value, names),
+        Expr::Assign { value, .. } => references(value, names, resolve),
         _ => {}
     }
 }
 
-fn escape(
-    expr: &Expr,
-    names: &mut BTreeSet<String>,
-    fields: &mut BTreeSet<String>,
-    dynamic: &mut bool,
-) {
-    match expr {
-        Expr::Member { property, .. } => match property_name(property) {
-            Some(name) => {
-                fields.insert(name.to_string());
-            }
-            None => *dynamic = true,
-        },
-        Expr::As { value, .. } => escape(value, names, fields, dynamic),
-        Expr::Object(properties) => {
-            for property in properties {
-                let (ObjectProperty::KeyValue(_, value) | ObjectProperty::Spread(value)) = property;
-                escape(value, names, fields, dynamic);
-            }
-        }
-        Expr::Array(elements) => {
-            for element in elements {
-                if let crate::adapter::ArrayElement::Value(value)
-                | crate::adapter::ArrayElement::Spread(value) = element
-                {
-                    escape(value, names, fields, dynamic);
+/// What escaping values expose: the bindings they alias, and the fields
+/// they hand out.
+struct Escaped<'s, 'r> {
+    names: &'s mut BTreeSet<Key>,
+    fields: &'s mut Names,
+    dynamic: &'s mut bool,
+    resolve: Resolve<'r>,
+    numeric: &'r dyn Fn(&Expr) -> bool,
+}
+
+impl Escaped<'_, '_> {
+    fn escape(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Member { property, .. } => match (property_name(property), property) {
+                (Some(name), _) => self.fields.insert(name),
+                (None, MemberProperty::Index(key)) if (self.numeric)(key) => {
+                    self.fields.numeric = true;
+                }
+                (None, _) => *self.dynamic = true,
+            },
+            Expr::As { value, .. } => self.escape(value),
+            Expr::Object(properties) => {
+                for property in properties {
+                    let (ObjectProperty::KeyValue(_, value) | ObjectProperty::Spread(value)) =
+                        property;
+                    self.escape(value);
                 }
             }
+            Expr::Array(elements) => {
+                for element in elements {
+                    if let crate::adapter::ArrayElement::Value(value)
+                    | crate::adapter::ArrayElement::Spread(value) = element
+                    {
+                        self.escape(value);
+                    }
+                }
+            }
+            Expr::Conditional {
+                consequent,
+                alternate,
+                ..
+            }
+            | Expr::Logical {
+                left: consequent,
+                right: alternate,
+                ..
+            } => {
+                self.escape(consequent);
+                self.escape(alternate);
+            }
+            Expr::Assign { value, .. } => self.escape(value),
+            _ => references(expr, self.names, self.resolve),
         }
-        Expr::Conditional {
-            consequent,
-            alternate,
-            ..
-        }
-        | Expr::Logical {
-            left: consequent,
-            right: alternate,
-            ..
-        } => {
-            escape(consequent, names, fields, dynamic);
-            escape(alternate, names, fields, dynamic);
-        }
-        Expr::Assign { value, .. } => escape(value, names, fields, dynamic),
-        _ => references(expr, names),
     }
 }
 
 fn escaped_fields(
     expr: &Expr,
-    fields: &BTreeSet<String>,
+    fields: &Names,
     dynamic: bool,
-    names: &mut BTreeSet<String>,
+    names: &mut BTreeSet<Key>,
+    resolve: Resolve<'_>,
 ) {
     if let Expr::As { value, .. } | Expr::Assign { value, .. } = expr {
-        escaped_fields(value, fields, dynamic, names);
+        escaped_fields(value, fields, dynamic, names, resolve);
     } else if let Expr::Member { object, .. } = expr {
-        escaped_fields(object, fields, dynamic, names);
+        escaped_fields(object, fields, dynamic, names, resolve);
     } else if let Expr::Conditional {
         consequent,
         alternate,
@@ -471,15 +592,15 @@ fn escaped_fields(
         ..
     } = expr
     {
-        escaped_fields(consequent, fields, dynamic, names);
-        escaped_fields(alternate, fields, dynamic, names);
+        escaped_fields(consequent, fields, dynamic, names, resolve);
+        escaped_fields(alternate, fields, dynamic, names, resolve);
     } else if let Expr::Object(properties) = expr {
         for property in properties {
             if let ObjectProperty::KeyValue(key, value) = property {
                 if dynamic || matches!(key, PropertyKey::Static(key) if fields.contains(key)) {
-                    references(value, names);
+                    references(value, names, resolve);
                 }
-                escaped_fields(value, fields, dynamic, names);
+                escaped_fields(value, fields, dynamic, names, resolve);
             }
         }
     }

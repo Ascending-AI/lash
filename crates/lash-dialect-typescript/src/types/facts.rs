@@ -28,7 +28,7 @@ use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{
     ArrayElement, AssignOp, AssignTarget, BinaryOp, CallArg, Catch, Expr, Function, FunctionBody,
     MemberProperty, ObjectProperty, OptionalOperation, Pattern, Program, PropertyKey, Stmt,
-    TypeAnnotation, VarKind,
+    TypeAnnotation, UnaryOp, VarKind,
 };
 
 /// How many times the types are recomputed before the analysis gives up
@@ -76,6 +76,8 @@ struct Entry<'a> {
     /// Declared in the program's own scope, which is the session's: a name
     /// an earlier cell left is that cell's binding.
     session_scope: bool,
+    /// How many functions enclose the declaration.
+    depth: usize,
     sources: Vec<Source<'a>>,
     declarations: usize,
     annotated: usize,
@@ -151,6 +153,18 @@ impl Facts {
         collector.declare_block(&program.statements);
         collector.statements(&program.statements);
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
+        for (binding, entry) in collector.bindings.iter().enumerate() {
+            if entry.session_scope && session.contains(&Name::new(entry.name.as_str())) {
+                collector.plain.exclude(super::plain::Key::Binding(binding));
+            }
+        }
+        let numbers = Numbers::proven(&collector.bindings, &collector.spellings, session);
+        let plain = std::mem::take(&mut collector.plain).finish(
+            session,
+            terminal,
+            &|name| collector.spellings.get(&spelling(name)).copied(),
+            &|expr| numbers.is(expr),
+        );
         let mut facts = Self {
             effect_results: effects
                 .iter()
@@ -169,7 +183,7 @@ impl Facts {
                 .iter()
                 .map(|name| (*name).to_owned())
                 .collect(),
-            plain: std::mem::take(&mut collector.plain).finish(session, terminal),
+            plain,
             types: vec![Ty::Never; collector.bindings.len()],
             assigned: collector
                 .bindings
@@ -235,11 +249,11 @@ impl Facts {
     }
 
     pub(crate) fn plain(&self, expr: &Expr) -> Option<super::PlainRecord> {
-        self.plain.of(expr)
+        self.plain.of(expr, &|name| self.binding(name))
     }
 
     pub(crate) fn primitive(&self, expr: &Expr) -> Option<Ty> {
-        self.plain.primitive(expr)
+        self.plain.primitive(expr, &|name| self.binding(name))
     }
 
     /// The type of the binding a spelling of the program names, or `None`
@@ -451,6 +465,7 @@ impl<'a> Collector<'a> {
     /// parameter named again.
     fn declare(&mut self, name: &str) -> usize {
         let session_scope = self.scopes.len() == 1;
+        let depth = self.function_depth;
         let Some(scope) = self.scopes.last_mut() else {
             unreachable!("the program's scope is open");
         };
@@ -458,6 +473,7 @@ impl<'a> Collector<'a> {
             self.bindings.push(Entry {
                 name: name.to_owned(),
                 session_scope,
+                depth,
                 sources: Vec::new(),
                 declarations: 0,
                 annotated: 0,
@@ -491,17 +507,28 @@ impl<'a> Collector<'a> {
     /// A read: the binding its spelling names, for the lowerer's read of
     /// the same spelling.
     fn read(&mut self, name: &'a str) {
-        if let Some(binding) = self.lookup(name) {
-            self.spellings.insert(spelling(name), binding);
+        match self.lookup(name) {
+            Some(binding) => {
+                self.spellings.insert(spelling(name), binding);
+                self.capture(binding);
+            }
+            None if self.function_depth > 0 => {
+                self.plain
+                    .exclude(super::plain::Key::Free(name.to_string()));
+            }
+            None => {}
+        }
+    }
+
+    /// A function nested in the one declaring `binding` names it: no
+    /// record it holds is proven plain.
+    fn capture(&mut self, binding: usize) {
+        if self.function_depth > self.bindings[binding].depth {
+            self.plain.exclude(super::plain::Key::Binding(binding));
         }
     }
 
     fn name(&mut self, name: &'a str, role: Role, source: Source<'a>) {
-        let value = match &source {
-            Source::Value(value) if self.function_depth == 0 => Some(*value),
-            _ => None,
-        };
-        self.plain.name(name, value);
         let tally = self.names.entry(name).or_default();
         match role {
             Role::Declared { hoisted } => {
@@ -523,10 +550,16 @@ impl<'a> Collector<'a> {
             // which nothing here types.
             Role::Assigned => self.lookup(name),
         };
+        let value = match &source {
+            Source::Value(value) => Some(*value),
+            _ => None,
+        };
+        self.plain.name(name, binding, value);
         let Some(binding) = binding else {
             return;
         };
         self.spellings.insert(spelling(name), binding);
+        self.capture(binding);
         let entry = &mut self.bindings[binding];
         if let Role::Assigned = role {
             entry.assignments += 1;
@@ -851,11 +884,6 @@ impl<'a> Collector<'a> {
     }
 
     fn expr(&mut self, expr: &'a Expr) {
-        if self.function_depth > 0
-            && let Expr::Ident(name, _) = expr
-        {
-            self.plain.exclude(name);
-        }
         match expr {
             Expr::Null
             | Expr::Bool(_)
@@ -1018,4 +1046,108 @@ fn loop_source(kind: Option<VarKind>, source: Source<'_>) -> Source<'_> {
     } else {
         source
     }
+}
+
+/// The bindings that only ever hold numbers, from every value given to
+/// them; an annotation, which is only believed, proves nothing.
+struct Numbers<'s> {
+    numeric: Vec<bool>,
+    spellings: &'s HashMap<usize, usize>,
+}
+
+impl<'s> Numbers<'s> {
+    /// Starts from every binding and drops one that is given anything else
+    /// until none is: a binding given only numbers and its own sums holds
+    /// numbers. A binding no value reaches, or one an earlier cell left,
+    /// is not proven.
+    fn proven(
+        bindings: &[Entry<'_>],
+        spellings: &'s HashMap<usize, usize>,
+        session: &BTreeSet<Name>,
+    ) -> Self {
+        let mut numbers = Self {
+            numeric: bindings
+                .iter()
+                .map(|entry| {
+                    !entry.sources.is_empty()
+                        && !(entry.session_scope
+                            && session.contains(&Name::new(entry.name.as_str())))
+                })
+                .collect(),
+            spellings,
+        };
+        loop {
+            let mut changed = false;
+            for (binding, entry) in bindings.iter().enumerate() {
+                if numbers.numeric[binding]
+                    && !entry.sources.iter().all(|source| match source {
+                        Source::Is(Ty::Float) => true,
+                        Source::Value(value) => numbers.is(value),
+                        Source::Compound(op, value) => {
+                            arithmetic(*op) || (*op == BinaryOp::Add && numbers.is(value))
+                        }
+                        _ => false,
+                    })
+                {
+                    numbers.numeric[binding] = false;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return numbers;
+            }
+        }
+    }
+
+    /// Whether `expr` gives a number whenever it gives a value.
+    fn is(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Number(_) | Expr::Update { .. } => true,
+            Expr::Unary { op, .. } => {
+                matches!(op, UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot)
+            }
+            Expr::Binary {
+                left, op, right, ..
+            } => arithmetic(*op) || (*op == BinaryOp::Add && self.is(left) && self.is(right)),
+            Expr::Ident(name, _) => self
+                .spellings
+                .get(&spelling(name))
+                .is_some_and(|binding| self.numeric[*binding]),
+            Expr::As { value, .. }
+            | Expr::Assign {
+                op: AssignOp::Assign,
+                value,
+                ..
+            } => self.is(value),
+            Expr::Assign {
+                op: AssignOp::Binary(op),
+                ..
+            } => arithmetic(*op),
+            Expr::Conditional {
+                consequent: left,
+                alternate: right,
+                ..
+            }
+            | Expr::Logical { left, right, .. } => self.is(left) && self.is(right),
+            _ => false,
+        }
+    }
+}
+
+/// An operator whose result is a number whatever its operands are.
+fn arithmetic(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Remainder
+            | BinaryOp::Exponent
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight
+            | BinaryOp::ShiftRightUnsigned
+    )
 }
