@@ -1625,6 +1625,7 @@ lash_rust_integration_test(
         "tests/workflow_laws/node_spans.rs",
         "tests/workflow_laws/returned_lists.rs",
         "tests/workflow_laws/sleep_resume_at.rs",
+        "tests/workflow_laws/value_names.rs",
         "tests/workflow_laws/view_links.rs",
     ],
     data_exclude = [

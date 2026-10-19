@@ -293,6 +293,15 @@ export type BindingView = {
   "kind": BindingKind;
   "name": Name;
   /**
+   * The `perform` whose reply a `let` nothing reassigns holds: the site
+   * of the effect's action in [`Dataflow::actions`], for TypeScript's
+   * `const r = await tools.x(...)` and Python's `r = await tools.x(...)`,
+   * and for an `await` of a promise or task that only performs it.
+   * Absent when the value is computed from a reply, such as one of its
+   * fields: that value comes from the code. Derived, never stored.
+   */
+  "produced_by"?: (Site | null);
+  /**
    * The node that declares it.
    */
   "site": Site;

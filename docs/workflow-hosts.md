@@ -733,11 +733,41 @@ entry's signature names and orders the parameters.
   `ParamCaption { index, name, caption }`, in signature order.
 - `fields` lists the captioned fields of its parameter and result types as
   `FieldCaption { path, caption }`, by path.
+- `bindings` lists each `let` of the entry whose declaring statement has a
+  caption as `BindingCaption { binding, name, site, caption }`, by binding
+  id: that caption names the value the variable holds.
 
 A Start/End panel reads `params` and `fields` and shows any parameter
 without a caption by its name. The view itself is unchanged by captions, so
 a caption-only change keeps its identity. Wording for a step without a
 caption is yours.
+
+**Naming values.** A binding has no caption syntax of its own: the caption
+a source writes on a declaration is the caption of the statement that
+declares the variable, so `/** The open orders */ const orders = …` and
+`#: The open orders` above `orders = …` name `orders`, and printing and
+reading back keep it there (`K-CAP-002`). For the value a variable holds,
+read its `BindingCaption`. For one that holds a tool's reply, read
+`BindingView.produced_by` too: the site of the `perform` it awaited, in
+`dataflow.actions`, so "what Fetch the orders returned" can name the step
+by its node's caption. It is set for TypeScript's
+`const r = await tools.x(…)`, Python's `r = await tools.x(…)` (through its
+reply helper, `py.reply`) and an `await` of a promise or task that only
+performs the call, for a `let` nothing reassigns. A value computed from a
+reply, such as `(await tools.x()).urgent`, has none: it comes from the code.
+`produced_by` is derived from the document; nothing stores it. A condition
+operand that is the `result` of an action joins to the binding whose
+`value_site` is that action's site.
+
+Lowered temporaries the source never named stay unnamed: lash makes up no
+plain name for a variable a lowering declared (`t28`, `v2`), so show such a
+value by what produced it or as "a value from the code", never by its
+kernel name. A temporary declared inside an expression never has a
+caption. When a lowering splits one source declaration over several
+statements, as TypeScript does for a field read of an awaited value or a
+destructuring, the declaration's caption stays the step's, on the statement
+that holds its first action (`K-CAP-003`): the temporary that statement
+declares lists it, and the source variable has no `BindingCaption`.
 
 **Telling a model.** Each dialect declares the caption kinds it spells and a
 short guide in its own syntax (`lash::typescript::CAPTIONS`,

@@ -10,7 +10,7 @@ use lash_kernel_doc::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{WorkflowNodeKind, WorkflowView};
+use crate::{BindingKind, WorkflowNodeKind, WorkflowView};
 
 /// A view's captions, each keyed by where the view draws it. Wording for a
 /// step without a caption is the host's.
@@ -34,6 +34,21 @@ pub struct CaptionView {
     /// By path: the captioned fields of the entry's parameter and result
     /// types, ascending.
     pub fields: Vec<FieldCaption>,
+    /// By binding: each `let` of the entry whose declaring statement has a
+    /// caption, which names the value it binds. A variable a lowering
+    /// declares inside an expression never has one.
+    pub bindings: Vec<BindingCaption>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BindingCaption {
+    /// The binding's id in [`crate::Dataflow::bindings`].
+    pub binding: usize,
+    pub name: Name,
+    /// The `let` statement that declares it, whose caption this is.
+    pub site: Site,
+    pub caption: Caption,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -185,6 +200,20 @@ impl WorkflowView {
             })
             .collect();
         let (params, fields) = self.signature_captions(document.document(), captions);
+        let bindings = self
+            .dataflow
+            .bindings
+            .iter()
+            .filter(|binding| binding.kind == BindingKind::Let)
+            .filter_map(|binding| {
+                Some(BindingCaption {
+                    binding: binding.id,
+                    name: binding.name.clone(),
+                    site: binding.site.clone(),
+                    caption: caption(&binding.site)?,
+                })
+            })
+            .collect();
         Ok(CaptionView {
             document: self.document,
             nodes,
@@ -192,6 +221,7 @@ impl WorkflowView {
             callables,
             params,
             fields,
+            bindings,
         })
     }
 

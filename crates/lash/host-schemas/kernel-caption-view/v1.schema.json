@@ -30,6 +30,34 @@
       ],
       "type": "object"
     },
+    "BindingCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "description": "The binding's id in [`crate::Dataflow::bindings`].",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The `let` statement that declares it, whose caption this is."
+        }
+      },
+      "required": [
+        "binding",
+        "name",
+        "site",
+        "caption"
+      ],
+      "type": "object"
+    },
     "CallableCaption": {
       "additionalProperties": false,
       "properties": {
@@ -265,6 +293,13 @@
       },
       "type": "array"
     },
+    "bindings": {
+      "description": "By binding: each `let` of the entry whose declaring statement has a\ncaption, which names the value it binds. A variable a lowering\ndeclares inside an expression never has one.",
+      "items": {
+        "$ref": "#/$defs/BindingCaption"
+      },
+      "type": "array"
+    },
     "callables": {
       "description": "By callable: a declared function's caption, on its\n[`crate::CallableView`]. The entry's is the workflow's title.",
       "items": {
@@ -303,7 +338,8 @@
     "arms",
     "callables",
     "params",
-    "fields"
+    "fields",
+    "bindings"
   ],
   "title": "CaptionView",
   "type": "object",

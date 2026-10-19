@@ -297,8 +297,8 @@ pub mod view {
     };
     /// A view's captions, joined by view location ([`WorkflowView::captions`]).
     pub use lash_kernel_view::{
-        ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption, NodeCaption,
-        ParamCaption,
+        ArmCaption, BindingCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption,
+        NodeCaption, ParamCaption,
     };
 }
 

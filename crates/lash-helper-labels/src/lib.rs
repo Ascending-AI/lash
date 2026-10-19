@@ -4,10 +4,12 @@
 //! definition or identity. Reading them links no dialect or helper release.
 //! Beside its labels, each library declares which of its functions are
 //! comparisons ([`Library::comparisons`]), so a reader shows a condition as
-//! the comparison its dialect wrote with no table of dialect names of its own.
+//! the comparison its dialect wrote with no table of dialect names of its own,
+//! and which receive an effect's reply ([`Library::replies`]), so a reader
+//! names the step a value came from through its dialect's reply helper.
 
 use lash_kernel_doc::FunctionName;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A host-facing title for a library function. Roles belong to the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,6 +113,19 @@ impl Library {
             Self::Regex | Self::Date | Self::Url => &[],
         }
     }
+
+    /// This library's functions that receive an effect's reply: each takes
+    /// one argument, what a `perform` yielded, and answers that reply as
+    /// the library's dialect holds it, so its value is still what the
+    /// effect returned. A function that reads a part of its argument or
+    /// converts it to another kind of value is not listed.
+    pub fn replies(self) -> &'static [&'static str] {
+        match self {
+            // The reply reads as `json.loads` gives it.
+            Self::Python => &["py.reply"],
+            Self::Kernel | Self::TypeScript | Self::Regex | Self::Date | Self::Url => &[],
+        }
+    }
 }
 
 /// What a comparison function decides. A binary comparison takes its left
@@ -154,6 +169,15 @@ pub fn comparisons() -> BTreeMap<&'static str, Comparison> {
     Library::ALL
         .into_iter()
         .flat_map(Library::comparisons)
+        .copied()
+        .collect()
+}
+
+/// Every shipped library's reply receivers, by function name.
+pub fn replies() -> BTreeSet<&'static str> {
+    Library::ALL
+        .into_iter()
+        .flat_map(Library::replies)
         .copied()
         .collect()
 }
@@ -242,16 +266,22 @@ mod tests {
         assert_eq!(title(&labels, &unknown), "future.removed_helper");
     }
 
-    /// HELP-COMPARE: a library declares comparisons only of functions it
-    /// labels, so a comparison name is never a dialect name of the reader's.
+    /// HELP-COMPARE: a library declares comparisons and reply receivers
+    /// only of functions it labels, so neither name is ever a dialect name
+    /// of the reader's.
     #[test]
-    fn a_library_declares_comparisons_only_of_its_labelled_functions() {
+    fn a_library_declares_comparisons_and_replies_only_of_its_labelled_functions() {
         for library in Library::ALL {
             let labels = library.labels().unwrap();
-            for (name, _) in library.comparisons() {
+            let declared = library
+                .comparisons()
+                .iter()
+                .map(|(name, _)| (*name, "a comparison"))
+                .chain(library.replies().iter().map(|name| (*name, "a reply")));
+            for (name, what) in declared {
                 assert!(
-                    labels.contains_key(&FunctionName::new(*name).unwrap()),
-                    "{library:?} declares {name} a comparison but does not label it"
+                    labels.contains_key(&FunctionName::new(name).unwrap()),
+                    "{library:?} declares {name} {what} but does not label it"
                 );
             }
         }

@@ -11,6 +11,12 @@ export type CaptionView = {
    */
   "arms": Array<ArmCaption>;
   /**
+   * By binding: each `let` of the entry whose declaring statement has a
+   * caption, which names the value it binds. A variable a lowering
+   * declares inside an expression never has one.
+   */
+  "bindings": Array<BindingCaption>;
+  /**
    * By callable: a declared function's caption, on its
    * [`crate::CallableView`]. The entry's is the workflow's title.
    */
@@ -46,6 +52,19 @@ export type ArmCaption = {
    * The control node's index in [`WorkflowView::nodes`].
    */
   "node": number;
+};
+
+export type BindingCaption = {
+  /**
+   * The binding's id in [`crate::Dataflow::bindings`].
+   */
+  "binding": number;
+  "caption": Caption;
+  "name": Name;
+  /**
+   * The `let` statement that declares it, whose caption this is.
+   */
+  "site": Site;
 };
 
 export type CallableCaption = {

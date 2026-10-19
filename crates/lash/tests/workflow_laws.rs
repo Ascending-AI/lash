@@ -1972,3 +1972,7 @@ mod sleep_resume_at;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/entry_comparison.rs"]
 mod entry_comparison;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/value_names.rs"]
+mod value_names;

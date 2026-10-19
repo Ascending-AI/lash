@@ -692,6 +692,17 @@
         "name": {
           "$ref": "#/$defs/Name"
         },
+        "produced_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The `perform` whose reply a `let` nothing reassigns holds: the site\nof the effect's action in [`Dataflow::actions`], for TypeScript's\n`const r = await tools.x(...)` and Python's `r = await tools.x(...)`,\nand for an `await` of a promise or task that only performs it.\nAbsent when the value is computed from a reply, such as one of its\nfields: that value comes from the code. Derived, never stored."
+        },
         "site": {
           "$ref": "#/$defs/Site",
           "description": "The node that declares it."

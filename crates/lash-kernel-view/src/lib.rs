@@ -37,13 +37,14 @@ mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
 mod captions;
 pub use captions::{
-    ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption, NodeCaption,
-    ParamCaption,
+    ArmCaption, BindingCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption,
+    NodeCaption, ParamCaption,
 };
 mod coarse;
 mod comparison;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
 mod entry;
+mod produced;
 pub use coarse::{
     CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,
     LineRange, ReadableLens, ReadableRefusal, WorkflowNode, WorkflowNodeKind,
@@ -221,6 +222,14 @@ pub struct BindingView {
     /// The site of a `let`'s value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_site: Option<Site>,
+    /// The `perform` whose reply a `let` nothing reassigns holds: the site
+    /// of the effect's action in [`Dataflow::actions`], for TypeScript's
+    /// `const r = await tools.x(...)` and Python's `r = await tools.x(...)`,
+    /// and for an `await` of a promise or task that only performs it.
+    /// Absent when the value is computed from a reply, such as one of its
+    /// fields: that value comes from the code. Derived, never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub produced_by: Option<Site>,
     /// Every node that reads it, in document order.
     pub uses: Vec<Use>,
 }
@@ -533,7 +542,8 @@ pub fn derive_callable(
     let Walk {
         mut view, mut uses, ..
     } = walk;
-    view.dataflow.bindings = graph
+    let producers = produced::Producers::new(graph, functions, &view.dataflow.actions);
+    let bindings = graph
         .bindings()
         .iter()
         .filter(|binding| graph.node(binding.declared_at).site.unit == *entry)
@@ -560,10 +570,12 @@ pub fn derive_callable(
                     }
                     _ => None,
                 },
+                produced_by: producers.binding(binding.id),
                 uses: uses.remove(&binding.id).unwrap_or_default(),
             }
         })
         .collect();
+    view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
     coarse::project(document, graph, functions, &mut view);
     Ok(view)
