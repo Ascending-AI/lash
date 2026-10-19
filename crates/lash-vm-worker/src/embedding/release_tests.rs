@@ -40,7 +40,7 @@ fn every_function_of_release_one_is_held(embedding: &super::Embedding) {
         );
     }
     let library = embedding.library_for(1).expect("release 1.0's names");
-    let resolved: BTreeSet<FunctionId> = library.iter().map(|(_, id)| *id).collect();
+    let resolved: BTreeSet<FunctionId> = library.iter().map(|(_, id)| id).collect();
     assert_eq!(
         resolved, first.writes,
         "release 1.0 resolves names as it wrote them"

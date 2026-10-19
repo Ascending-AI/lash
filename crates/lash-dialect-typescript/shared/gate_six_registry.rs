@@ -10,23 +10,18 @@ mod token_bootstrap;
     reason = "the shipped token library assembles by construction"
 )]
 pub(crate) fn registry() -> Arc<FunctionRegistry> {
-    let mut registry = token_bootstrap::kernel(|registry| {
-        lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
-        lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
-        lash_kernel_vm::register_machine_functions(registry).map_err(|error| error.to_string())?;
-        Ok(())
-    })
-    .expect("kernel token bootstrap");
-    lash_ext_regex_ecma::register(
+    let mut registry = token_bootstrap::kernel().expect("kernel token bootstrap");
+    let extensions =
+        token_bootstrap::register(&mut registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)
+            .expect("extension tokens");
+    lash_ext_regex_ecma::implement(
         &mut registry,
         &Arc::new(lash_ext_regex_ecma::Engine::new(256)),
     )
     .expect("regex extension");
-    let extensions =
-        token_bootstrap::register(&mut registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)
-            .expect("extension tokens");
     lash_ext_date_ecma::implement(&mut registry, extensions.iter().copied()).expect("date natives");
-    lash_ext_url_whatwg::implement(&mut registry, extensions).expect("URL natives");
+    lash_ext_url_whatwg::implement(&mut registry, extensions.iter().copied()).expect("URL natives");
+    token_bootstrap::implemented(&registry, &extensions).expect("extension natives");
     for dialect in lash_vm_releases::DIALECTS {
         let helpers =
             token_bootstrap::register(&mut registry, dialect.helpers).expect("helper tokens");

@@ -79,6 +79,7 @@ impl Registers {
     }
 
     /// Releases the prepared set at every exit of its statement's step.
+    #[inline]
     pub(super) fn kill_statement(&mut self) {
         let end = std::mem::take(&mut self.kill).min(self.extent);
         #[cfg(any(test, feature = "perf-witness"))]

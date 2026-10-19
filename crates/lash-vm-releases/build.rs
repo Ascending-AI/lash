@@ -45,6 +45,11 @@ fn main() -> Result<(), BuildError> {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     let mut kernel = FunctionRegistry::new();
     library::register_kernel_base(&mut kernel)?;
+    write_functions(
+        &out.join("kernel_base.bin"),
+        &FunctionRegistry::new(),
+        &kernel,
+    )?;
     let basis = kernel.clone();
     lash_kernel_lib::register_collections(&mut kernel)?;
     write_kernel_set(&out, &kernel)?;
@@ -53,10 +58,9 @@ fn main() -> Result<(), BuildError> {
     {
         let mut registry = kernel.clone();
         library::register_extensions(&mut registry)?;
-        let basis = registry.clone();
         lash_ext_date_ecma::register(&mut registry)?;
         lash_ext_url_whatwg::register(&mut registry)?;
-        write_functions(&out.join("typescript_extensions.bin"), &basis, &registry)?;
+        write_functions(&out.join("typescript_extensions.bin"), &kernel, &registry)?;
         dialect(
             &out,
             "typescript",
@@ -115,7 +119,10 @@ fn dialect(
     let ids: Vec<_> = validated.iter().map(|(function, _)| *function).collect();
     implement(&mut registry, &ids)?;
     sets::validate(&registry, &helper_names, dialect == "typescript")?;
-    write("helpers.bin", &validated.to_tokens())?;
+    write(
+        "helpers.bin",
+        &validated.to_image(&lash_kernel_vm::body_census),
+    )?;
 
     let held = releases::HeldReleases {
         retained: vec![release::current(&registry)],
@@ -171,7 +178,7 @@ fn write_kernel_set(out: &std::path::Path, registry: &FunctionRegistry) -> Resul
     Ok(())
 }
 
-/// Reuses the release's dependency order and the helper boot token form.
+/// Reuses the release's dependency order and the helper boot image.
 #[expect(
     clippy::disallowed_methods,
     reason = "the build writes its OUT_DIR artifacts"
@@ -190,6 +197,6 @@ fn write_functions(
     checked.validate_functions(base.into_iter().map(|f| f.definition).collect())?;
     let validated =
         checked.validate_functions(definitions.into_iter().map(|f| f.definition).collect())?;
-    std::fs::write(path, validated.to_tokens())?;
+    std::fs::write(path, validated.to_image(&lash_kernel_vm::body_census))?;
     Ok(())
 }

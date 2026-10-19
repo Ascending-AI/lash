@@ -477,6 +477,16 @@ impl Embedder {
     /// [`Self::with`], or why the machine refused to start: a bound it
     /// cannot start under.
     pub(crate) fn try_with(text: &str, setup: Setup) -> Result<Self, crate::StartError> {
+        Self::try_over(text, setup, None)
+    }
+
+    /// [`Self::try_with`] over `prepared` when given: a library prepared
+    /// from the registry the setup builds, which earlier runs may have used.
+    pub(crate) fn try_over(
+        text: &str,
+        setup: Setup,
+        prepared: Option<PreparedLibrary>,
+    ) -> Result<Self, crate::StartError> {
         let library = library_with(setup.native_twice, setup.probes);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
@@ -484,7 +494,8 @@ impl Embedder {
         let program = Program {
             release: PageId([8; 32]),
             document: Arc::clone(&document),
-            library: PreparedLibrary::new(Arc::clone(&library.registry)),
+            library: prepared
+                .unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
         };
         let source = Source::default();
         let machine = crate::KernelMachine::start_with_census(

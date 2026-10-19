@@ -31,7 +31,7 @@ use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode, NamedLibrary, Package};
 #[cfg(test)]
-use lash_kernel_doc::ValidatedFunctions;
+use lash_kernel_doc::ReleasedFunctions;
 use lash_kernel_doc::{FunctionId, FunctionRegistry};
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::graph::ReleaseGraph;
@@ -309,8 +309,7 @@ impl Embedder {
     ///
     /// [`EmbedError::Registry`].
     pub fn kernel() -> Result<Self, EmbedError> {
-        let registry = crate::token_bootstrap::kernel(crate::library::register_kernel_base)
-            .map_err(EmbedError::Registry)?;
+        let registry = crate::token_bootstrap::kernel().map_err(EmbedError::Registry)?;
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
@@ -576,10 +575,9 @@ pub(crate) mod tests {
         let tuning = WorkerTuning::standard();
         let helpers = |dialect: &str| -> BTreeSet<FunctionId> {
             let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            ValidatedFunctions::from_tokens(built.helpers)
+            ReleasedFunctions::read(built.helpers)
                 .expect("the built helpers")
-                .iter()
-                .map(|(function, _)| *function)
+                .ids()
                 .collect()
         };
         let (ts, py) = (helpers("typescript"), helpers("python"));
@@ -686,15 +684,19 @@ pub(crate) mod tests {
         let typescript =
             lash_dialect_typescript::define_helpers(&mut library).expect("TypeScript's helpers");
         for (dialect, defined) in [("python", python), ("typescript", typescript)] {
-            let defined: Vec<_> = defined
+            let mut defined: Vec<_> = defined
                 .into_iter()
                 .map(|definition| (definition.identity(), definition))
                 .collect();
+            // The image holds its functions in identity order.
+            defined.sort_by_key(|(function, _)| *function);
             let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            let built = ValidatedFunctions::from_tokens(built.helpers).expect("the built helpers");
-            let built: Vec<_> = built
-                .iter()
-                .map(|(function, definition)| (*function, definition.clone()))
+            let built = ReleasedFunctions::read(built.helpers).expect("the built helpers");
+            let built: Vec<_> = (0..built.len())
+                .map(|at| {
+                    let definition = built.definition(at).expect("a built helper decodes");
+                    (built.id(at), definition)
+                })
                 .collect();
             assert_eq!(built.len(), defined.len(), "{dialect}: as many helpers");
             assert!(
@@ -739,7 +741,7 @@ pub(crate) mod tests {
         let written = embedding
             .registry_for(lash_kernel_doc::KERNEL_VERSION)
             .expect("the functions as registered");
-        let named: BTreeSet<FunctionId> = embedding.library().iter().map(|(_, id)| *id).collect();
+        let named: BTreeSet<FunctionId> = embedding.library().iter().map(|(_, id)| id).collect();
         assert!(
             named.iter().all(|function| written.get(function).is_some()),
             "every name resolves to a registered function"
@@ -964,11 +966,12 @@ mod release_tests;
 
 #[cfg(feature = "dialect-typescript")]
 fn register_typescript_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
-    crate::library::register_extensions(registry)?;
     let functions =
         crate::token_bootstrap::register(registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)?;
+    crate::library::implement_extensions(registry)?;
     lash_ext_date_ecma::implement(registry, functions.iter().copied())
         .map_err(|error| error.to_string())?;
-    lash_ext_url_whatwg::implement(registry, functions).map_err(|error| error.to_string())?;
-    Ok(())
+    lash_ext_url_whatwg::implement(registry, functions.iter().copied())
+        .map_err(|error| error.to_string())?;
+    crate::token_bootstrap::implemented(registry, &functions)
 }

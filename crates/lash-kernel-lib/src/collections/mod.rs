@@ -55,7 +55,7 @@ pub fn register_collections(
     for name in ["num.add", "num.sub", "num.lt", "eq", "tasks.unfinished"] {
         let Some((id, function)) = registry
             .iter()
-            .find(|(_, function)| function.definition().name.as_str() == name)
+            .find(|(_, function)| function.name() == name)
         else {
             return Err(CollectionError::Missing(name));
         };
@@ -107,9 +107,8 @@ fn raise(kind: &'static str, message: impl Into<String>) -> lash_kernel_doc::Nat
 pub fn implement_collections(registry: &mut FunctionRegistry) -> Result<(), CollectionError> {
     let functions = native::functions(|name, _| {
         registry
-            .iter()
-            .find(|(_, function)| function.definition().name.as_str() == name)
-            .map(|(id, _)| *id)
+            .named(name)
+            .next()
             .ok_or_else(|| CollectionError::MissingDefinition(name.to_owned()))
     })?;
     for (function, native) in functions {

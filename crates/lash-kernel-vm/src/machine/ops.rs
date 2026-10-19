@@ -35,7 +35,7 @@ use lash_kernel_state::arena::{Arena, Key};
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
 use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
-use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
+use crate::compile::{Charge, Executable, Lib, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::interface::Bound;
 use crate::observe::Event;
@@ -559,10 +559,9 @@ impl KernelMachine {
         count: usize,
         awaiting: Option<StmtId>,
     ) -> Status {
-        let function = exe.lib(lib);
         let code = match self
             .answer(task, exe, lib, args, count, args)
-            .map_err(|interrupt| interrupt.answering(function))?
+            .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
@@ -602,10 +601,9 @@ impl KernelMachine {
         args: Reg,
         count: usize,
     ) -> Eval<()> {
-        let function = exe.lib(lib);
         match self
             .answer(task, exe, lib, args, count, args)
-            .map_err(|interrupt| interrupt.answering(function))?
+            .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => Ok(()),
             Answer::Body(_) | Answer::Yielded => {
@@ -625,7 +623,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         let function = exe.lib(lib);
         match self
-            .answer_admitted(task, exe, lib, args, args, None, false)
+            .answer_admitted(task, exe, lib, function, args, args, None, false)
             .map_err(|interrupt| interrupt.answering(function))?
         {
             Answer::Done => Ok(()),
@@ -671,7 +669,8 @@ impl KernelMachine {
                     .map_err(|interrupt| interrupt.in_function(&function.definition.name))
             })
             .transpose()?;
-        let result = self.answer_admitted(task, exe, lib, args, out, entry.as_ref(), true);
+        let result =
+            self.answer_admitted(task, exe, lib, function, args, out, entry.as_ref(), true);
         match result {
             Ok(Answer::Body(mut body)) => {
                 body.entry = entry;
@@ -712,7 +711,7 @@ impl KernelMachine {
                 prepared.answer(&self.regs[args..args + function.arity], self.charging)
         {
             self.observe(Event::NativeEnter { task, lib });
-            self.prepared_answered(exe, lib, args, out, value, fast)?;
+            self.prepared_answered(exe, lib, function, args, out, value, fast)?;
             return Ok(Answer::Done);
         }
         self.operator_missed(task, exe, lib, args, out, entry)
@@ -729,7 +728,8 @@ impl KernelMachine {
         out: Reg,
         entry: Option<super::operation_entry::OperationEntry>,
     ) -> Eval<Answer> {
-        match self.answer_admitted(task, exe, lib, args, out, entry.as_ref(), false)? {
+        let function = exe.lib(lib);
+        match self.answer_admitted(task, exe, lib, function, args, out, entry.as_ref(), false)? {
             Answer::Body(mut body) => {
                 body.entry = entry;
                 Ok(Answer::Body(body))
@@ -739,18 +739,22 @@ impl KernelMachine {
     }
 
     /// What the general call does with a prepared entry's value: keep it,
-    /// charge the formula and put it in `out`.
+    /// charge the formula and put it in `out`. `function` is `lib`'s.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the caller's lookup of the function travels with its id"
+    )]
     #[inline(always)]
     fn prepared_answered(
         &mut self,
         exe: &Executable,
         lib: LibId,
+        function: &Lib,
         args: Reg,
         out: Reg,
         answer: lash_kernel_doc::PreparedAnswer,
         fast: &crate::compile::Fast,
     ) -> Eval<()> {
-        let function = exe.lib(lib);
         let end = args + function.arity;
         self.observe(Event::NativeFast);
         let value = answer.value;
@@ -787,12 +791,12 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         lib: LibId,
+        function: &Lib,
         args: Reg,
         out: Reg,
         admission: Option<&super::operation_entry::OperationEntry>,
         prepared: bool,
     ) -> Eval<Answer> {
-        let function = exe.lib(lib);
         let end = args + function.arity;
         // A function that runs its body is observed by its frame; one that
         // does not, from here to its charge. A halt ends the run and its
@@ -811,7 +815,7 @@ impl KernelMachine {
                 || self.template_depth_fits(task, entry.depth(), admission)?)
             && let Some(value) = entry.answer(&self.regs[args..end], self.charging)
         {
-            self.prepared_answered(exe, lib, args, out, value, fast)?;
+            self.prepared_answered(exe, lib, function, args, out, value, fast)?;
             return Ok(Answer::Done);
         }
         let result = match &function.run {

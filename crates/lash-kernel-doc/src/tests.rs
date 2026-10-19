@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use crate::{
     Action, AssignOrder, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition,
     FunctionId, FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name,
-    Node, NumberPolicy, ParseErrorReason, Place, RegistryError, Rhs, StatementForm, Stmt,
-    ValidatedFunctions, parse_definition, parse_document, print_definition, print_document,
+    Node, NumberPolicy, ParseErrorReason, Place, RegistryError, ReleasedFunctions, Rhs,
+    StatementForm, Stmt, parse_definition, parse_document, print_definition, print_document,
     validate_document,
 };
 
@@ -777,9 +777,10 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
     let validated = built
         .validate_functions(vec![definition("helper.joined", false)])
         .unwrap();
-    let validated = ValidatedFunctions::from_tokens(&validated.to_tokens()).unwrap();
+    let image: &'static [u8] = Vec::leak(validated.to_image(&|_| None));
+    let validated = ReleasedFunctions::read(image).unwrap();
     let mut same = holding("helper.base");
-    same.register_validated(validated.clone()).unwrap();
+    same.register_released(validated).unwrap();
     assert!(
         same.iter()
             .map(|(id, _)| id)
@@ -789,16 +790,84 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
     wider
         .register(definition("helper.other", false), None)
         .unwrap();
-    wider.register_validated(validated.clone()).unwrap();
+    wider.register_released(validated).unwrap();
     assert_eq!(wider.len(), built.len() + 1);
     for mut other in [holding("helper.other"), FunctionRegistry::new()] {
         let held = other.len();
         assert!(matches!(
-            other.register_validated(validated.clone()),
+            other.register_released(validated),
             Err(RegistryError::OtherBasis { .. })
         ));
         assert_eq!(other.len(), held, "nothing joins another registry");
     }
+}
+
+/// FIG-6843: a registry takes a build's release image in place. Each
+/// function's name, implementation, kernel version, listed callees and
+/// census answer without decoding its definition; reading the definition
+/// decodes it once, for every clone of the registry; and the definition is
+/// the one validated.
+#[test]
+fn a_release_image_registers_without_decoding_a_definition() {
+    let mut built = FunctionRegistry::declarations();
+    let base = built
+        .register(definition("helper.base", true), None)
+        .unwrap();
+    let calling = parse_definition(&format!(
+        "function helper.calling(x: Any) -> Any\nkernel 1\ncharge 1\nuse helper.base = @{base}\n\
+         body {{ let y = helper.base(x) return y }}\n"
+    ))
+    .unwrap();
+    let validated = built
+        .validate_functions(vec![definition("helper.joined", false), calling.clone()])
+        .unwrap();
+    let census = crate::BodyCensus {
+        codes: 1,
+        blocks: 2,
+        stmts: 3,
+        sites: 4,
+        closures: true,
+        occurrences: vec![vec![0, 1], vec![]],
+    };
+    let image: &'static [u8] = Vec::leak(validated.to_image(&|definition| {
+        (definition.name.as_str() == "helper.calling").then(|| census.clone())
+    }));
+    let image = ReleasedFunctions::read(image).unwrap();
+    let decoded = || crate::released::DECODED.with(std::cell::Cell::get);
+    let before = decoded();
+    let mut registry = FunctionRegistry::declarations();
+    registry
+        .register(definition("helper.base", true), None)
+        .unwrap();
+    registry.register_released(image).unwrap();
+    let calling_id = calling.identity();
+    let held = registry.get(&calling_id).unwrap();
+    assert!(held.released());
+    assert_eq!(held.name(), "helper.calling");
+    assert!(held.has_body() && !held.states_native());
+    assert_eq!(held.kernel(), 1);
+    assert_eq!(
+        held.listed(),
+        vec![(base, crate::FunctionName::new("helper.base").unwrap())]
+    );
+    assert_eq!(held.census(), Some(census));
+    assert_eq!(
+        registry.named("helper.joined").collect::<Vec<_>>(),
+        vec![definition("helper.joined", false).identity()]
+    );
+    assert_eq!(
+        decoded(),
+        before,
+        "registering and reading facts decode nothing"
+    );
+    let clone = registry.clone();
+    assert_eq!(**registry.get(&calling_id).unwrap().definition(), calling);
+    assert_eq!(**clone.get(&calling_id).unwrap().definition(), calling);
+    assert_eq!(
+        decoded(),
+        before + 1,
+        "clones share the one decoded definition"
+    );
 }
 
 /// `K-LIB-011`: a native implementation states its version, the first when
@@ -927,15 +996,18 @@ fn logarithmic_charge_rounds_up_and_round_trips() {
             function
         );
         let mut registry = FunctionRegistry::new();
-        let encoded = registry
-            .validate_functions(vec![function])
-            .unwrap()
-            .to_tokens();
-        assert_eq!(
-            ValidatedFunctions::from_tokens(&encoded)
+        let image: &'static [u8] = Vec::leak(
+            registry
+                .validate_functions(vec![function.clone()])
                 .unwrap()
-                .to_tokens(),
-            encoded
+                .to_image(&|_| None),
+        );
+        assert_eq!(
+            ReleasedFunctions::read(image)
+                .unwrap()
+                .definition(0)
+                .unwrap(),
+            function
         );
     }
 }

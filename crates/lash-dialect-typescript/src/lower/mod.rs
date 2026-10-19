@@ -621,7 +621,10 @@ fn reachable(
         };
         entry.insert(name);
         let catalog: &dyn FunctionCatalog = library;
-        if let Some(body) = catalog
+        // A registered function lists its callees without being decoded.
+        if let Some(registered) = catalog.registered(&function) {
+            pending.extend(registered.listed());
+        } else if let Some(body) = catalog
             .definition(&function)
             .and_then(|definition| definition.body())
         {

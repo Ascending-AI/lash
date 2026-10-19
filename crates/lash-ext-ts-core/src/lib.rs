@@ -116,7 +116,7 @@ pub fn implement(
                 compare: Arc::clone(&compare),
             })
         };
-        let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
+        let native: Arc<dyn NativeFunction> = match registered.name() {
             "ts.builtin_name" => Arc::new(BuiltinName),
             "ts.get" => Arc::new(Get),
             "ts.add" => add.clone(),

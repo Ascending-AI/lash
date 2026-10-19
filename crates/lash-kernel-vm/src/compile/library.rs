@@ -113,7 +113,7 @@ impl PreparedPlan {
     pub(super) fn new<'l>(
         plan: &'static doc::plan::HelperPlan,
         definition: &doc::FunctionDefinition,
-        lib_of: &BTreeMap<FunctionId, LibId>,
+        lib_of: &dyn Fn(&FunctionId) -> Option<LibId>,
         layout: Layout,
         body: CodeId,
         tables: Option<(&Tables, &Base)>,
@@ -127,7 +127,7 @@ impl PreparedPlan {
             .callees
             .iter()
             // Installation checked that the registry holds every callee.
-            .map(|callee| lib_of.get(callee).copied().unwrap_or(LibId(u32::MAX)))
+            .map(|callee| lib_of(callee).unwrap_or(LibId(u32::MAX)))
             .collect();
         let literals = plan
             .literals

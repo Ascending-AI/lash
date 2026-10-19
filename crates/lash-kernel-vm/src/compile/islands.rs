@@ -36,8 +36,8 @@ use lash_kernel_exec::{Op, Reg};
 
 use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind};
 use super::{
-    BlockId, CodeId, Executable, Form, Lib, LibId, LibRun, NestedCallee, NestedKind, Stmt, StmtId,
-    Tables,
+    BlockId, CodeId, Executable, Form, LibId, LibRun, NestedCallee, NestedKind, Prepared, Stmt,
+    StmtId, Tables,
 };
 use crate::machine::islands::Compiled;
 
@@ -168,10 +168,10 @@ impl Executable {
 }
 
 /// Forms and verifies the island of every document code of `tables` that
-/// has one, against `libs`, and marks the nested calls that may enter
+/// has one, against `library`, and marks the nested calls that may enter
 /// one. `codes`, `blocks` and `stmts` are where the document's own ids
 /// start.
-pub(super) fn form(tables: &mut Tables, libs: &[Lib], base: (u32, u32, u32)) -> Islands {
+pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32)) -> Islands {
     let (codes, blocks, stmts) = base;
     let mut islands = Islands {
         by_code: vec![None; tables.codes.len()],
@@ -194,7 +194,7 @@ pub(super) fn form(tables: &mut Tables, libs: &[Lib], base: (u32, u32, u32)) -> 
         }
         let mut former = Former {
             tables,
-            libs,
+            library,
             blocks,
             stmts,
             calls: Vec::new(),
@@ -251,7 +251,7 @@ fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
 /// The walk that forms one code's plan.
 struct Former<'a> {
     tables: &'a Tables,
-    libs: &'a [Lib],
+    library: &'a Prepared,
     blocks: u32,
     stmts: u32,
     calls: Vec<usize>,
@@ -479,7 +479,7 @@ impl Former<'_> {
     /// calls through its general call: no operation, whose admission is
     /// the reference's, and no plan or body.
     fn native(&self, lib: LibId, given: usize) -> Option<()> {
-        let function = self.libs.get(lib.0 as usize)?;
+        let function = self.library.get_lib(lib)?;
         (matches!(function.run, LibRun::Native { .. })
             && !function.operation()
             && given <= function.arity
@@ -491,7 +491,7 @@ impl Former<'_> {
     /// prepared entry with a scalar charge table: an operator, or a helper
     /// call when `helper`.
     fn operator(&self, lib: LibId, given: usize, helper: bool) -> Option<()> {
-        let function = self.libs.get(lib.0 as usize)?;
+        let function = self.library.get_lib(lib)?;
         let (entry, fast) = function.prepared.as_ref()?;
         fast.scalar()?;
         // An island holds immediates alone: an entry with no immediate

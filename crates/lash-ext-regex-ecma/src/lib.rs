@@ -82,6 +82,36 @@ impl Functions {
     }
 }
 
+/// Adds the six natives, which compile through `engine`, to the registered
+/// definitions of their names, which the build's release image holds
+/// (FIG-6843).
+///
+/// # Errors
+///
+/// The first [`FunctionRegistry::implement_named`] refuses.
+pub fn implement(
+    registry: &mut FunctionRegistry,
+    engine: &Arc<Engine>,
+) -> Result<Functions, RegistryError> {
+    let mut implement = |operation: Operation| {
+        registry.implement_named(
+            operation.definition().name.as_str(),
+            Arc::new(functions::Function {
+                engine: Arc::clone(engine),
+                operation,
+            }),
+        )
+    };
+    Ok(Functions {
+        compile_check: implement(Operation::CompileCheck)?,
+        exec: implement(Operation::Exec)?,
+        test: implement(Operation::Test)?,
+        match_all: implement(Operation::MatchAll)?,
+        replace: implement(Operation::Replace)?,
+        split: implement(Operation::Split)?,
+    })
+}
+
 /// Registers the six functions with their native implementations, which
 /// compile through `engine`.
 pub fn register(

@@ -68,6 +68,11 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
 
 /// Which of the machine's functions a definition is, if either.
 pub(crate) fn machine_function(candidate: &FunctionDefinition) -> Option<MachineFunction> {
+    // Only a definition with one of their names can be either; most are
+    // told apart without building theirs.
+    if !matches!(candidate.name.as_str(), "deref" | "tasks.unfinished") {
+        return None;
+    }
     [MachineFunction::Deref, MachineFunction::TasksUnfinished]
         .into_iter()
         .find(|function| definition(*function, candidate.kernel) == *candidate)
@@ -84,6 +89,25 @@ impl NativeFunction for RunByTheMachine {
             "this function is implemented by the machine that runs the document",
         ))
     }
+}
+
+/// Marks `deref` and `tasks.unfinished`, whose definitions the build's
+/// release image holds (FIG-6843), as run by the machine.
+///
+/// # Errors
+///
+/// The first [`FunctionRegistry::implement_named`] refuses.
+pub fn implement_machine_functions(
+    registry: &mut FunctionRegistry,
+) -> Result<MachineFunctions, RegistryError> {
+    let mut implement = |function| {
+        let name = definition(function, KERNEL_VERSION).name;
+        registry.implement_named(name.as_str(), Arc::new(RunByTheMachine))
+    };
+    Ok(MachineFunctions {
+        deref: implement(MachineFunction::Deref)?,
+        tasks_unfinished: implement(MachineFunction::TasksUnfinished)?,
+    })
 }
 
 /// Registers `deref` and `tasks.unfinished`, the two functions of the

@@ -1,16 +1,18 @@
-error[E0616]: field `definition` of struct `RegisteredFunction` is private
+error[E0615]: attempted to take value of method `definition` on type `RegisteredFunction`
  --> tests/ui/registered_function_is_immutable.rs:4:14
   |
 4 |     function.definition = other.definition;
-  |              ^^^^^^^^^^ private field
+  |              ^^^^^^^^^^ method, not a field
+  |
+  = help: methods are immutable and cannot be assigned to
 
-error[E0616]: field `definition` of struct `RegisteredFunction` is private
+error[E0615]: attempted to take value of method `definition` on type `RegisteredFunction`
  --> tests/ui/registered_function_is_immutable.rs:4:33
   |
 4 |     function.definition = other.definition;
-  |                                 ^^^^^^^^^^ private field
+  |                                 ^^^^^^^^^^ method, not a field
   |
-help: a method `definition` also exists, call it with parentheses
+help: use parentheses to call the method
   |
 4 |     function.definition = other.definition();
   |                                           ++

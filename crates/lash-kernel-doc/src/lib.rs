@@ -66,6 +66,7 @@ mod number;
 /// Generated execution plans for library bodies (FIG-6678): what a build's
 /// helper compiler emits and an embedder installs beside the definitions.
 pub mod plan;
+mod released;
 mod text;
 mod types;
 mod validate;
@@ -120,6 +121,7 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
+pub use released::{BodyCensus, ImageError, ReleasedFunctions};
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits, parse_document,
     parse_document_with_limits, print_definition, print_document, print_document_with_ranges,

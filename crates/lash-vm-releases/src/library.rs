@@ -20,6 +20,12 @@ const CACHED_PATTERNS: usize = 256;
 
 /// Registers the kernel's native base and the machine's own functions.
 /// Collection definitions are supplied separately by the release build.
+/// The build writes these definitions into its kernel image; a worker
+/// registers that image and adds the natives (FIG-6843).
+#[allow(
+    dead_code,
+    reason = "the build registers the base from source; a worker only in its laws"
+)]
 pub(crate) fn register_kernel_base(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
     lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
@@ -27,9 +33,14 @@ pub(crate) fn register_kernel_base(registry: &mut FunctionRegistry) -> Result<()
     Ok(())
 }
 
-/// Registers the regular-expression extension. Date and URL definitions
-/// are supplied separately by the release build.
+/// Registers the regular-expression extension, which the build writes
+/// into the TypeScript extensions' image beside the date and URL
+/// definitions.
 #[cfg(feature = "dialect-typescript")]
+#[allow(
+    dead_code,
+    reason = "the build registers the extension from source; a worker only in its laws"
+)]
 pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_ext_regex_ecma::register(
         registry,
@@ -37,6 +48,22 @@ pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(),
     )
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Adds the regular-expression natives to the definitions the
+/// TypeScript extensions' image holds.
+#[cfg(feature = "dialect-typescript")]
+#[allow(
+    dead_code,
+    reason = "a worker adds the natives; the build registers them"
+)]
+pub(crate) fn implement_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
+    lash_ext_regex_ecma::implement(
+        registry,
+        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 /// Adds the natives of the TypeScript dialect's operations to its

@@ -599,6 +599,7 @@ impl Arena {
     /// Marks the mutable object `handle` changed since it was last
     /// projected, with `card` dirty when it is a list or a table the heap
     /// holds.
+    #[inline]
     pub(crate) fn mark(
         &mut self,
         handle: ArenaHandle,

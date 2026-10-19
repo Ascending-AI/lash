@@ -16,9 +16,11 @@ mod numeric;
 mod text_json;
 
 pub use comparison::{compare, equal, same};
-pub use numbers::{numbers, register_numbers};
+pub use numbers::{implement_numbers, numbers, register_numbers};
 pub use numeric::{float_to_integer, integer_to_float};
-pub use text_json::{decode_number, parse_json, register_text_json, stringify_json, text_json};
+pub use text_json::{
+    decode_number, implement_text_json, parse_json, register_text_json, stringify_json, text_json,
+};
 
 #[cfg(test)]
 mod memory_laws;

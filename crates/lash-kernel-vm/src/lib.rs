@@ -48,8 +48,8 @@ mod laws;
 
 #[cfg(test)]
 pub(crate) use compile::Layout;
-pub use compile::PreparedLibrary;
-pub use functions::{MachineFunctions, register_machine_functions};
+pub use compile::{PreparedLibrary, body_census};
+pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
 pub use lash_kernel_doc::ExecutionPath;
 pub use machine::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode, SiteCounts};

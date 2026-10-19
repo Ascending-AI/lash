@@ -1068,7 +1068,7 @@ mod tests {
         let add = embedding
             .library()
             .iter()
-            .find(|(name, _)| name.to_string() == "num.add")
+            .find(|(name, _)| *name == "num.add")
             .map(|(_, id)| id)
             .expect("helper");
         let document = lash_kernel_doc::parse_document(&format!(

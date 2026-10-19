@@ -186,7 +186,7 @@ pub fn implement(
             .ok_or(RegistryError::NotRegistered { function })?;
         if let Some(operation) = Operation::ALL
             .into_iter()
-            .find(|operation| operation.name() == registered.definition().name.as_str())
+            .find(|operation| operation.name() == registered.name())
         {
             registry.implement(function, Arc::new(operation))?;
         }

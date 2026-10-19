@@ -61,6 +61,20 @@ pub fn text_json() -> Vec<Function> {
     functions
 }
 
+/// Adds each text, bytes, JSON and format native to the registered
+/// definition of its name, which the build's release image holds
+/// (FIG-6843).
+///
+/// # Errors
+///
+/// The first [`FunctionRegistry::implement_named`] refuses.
+pub fn implement_text_json(registry: &mut FunctionRegistry) -> Result<(), RegistryError> {
+    for (definition, native) in text_json() {
+        registry.implement_named(definition.name.as_str(), native)?;
+    }
+    Ok(())
+}
+
 /// Adds the text, bytes, JSON and format functions to an embedder's registry.
 pub fn register_text_json(registry: &mut FunctionRegistry) -> Result<(), RegistryError> {
     for (definition, native) in text_json() {

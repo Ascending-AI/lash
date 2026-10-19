@@ -44,6 +44,7 @@ pub(crate) mod islands;
 mod library;
 pub(crate) use library::{Lib, LibRun, PreparedPlan};
 mod lazy;
+pub use lazy::body_census;
 mod lower;
 mod occurrences;
 mod parameters;
@@ -228,15 +229,15 @@ struct Prepared {
     registry: Arc<FunctionRegistry>,
     layout: Layout,
     tables: lazy::LibraryTables,
-    /// Every registered function, in the layout's order.
-    libs: Vec<Lib>,
+    /// Every registered function, in the layout's order, each prepared
+    /// when first asked for.
+    libs: Box<[std::sync::OnceLock<lazy::LibSlot>]>,
     functions: Vec<FunctionId>,
+    /// Each library id by its function's registry position, when the
+    /// layout permutes them; the position itself otherwise.
+    lib_at: Option<Box<[u32]>>,
     runs: Vec<Runs>,
-    operators: Vec<Option<usize>>,
     plan_sites: Vec<u32>,
-    // Admission metadata stays outside the hot call table.
-    shared_params: Vec<Vec<usize>>,
-    lib_of: BTreeMap<FunctionId, LibId>,
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
@@ -302,7 +303,7 @@ impl PreparedLibrary {
                 running += 1;
             } else if plan.is_none()
                 && !self.0.layout.declines()
-                && let Err(problem) = self.0.checked_plan(index)
+                && let Err(problem) = self.0.checked_plan(index, false)
             {
                 unresolved.push(format!("{}: {problem}", lib.definition.name));
             }
@@ -313,6 +314,12 @@ impl PreparedLibrary {
     /// Explicitly verifies every library body, including cold fallbacks.
     pub(crate) fn verify_stream(&self) -> Result<usize, KirError> {
         self.0.tables.verify_stream(&self.0)
+    }
+
+    /// How many library functions are prepared.
+    #[cfg(test)]
+    pub(crate) fn prepared(&self) -> usize {
+        self.0.libs.iter().filter(|lib| lib.get().is_some()).count()
     }
 
     /// The registry the library was prepared from.
@@ -526,12 +533,12 @@ impl Executable {
 
     #[inline]
     pub(crate) fn lib(&self, id: LibId) -> &Lib {
-        &self.library.0.libs[id.0 as usize]
+        self.library.0.lib(id)
     }
 
     #[inline]
     pub(crate) fn shared_params(&self, id: LibId) -> &[usize] {
-        &self.library.0.shared_params[id.0 as usize]
+        &self.library.0.slot(id).shared_params
     }
 
     /// Resolves a source statement inside one admitted code body.
@@ -577,7 +584,7 @@ impl Executable {
     /// The library function `function`, reached or not: a template's
     /// heap path's callee.
     pub(crate) fn library_lib(&self, function: &FunctionId) -> Option<LibId> {
-        self.library.0.lib_of.get(function).copied()
+        self.library.0.lib_of(function)
     }
 
     /// The library function `function`, when the document reaches it.
@@ -585,7 +592,7 @@ impl Executable {
         if !self.reaches(function) {
             return None;
         }
-        self.library.0.lib_of.get(function).copied()
+        self.library.0.lib_of(function)
     }
 
     /// Whether a frame of the run may stand in library function
@@ -626,7 +633,11 @@ impl Executable {
                 if !self.reaches(function) {
                     return None;
                 }
-                let body = *self.library.0.tables.body_of.get(function)?;
+                let body = self
+                    .library
+                    .0
+                    .tables
+                    .body_of(self.library.0.lib_of(function)?)?;
                 Some(self.library.0.tables.tables(&self.library.0, body))
             }
             Unit::Main | Unit::Function(_) => Some(&self.own.tables),
@@ -1120,15 +1131,12 @@ const NO_BINDINGS: BTreeSet<Name> = BTreeSet::new();
 /// How a compiled call names a library function.
 #[derive(Clone, Copy)]
 struct Resolve<'a> {
-    lib_of: &'a BTreeMap<FunctionId, LibId>,
+    /// The library the calls resolve against: each function's id, how it
+    /// runs and whether it is an operator (`Op::Operator`).
+    library: &'a Prepared,
     /// The functions a document lists; a library body's calls resolve
     /// against the whole registry, which its registration checked.
     listed: Option<&'a BTreeMap<FunctionId, doc::FunctionName>>,
-    /// How each library function, by its id, runs in this preparation.
-    bodies: &'a [Runs],
-    /// Each library function whose native states a prepared entry this
-    /// layout calls, by its arity: an operator (`Op::Operator`).
-    operators: &'a [Option<usize>],
 }
 
 /// How a library function runs when it is called inside an expression.
@@ -1145,11 +1153,12 @@ impl Resolve<'_> {
     /// How `lib` runs when it is called.
     /// Whether a call of `lib` with `given` arguments is an operator's.
     fn operator(&self, lib: LibId, given: usize) -> bool {
-        self.operators.get(lib.0 as usize).copied().flatten() == Some(given)
+        self.library.operator(lib) == Some(given)
     }
 
     fn runs(&self, lib: LibId) -> Runs {
-        self.bodies
+        self.library
+            .runs
             .get(lib.0 as usize)
             .copied()
             .unwrap_or(Runs::Answers)
@@ -1162,7 +1171,7 @@ impl Resolve<'_> {
         {
             return None;
         }
-        self.lib_of.get(function).copied()
+        self.library.lib_of(function)
     }
 }
 
@@ -1240,10 +1249,8 @@ fn compile_document(
         layout,
         shuffler,
         Resolve {
-            lib_of: &prepared.lib_of,
+            library: prepared,
             listed: Some(&document.manifest.functions),
-            bodies: &prepared.runs,
-            operators: &prepared.operators,
         },
         &document.private_bindings,
         Base {
@@ -1306,7 +1313,7 @@ fn compile_document(
         );
         // Islands form first: a loop region runs its guest calls through
         // its callees' islands.
-        let islands = islands::form(&mut tables, &prepared.libs, base);
+        let islands = islands::form(&mut tables, prepared, base);
         let regions = form_regions(
             &mut tables,
             prepared,
@@ -1353,8 +1360,8 @@ fn form_regions(
     {
         let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
         let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
-        let lib = |id: LibId| &library.libs[id.0 as usize];
-        let lib_of = |function: &FunctionId| library.lib_of.get(function).copied();
+        let lib = |id: LibId| library.lib(id);
+        let lib_of = |function: &FunctionId| library.lib_of(function);
         let lowered = || regions::Lowered {
             stream: &tables.stream,
             block: &block,

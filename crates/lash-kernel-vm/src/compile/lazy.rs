@@ -15,7 +15,9 @@ pub(super) struct Body {
 #[derive(Default)]
 pub(super) struct LibraryTables {
     pub(super) bodies: Vec<Body>,
-    pub(super) body_of: BTreeMap<FunctionId, usize>,
+    /// Each library function's body, by library id: `NO_BODY` for one
+    /// with none.
+    body_of: Vec<u32>,
     // Dense owner indexes preserve constant-time code/statement lookup.
     pub(super) codes: Vec<usize>,
     pub(super) blocks: Vec<usize>,
@@ -24,7 +26,18 @@ pub(super) struct LibraryTables {
     pub(super) occurrence_keys: Box<[Vec<u8>]>,
 }
 
+/// A library function with no body to compile.
+const NO_BODY: u32 = u32::MAX;
+
 impl LibraryTables {
+    /// The body of library function `lib`, when it has one.
+    pub(super) fn body_of(&self, lib: LibId) -> Option<usize> {
+        match self.body_of.get(lib.0 as usize) {
+            Some(&body) if body != NO_BODY => Some(body as usize),
+            _ => None,
+        }
+    }
+
     pub(super) fn compiled(&self) -> usize {
         self.bodies
             .iter()
@@ -69,10 +82,8 @@ impl LibraryTables {
                 prepared.layout.shape(),
                 Shuffler(prepared.layout.shape().0),
                 Resolve {
-                    lib_of: &prepared.lib_of,
+                    library: prepared,
                     listed: None,
-                    bodies: &prepared.runs,
-                    operators: &prepared.operators,
                 },
                 &no_bindings,
                 body.base,
@@ -154,7 +165,8 @@ impl LibraryTables {
         Ok(checked)
     }
 
-    fn reserve(&mut self, function: FunctionId, block: &doc::Block, sites: &mut u32) {
+    /// Reserves `function`'s table ranges as its body's census states them.
+    fn reserve(&mut self, function: FunctionId, census: &doc::BodyCensus, sites: &mut u32) {
         let owner = self.bodies.len();
         let base = Base {
             codes: self.codes.len() as u32,
@@ -163,65 +175,102 @@ impl LibraryTables {
             occurrences: 0,
             sites: *sites,
         };
-        self.codes.push(owner);
-        let mut closures = false;
-        let mut pending = vec![(
-            doc::Node::Block(block),
-            Site::new(Unit::Library(function), []),
-        )];
-        while let Some((node, site)) = pending.pop() {
-            // Match the property cache sites lowering allocates, without
-            // constructing any executable tables or constants.
-            *sites += match node {
-                doc::Node::Expr(doc::Expr::Member(_))
-                | doc::Node::Stmt(
-                    doc::Stmt::Assign {
-                        place: doc::Place::Member(doc::Member::Field { .. }),
-                        ..
-                    }
-                    | doc::Stmt::Remove {
-                        member: doc::Member::Field { .. },
-                    },
-                ) => 1,
-                _ => 0,
-            };
-            match node {
-                doc::Node::Block(_) => self.blocks.push(owner),
-                doc::Node::Stmt(_) => self.stmts.push(owner),
-                doc::Node::Expr(doc::Expr::Closure(_)) => {
-                    self.codes.push(owner);
-                    closures = true;
-                }
-                _ => {}
-            }
-            let counted = match node {
-                doc::Node::Action(
-                    doc::Action::Perform { .. }
-                    | doc::Action::Sleep { .. }
-                    | doc::Action::Spawn { .. },
-                ) => true,
-                doc::Node::Expr(doc::Expr::Act(act)) => matches!(
-                    act.kind,
-                    doc::ActKind::Perform { .. }
-                        | doc::ActKind::Sleep { .. }
-                        | doc::ActKind::Spawn(_)
-                ),
-                _ => false,
-            };
-            if counted {
-                self.occurrence_at.insert(site.clone(), 0);
-            }
-            for (index, child) in node.children().into_iter().enumerate() {
-                pending.push((child, site.child(index as u32)));
-            }
+        *sites += census.sites;
+        self.codes
+            .resize(self.codes.len() + census.codes as usize, owner);
+        self.blocks
+            .resize(self.blocks.len() + census.blocks as usize, owner);
+        self.stmts
+            .resize(self.stmts.len() + census.stmts as usize, owner);
+        for path in &census.occurrences {
+            self.occurrence_at
+                .insert(Site::new(Unit::Library(function), path.clone()), 0);
         }
-        self.body_of.insert(function, owner);
+        self.body_of.push(owner as u32);
         self.bodies.push(Body {
             function,
             base,
             tables: OnceLock::new(),
-            closures,
+            closures: census.closures,
         });
+    }
+}
+
+/// What preparation reserves for a library function's body before it
+/// compiles it ([`doc::BodyCensus`]): none for a function with no body or
+/// one the machine runs itself. A build writes it into its release image
+/// (FIG-6843), and a process computes it only for a function registered one
+/// by one.
+pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
+    if machine_function(definition).is_some() {
+        return None;
+    }
+    let body = definition.body()?;
+    let mut census = doc::BodyCensus {
+        codes: 1,
+        ..doc::BodyCensus::default()
+    };
+    // Each node's child path: a node at depth `d` overwrites the path's
+    // last entries below its parent's, which the walk visited last at that
+    // depth.
+    let mut path: Vec<u32> = Vec::new();
+    let mut pending = vec![(doc::Node::Block(&body.block), 0usize, 0u32)];
+    while let Some((node, depth, index)) = pending.pop() {
+        if depth > 0 {
+            path.truncate(depth - 1);
+            path.push(index);
+        }
+        // Match the property cache sites lowering allocates, without
+        // constructing any executable tables or constants.
+        census.sites += match node {
+            doc::Node::Expr(doc::Expr::Member(_))
+            | doc::Node::Stmt(
+                doc::Stmt::Assign {
+                    place: doc::Place::Member(doc::Member::Field { .. }),
+                    ..
+                }
+                | doc::Stmt::Remove {
+                    member: doc::Member::Field { .. },
+                },
+            ) => 1,
+            _ => 0,
+        };
+        match node {
+            doc::Node::Block(_) => census.blocks += 1,
+            doc::Node::Stmt(_) => census.stmts += 1,
+            doc::Node::Expr(doc::Expr::Closure(_)) => {
+                census.codes += 1;
+                census.closures = true;
+            }
+            _ => {}
+        }
+        let counted = match node {
+            doc::Node::Action(
+                doc::Action::Perform { .. } | doc::Action::Sleep { .. } | doc::Action::Spawn { .. },
+            ) => true,
+            doc::Node::Expr(doc::Expr::Act(act)) => matches!(
+                act.kind,
+                doc::ActKind::Perform { .. } | doc::ActKind::Sleep { .. } | doc::ActKind::Spawn(_)
+            ),
+            _ => false,
+        };
+        if counted {
+            census.occurrences.push(path.clone());
+        }
+        for (index, child) in node.children().into_iter().enumerate() {
+            pending.push((child, depth + 1, index as u32));
+        }
+    }
+    Some(census)
+}
+
+/// A registered function's census: its build's, for a released function,
+/// and computed from its definition otherwise.
+fn census_of(registered: &doc::RegisteredFunction) -> Option<doc::BodyCensus> {
+    if registered.released() {
+        registered.census()
+    } else {
+        body_census(registered.definition())
     }
 }
 
@@ -238,43 +287,37 @@ impl PreparedLibrary {
         charge: crate::Charge,
     ) -> Self {
         let layout = stated.shape();
-        let mut functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
-        Shuffler(layout.0).shuffle(layout, &mut functions);
-        let lib_of = functions
-            .iter()
-            .enumerate()
-            .map(|(at, id)| (*id, LibId(at as u32)))
-            .collect();
-        let mut tables = LibraryTables::default();
-        let mut sites = 0;
-        let mut runs = Vec::new();
-        let mut operators = Vec::new();
-        let mut entries = Vec::new();
-        for function in &functions {
-            let registered = registry
-                .get(function)
-                .unwrap_or_else(|| unreachable!("registry index"));
-            let definition = registered.definition();
-            let machine = machine_function(definition).is_some();
-            if !machine && let Some(body) = definition.body() {
-                tables.reserve(*function, &body.block, &mut sites);
+        let mut order: Vec<usize> = (0..registry.len()).collect();
+        Shuffler(layout.0).shuffle(layout, &mut order);
+        let registered: Vec<_> = registry.iter().collect();
+        let functions: Vec<FunctionId> = order.iter().map(|at| *registered[*at].0).collect();
+        // Library ids by registry position, when the layout permutes them.
+        let lib_at = (layout.0 != 0).then(|| {
+            let mut lib_at = vec![0; order.len()].into_boxed_slice();
+            for (lib, at) in order.iter().enumerate() {
+                lib_at[*at] = lib as u32;
             }
-            runs.push(if !machine && definition.body().is_some() {
+            lib_at
+        });
+        let mut tables = LibraryTables {
+            bodies: Vec::with_capacity(order.len()),
+            body_of: Vec::with_capacity(order.len()),
+            ..LibraryTables::default()
+        };
+        let mut sites = 0;
+        let mut runs = Vec::with_capacity(order.len());
+        for at in &order {
+            let (function, registered) = registered[*at];
+            let census = census_of(registered);
+            match &census {
+                Some(census) => tables.reserve(*function, census, &mut sites),
+                None => tables.body_of.push(NO_BODY),
+            }
+            runs.push(if census.is_some() {
                 Runs::Body
             } else {
                 Runs::Answers
             });
-            let entry = if machine || definition.guard.is_some() || !layout.0.is_multiple_of(2) {
-                None
-            } else {
-                registered
-                    .plan()
-                    .and_then(|plan| plan.template.as_ref())
-                    .and_then(|template| Entry::template(&registry, template))
-                    .or_else(|| registered.native()?.prepare().map(Entry::Native))
-            };
-            operators.push(entry.as_ref().map(|_| definition.signature.params.len()));
-            entries.push(entry);
         }
         let by_key: BTreeMap<_, _> = tables
             .occurrence_at
@@ -294,52 +337,91 @@ impl PreparedLibrary {
             .collect();
         // Plan fields have their own cache sites, separate from body and
         // document sites, even if no interpreted body ever runs.
-        let plan_sites = functions
+        let plan_sites = order
             .iter()
-            .map(|function| {
+            .map(|at| {
                 let start = sites;
-                if let Some(plan) = registry.get(function).and_then(|r| r.plan()) {
+                if let Some(plan) = registered[*at].1.plan() {
                     sites += plan.fields.len() as u32;
                 }
                 start
             })
             .collect();
-        let missing = missing(&registry);
-        let mut prepared = Prepared {
+        // Only a body that names a function the registry lacks can reach
+        // one.
+        let missing = if registry.holds_every_callee() {
+            BTreeMap::new()
+        } else {
+            missing(&registry)
+        };
+        drop(registered);
+        let libs = functions.iter().map(|_| OnceLock::new()).collect();
+        Self(Arc::new(Prepared {
             charge,
             alternative: Default::default(),
             registry,
             layout: stated,
             tables,
             functions,
-            libs: Vec::new(),
-            lib_of,
+            lib_at,
+            libs,
             missing,
             sites,
             documents: Default::default(),
             runs,
-            operators,
             plan_sites,
-            shared_params: Vec::new(),
-        };
-        let (libs, shared_params) = entries
-            .into_iter()
-            .enumerate()
-            .map(|(index, entry)| prepared.prepare_lib(LibId(index as u32), entry))
-            .unzip();
-        prepared.libs = libs;
-        prepared.shared_params = shared_params;
-        Self(Arc::new(prepared))
+        }))
     }
 }
 
 impl Prepared {
+    /// Library function `id`, prepared when first asked for: preparation
+    /// never reads a function no run calls.
     #[inline]
     pub(super) fn lib(&self, id: LibId) -> &Lib {
-        &self.libs[id.0 as usize]
+        &self.slot(id).lib
     }
 
-    fn prepare_lib(&self, id: LibId, entry: Option<Entry>) -> (Lib, Vec<usize>) {
+    #[inline]
+    pub(super) fn slot(&self, id: LibId) -> &LibSlot {
+        let slot = &self.libs[id.0 as usize];
+        match slot.get() {
+            Some(slot) => slot,
+            None => self.prepare_slot(slot, id),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn prepare_slot<'p>(&'p self, slot: &'p OnceLock<LibSlot>, id: LibId) -> &'p LibSlot {
+        slot.get_or_init(|| self.prepare_lib(id))
+    }
+
+    /// Library function `id`, when the library numbers it.
+    pub(super) fn get_lib(&self, id: LibId) -> Option<&Lib> {
+        ((id.0 as usize) < self.libs.len()).then(|| self.lib(id))
+    }
+
+    /// Library function `function`'s id in this layout, reached or not.
+    pub(super) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
+        let at = self.registry.position(function)?;
+        Some(LibId(match &self.lib_at {
+            Some(lib_at) => lib_at[at],
+            None => at as u32,
+        }))
+    }
+
+    /// The arity an operator call of `lib` takes, when its native states a
+    /// prepared entry this layout calls (`Op::Operator`).
+    pub(super) fn operator(&self, lib: LibId) -> Option<usize> {
+        if lib.0 as usize >= self.libs.len() {
+            return None;
+        }
+        let lib = self.lib(lib);
+        lib.prepared.as_ref().map(|_| lib.arity)
+    }
+
+    fn prepare_lib(&self, id: LibId) -> LibSlot {
         let index = id.0 as usize;
         let function = self.functions[index];
         let registered = self
@@ -347,21 +429,33 @@ impl Prepared {
             .get(&function)
             .unwrap_or_else(|| unreachable!("registry index"));
         let definition = Arc::clone(registered.definition());
+        let machine = machine_function(&definition);
+        let entry = if machine.is_some()
+            || definition.guard.is_some()
+            || !self.layout.shape().0.is_multiple_of(2)
+        {
+            None
+        } else {
+            registered
+                .plan()
+                .and_then(|plan| plan.template.as_ref())
+                .and_then(|template| Entry::template(&self.registry, template))
+                .or_else(|| registered.native()?.prepare().map(Entry::Native))
+        };
         let body_slot = self
             .tables
-            .body_of
-            .get(&function)
-            .map(|at| (*at, &self.tables.bodies[*at]));
+            .body_of(id)
+            .map(|at| (at, &self.tables.bodies[at]));
         let body = body_slot.map(|(_, slot)| CodeId(slot.base.codes));
         let deferred = registered
             .plan()
             .is_some_and(|plan| !plan.sites.is_empty() || !plan.closures.is_empty());
         let plan = if registered.native().is_none() && !self.layout.declines() && !deferred {
-            self.prepare_plan(index)
+            self.prepare_plan(index, true)
         } else {
             None
         };
-        let run = match (machine_function(&definition), registered.native(), body) {
+        let run = match (machine, registered.native(), body) {
             (Some(machine), _, _) => LibRun::Machine(machine),
             (None, Some(_), Some(body)) if self.layout.declines() => LibRun::Body(body),
             (None, Some(native), body) => LibRun::Native {
@@ -396,8 +490,8 @@ impl Prepared {
         } else {
             Vec::new()
         };
-        (
-            Lib {
+        LibSlot {
+            lib: Lib {
                 index: id,
                 shares_params: !shared_params.is_empty(),
                 operation: definition.has_native() && definition.body().is_some(),
@@ -410,16 +504,29 @@ impl Prepared {
                 prepared,
             },
             shared_params,
-        )
+        }
     }
 }
 
+/// A library function as one preparation runs it, with the parameters its
+/// body's closures share, which admission reads outside the hot call table.
+pub(super) struct LibSlot {
+    pub(super) lib: Lib,
+    pub(super) shared_params: Vec<usize>,
+}
+
 impl Prepared {
-    fn prepare_plan(&self, index: usize) -> Option<Arc<PreparedPlan>> {
-        self.checked_plan(index).ok().flatten()
+    /// Library function `index`'s plan, `preparing` while that function
+    /// itself is prepared.
+    fn prepare_plan(&self, index: usize, preparing: bool) -> Option<Arc<PreparedPlan>> {
+        self.checked_plan(index, preparing).ok().flatten()
     }
 
-    pub(super) fn checked_plan(&self, index: usize) -> Result<Option<Arc<PreparedPlan>>, String> {
+    pub(super) fn checked_plan(
+        &self,
+        index: usize,
+        preparing: bool,
+    ) -> Result<Option<Arc<PreparedPlan>>, String> {
         let function = self.functions[index];
         let Some(registered) = self.registry.get(&function) else {
             return Ok(None);
@@ -427,18 +534,25 @@ impl Prepared {
         let Some(plan) = registered.plan() else {
             return Ok(None);
         };
-        let Some(&at) = self.tables.body_of.get(&function) else {
+        let Some(at) = self.tables.body_of(LibId(index as u32)) else {
             return Ok(None);
         };
         let slot = &self.tables.bodies[at];
         let tables = (!plan.sites.is_empty() || !plan.closures.is_empty())
             .then(|| (self.tables.tables(self, at), &slot.base));
         let mut sites = self.plan_sites[index];
-        let lib = |lib: LibId| self.libs.get(lib.0 as usize);
+        // A plan formed while its own function is prepared sees no other
+        // library function, as when the library prepared every function in
+        // one pass before any of them was stated; one formed on first use,
+        // or verified, sees each callee, prepared then if it is not yet.
+        let lib = |lib: LibId| {
+            if preparing { None } else { self.get_lib(lib) }
+        };
+        let lib_of = |function: &FunctionId| self.lib_of(function);
         PreparedPlan::new(
             plan,
             registered.definition(),
-            &self.lib_of,
+            &lib_of,
             self.layout,
             CodeId(slot.base.codes),
             tables,
@@ -469,7 +583,7 @@ impl Prepared {
         id: LibId,
     ) -> Option<&'p Arc<PreparedPlan>> {
         fallback
-            .get_or_init(|| self.prepare_plan(id.0 as usize))
+            .get_or_init(|| self.prepare_plan(id.0 as usize, false))
             .as_ref()
     }
 }

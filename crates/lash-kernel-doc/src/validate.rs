@@ -203,16 +203,29 @@ fn check_written_for(
     function: &FunctionId,
     version: KernelVersion,
 ) -> Result<(), Invalid> {
-    match catalog.definition(function) {
-        Some(definition) if definition.kernel != version.number() => Err(invalid(
-            None,
-            InvalidReason::FunctionOfAnotherVersion {
-                function: *function,
-                name: definition.name.clone(),
-                written_for: definition.kernel,
-                required: version.number(),
-            },
-        )),
+    // A registered function states its version without being decoded.
+    let written_for = match catalog.registered(function) {
+        Some(registered) => Some(registered.kernel()),
+        None => catalog
+            .definition(function)
+            .map(|definition| definition.kernel),
+    };
+    match written_for {
+        Some(written_for) if written_for != version.number() => {
+            let name = catalog
+                .definition(function)
+                .map(|definition| definition.name.clone())
+                .unwrap_or_else(|| unreachable!("a function that states a version is defined"));
+            Err(invalid(
+                None,
+                InvalidReason::FunctionOfAnotherVersion {
+                    function: *function,
+                    name,
+                    written_for,
+                    required: version.number(),
+                },
+            ))
+        }
         _ => Ok(()),
     }
 }

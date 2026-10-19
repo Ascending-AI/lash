@@ -75,6 +75,11 @@ string_schema!(
 );
 
 impl QualifiedName {
+    /// A name read from where a qualified name was written, unchecked.
+    pub(crate) fn written(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+
     pub fn new(name: impl Into<String>) -> Result<Self, InvalidQualifiedName> {
         let text = name.into();
         if text.split('.').all(is_identifier) {
@@ -183,9 +188,32 @@ pub(crate) fn parse_hex(text: &str) -> Option<Vec<u8>> {
 macro_rules! identity {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(try_from = "String", into = "String")]
         pub struct $name([u8; 32]);
+
+        // Byte order, compared a word at a time rather than through a
+        // library call: registries and indexes compare identities often.
+        impl Ord for $name {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                let words = |digest: &[u8; 32]| {
+                    let (words, _) = digest.as_chunks::<8>();
+                    [
+                        u64::from_be_bytes(words[0]),
+                        u64::from_be_bytes(words[1]),
+                        u64::from_be_bytes(words[2]),
+                        u64::from_be_bytes(words[3]),
+                    ]
+                };
+                words(&self.0).cmp(&words(&other.0))
+            }
+        }
+
+        impl PartialOrd for $name {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
 
         impl JsonSchema for $name {
             fn schema_name() -> std::borrow::Cow<'static, str> {

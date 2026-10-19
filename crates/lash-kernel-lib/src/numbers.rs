@@ -83,145 +83,53 @@ struct NumericFunction {
 /// Every operation is registered with its exact operand domain. Generic
 /// equality accepts everything; numeric equality accepts only numbers, and
 /// integer/float variants accept only that kind. See `docs/kernel/numbers.md`.
-#[expect(
-    clippy::expect_used,
-    reason = "catalogue names are fixed valid identifiers, not guest data"
-)]
 pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
     let mut functions = Vec::new();
-    let mut add = |name: KernelHelper,
-                   domain: Domain,
-                   operation: Operation,
-                   params: Vec<Type>,
-                   result: Type| {
-        let param_defs: Vec<Param> = params
-            .iter()
-            .enumerate()
-            .map(|(index, ty)| Param {
-                name: Name::new(format!("arg{index}")),
-                ty: ty.clone(),
-                optional: false,
-            })
-            .collect();
-        let sizes: Vec<Formula> = param_defs
-            .iter()
-            .map(|param| Formula::DeepSize(Operand::Param(param.name.clone())))
-            .collect();
-        let input = Formula::Sum(sizes);
-        // Structural map/record equality can inspect every pair of entries;
-        // product charging bounds that work without observing hash layout.
-        let work = match operation {
-            Operation::Eq
-            | Operation::Compare
-            | Operation::Lt
-            | Operation::Le
-            | Operation::Gt
-            | Operation::Ge
-            | Operation::Binary(
-                Binary::Mul
-                | Binary::Div
-                | Binary::DivFloor
-                | Binary::DivTrunc
-                | Binary::RemFloor
-                | Binary::RemTrunc,
-            ) => Formula::Product(vec![input.clone(), input]),
-            // A float power is one libm call; only an integer power does
-            // work that grows with the exponent.
-            Operation::Binary(Binary::Pow) if matches!(domain, Domain::Float) => input,
-            Operation::Binary(Binary::Pow) => Formula::Product(vec![
-                input,
-                Formula::Magnitude(Operand::Param(Name::new("arg1"))),
-            ]),
-            Operation::Math(_) => Formula::Sum(vec![Formula::Constant(64), input]),
-            // `kind` reads a tag. `same` compares two heap objects by identity
-            // and two immutable values member by member: it walks no heap
-            // object's contents, but walks every member nested in a tuple or
-            // an error's data. Each operand's nested size bounds that walk,
-            // and is what measuring it costs.
-            Operation::Kind => Formula::Constant(0),
-            Operation::Same => Formula::Sum(
-                std::iter::once(Formula::Min(
-                    param_defs
-                        .iter()
-                        .map(|param| Formula::Size(Operand::Param(param.name.clone())))
-                        .collect(),
-                ))
-                .chain(
-                    param_defs
-                        .iter()
-                        .map(|param| Formula::NestedSize(Operand::Param(param.name.clone()))),
-                )
-                .collect(),
-            ),
-            _ => input,
-        };
-        let charge = Formula::Sum(vec![
-            Formula::Constant(1),
-            work,
-            Formula::DeepSize(Operand::Result),
-        ]);
-        let guard = (matches!(operation, Operation::Binary(Binary::Pow))
-            && !matches!(domain, Domain::Float))
-        .then(|| Guard {
-            unit:
-                "upper-bound 64-bit output magnitude words of each integer exponentiation product"
-                    .into(),
-            limit: Formula::Constant(1_048_576),
-        });
-        let mut errors = vec!["type_error".to_owned(), "arity".to_owned()];
-        match operation {
-            Operation::Binary(_) | Operation::ToFloat | Operation::ToInt | Operation::Math(_) => {
-                errors.push("number_range".into())
-            }
-            Operation::Compare => errors.push("unordered".into()),
-            Operation::IntParse | Operation::FloatParse => {
-                errors.push("number_parse".into());
-                errors.push("number_range".into());
-            }
-            Operation::IntText => errors.push("number_range".into()),
-            _ => {}
-        }
-        if matches!(
-            operation,
-            Operation::Binary(
-                Binary::Div
-                    | Binary::DivFloor
-                    | Binary::DivTrunc
-                    | Binary::RemFloor
-                    | Binary::RemTrunc
-            )
-        ) {
-            errors.push("division_by_zero".into());
-        }
-        if matches!(
-            (domain, operation),
-            (
-                Domain::Any,
-                Operation::Eq | Operation::Same | Operation::Kind
-            )
-        ) {
-            errors.retain(|kind| kind == "arity");
-        }
-        let definition = FunctionDefinition {
-            kernel: KERNEL_VERSION,
-            name: QualifiedName::new(name.name()).expect("fixed catalogue name is valid"),
-            signature: Signature {
-                params: param_defs,
-                result,
-            },
-            errors: errors.into_iter().collect(),
-            charge,
-            guard,
-            implementation: Implementation::Native,
-            native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
-        };
+    catalogue(|name, domain, operation, params, result| {
+        let definition = definition(name, domain, operation, &params, result);
         let native: Arc<dyn NativeFunction> = Arc::new(NumericFunction {
             operation,
             domain,
             params,
         });
         functions.push((definition, native));
-    };
+    });
+    functions
+}
+
+/// Adds each numeric native to the registered definition of its name: the
+/// definitions come from the build's release image (FIG-6843), so a process
+/// builds the natives alone.
+///
+/// # Errors
+///
+/// The first [`FunctionRegistry::implement_named`] refuses.
+pub fn implement_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryError> {
+    let mut implemented = Ok(());
+    catalogue(|name, domain, operation, params, _| {
+        if implemented.is_ok() {
+            implemented = registry
+                .implement_named(
+                    name.name(),
+                    Arc::new(NumericFunction {
+                        operation,
+                        domain,
+                        params,
+                    }),
+                )
+                .map(|_| ());
+        }
+    });
+    implemented
+}
+
+/// Hands `add` each numeric function: its name, operand domain, operation,
+/// parameter types and result type.
+#[expect(
+    clippy::expect_used,
+    reason = "catalogue names are fixed valid identifiers, not guest data"
+)]
+fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Type)) {
     for (prefix, domain) in [
         ("", Domain::Number),
         ("num.", Domain::Number),
@@ -439,7 +347,136 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
             Type::Float,
         );
     }
-    functions
+}
+
+/// The definition of numeric function `name`.
+#[expect(
+    clippy::expect_used,
+    reason = "catalogue names are fixed valid identifiers, not guest data"
+)]
+fn definition(
+    name: KernelHelper,
+    domain: Domain,
+    operation: Operation,
+    params: &[Type],
+    result: Type,
+) -> FunctionDefinition {
+    let param_defs: Vec<Param> = params
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| Param {
+            name: Name::new(format!("arg{index}")),
+            ty: ty.clone(),
+            optional: false,
+        })
+        .collect();
+    let sizes: Vec<Formula> = param_defs
+        .iter()
+        .map(|param| Formula::DeepSize(Operand::Param(param.name.clone())))
+        .collect();
+    let input = Formula::Sum(sizes);
+    // Structural map/record equality can inspect every pair of entries;
+    // product charging bounds that work without observing hash layout.
+    let work = match operation {
+        Operation::Eq
+        | Operation::Compare
+        | Operation::Lt
+        | Operation::Le
+        | Operation::Gt
+        | Operation::Ge
+        | Operation::Binary(
+            Binary::Mul
+            | Binary::Div
+            | Binary::DivFloor
+            | Binary::DivTrunc
+            | Binary::RemFloor
+            | Binary::RemTrunc,
+        ) => Formula::Product(vec![input.clone(), input]),
+        // A float power is one libm call; only an integer power does
+        // work that grows with the exponent.
+        Operation::Binary(Binary::Pow) if matches!(domain, Domain::Float) => input,
+        Operation::Binary(Binary::Pow) => Formula::Product(vec![
+            input,
+            Formula::Magnitude(Operand::Param(Name::new("arg1"))),
+        ]),
+        Operation::Math(_) => Formula::Sum(vec![Formula::Constant(64), input]),
+        // `kind` reads a tag. `same` compares two heap objects by identity
+        // and two immutable values member by member: it walks no heap
+        // object's contents, but walks every member nested in a tuple or
+        // an error's data. Each operand's nested size bounds that walk,
+        // and is what measuring it costs.
+        Operation::Kind => Formula::Constant(0),
+        Operation::Same => Formula::Sum(
+            std::iter::once(Formula::Min(
+                param_defs
+                    .iter()
+                    .map(|param| Formula::Size(Operand::Param(param.name.clone())))
+                    .collect(),
+            ))
+            .chain(
+                param_defs
+                    .iter()
+                    .map(|param| Formula::NestedSize(Operand::Param(param.name.clone()))),
+            )
+            .collect(),
+        ),
+        _ => input,
+    };
+    let charge = Formula::Sum(vec![
+        Formula::Constant(1),
+        work,
+        Formula::DeepSize(Operand::Result),
+    ]);
+    let guard = (matches!(operation, Operation::Binary(Binary::Pow))
+        && !matches!(domain, Domain::Float))
+    .then(|| Guard {
+        unit: "upper-bound 64-bit output magnitude words of each integer exponentiation product"
+            .into(),
+        limit: Formula::Constant(1_048_576),
+    });
+    let mut errors = vec!["type_error".to_owned(), "arity".to_owned()];
+    match operation {
+        Operation::Binary(_) | Operation::ToFloat | Operation::ToInt | Operation::Math(_) => {
+            errors.push("number_range".into())
+        }
+        Operation::Compare => errors.push("unordered".into()),
+        Operation::IntParse | Operation::FloatParse => {
+            errors.push("number_parse".into());
+            errors.push("number_range".into());
+        }
+        Operation::IntText => errors.push("number_range".into()),
+        _ => {}
+    }
+    if matches!(
+        operation,
+        Operation::Binary(
+            Binary::Div | Binary::DivFloor | Binary::DivTrunc | Binary::RemFloor | Binary::RemTrunc
+        )
+    ) {
+        errors.push("division_by_zero".into());
+    }
+    if matches!(
+        (domain, operation),
+        (
+            Domain::Any,
+            Operation::Eq | Operation::Same | Operation::Kind
+        )
+    ) {
+        errors.retain(|kind| kind == "arity");
+    }
+    FunctionDefinition {
+        kernel: KERNEL_VERSION,
+        name: QualifiedName::new(name.name()).expect("fixed catalogue name is valid"),
+        signature: Signature {
+            params: param_defs,
+            result,
+        },
+        errors: errors.into_iter().collect(),
+        charge,
+        guard,
+        implementation: Implementation::Native,
+        native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+    }
 }
 
 /// Registers the numeric catalogue. No runtime or global registry is hidden.

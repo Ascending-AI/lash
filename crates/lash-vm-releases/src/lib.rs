@@ -119,12 +119,17 @@ mod python_helpers {
 #[cfg(feature = "dialect-python")]
 pub use python_helpers::PythonHelper;
 
+/// The kernel's native base: its number, text and JSON functions and the
+/// machine's own, each a definition its embedder adds the native of.
+pub const KERNEL_BASE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/kernel_base.bin"));
+
 /// Kernel collection definitions, validated against the kernel's native base
 /// and encoded in the same token form as dialect helpers.
 pub const KERNEL_COLLECTIONS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kernel_collections.bin"));
 
-/// TypeScript date and URL definitions, validated against its kernel and regex library.
+/// TypeScript regular-expression, date and URL definitions, validated
+/// against its kernel.
 #[cfg(feature = "dialect-typescript")]
 pub const TYPESCRIPT_EXTENSIONS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/typescript_extensions.bin"));

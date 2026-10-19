@@ -17,6 +17,7 @@ mod observe;
 mod operations;
 mod operators;
 mod paged;
+mod preparation;
 mod regions;
 mod resident;
 mod stream;
