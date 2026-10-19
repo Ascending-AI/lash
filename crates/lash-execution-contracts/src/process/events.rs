@@ -166,6 +166,7 @@ macro_rules! process_event_kinds {
 process_event_kinds! {
     Waiting => "process.waiting",
     Resumed => "process.resumed",
+    WaitCancelled => "process.wait_cancelled",
     EffectOutcome => "process.effect_outcome",
     EffectOmissions => "process.effect_omissions",
     Ran => "process.ran",
@@ -239,8 +240,12 @@ impl std::fmt::Display for ProcessEventKind {
 pub enum ProcessLifecycleFact {
     /// The process parked on a wait.
     Waiting { wait: WaitState },
-    /// The wait the process was parked on ended.
+    /// The wait the process was parked on ended: what it waited for
+    /// arrived, or the process moved on without it.
     Resumed { wait: WaitState },
+    /// The process's cancel cut short the wait it was parked on: the wait
+    /// ended without resuming (FIG-6821).
+    WaitCancelled { wait: WaitState },
     /// One recorded effect occurrence (ADR 0100 R4).
     EffectOutcome(ProcessEffectOccurrence),
     /// The effect occurrences past the per-node cap, counted.
@@ -283,6 +288,7 @@ impl ProcessLifecycleFact {
         match self {
             Self::Waiting { .. } => ProcessEventKind::Waiting,
             Self::Resumed { .. } => ProcessEventKind::Resumed,
+            Self::WaitCancelled { .. } => ProcessEventKind::WaitCancelled,
             Self::EffectOutcome(_) => ProcessEventKind::EffectOutcome,
             Self::EffectOmissions(_) => ProcessEventKind::EffectOmissions,
             Self::Ran(_) => ProcessEventKind::Ran,
@@ -317,7 +323,9 @@ impl ProcessLifecycleFact {
     )]
     pub fn payload(&self) -> serde_json::Value {
         match self {
-            Self::Waiting { wait } | Self::Resumed { wait } => serde_json::json!({ "wait": wait }),
+            Self::Waiting { wait } | Self::Resumed { wait } | Self::WaitCancelled { wait } => {
+                serde_json::json!({ "wait": wait })
+            }
             Self::EffectOutcome(occurrence) => {
                 serde_json::to_value(occurrence).expect("an effect occurrence serializes")
             }
@@ -405,6 +413,11 @@ impl ProcessLifecycleFact {
                     .wait,
             },
             ProcessEventKind::Resumed => Self::Resumed {
+                wait: serde_json::from_value::<WaitPayload>(payload)
+                    .map_err(invalid)?
+                    .wait,
+            },
+            ProcessEventKind::WaitCancelled => Self::WaitCancelled {
                 wait: serde_json::from_value::<WaitPayload>(payload)
                     .map_err(invalid)?
                     .wait,
@@ -1232,6 +1245,14 @@ impl ProcessEventAppendRequest {
     pub fn wait_cleared(process_id: &ProcessId, wait: &WaitState) -> Self {
         Self::new(ProcessLifecycleFact::Resumed { wait: wait.clone() })
             .with_replay_key(Self::wait_transition_key(process_id, wait, "cleared"))
+    }
+
+    /// Builds the event that ends a wait the process's cancel cut short, for
+    /// process-store implementors, keyed to the exact wait identity and start
+    /// time being cancelled.
+    pub fn wait_cancelled(process_id: &ProcessId, wait: &WaitState) -> Self {
+        Self::new(ProcessLifecycleFact::WaitCancelled { wait: wait.clone() })
+            .with_replay_key(Self::wait_transition_key(process_id, wait, "cancelled"))
     }
 
     fn wait_transition_key(process_id: &ProcessId, wait: &WaitState, transition: &str) -> String {

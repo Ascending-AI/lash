@@ -420,6 +420,33 @@ counts, action states and current task positions. Fold its committed events
 and accepted live observations with `ProcessWorkflowOverlayAccumulator`, as
 [Observing processes](observing-processes.md) describes.
 
+The overlay's `live_coverage` says whether that fold took any live evidence.
+Only live observations from the process feed move it off `not_observed`; a
+fold of committed events alone answers `not_observed` however far the run
+got, because stored events carry no live evidence. To show live coverage, a
+host must:
+
+1. Read the overlay from the process feed, not from its own copy of the
+   stored events. Either take `workflow` from the `Retained` read view of
+   `core.processes().observe(&process_id).snapshot()`, or fold the feed
+   yourself: `committed` for each stored event, then `observe(&document,
+   &event.payload)` for every item of `subscribe_and_recover(cursor)`, and
+   `live_gap(reason)` at a gap. The fold then answers `retained_window`
+   while the replay window holds the run's frames, and `gap` once it lost
+   them.
+2. On a PostgreSQL deployment with more than one replica, install the
+   shared replay store: `PostgresHost::process_replay()` through
+   `LashCoreBuilder::process_replay_store`, configured by the
+   `process_replay` section ([PostgreSQL operations](operations/postgres.md#process_replay)).
+   The default in-memory store holds only the frames its own OS process
+   produced, so a replica that reads a run another replica executes finds
+   no frames and answers `not_observed`.
+
+Frames leave the replay window by its age, event and byte bounds
+(`DataRetention::process_replay`; 120 seconds in the standard preset). Once
+a run's frames have left it, a fresh snapshot answers `not_observed` again
+and its coverage comes from committed counts alone.
+
 Pass that overlay's `ran_counts()` to the view helper, with the document
 and the unit the run entered:
 
@@ -523,6 +550,10 @@ Lash stores no wall time on an occurrence, and a row's `first_entered` and
   its `call_id` when it begins, so record the start there if you need it.
 - **Sleeps:** a sleep's `process.waiting` and `process.resumed` are its
   start and end. A sleep that never parks commits neither.
+- **Cancelled waits:** a cancel that cuts a parked wait short, a sleep
+  included, ends it with `process.wait_cancelled`, never `process.resumed`.
+  The fold settles that occurrence `cancelled`, so a cancelled sleep never
+  reads completed. A sleep that elapsed before the cancel stays completed.
 - **Omitted occurrences:** an occurrence past the evidence cap has no outcome
   event of its own. `process.effect_omissions` counts it.
 

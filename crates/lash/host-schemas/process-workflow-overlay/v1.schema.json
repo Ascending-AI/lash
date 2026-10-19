@@ -28,9 +28,10 @@
       ]
     },
     "ProcessWorkflowLiveCoverage": {
-      "description": "Which provisional evidence this fold holds. RetainedWindow is bounded;\nit never claims to be the execution's entire history.",
+      "description": "Which provisional evidence this fold holds. RetainedWindow is bounded;\nit never claims to be the execution's entire history.\n\nOnly live observations from the process feed move a fold off\n`NotObserved`: a fold of committed events alone\n([`ProcessWorkflowOverlayAccumulator::committed`]) answers `NotObserved`\nhowever far the run got. A host that shows live coverage reads the\noverlay of `core.processes().observe(id).snapshot()`, or folds the feed's\nitems with [`ProcessWorkflowOverlayAccumulator::observe`]; with more than\none replica it also installs a shared process replay store (on\nPostgreSQL, `PostgresHost::process_replay()`), or a replica reading a run\nanother replica executes finds no frames.",
       "oneOf": [
         {
+          "description": "The fold took no live observation.",
           "properties": {
             "state": {
               "const": "not_observed",
@@ -43,6 +44,7 @@
           "type": "object"
         },
         {
+          "description": "The fold holds the frames the replay window retained.",
           "properties": {
             "state": {
               "const": "retained_window",
@@ -55,6 +57,7 @@
           "type": "object"
         },
         {
+          "description": "The feed lost frames the fold would have taken.",
           "properties": {
             "reason": {
               "$ref": "#/$defs/ProcessReplayGapReason"
@@ -99,7 +102,7 @@
       "type": "object"
     },
     "ProcessWorkflowSite": {
-      "description": "One task's latest visit to a document site. The VM's zero-based occurrence\nindex counts entries, including sleeps and calls, independently of effects.\n\nLash stores no wall time on an occurrence. One effect attempt's start,\nend and result join, for every host, on its [`EffectId`] (the task, site,\noccurrence and loops of `EffectIdentity`) across the process events the\nhost stores, each timed by its own `occurred_at_ms`:\n- its result and end are the committed `process.effect_outcome` whose\n  `at` is that id: outcome class, failure code and, for a tool, the\n  `call_id` that names the call's record and answer;\n- its start is the committed `process.waiting` whose `wait.site` is that\n  id, when the call was still in flight as the process released, and its\n  `process.resumed` ends that wait. A call that settles inside the run\n  segment that issued it commits no start: the host's tool\n  implementation sees its `call_id` when it begins.\n\nA sleep is entered by its `process.waiting` and settled by its\n`process.resumed`. An occurrence past the evidence cap has no outcome of\nits own; `process.effect_omissions` counts it. `first_entered` and\n`last_settled` are the sequences of the first and the latest of these\nevents across the row's occurrences, so they bound the site's history,\nnot one attempt.",
+      "description": "One task's latest visit to a document site. The VM's zero-based occurrence\nindex counts entries, including sleeps and calls, independently of effects.\n\nLash stores no wall time on an occurrence. One effect attempt's start,\nend and result join, for every host, on its [`EffectId`] (the task, site,\noccurrence and loops of `EffectIdentity`) across the process events the\nhost stores, each timed by its own `occurred_at_ms`:\n- its result and end are the committed `process.effect_outcome` whose\n  `at` is that id: outcome class, failure code and, for a tool, the\n  `call_id` that names the call's record and answer;\n- its start is the committed `process.waiting` whose `wait.site` is that\n  id, when the call was still in flight as the process released, and its\n  `process.resumed` ends that wait. A call that settles inside the run\n  segment that issued it commits no start: the host's tool\n  implementation sees its `call_id` when it begins.\n\nA sleep is entered by its `process.waiting` and settled by its\n`process.resumed`. A wait the process's cancel cut short ends with\n`process.wait_cancelled` instead, which settles its occurrence as\n[`ProcessWorkflowSiteState::Cancelled`]: a cancelled sleep never reads\ncompleted. An occurrence past the evidence cap has no outcome of\nits own; `process.effect_omissions` counts it. `first_entered` and\n`last_settled` are the sequences of the first and the latest of these\nevents across the row's occurrences, so they bound the site's history,\nnot one attempt.",
       "properties": {
         "at": {
           "$ref": "#/$defs/EffectId"
@@ -118,7 +121,7 @@
           "type": "string"
         },
         "last_settled": {
-          "description": "Sequence of the latest committed sleep resumption or effect outcome\nsettling an occurrence at this site. Retained through later entries;\nlive-only completion and `TerminalUnobserved` supply no settlement.\nAlways `None` until `first_entered` is present. Lash stores no wall time\nhere: hosts map the sequence to their event's `occurred_at_ms`.",
+          "description": "Sequence of the latest committed sleep resumption, cancelled wait or\neffect outcome settling an occurrence at this site. Retained through later entries;\nlive-only completion and `TerminalUnobserved` supply no settlement.\nAlways `None` until `first_entered` is present. Lash stores no wall time\nhere: hosts map the sequence to their event's `occurred_at_ms`.",
           "format": "uint64",
           "minimum": 0,
           "type": [

@@ -1369,8 +1369,10 @@ impl ContractEventIdentities {
         {
             self.normalize_call(call);
         }
-        if matches!(event_type, "process.waiting" | "process.resumed")
-            && let Some(wait) = payload.get_mut("wait").and_then(Value::as_object_mut)
+        if matches!(
+            event_type,
+            "process.waiting" | "process.resumed" | "process.wait_cancelled"
+        ) && let Some(wait) = payload.get_mut("wait").and_then(Value::as_object_mut)
         {
             if let Some(time) = wait.get("since_ms").and_then(Value::as_u64) {
                 let next = self.wait_times.len() + 1;

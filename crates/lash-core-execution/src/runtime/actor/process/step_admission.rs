@@ -18,6 +18,7 @@ use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::record_omitted_effects;
 use super::node_trace::NodeCloses;
 use super::terminal::record_terminal;
+use super::waiting::Ending;
 use crate::ProcessId;
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, RoundDraft, RunFold};
 use crate::runtime::actor::waits;
@@ -184,7 +185,7 @@ impl ProcessActivation {
                     .await;
             }
         }
-        super::waiting::settle(&mut tx, process, record, &driver);
+        super::waiting::settle(&mut tx, process, record, &driver, Ending::Resumed);
         tx.write(DomainWrite::Process(ProcessWrite::Advance {
             process: process.clone(),
             expected_rev: row.state_rev,
@@ -212,7 +213,7 @@ impl ProcessActivation {
         driver: &Driver,
         outcome: lash_execution_contracts::process::ProcessOutcome,
     ) -> Result<Pass, DurableError> {
-        super::waiting::end(&mut tx, process, record);
+        super::waiting::end(&mut tx, process, record, Ending::Resumed);
         record_omitted_effects(&mut tx, process, driver, self.fleet());
         record_terminal(&mut tx, process, &outcome)?;
         tx.ack_seen();
@@ -439,9 +440,10 @@ pub(super) fn outstanding_work(
 }
 
 impl ProcessActivation {
-    /// Record `action`'s admission on `tx` and its effect on `driver`.
-    /// Answers the terminal to commit instead when the action ends the
-    /// process or its admission is refused.
+    /// Record `action`'s admission on `tx` and its effect on `driver`, and
+    /// end the waits it leaves behind as `ending` says. Answers the terminal
+    /// to commit instead when the action ends the process or its admission
+    /// is refused.
     #[expect(
         clippy::too_many_arguments,
         reason = "the transition and the rows its admission is recorded against"
@@ -454,6 +456,7 @@ impl ProcessActivation {
         record: &ProcessRecord,
         driver: &mut Driver,
         action: EngineAction,
+        ending: Ending,
         now: DurableInstant,
         fresh: &mut Vec<AdmittedExecution>,
     ) -> Result<Option<lash_execution_contracts::process::ProcessOutcome>, DurableError> {
@@ -562,7 +565,7 @@ impl ProcessActivation {
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
-        super::waiting::settle(tx, process, record, driver);
+        super::waiting::settle(tx, process, record, driver, ending);
         Ok(None)
     }
 }

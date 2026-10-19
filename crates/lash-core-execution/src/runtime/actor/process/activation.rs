@@ -66,6 +66,7 @@ use super::succession::{Current, Succession};
 use super::terminal::cancelled;
 use super::terminal::record_park;
 use super::terminal::record_terminal;
+use super::waiting::Ending;
 use super::{CascadeProgress, end_scope};
 use crate::ActorContext;
 use crate::AdmittedScope;
@@ -639,8 +640,10 @@ impl ProcessActivation {
             && now.0 >= until
         {
             // The grace ran out: lash ends the process, whatever its steps
-            // are doing, and never claims they physically stopped.
+            // are doing, and never claims they physically stopped. The waits
+            // it still lists were cut short by the cancel.
             live.lifecycle.abandon();
+            super::waiting::end(&mut tx, process, &record, Ending::Cancelled);
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &cancelled(origin, true))?;
             tx.ack_seen();
@@ -814,7 +817,7 @@ impl ProcessActivation {
                 .and_then(|payload| serde_json::from_str::<crate::ToolCallOutput>(payload).ok())
             && output.tool_panic_stop().is_some()
         {
-            super::waiting::end(&mut tx, process, &record);
+            super::waiting::end(&mut tx, process, &record, Ending::Resumed);
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(
                 &mut tx,
@@ -826,6 +829,7 @@ impl ProcessActivation {
             self.commit_terminal(owned, tx, process, nodes).await?;
             return Ok(Pass::Again);
         }
+        let ending = Ending::of(&event);
         let (next, action) = match engine.advance(state, event) {
             Ok(transition) => transition,
             Err(error) => {
@@ -867,12 +871,13 @@ impl ProcessActivation {
                 &record,
                 &mut driver,
                 action,
+                ending,
                 now,
                 &mut fresh,
             )
             .await?;
         if let Some(outcome) = applied {
-            super::waiting::end(&mut tx, process, &record);
+            super::waiting::end(&mut tx, process, &record, ending);
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();

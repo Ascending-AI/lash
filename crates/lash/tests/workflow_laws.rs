@@ -1956,3 +1956,7 @@ mod failures;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/returned_lists.rs"]
 mod returned_lists;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/cancelled_sleep.rs"]
+mod cancelled_sleep;

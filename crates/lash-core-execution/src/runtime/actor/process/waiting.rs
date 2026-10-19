@@ -2,7 +2,8 @@
 //! calls, and the key, process or instant its engine waits for, each with
 //! the node that waits when the engine named one. A wait is entered when the
 //! actor releases to wait on rows, and ended by the transition after which
-//! it no longer holds.
+//! it no longer holds. A wait the transition that delivered the process's
+//! cancel ends was cut short, never resumed (FIG-6821).
 use super::driver::{Blocked, Driver};
 use super::effects::append_event as append;
 use crate::ProcessId;
@@ -12,6 +13,38 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::process::WaitKind;
 use lash_execution_contracts::process::WaitState;
+
+/// Why a transition ends the waits it ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Ending {
+    /// What the process waited for arrived, or its engine moved on.
+    Resumed,
+    /// The transition delivered the process's cancel, or forced its
+    /// cancelled terminal: the waits it ends never resumed.
+    Cancelled,
+}
+
+impl Ending {
+    /// The ending of the waits a transition for `event` ends.
+    pub(super) fn of(event: &lash_execution_contracts::process::EngineEvent) -> Self {
+        match event {
+            lash_execution_contracts::process::EngineEvent::Cancelled { .. } => Self::Cancelled,
+            _ => Self::Resumed,
+        }
+    }
+
+    fn event(
+        self,
+        process: &ProcessId,
+        wait: &WaitState,
+    ) -> lash_execution_contracts::process::ProcessEventAppendRequest {
+        use lash_execution_contracts::process::ProcessEventAppendRequest;
+        match self {
+            Self::Resumed => ProcessEventAppendRequest::wait_cleared(process, wait),
+            Self::Cancelled => ProcessEventAppendRequest::wait_cancelled(process, wait),
+        }
+    }
+}
 
 /// What the engine itself waits for, beside its steps.
 fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_protocol_types::EffectId>)> {
@@ -101,6 +134,7 @@ pub(super) fn settle(
     process: &ProcessId,
     record: &ProcessRecord,
     driver: &Driver,
+    ending: Ending,
 ) {
     let engine = engine_blocker(driver).map(|(kind, _)| kind);
     for wait in record.waits() {
@@ -111,26 +145,14 @@ pub(super) fn settle(
             kind => engine.as_ref() == Some(kind),
         };
         if !holds {
-            append(
-                tx,
-                process,
-                lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
-                    process, wait,
-                ),
-            );
+            append(tx, process, ending.event(process, wait));
         }
     }
 }
 
 /// End every wait `record` lists, ahead of its terminal.
-pub(super) fn end(tx: &mut ActorTx, process: &ProcessId, record: &ProcessRecord) {
+pub(super) fn end(tx: &mut ActorTx, process: &ProcessId, record: &ProcessRecord, ending: Ending) {
     for wait in record.waits() {
-        append(
-            tx,
-            process,
-            lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
-                process, wait,
-            ),
-        );
+        append(tx, process, ending.event(process, wait));
     }
 }

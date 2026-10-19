@@ -78,7 +78,10 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 ///   implementation sees its `call_id` when it begins.
 ///
 /// A sleep is entered by its `process.waiting` and settled by its
-/// `process.resumed`. An occurrence past the evidence cap has no outcome of
+/// `process.resumed`. A wait the process's cancel cut short ends with
+/// `process.wait_cancelled` instead, which settles its occurrence as
+/// [`ProcessWorkflowSiteState::Cancelled`]: a cancelled sleep never reads
+/// completed. An occurrence past the evidence cap has no outcome of
 /// its own; `process.effect_omissions` counts it. `first_entered` and
 /// `last_settled` are the sequences of the first and the latest of these
 /// events across the row's occurrences, so they bound the site's history,
@@ -95,8 +98,8 @@ pub struct ProcessWorkflowSite {
     /// `None`. Lash stores no wall time here: hosts map the sequence to the
     /// `occurred_at_ms` of the event they already hold.
     pub first_entered: Option<u64>,
-    /// Sequence of the latest committed sleep resumption or effect outcome
-    /// settling an occurrence at this site. Retained through later entries;
+    /// Sequence of the latest committed sleep resumption, cancelled wait or
+    /// effect outcome settling an occurrence at this site. Retained through later entries;
     /// live-only completion and `TerminalUnobserved` supply no settlement.
     /// Always `None` until `first_entered` is present. Lash stores no wall time
     /// here: hosts map the sequence to their event's `occurred_at_ms`.
@@ -105,11 +108,24 @@ pub struct ProcessWorkflowSite {
 
 /// Which provisional evidence this fold holds. RetainedWindow is bounded;
 /// it never claims to be the execution's entire history.
+///
+/// Only live observations from the process feed move a fold off
+/// `NotObserved`: a fold of committed events alone
+/// ([`ProcessWorkflowOverlayAccumulator::committed`]) answers `NotObserved`
+/// however far the run got. A host that shows live coverage reads the
+/// overlay of `core.processes().observe(id).snapshot()`, or folds the feed's
+/// items with [`ProcessWorkflowOverlayAccumulator::observe`]; with more than
+/// one replica it also installs a shared process replay store (on
+/// PostgreSQL, `PostgresHost::process_replay()`), or a replica reading a run
+/// another replica executes finds no frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessWorkflowLiveCoverage {
+    /// The fold took no live observation.
     NotObserved,
+    /// The fold holds the frames the replay window retained.
     RetainedWindow,
+    /// The feed lost frames the fold would have taken.
     Gap {
         reason: super::process_replay::ProcessReplayGapReason,
     },
@@ -348,28 +364,30 @@ impl ProcessWorkflowOverlayAccumulator {
         self.through = event.sequence;
         let now = event.occurred_at_ms;
         match &event.fact {
-            ProcessLifecycleFact::Waiting { wait } | ProcessLifecycleFact::Resumed { wait } => {
+            ProcessLifecycleFact::Waiting { wait }
+            | ProcessLifecycleFact::Resumed { wait }
+            | ProcessLifecycleFact::WaitCancelled { wait } => {
                 let Some(at) = &wait.site else {
                     return;
                 };
                 self.enter_committed(at);
-                let waiting = matches!(event.fact, ProcessLifecycleFact::Waiting { .. });
-                let state = if waiting {
-                    ProcessWorkflowSiteState::Waiting {
-                        kind: (&wait.kind).into(),
+                let sleep = matches!(wait.kind, WaitKind::Sleep { .. });
+                // A sleep's end settles its occurrence, and so does a cancel
+                // that cut any wait short; a resumed call runs on.
+                let (state, settled) = match &event.fact {
+                    ProcessLifecycleFact::Waiting { .. } => (
+                        ProcessWorkflowSiteState::Waiting {
+                            kind: (&wait.kind).into(),
+                        },
+                        false,
+                    ),
+                    ProcessLifecycleFact::WaitCancelled { .. } => {
+                        (ProcessWorkflowSiteState::Cancelled, true)
                     }
-                } else if matches!(wait.kind, WaitKind::Sleep { .. }) {
-                    ProcessWorkflowSiteState::Completed
-                } else {
-                    ProcessWorkflowSiteState::Running
+                    _ if sleep => (ProcessWorkflowSiteState::Completed, true),
+                    _ => (ProcessWorkflowSiteState::Running, false),
                 };
-                self.site(
-                    at,
-                    now,
-                    state,
-                    !waiting && matches!(wait.kind, WaitKind::Sleep { .. }),
-                    Some(event.sequence),
-                );
+                self.site(at, now, state, settled, Some(event.sequence));
             }
             ProcessLifecycleFact::EffectOutcome(outcome) => {
                 self.enter_committed(&outcome.at);

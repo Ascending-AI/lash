@@ -281,19 +281,21 @@ pub fn apply_process_event_projection(
                 record.lifecycle = record.lifecycle.entering(wait);
             }
         },
-        ProcessLifecycleFact::Resumed { wait } => match &record.lifecycle {
-            // An ended process stays ended: no later fact takes its outcome
-            // back, so a resume cannot return it to running.
-            ProcessLifecycleState::Terminal { .. } => {
-                return Err(PluginError::ProcessAlreadyTerminal {
-                    process_id: record.id.clone(),
-                    status: record.status(),
-                });
+        ProcessLifecycleFact::Resumed { wait } | ProcessLifecycleFact::WaitCancelled { wait } => {
+            match &record.lifecycle {
+                // An ended process stays ended: no later fact takes its outcome
+                // back, so ending a wait cannot return it to running.
+                ProcessLifecycleState::Terminal { .. } => {
+                    return Err(PluginError::ProcessAlreadyTerminal {
+                        process_id: record.id.clone(),
+                        status: record.status(),
+                    });
+                }
+                ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
+                    record.lifecycle = record.lifecycle.leaving(wait);
+                }
             }
-            ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
-                record.lifecycle = record.lifecycle.leaving(wait);
-            }
-        },
+        }
         ProcessLifecycleFact::ExternalRefSet { external_ref } => {
             // Compare-and-set on the segment ordinal, never last-write-wins.
             // A live host and the recovery pass may both submit the same

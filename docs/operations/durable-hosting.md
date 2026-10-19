@@ -628,7 +628,8 @@ TURN    the wait on P resolves -> model -> commit
 
 While P awaits `done` it reads as waiting: its lifecycle log records
 `process.waiting` with `WaitKind::Key { name }`, without the bearer key, and
-`process.resumed` when the wait ends. A host that lost the key, or restarted
+`process.resumed` when the wait ends (`process.wait_cancelled` when P's cancel
+cuts it short). A host that lost the key, or restarted
 before CI called back, reads it again with `Completions::pinned_keys(P)`.
 
 ```rust,ignore
@@ -1108,8 +1109,8 @@ Hosts that used `ProcessExternalRef.metadata` keep that metadata in their own
 adapter keyed by process id.
 
 The process lifecycle log has a closed vocabulary: started, waiting with
-`call_id` and `tool_id`, resumed, effect outcome, effect omissions, cancel
-requested, observer added and removed, external reference set, and completed,
+`call_id` and `tool_id`, resumed, wait cancelled, effect outcome, effect
+omissions, cancel requested, observer added and removed, external reference set, and completed,
 failed, cancelled or abandoned. Waiting facts carry no completion key. Hosts
 reconcile retained process and turn cursors, acknowledging a page only after
 recording it or completing its idempotent actions. Best-effort observation is

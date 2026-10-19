@@ -4,6 +4,7 @@
 pub enum SessionProcessEventKind {
     Waiting { sequence: u64 },
     Resumed { sequence: u64 },
+    WaitCancelled { sequence: u64 },
     CancelRequested { sequence: u64 },
     Completed { sequence: u64 },
     Failed { sequence: u64 },
@@ -17,6 +18,7 @@ impl SessionProcessEventKind {
         Some(match event_type {
             "process.waiting" => Self::Waiting { sequence },
             "process.resumed" => Self::Resumed { sequence },
+            "process.wait_cancelled" => Self::WaitCancelled { sequence },
             "process.cancel_requested" => Self::CancelRequested { sequence },
             "process.completed" => Self::Completed { sequence },
             "process.failed" => Self::Failed { sequence },
