@@ -119,11 +119,26 @@ impl Working {
         }
     }
 
+    /// Each unit's body and its shadow.
+    fn units(&self) -> impl Iterator<Item = (Unit, Node<'_>, &Shadow)> {
+        let functions = self
+            .document
+            .functions
+            .iter()
+            .map(|(name, function)| (Unit::Function(name.clone()), &function.body));
+        std::iter::once((Unit::Main, &self.document.main))
+            .chain(functions)
+            .filter_map(|(unit, body)| {
+                let root = self.shadows.get(&unit)?;
+                Some((unit, Node::Block(body), root))
+            })
+    }
+
     /// Every site of the document.
     pub(crate) fn sites(&self) -> Vec<Site> {
         let mut sites = Vec::new();
-        for (unit, root) in &self.shadows {
-            root.walk(&mut Vec::new(), &mut |path, _| {
+        for (unit, body, root) in self.units() {
+            root.walk(body, &mut Vec::new(), &mut |path, _| {
                 sites.push(Site::new(unit.clone(), path));
             });
         }
@@ -132,9 +147,8 @@ impl Working {
 
     /// Where the node that was at `base` is now.
     pub(super) fn locate(&self, base: &Site) -> Result<Site, Fault> {
-        self.shadows
-            .iter()
-            .find_map(|(unit, root)| Some(Site::new(unit.clone(), root.find(base)?)))
+        self.units()
+            .find_map(|(unit, body, root)| Some(Site::new(unit, root.find(body, base)?)))
             .ok_or_else(|| at(base, EditDiagnosticKind::NoSuchNode))
     }
 
@@ -187,7 +201,7 @@ impl Working {
 
     /// The statements of the block at `site`, which a `locate_as` has shown
     /// to be one.
-    pub(super) fn block(&mut self, site: &Site) -> &mut Block {
+    pub(super) fn block(&mut self, site: &Site) -> &Block {
         match node(&mut self.document, site) {
             Some(NodeMut::Block(block)) => block,
             _ => unreachable!("the site was resolved to a block"),
@@ -201,14 +215,46 @@ impl Working {
         }
     }
 
+    /// Changes the statements of the block at `site`, which a `locate_as`
+    /// has shown to be one, and their shadows through `change`, which holds
+    /// both for the whole change. A loop's `else` the change leaves empty is
+    /// no longer a node (`K-ID-004`), and its shadow goes with it.
+    pub(super) fn splice<R>(
+        &mut self,
+        site: &Site,
+        change: impl FnOnce(&mut Block, &mut Vec<Shadow>) -> R,
+    ) -> R {
+        let Some(NodeMut::Block(block)) = node(&mut self.document, site) else {
+            unreachable!("the site was resolved to a block");
+        };
+        let Some(shadow) = shadow(&mut self.shadows, site) else {
+            unreachable!("every node of the document has a shadow");
+        };
+        let changed = change(block, &mut shadow.children);
+        if block.is_empty()
+            && let Some((_, parent)) = site.path.split_last()
+        {
+            let parent = Site::new(site.unit.clone(), parent);
+            let Some(holder) = node(&mut self.document, &parent) else {
+                unreachable!("a block's parent is a node");
+            };
+            let children = holder.as_node().children().len();
+            self.shadow(&parent).children.truncate(children);
+        }
+        changed
+    }
+
     pub(super) fn insert(&mut self, block: &Site, index: usize, statement: Stmt, shadow: Shadow) {
-        self.shadow(block).children.insert(index, shadow);
-        self.block(block).insert(index, statement);
+        self.splice(block, |statements, shadows| {
+            statements.insert(index, statement);
+            shadows.insert(index, shadow);
+        });
     }
 
     pub(super) fn take(&mut self, block: &Site, index: usize) -> (Stmt, Shadow) {
-        let shadow = self.shadow(block).children.remove(index);
-        (self.block(block).remove(index), shadow)
+        self.splice(block, |statements, shadows| {
+            (statements.remove(index), shadows.remove(index))
+        })
     }
 
     /// Replaces the node at `site`'s content through `write`, which returns
@@ -411,7 +457,16 @@ impl Working {
             if index > at_index {
                 index -= 1;
             }
-        } else if block.unit == from.unit
+            // One change, so the block is never empty part way through.
+            self.splice(&from, |statements, shadows| {
+                let taken = statements.remove(at_index);
+                statements.insert(index, taken);
+                let shadow = shadows.remove(at_index);
+                shadows.insert(index, shadow);
+            });
+            return Ok(());
+        }
+        if block.unit == from.unit
             && block.path.starts_with(&from.path)
             && let Some(step) = block.path.get_mut(from.path.len())
             && *step as usize > at_index
@@ -463,8 +518,8 @@ impl Working {
         result: DocumentId,
     ) -> Result<Correspondence, EditRefusal> {
         let mut survivors = Vec::new();
-        for (unit, root) in &self.shadows {
-            root.walk(&mut Vec::new(), &mut |path, shadow| {
+        for (unit, body, root) in self.units() {
+            root.walk(body, &mut Vec::new(), &mut |path, shadow| {
                 if let Some(origin) = &shadow.origin {
                     survivors.push(Survivor {
                         from: origin.clone(),

@@ -308,44 +308,20 @@ impl Working {
             Wrapper::For { iterable, .. } => header(iterable, first)?,
             Wrapper::Try { .. } => {}
         }
-        let mut body = Vec::new();
-        let mut children = Vec::new();
-        for _ in start..=end {
-            let (stmt, shadow) = self.take(&block, start);
-            body.push(stmt);
-            children.push(shadow);
-        }
-        let statement = match wrapper {
-            Wrapper::If { condition } => Stmt::If {
-                condition: condition.clone(),
-                then_block: body,
-                else_block: vec![],
-            },
-            Wrapper::For { binding, iterable } => Stmt::For {
-                metered: 0,
-                binding: binding.clone(),
-                iterable: iterable.clone(),
-                via: None,
-                body,
-                else_block: vec![],
-            },
-            Wrapper::Try { catch_binding } => Stmt::Try(TryStmt {
-                body,
-                catch: Some(Catch {
-                    binding: catch_binding.clone(),
-                    body: vec![],
-                }),
-                finally: None,
-            }),
-        };
         let body_index = if matches!(wrapper, Wrapper::Try { .. }) {
             0
         } else {
             1
         };
-        let mut shadow = Shadow::fresh(Node::Stmt(&statement));
-        shadow.children[body_index].children = children;
-        self.insert(&block, start, statement, shadow);
+        // One change, so the block is never empty part way through.
+        self.splice(&block, |statements, shadows| {
+            let body: Vec<Stmt> = statements.drain(start..=end).collect();
+            let statement = wrapped(wrapper, body);
+            let mut shadow = Shadow::fresh(Node::Stmt(&statement));
+            shadow.children[body_index].children = shadows.drain(start..=end).collect();
+            statements.insert(start, statement);
+            shadows.insert(start, shadow);
+        });
         Ok(())
     }
 
@@ -427,28 +403,57 @@ impl Working {
                 return Err(at(base, Cause::ControlTargetLost));
             }
         }
-        let (statement, mut shadow) = self.take(&block, index);
-        let body = match statement {
-            Stmt::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                if branch == Branch::Then {
-                    then_block
-                } else {
-                    else_block
+        // One change, so the block is never empty part way through.
+        self.splice(&block, |statements, shadows| {
+            let body = match statements.remove(index) {
+                Stmt::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    if branch == Branch::Then {
+                        then_block
+                    } else {
+                        else_block
+                    }
                 }
-            }
-            Stmt::For { body, .. } => body,
-            Stmt::Try(scope) => scope.body,
-            _ => unreachable!(),
-        };
-        let body_shadow = shadow.children.remove(body_index);
-        for (offset, (statement, child)) in body.into_iter().zip(body_shadow.children).enumerate() {
-            self.insert(&block, index + offset, statement, child);
-        }
+                Stmt::For { body, .. } => body,
+                Stmt::Try(scope) => scope.body,
+                _ => unreachable!(),
+            };
+            let mut shadow = shadows.remove(index);
+            let children = std::mem::take(&mut shadow.children[body_index].children);
+            statements.splice(index..index, body);
+            shadows.splice(index..index, children);
+        });
         Ok(())
+    }
+}
+
+/// The statement `wrapper` makes of `body`.
+fn wrapped(wrapper: &Wrapper, body: Vec<Stmt>) -> Stmt {
+    match wrapper {
+        Wrapper::If { condition } => Stmt::If {
+            condition: condition.clone(),
+            then_block: body,
+            else_block: vec![],
+        },
+        Wrapper::For { binding, iterable } => Stmt::For {
+            metered: 0,
+            binding: binding.clone(),
+            iterable: iterable.clone(),
+            via: None,
+            body,
+            else_block: vec![],
+        },
+        Wrapper::Try { catch_binding } => Stmt::Try(TryStmt {
+            body,
+            catch: Some(Catch {
+                binding: catch_binding.clone(),
+                body: vec![],
+            }),
+            finally: None,
+        }),
     }
 }
 

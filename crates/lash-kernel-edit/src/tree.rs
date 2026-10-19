@@ -5,7 +5,8 @@
 //! [`lash_kernel_doc::Node::children`]. It carries what the document does
 //! not: the site the node had in the base document and whether an edit
 //! wrote the node. Every edit changes the document and its shadow together,
-//! so a node's shadow travels with it.
+//! so a node's shadow travels with it. The document alone says which nodes
+//! there are: [`Shadow::find`] and [`Shadow::walk`] follow it.
 
 use lash_kernel_doc::{Action, Block, Expr, Member, Node, Place, Rhs, Site, Stmt};
 
@@ -235,25 +236,34 @@ impl Shadow {
         Some(shadow)
     }
 
-    /// The path from this shadow to the node that was at `origin`.
-    pub(crate) fn find(&self, origin: &Site) -> Option<Vec<u32>> {
+    /// The path from `node`, whose shadow this is, to the node that was at
+    /// `origin`.
+    pub(crate) fn find(&self, node: Node<'_>, origin: &Site) -> Option<Vec<u32>> {
         if self.origin.as_ref() == Some(origin) {
             return Some(Vec::new());
         }
-        (0u32..).zip(&self.children).find_map(|(index, child)| {
-            let mut path = child.find(origin)?;
-            path.insert(0, index);
-            Some(path)
-        })
+        (0u32..)
+            .zip(node.children().into_iter().zip(&self.children))
+            .find_map(|(index, (node, child))| {
+                let mut path = child.find(node, origin)?;
+                path.insert(0, index);
+                Some(path)
+            })
     }
 
-    /// Calls `visit` with every shadow under this one and its path, parents
-    /// first.
-    pub(crate) fn walk(&self, path: &mut Vec<u32>, visit: &mut dyn FnMut(&[u32], &Shadow)) {
+    /// Calls `visit` with the shadow and path of `node`, whose shadow this
+    /// is, and of every node under it, parents first.
+    pub(crate) fn walk(
+        &self,
+        node: Node<'_>,
+        path: &mut Vec<u32>,
+        visit: &mut dyn FnMut(&[u32], &Shadow),
+    ) {
         visit(path, self);
-        for (index, child) in (0u32..).zip(&self.children) {
+        for (index, (node, child)) in (0u32..).zip(node.children().into_iter().zip(&self.children))
+        {
             path.push(index);
-            child.walk(path, visit);
+            child.walk(node, path, visit);
             path.pop();
         }
     }

@@ -1447,3 +1447,161 @@ fn set_argument_on_do_keeps_computed_values_in_the_expression() {
         );
     }
 }
+
+/// The two loops whose `else` is a node only while it holds a statement
+/// (`K-ID-004`), each around `inner`.
+fn loop_else(inner: &str) -> [String; 2] {
+    [
+        format!("for item in [1] {{}} else {{ {inner} }} finish null"),
+        format!("while false {{}} else {{ {inner} }} finish null"),
+    ]
+}
+
+/// Every survivor `applied` reports names a node of the document `draft`
+/// now holds.
+fn survivors_resolve(draft: &Draft, applied: &crate::Applied) {
+    let sites = sites(draft.document());
+    for survivor in applied.correspondence.entries() {
+        assert!(sites.contains(&survivor.to), "{survivor:?}");
+    }
+}
+
+/// FIG-6853 / CANVAS-STEP: a loop's `else` that an edit empties is no node,
+/// so no survivor names it and no later edit of the batch writes into it.
+#[test]
+fn emptying_a_loop_else_leaves_no_survivor_for_it() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    for source in loop_else(r#"do perform send("x") as Any"#) {
+        let mut draft = Draft::open(doc(&source)).unwrap();
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::RemoveStep {
+                        base,
+                        action: site(&[0, 2, 0, 0]),
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        survivors_resolve(&draft, &applied);
+        assert_eq!(applied.correspondence.successor(&site(&[0, 2])), None);
+
+        let mut draft = Draft::open(doc(&source)).unwrap();
+        let base = draft.identity();
+        let error = rejected(
+            &mut draft,
+            vec![
+                Operation::RemoveStep {
+                    base,
+                    action: site(&[0, 2, 0, 0]),
+                },
+                insert(base, Position::end(site(&[0, 2])), "revived"),
+            ],
+            &env,
+        );
+        assert_eq!(error.diagnostics[0].edit, Some(1));
+        assert_eq!(error.diagnostics[0].kind, Cause::NoSuchNode);
+    }
+    for source in loop_else("if true {}") {
+        let mut draft = Draft::open(doc(&source)).unwrap();
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::UnwrapSteps {
+                        base,
+                        wrapper: site(&[0, 2, 0]),
+                        branch: Branch::Then,
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        survivors_resolve(&draft, &applied);
+        assert_eq!(applied.correspondence.successor(&site(&[0, 2])), None);
+    }
+}
+
+/// FIG-6853 / CANVAS-STEP, CANVAS-WRAP: moving, wrapping or unwrapping the
+/// only statement of a loop's `else` keeps that block, which never stops
+/// being a node part way through the edit.
+#[test]
+fn the_only_statement_of_a_loop_else_moves_wraps_and_unwraps_in_place() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    let step = r#"do perform send("x") as Any"#;
+    let wrapped = format!("if true {{ {step} }} else {{}}");
+    for (source, wrapped) in loop_else(step).into_iter().zip(loop_else(&wrapped)) {
+        let mut draft = Draft::open(doc(&source)).unwrap();
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::MoveStep {
+                        base,
+                        action: site(&[0, 2, 0, 0]),
+                        to: Position::end(site(&[0, 2])),
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        survivors_resolve(&draft, &applied);
+        assert_eq!(draft.document().main, doc(&source).main);
+        assert_eq!(
+            applied.correspondence.successor(&site(&[0, 2, 0, 0])),
+            Some(&site(&[0, 2, 0, 0]))
+        );
+
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::WrapSteps {
+                        base,
+                        first: site(&[0, 2, 0, 0]),
+                        last: site(&[0, 2, 0, 0]),
+                        wrapper: Wrapper::If {
+                            condition: Expr::Literal(Literal::Bool(true)),
+                        },
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        survivors_resolve(&draft, &applied);
+        assert_eq!(draft.document().main, doc(&wrapped).main);
+        assert_eq!(
+            applied.correspondence.successor(&site(&[0, 2, 0])),
+            Some(&site(&[0, 2, 0, 1, 0]))
+        );
+
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::UnwrapSteps {
+                        base,
+                        wrapper: site(&[0, 2, 0]),
+                        branch: Branch::Then,
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        survivors_resolve(&draft, &applied);
+        assert_eq!(draft.document().main, doc(&source).main);
+        assert_eq!(
+            applied.correspondence.successor(&site(&[0, 2, 0, 1, 0])),
+            Some(&site(&[0, 2, 0]))
+        );
+    }
+}
