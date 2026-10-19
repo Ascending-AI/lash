@@ -3,6 +3,7 @@
 use crate::{Python, generated_scope::BindingScope};
 mod names;
 mod readable;
+mod signature;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
     check_document_depth,
@@ -14,8 +15,15 @@ pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 /// manifest, entries, private bindings, helper identities and name renames
 /// are not written: [`crate::read`] takes them from the base document.
 /// Each caption is spelled as `#:` lines directly above what it captions,
-/// an `else`, `except` or `finally` clause for an arm and the `def` for a
-/// function; none is dropped.
+/// an `else`, `except` or `finally` clause for an arm, the `def` for a
+/// function, a parameter written on its own line, and a field of a
+/// `TypedDict`. A function whose parameters or whose types' fields carry
+/// captions takes one parameter a line, and each parameter or result with a
+/// captioned field is annotated with its type, written from the entry's
+/// signature, each record a `TypedDict` above every function.
+/// [`PrintedSource::dropped`] lists an entry's parameter and field captions
+/// when its function takes other parameters than its signature names, and a
+/// field's below a record with a field no class body can name.
 pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
@@ -37,9 +45,10 @@ pub fn print(
         operators: crate::generated_operators::Operators::new(&document.manifest.functions),
         captions: captions.is_some_and(|captions| !captions.is_empty()),
     };
+    let signatures = r.typed_dicts(document);
     for (name, function) in &document.functions {
         if r.captions {
-            r.caption_of(&k::Site::new(k::Unit::Function(name.clone()), Vec::new()));
+            r.caption_of(k::Site::new(k::Unit::Function(name.clone()), Vec::new()));
         }
         r.out.write(if awaits(&function.body) {
             "async def "
@@ -47,7 +56,7 @@ pub fn print(
             "def "
         });
         r.name(name);
-        r.parameters(&function.params);
+        r.signature(&signatures, name, function);
         r.out.write(":\n");
         let unit = r
             .out
@@ -93,7 +102,7 @@ impl Renderer<'_> {
     /// The caption of the node the writer opens next, taken to be spelled.
     fn next_caption(&mut self) -> Option<k::Caption> {
         let site = self.captions.then(|| self.out.next_site(None)).flatten()?;
-        self.out.take_caption(&site)
+        self.out.take_caption(site)
     }
     /// Spells the caption of the node the writer opens next, if it has one.
     fn caption_next(&mut self) {
@@ -101,7 +110,7 @@ impl Renderer<'_> {
             self.spell(&caption);
         }
     }
-    fn caption_of(&mut self, site: &k::Site) {
+    fn caption_of(&mut self, site: k::Site) {
         if let Some(caption) = self.out.take_caption(site) {
             self.spell(&caption);
         }

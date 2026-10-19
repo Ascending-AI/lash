@@ -1,6 +1,7 @@
-//! Plain-language captions for a document's steps: a value beside the
-//! document, keyed to its identity like a source map, that a dialect reads
-//! from and writes into source and a host holds (`K-CAP-001`..`K-CAP-006`).
+//! Plain-language captions for a document's steps, its entries' parameters
+//! and the fields of their types: a value beside the document, keyed to its
+//! identity like a source map, that a dialect reads from and writes into
+//! source and a host holds (`K-CAP-001`..`K-CAP-007`).
 //!
 //! A caption never changes behaviour or the document's identity. Nothing a
 //! run, an edit, a checkpoint or a continuation holds names one.
@@ -11,6 +12,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{Correspondence, Document, DocumentId, IdentifiedDocument, Node, Site, Stmt, Unit};
+
+mod target;
+
+pub use target::{CaptionEntry, CaptionTarget, FieldPath, FieldRoot, FieldTarget, ParamTarget};
 
 /// The longest title, in UTF-8 bytes.
 pub const CAPTION_TITLE_BYTES: usize = 200;
@@ -196,9 +201,10 @@ impl<'de> Deserialize<'de> for Caption {
     }
 }
 
-/// What a captionable site is (`K-CAP-003`). A then-arm, a loop body, a
-/// try body, a closure body and `main`'s body are not captionable: the
-/// statement or callable that holds them names them.
+/// What a caption may name (`K-CAP-003`, `K-CAP-007`): a captionable site,
+/// a declared function's parameter or a field of an entry's types. A
+/// then-arm, a loop body, a try body, a closure body and `main`'s body are
+/// not captionable: the statement or callable that holds them names them.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -217,17 +223,24 @@ pub enum CaptionKind {
     /// A declared function's body, at `Site(Function(f), [])`: the entry's
     /// is the workflow's title.
     Function,
+    /// A declared function's parameter ([`CaptionTarget::Param`]).
+    Param,
+    /// A named field of an entry's parameter or result type
+    /// ([`CaptionTarget::Field`]).
+    Field,
 }
 
 impl CaptionKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Statement,
         Self::ElseArm,
         Self::CatchArm,
         Self::FinallyArm,
         Self::LoopElseArm,
         Self::Function,
+        Self::Param,
+        Self::Field,
     ];
 
     /// What `site` is in `document`, when a caption may name it.
@@ -271,9 +284,52 @@ impl CaptionKind {
         }
     }
 
-    /// Every captionable site of `document`, ascending.
+    /// Every target of `document` a caption may name, ascending: its
+    /// captionable sites, every parameter of a declared function and every
+    /// field path of an entry's signature.
     #[must_use]
-    pub fn captionable(document: &Document) -> Vec<(Site, Self)> {
+    pub fn captionable(document: &Document) -> Vec<(CaptionTarget, Self)> {
+        let mut out: Vec<(CaptionTarget, Self)> = Self::captionable_sites(document)
+            .into_iter()
+            .map(|(site, kind)| (CaptionTarget::Site(site), kind))
+            .collect();
+        for (function, declared) in &document.functions {
+            let params: Vec<&crate::Name> = match document.entries.get(function) {
+                Some(entry) => entry
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| &param.name)
+                    .collect(),
+                None => declared.params.iter().collect(),
+            };
+            out.extend(params.into_iter().map(|param| {
+                (
+                    CaptionTarget::Param(ParamTarget {
+                        function: function.clone(),
+                        param: param.clone(),
+                    }),
+                    Self::Param,
+                )
+            }));
+        }
+        for (function, entry) in &document.entries {
+            out.extend(FieldPath::every(&entry.signature).into_iter().map(|path| {
+                (
+                    CaptionTarget::Field(FieldTarget {
+                        function: function.clone(),
+                        path,
+                    }),
+                    Self::Field,
+                )
+            }));
+        }
+        out.sort();
+        out
+    }
+
+    /// Every captionable site of `document`, ascending.
+    fn captionable_sites(document: &Document) -> Vec<(Site, Self)> {
         let mut out = Vec::new();
         let roots = std::iter::once((Unit::Main, &document.main)).chain(
             document
@@ -307,21 +363,13 @@ impl CaptionKind {
     }
 }
 
-/// One site's caption.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CaptionEntry {
-    pub site: Site,
-    pub caption: Caption,
-}
-
-/// The captions of one document, by site: strictly ascending and unique,
-/// each a captionable site of the document of identity `document`. It is
+/// The captions of one document, by target: strictly ascending and unique,
+/// each a target the document of identity `document` lets a caption name. It is
 /// separate from the [`crate::SourceMap`]: captions outlive the source bytes
 /// a map is keyed to. A host holds it; lash stores none.
 ///
 /// Decoding checks the order; validate a decoded value against its document
-/// before using its sites.
+/// before using its targets.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Captions {
@@ -330,7 +378,7 @@ pub struct Captions {
     entries: Vec<CaptionEntry>,
 }
 
-/// The first failed check: document, then each entry's site and kind in
+/// The first failed check: document, then each entry's target and kind in
 /// order, then ordering.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CaptionsRefusal {
@@ -340,19 +388,28 @@ pub enum CaptionsRefusal {
     Site { site: Site },
     #[error("caption site {site} is not a statement, a clause arm or a declared function")]
     NotCaptionable { site: Site },
-    #[error("caption sites are unsorted at {site}")]
-    Order { site: Site },
-    #[error("two captions name {site}")]
-    Duplicate { site: Site },
+    /// The function is not declared, or declares no parameter of the name.
+    #[error("fn {} has no parameter {}", .target.function, .target.param)]
+    Param { target: ParamTarget },
+    /// The function is no entry, or the path does not walk its signature's
+    /// types to a named record field ([`FieldPath`]).
+    #[error("{} does not name a field of the types fn {} states", .target.path, .target.function)]
+    Field { target: FieldTarget },
+    #[error("captions are unsorted at {target}")]
+    Order { target: CaptionTarget },
+    #[error("two captions name {target}")]
+    Duplicate { target: CaptionTarget },
 }
 
-/// What [`Captions::rekey`] answers: the survivors at their new sites, and
-/// which of them an edit may have made stale.
+/// What [`Captions::rekey`] answers: the survivors at their new targets,
+/// and which of them an edit may have made stale.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rekeyed {
     pub captions: Captions,
     /// The sites in `captions` whose node or any node beneath it the edit
     /// wrote or made new, ascending. A host marks those captions for review.
+    /// A parameter's or a field's caption is never touched: it survives
+    /// only while its name does.
     pub touched: Vec<Site>,
 }
 
@@ -366,11 +423,11 @@ impl Captions {
         }
     }
 
-    /// Build the one canonical ordering, then check every site.
+    /// Build the one canonical ordering, then check every target.
     ///
     /// # Errors
     ///
-    /// Two entries for one site, or a site `document` does not hold or
+    /// Two entries for one target, or a target `document` does not hold or
     /// a caption may not name.
     pub fn new(document: &Document, entries: Vec<CaptionEntry>) -> Result<Self, CaptionsRefusal> {
         Self::of(document, document.identity(), entries)
@@ -393,7 +450,7 @@ impl Captions {
         identity: DocumentId,
         mut entries: Vec<CaptionEntry>,
     ) -> Result<Self, CaptionsRefusal> {
-        entries.sort_by(|a, b| a.site.cmp(&b.site));
+        entries.sort_by(|a, b| a.target.cmp(&b.target));
         let captions = Self {
             document: identity,
             entries,
@@ -429,32 +486,37 @@ impl Captions {
             return Err(CaptionsRefusal::Document);
         }
         for entry in &self.entries {
-            if document.node(&entry.site).is_none() {
-                return Err(CaptionsRefusal::Site {
-                    site: entry.site.clone(),
-                });
+            if entry.target.kind(document).is_some() {
+                continue;
             }
-            if CaptionKind::of(document, &entry.site).is_none() {
-                return Err(CaptionsRefusal::NotCaptionable {
-                    site: entry.site.clone(),
-                });
-            }
+            return Err(match &entry.target {
+                CaptionTarget::Site(site) if document.node(site).is_none() => {
+                    CaptionsRefusal::Site { site: site.clone() }
+                }
+                CaptionTarget::Site(site) => CaptionsRefusal::NotCaptionable { site: site.clone() },
+                CaptionTarget::Param(target) => CaptionsRefusal::Param {
+                    target: target.clone(),
+                },
+                CaptionTarget::Field(target) => CaptionsRefusal::Field {
+                    target: target.clone(),
+                },
+            });
         }
         self.check_order()
     }
 
     fn check_order(&self) -> Result<(), CaptionsRefusal> {
         for pair in self.entries.windows(2) {
-            match pair[0].site.cmp(&pair[1].site) {
+            match pair[0].target.cmp(&pair[1].target) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
                     return Err(CaptionsRefusal::Duplicate {
-                        site: pair[1].site.clone(),
+                        target: pair[1].target.clone(),
                     });
                 }
                 std::cmp::Ordering::Greater => {
                     return Err(CaptionsRefusal::Order {
-                        site: pair[1].site.clone(),
+                        target: pair[1].target.clone(),
                     });
                 }
             }
@@ -468,7 +530,7 @@ impl Captions {
         self.document
     }
 
-    /// The captions, ascending by site.
+    /// The captions, ascending by target.
     #[must_use]
     pub fn entries(&self) -> &[CaptionEntry] {
         &self.entries
@@ -479,11 +541,23 @@ impl Captions {
         self.entries.is_empty()
     }
 
+    /// The caption of `target`, when it has one.
+    #[must_use]
+    pub fn get(&self, target: &CaptionTarget) -> Option<&Caption> {
+        self.entries
+            .binary_search_by(|entry| entry.target.cmp(target))
+            .ok()
+            .map(|index| &self.entries[index].caption)
+    }
+
     /// The caption of `site`, when it has one.
     #[must_use]
-    pub fn get(&self, site: &Site) -> Option<&Caption> {
+    pub fn at(&self, site: &Site) -> Option<&Caption> {
         self.entries
-            .binary_search_by(|entry| entry.site.cmp(site))
+            .binary_search_by(|entry| match &entry.target {
+                CaptionTarget::Site(at) => at.cmp(site),
+                CaptionTarget::Param(_) | CaptionTarget::Field(_) => std::cmp::Ordering::Greater,
+            })
             .ok()
             .map(|index| &self.entries[index].caption)
     }
@@ -497,10 +571,14 @@ impl Captions {
             .sum()
     }
 
-    /// Move surviving captions to their sites in `result`, the document the
-    /// correspondence leads to, as [`crate::SourceMap::rekey`] moves
-    /// locations; a survivor that is no longer captionable there is dropped
-    /// with the rest. `None` when the correspondence does not start at these
+    /// Move surviving captions to their targets in `result`, the document
+    /// the correspondence leads to, as [`crate::SourceMap::rekey`] moves
+    /// locations. A site's caption follows its node. A parameter's or a
+    /// field's follows its function's body and keeps its name: it survives
+    /// exactly while that function still has the parameter, or its
+    /// signature still resolves the path, and no edit touches it. A
+    /// survivor that is no longer captionable there is dropped with the
+    /// rest. `None` when the correspondence does not start at these
     /// captions' document or does not end at `result`.
     #[must_use]
     pub fn rekey(&self, correspondence: &Correspondence, result: &Document) -> Option<Rekeyed> {
@@ -511,15 +589,24 @@ impl Captions {
             .entries
             .iter()
             .filter_map(|entry| {
-                let site = correspondence.successor(&entry.site)?;
-                CaptionKind::of(result, site)?;
+                let target = match &entry.target {
+                    CaptionTarget::Site(site) => {
+                        CaptionTarget::Site(correspondence.successor(site)?.clone())
+                    }
+                    other => {
+                        let function = other.function()?.clone();
+                        let body = Site::new(Unit::Function(function), Vec::new());
+                        other.of_function(correspondence.successor(&body)?)?
+                    }
+                };
+                target.kind(result)?;
                 Some(CaptionEntry {
-                    site: site.clone(),
+                    target,
                     caption: entry.caption.clone(),
                 })
             })
             .collect();
-        entries.sort_by(|a, b| a.site.cmp(&b.site));
+        entries.sort_by(|a, b| a.target.cmp(&b.target));
         let survivors: BTreeSet<&Site> = correspondence
             .entries()
             .iter()
@@ -533,8 +620,9 @@ impl Captions {
             .collect();
         let touched = entries
             .iter()
-            .filter(|entry| written_at_or_beneath(result, &entry.site, &survivors, &edited))
-            .map(|entry| entry.site.clone())
+            .filter_map(|entry| entry.target.site())
+            .filter(|site| written_at_or_beneath(result, site, &survivors, &edited))
+            .cloned()
             .collect();
         Some(Rekeyed {
             captions: Self {

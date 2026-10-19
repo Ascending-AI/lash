@@ -42,16 +42,27 @@ impl Adapter<'_> {
                 span,
             )
         })?;
-        let (params, body) = self.in_function(function.is_async, || {
-            let params = function
+        let own_params = || {
+            function
                 .params
                 .iter()
                 .enumerate()
                 .filter(|(index, param)| !self.is_this_parameter(*index, &param.pat))
-                .map(|(_, param)| self.convert_pattern(&param.pat))
+                .map(|(_, param)| param)
+        };
+        let (params, body) = self.in_function(function.is_async, || {
+            let params = own_params()
+                .map(|param| self.convert_pattern(&param.pat))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((params, self.convert_statements(&body.stmts)?))
         })?;
+        let captions = self.comments.signature(
+            own_params(),
+            function
+                .return_type
+                .as_ref()
+                .map(|annotation| annotation.type_ann.as_ref()),
+        );
         Ok(Function {
             name,
             params,
@@ -62,6 +73,7 @@ impl Adapter<'_> {
                 .map(|annotation| types::convert_return_type(&annotation.type_ann)),
             is_async: function.is_async,
             is_arrow: false,
+            captions,
         })
     }
 }

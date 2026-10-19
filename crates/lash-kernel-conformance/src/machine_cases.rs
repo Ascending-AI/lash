@@ -71,6 +71,11 @@ fn k_cap_006() {
 }
 
 #[test]
+fn k_cap_007() {
+    super::run_rule("K-CAP-007", include_str!("../corpus/cap/K-CAP-007.json"));
+}
+
+#[test]
 fn k_chg_001() {
     super::run_rule("K-CHG-001", include_str!("../corpus/chg/K-CHG-001.json"));
 }

@@ -17,12 +17,22 @@ export type CaptionView = {
   "callables": Array<CallableCaption>;
   "document": DocumentId;
   /**
+   * By path: the captioned fields of the entry's parameter and result
+   * types, ascending.
+   */
+  "fields": Array<FieldCaption>;
+  /**
    * By node, then site. An action or control node has its carrier
    * statement's caption; a statement with several actions gives it to
    * the node of its first. A code node has the caption of every member,
    * and of every clause arm of a member, that has one.
    */
   "nodes": Array<NodeCaption>;
+  /**
+   * By parameter: the entry's parameters that have a caption, in the
+   * order the entry takes them.
+   */
+  "params": Array<ParamCaption>;
 };
 
 export type ArmCaption = {
@@ -67,6 +77,38 @@ export type Caption = {
 
 export type DocumentId = string;
 
+export type FieldCaption = {
+  "caption": Caption;
+  /**
+   * The field, from the entry's parameter or result.
+   */
+  "path": FieldPath;
+};
+
+/**
+ * A walk from a parameter's or the result's type to a named record field.
+ * Each step names a field of a record. A list is walked to its element
+ * type, and a union whose members other than null and absent are exactly
+ * one is walked to that member, so `items.title` names the `title` of each
+ * record of a list `items`, and `reply.note` the `note` of an optional
+ * `reply`. A map, a set, a tuple, a record's rest and a union of two
+ * records are not walked.
+ */
+export type FieldPath = {
+  /**
+   * At least one field name.
+   */
+  "fields": Array<string>;
+  "root": FieldRoot;
+};
+
+/**
+ * Where a [`FieldPath`] starts.
+ */
+export type FieldRoot = ({
+  "param": Name;
+} | "result");
+
 export type FunctionId = string;
 
 /**
@@ -87,6 +129,15 @@ export type NodeCaption = {
    * The captioned statement or arm.
    */
   "site": Site;
+};
+
+export type ParamCaption = {
+  "caption": Caption;
+  /**
+   * The parameter's position among the entry's.
+   */
+  "index": number;
+  "name": Name;
 };
 
 /**

@@ -1,4 +1,4 @@
-//! The caption conformance harness (`K-CAP-001`..`K-CAP-006`), the same for
+//! The caption conformance harness (`K-CAP-001`..`K-CAP-007`), the same for
 //! every dialect: it takes a dialect [`Package`] and that dialect's
 //! [`CaptionCorpus`], and checks each rule against what the package's front
 //! end, printer and reader do. A dialect that spells no caption declares no
@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use lash_kernel_dialect::{
     Environment, Lowered, Mode, Package, PrintError, PrintOptions, SourceFormat,
 };
-use lash_kernel_doc::{Caption, CaptionEntry, CaptionKind, Captions, Document, Site};
+use lash_kernel_doc::{Caption, CaptionEntry, CaptionTarget, Captions, Document, Site};
 use serde::Deserialize;
 
 use crate::HarnessError;
@@ -27,7 +27,8 @@ pub struct CaptionCorpus {
     #[serde(default)]
     pub authored: Vec<AuthoredCase>,
     /// Workflow modules whose documents are printed with a caption on every
-    /// captionable site and read back (`K-CAP-002`, `K-CAP-005`, `K-CAP-006`).
+    /// captionable target and read back (`K-CAP-002`, `K-CAP-005`,
+    /// `K-CAP-006`).
     #[serde(default)]
     pub readback: Vec<ReadbackCase>,
 }
@@ -170,7 +171,7 @@ impl CaptionDialect<'_> {
     }
 
     /// `K-CAP-002`: printing a document with a caption on every captionable
-    /// site, without a source map, and reading the source back against it
+    /// target, without a source map, and reading the source back against it
     /// answers the document and exactly the captions of the kinds the
     /// dialect spells.
     ///
@@ -226,11 +227,11 @@ impl CaptionDialect<'_> {
             let lowered = self.module(RULE, &case.name, &case.source)?;
             let document = lowered.document.document();
             let captions = everywhere(document)?;
-            let expected: Vec<Site> = captions
+            let expected: Vec<CaptionTarget> = captions
                 .entries()
                 .iter()
-                .filter(|entry| !self.supports(document, &entry.site))
-                .map(|entry| entry.site.clone())
+                .filter(|entry| !self.supports(document, &entry.target))
+                .map(|entry| entry.target.clone())
                 .collect();
             for source_map in [false, true] {
                 let printed = self
@@ -273,22 +274,40 @@ impl CaptionDialect<'_> {
         let document = lowered.document.document();
         let other = lash_kernel_doc::Document::new(document.manifest.numbers, Vec::new());
         let caption = serde_json::json!({"title": "Send the report"});
+        let entry = document
+            .entries
+            .keys()
+            .next()
+            .ok_or_else(|| fail(RULE, &case.name, "a module has an entry"))?;
         let wrong = [
             (
                 "another document",
                 other.identity(),
-                Site::new(lash_kernel_doc::Unit::Main, [0]),
+                serde_json::json!({"site": Site::new(lash_kernel_doc::Unit::Main, [0])}),
             ),
             (
                 "main's body",
                 document.identity(),
-                Site::new(lash_kernel_doc::Unit::Main, Vec::new()),
+                serde_json::json!({"site": Site::new(lash_kernel_doc::Unit::Main, Vec::new())}),
+            ),
+            (
+                "a parameter the entry lacks",
+                document.identity(),
+                serde_json::json!({"param": {"function": entry, "param": "no_such_parameter"}}),
+            ),
+            (
+                "a field no type of the entry has",
+                document.identity(),
+                serde_json::json!({"field": {"function": entry, "path": {
+                    "root": "result", "fields": ["no_such_field"]
+                }}}),
             ),
         ];
-        for (name, identity, site) in wrong {
+        for (name, identity, mut target) in wrong {
+            target["caption"] = caption.clone();
             let captions: Captions = serde_json::from_value(serde_json::json!({
                 "document": identity,
-                "entries": [{"site": site, "caption": caption}],
+                "entries": [target],
             }))
             .map_err(|error| fail(RULE, name, error))?;
             match self.print(document, &captions, false) {
@@ -299,8 +318,10 @@ impl CaptionDialect<'_> {
         Ok(())
     }
 
-    fn supports(&self, document: &Document, site: &Site) -> bool {
-        CaptionKind::of(document, site).is_some_and(|kind| self.package.captions.supports(kind))
+    fn supports(&self, document: &Document, target: &CaptionTarget) -> bool {
+        target
+            .kind(document)
+            .is_some_and(|kind| self.package.captions.supports(kind))
     }
 
     /// `captions` restricted to the kinds the dialect spells.
@@ -308,7 +329,7 @@ impl CaptionDialect<'_> {
         let kept = captions
             .entries()
             .iter()
-            .filter(|entry| self.supports(document, &entry.site))
+            .filter(|entry| self.supports(document, &entry.target))
             .cloned()
             .collect();
         Captions::new(document, kept).map_err(|refusal| HarnessError(refusal.to_string()))
@@ -349,19 +370,20 @@ pub fn boundary_captions() -> Result<Vec<Caption>, HarnessError> {
     .collect()
 }
 
-/// A caption on every captionable site of `document`, cycling through
+/// A caption on every captionable target of `document`, cycling through
 /// [`boundary_captions`].
 ///
 /// # Errors
 ///
-/// A site [`CaptionKind::captionable`] lists that does not take one.
+/// A target [`lash_kernel_doc::CaptionKind::captionable`] lists that does
+/// not take one.
 pub fn everywhere(document: &Document) -> Result<Captions, HarnessError> {
     let texts = boundary_captions()?;
-    let entries = CaptionKind::captionable(document)
+    let entries = lash_kernel_doc::CaptionKind::captionable(document)
         .into_iter()
         .zip(texts.iter().cycle())
-        .map(|((site, _), caption)| CaptionEntry {
-            site,
+        .map(|((target, _), caption)| CaptionEntry {
+            target,
             caption: caption.clone(),
         })
         .collect();

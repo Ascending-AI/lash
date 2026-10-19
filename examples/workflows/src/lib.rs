@@ -357,7 +357,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
                     code_sites(document).len()
                 )?;
                 views.push_str(&readable::view(&checked, &view)?);
-                views.push_str(&readable::captions(&view, &lowered.captions)?);
+                views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);
             outputs.insert(format!("{prefix}view.{extension}.txt"), views);
@@ -456,7 +456,7 @@ fn edit(
     for site in &rekeyed.touched {
         let caption = rekeyed
             .captions
-            .get(site)
+            .at(site)
             .context("a touched site keeps its caption")?;
         writeln!(text, "{site} {:?}", caption.title())?;
     }

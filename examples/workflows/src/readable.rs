@@ -153,13 +153,15 @@ pub(super) fn view(
     Ok(text)
 }
 
-/// Each caption where a canvas draws it: by node, by control arm, and by
-/// callable, whose entry caption is the workflow's title.
+/// Each caption where a canvas draws it: by node, by control arm, by
+/// callable, whose entry caption is the workflow's title, and by the entry's
+/// parameter and field.
 pub(super) fn captions(
+    checked: &lash_kernel_check::WorkflowDocument,
     view: &lash_kernel_view::WorkflowView,
     captions: &lash_kernel_doc::Captions,
 ) -> Result<String> {
-    let joined = view.captions(captions)?;
+    let joined = view.captions(checked, captions)?;
     let mut text = String::new();
     for caption in &joined.callables {
         writeln!(
@@ -186,6 +188,23 @@ pub(super) fn captions(
             caption.node,
             caption.arm,
             caption.block,
+            spelled(&caption.caption)
+        )?;
+    }
+    for caption in &joined.params {
+        writeln!(
+            text,
+            "caption param {} {} {}",
+            caption.index,
+            caption.name,
+            spelled(&caption.caption)
+        )?;
+    }
+    for caption in &joined.fields {
+        writeln!(
+            text,
+            "caption field {} {}",
+            caption.path,
             spelled(&caption.caption)
         )?;
     }

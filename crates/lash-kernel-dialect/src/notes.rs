@@ -90,21 +90,26 @@ pub enum SiteLayersRefusal {
 /// `main` are the notes of the document's `main`, and `functions` those of
 /// each declared function the source spelled; a declared function with
 /// none, such as a saved function an earlier cell made, has no locations.
-/// `function_captions` are the captions of declared functions' roots. A
-/// statement's span locates it and its action.
+/// `declared` are the captions no statement's note carries: of declared
+/// functions' bodies, their parameters and the fields of their types. Of
+/// those, a parameter's or a field's that names nothing the document
+/// declares is left out, as unattached caption syntax is trivia: a front
+/// end reads the fields its source spells, and only the kernel's types say
+/// which of them an entry's signature states. A statement's span locates it
+/// and its action.
 ///
 /// # Errors
 ///
 /// The map's refusal when a span is not within `source` or a note names no
-/// node, and the captions' when a note's caption names no captionable site:
-/// a front end's defect.
+/// node, and the captions' when a note's or a function body's caption names
+/// no captionable site: a front end's defect.
 pub fn site_layers(
     document: &lash_kernel_doc::IdentifiedDocument,
     source: &str,
     language: SourceLanguage,
     main: &[Note],
     functions: &BTreeMap<Name, Vec<Note>>,
-    function_captions: &BTreeMap<Name, Caption>,
+    declared: &[CaptionEntry],
 ) -> Result<SiteLayers, SiteLayersRefusal> {
     let mut layers = Layers::default();
     layers.block(&document.main, main, &Site::new(Unit::Main, Vec::new()));
@@ -117,12 +122,12 @@ pub fn site_layers(
             );
         }
     }
-    for (name, caption) in function_captions {
-        layers.captions.push(CaptionEntry {
-            site: Site::new(Unit::Function(name.clone()), Vec::new()),
-            caption: caption.clone(),
-        });
-    }
+    layers.captions.extend(
+        declared
+            .iter()
+            .filter(|entry| entry.target.site().is_some() || entry.target.kind(document).is_some())
+            .cloned(),
+    );
     let source_map = SourceMap::new_identified(document, source, language, layers.sites)?;
     let captions = Captions::new_identified(document, layers.captions)?;
     Ok(SiteLayers {
@@ -159,10 +164,8 @@ impl Layers {
                 self.actions(Node::Stmt(statement), &statement_site, span);
             }
             if let Some(caption) = &note.caption {
-                self.captions.push(CaptionEntry {
-                    site: statement_site.clone(),
-                    caption: caption.clone(),
-                });
+                self.captions
+                    .push(CaptionEntry::site(statement_site.clone(), caption.clone()));
             }
             let mut nested = Vec::new();
             nested_blocks(Node::Stmt(statement), &statement_site, &mut nested);
@@ -170,10 +173,8 @@ impl Layers {
                 nested.into_iter().zip(&note.blocks).enumerate()
             {
                 if let Some(caption) = note.arm_captions.get(&arm) {
-                    self.captions.push(CaptionEntry {
-                        site: inner_site.clone(),
-                        caption: caption.clone(),
-                    });
+                    self.captions
+                        .push(CaptionEntry::site(inner_site.clone(), caption.clone()));
                 }
                 self.block(inner, inner_notes, &inner_site);
             }

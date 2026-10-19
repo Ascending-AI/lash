@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{
-    AssignOrder, Expr, Function, Literal, MapType, Name, Param, Place, Rhs, Signature, Stmt, Type,
+    AssignOrder, Expr, Function, Literal, Name, Param, Place, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
@@ -41,6 +41,13 @@ impl Lowerer<'_> {
         self.span_of(def);
         let span = self.span;
         let signature = self.entry_signature(&def.parameters, def.returns.as_deref())?;
+        let names: Vec<Name> = signature
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        let captions = self.signature_captions(def, &names);
+        self.declared_captions.extend(captions);
         self.in_entry = true;
         let creates_tasks = std::mem::take(&mut self.creates_tasks);
         let body = self.function_body(
@@ -169,7 +176,7 @@ impl Lowerer<'_> {
         let Some(annotation) = annotation else {
             return Ok(Type::Any);
         };
-        annotation_type(annotation).ok_or_else(|| {
+        super::typed_dicts::annotation_type(annotation, &self.typed_dicts).ok_or_else(|| {
             ModuleRefusal::UnmappableEntryAnnotation
                 .at(
                     format!(
@@ -180,82 +187,5 @@ impl Lowerer<'_> {
                 )
                 .into_diagnostic()
         })
-    }
-}
-
-/// What a Python annotation means as a kernel type: `int`, `float`, `bool`,
-/// `str`, `bytes` and `None`; `list`, `set` and `dict`, bare or with their
-/// item types; `tuple` with its member types; `Any` and `object`; and
-/// unions written with `|`, `Optional` or `Union`. `None` when it is none
-/// of these.
-fn annotation_type(annotation: &PyExpr) -> Option<Type> {
-    match annotation {
-        PyExpr::NoneLiteral(_) => Some(Type::Null),
-        PyExpr::Name(name) => match name.id.as_str() {
-            "int" => Some(Type::Int),
-            "float" => Some(Type::Float),
-            "bool" => Some(Type::Bool),
-            "str" => Some(Type::Text),
-            "bytes" => Some(Type::Bytes),
-            "None" => Some(Type::Null),
-            "Any" | "object" => Some(Type::Any),
-            "list" => Some(Type::List(Box::new(Type::Any))),
-            "set" => Some(Type::Set(Box::new(Type::Any))),
-            "dict" => Some(map(Type::Any, Type::Any)),
-            _ => None,
-        },
-        PyExpr::Subscript(subscript) => {
-            let PyExpr::Name(name) = subscript.value.as_ref() else {
-                return None;
-            };
-            let members: Vec<&PyExpr> = match subscript.slice.as_ref() {
-                PyExpr::Tuple(tuple) => tuple.elts.iter().collect(),
-                single => vec![single],
-            };
-            let types = members
-                .into_iter()
-                .map(annotation_type)
-                .collect::<Option<Vec<_>>>()?;
-            match (name.id.as_str(), types.as_slice()) {
-                ("list", [item]) => Some(Type::List(Box::new(item.clone()))),
-                ("set", [item]) => Some(Type::Set(Box::new(item.clone()))),
-                ("dict", [key, value]) => Some(map(key.clone(), value.clone())),
-                ("tuple", members) if !members.is_empty() => Some(Type::Tuple(members.to_vec())),
-                ("Optional", [item]) => Some(union(vec![item.clone(), Type::Null])),
-                ("Union", members) if !members.is_empty() => Some(union(members.to_vec())),
-                _ => None,
-            }
-        }
-        PyExpr::BinOp(operation) if operation.op == ast::Operator::BitOr => Some(union(vec![
-            annotation_type(&operation.left)?,
-            annotation_type(&operation.right)?,
-        ])),
-        _ => None,
-    }
-}
-
-fn map(key: Type, value: Type) -> Type {
-    Type::Map(Box::new(MapType { key, value }))
-}
-
-/// One type of `members`: none nested, none twice, and any value if one
-/// member is.
-fn union(members: Vec<Type>) -> Type {
-    let mut types: Vec<Type> = Vec::new();
-    for member in members {
-        let flat = match member {
-            Type::Any => return Type::Any,
-            Type::Union(inner) => inner,
-            other => vec![other],
-        };
-        for member in flat {
-            if !types.contains(&member) {
-                types.push(member);
-            }
-        }
-    }
-    match types.len() {
-        1 => types.remove(0),
-        _ => Type::Union(types),
     }
 }

@@ -33,6 +33,7 @@ thiserror.workspace = true
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-edit.workspace = true
 lash-kernel-exec.workspace = true
+lash-kernel-view.workspace = true
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 
 # Helper conformance uses the shared dialect runner.

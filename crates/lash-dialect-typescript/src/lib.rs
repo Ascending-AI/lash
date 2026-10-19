@@ -33,9 +33,10 @@ pub use package::{builtin_names, define_helpers};
 pub use printer::print;
 
 /// The captions the dialect spells: every kind, as a JSDoc block before the
-/// statement, function or `else`/`catch`/`finally` keyword it names. A
-/// workflow module's front end, the reader of exported source and the
-/// printer spell them alike; a cell's front end reads none.
+/// statement, function, `else`/`catch`/`finally` keyword, parameter or
+/// property of an inline object type it names. A workflow module's front
+/// end, the reader of exported source and the printer spell them alike; a
+/// cell's front end reads none.
 pub const CAPTIONS: CaptionSupport = CaptionSupport {
     kinds: captions::KINDS,
     guide: captions::GUIDE,

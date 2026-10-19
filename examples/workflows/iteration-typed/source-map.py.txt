@@ -1,8 +1,8 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [22..250] "async def demo(items: list[int]):\n    #: Start the total at zero\n    total = 0\n    #: Go through each number\n    for item in items:\n        #: Add it to the total\n        total += item\n    #: Give back the total\n    return total"
-fn demo/0 [91..100] "total = 0"
-fn demo/1 [135..206] "for item in items:\n        #: Add it to the total\n        total += item"
-fn demo/1/1/0 [193..206] "total += item"
-fn demo/1/1/0/0 [193..206] "total += item"
-fn demo/2 [238..250] "return total"
+main/0 [22..283] "async def demo(\n    #: The numbers to add\n    items: list[int],\n):\n    #: Start the total at zero\n    total = 0\n    #: Go through each number\n    for item in items:\n        #: Add it to the total\n        total += item\n    #: Give back the total\n    return total"
+fn demo/0 [124..133] "total = 0"
+fn demo/1 [168..239] "for item in items:\n        #: Add it to the total\n        total += item"
+fn demo/1/1/0 [226..239] "total += item"
+fn demo/1/1/0/0 [226..239] "total += item"
+fn demo/2 [271..283] "return total"

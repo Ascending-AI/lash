@@ -22,25 +22,102 @@
       "type": "object"
     },
     "CaptionEntry": {
-      "additionalProperties": false,
-      "description": "One site's caption.",
-      "properties": {
-        "caption": {
-          "$ref": "#/$defs/Caption"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SiteEntry"
         },
-        "site": {
-          "$ref": "#/$defs/Site"
+        {
+          "$ref": "#/$defs/ParamEntry"
+        },
+        {
+          "$ref": "#/$defs/FieldEntry"
         }
-      },
-      "required": [
-        "site",
-        "caption"
       ],
-      "type": "object"
+      "description": "One caption: its text and what it names, by exactly one of `site`,\n`param` and `field`."
     },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "FieldEntry": {
+      "additionalProperties": false,
+      "description": "A field's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldTarget"
+        }
+      },
+      "required": [
+        "field",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "FieldPath": {
+      "additionalProperties": false,
+      "description": "A walk from a parameter's or the result's type to a named record field.\nEach step names a field of a record. A list is walked to its element\ntype, and a union whose members other than null and absent are exactly\none is walked to that member, so `items.title` names the `title` of each\nrecord of a list `items`, and `reply.note` the `note` of an optional\n`reply`. A map, a set, a tuple, a record's rest and a union of two\nrecords are not walked.",
+      "properties": {
+        "fields": {
+          "description": "At least one field name.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "root": {
+          "$ref": "#/$defs/FieldRoot"
+        }
+      },
+      "required": [
+        "root",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "FieldRoot": {
+      "description": "Where a [`FieldPath`] starts.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The type of the entry's parameter of this name.",
+          "properties": {
+            "param": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "param"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "result",
+          "description": "The entry's result type.",
+          "type": "string"
+        }
+      ]
+    },
+    "FieldTarget": {
+      "additionalProperties": false,
+      "description": "A named field of a type an entry's signature states.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/Name",
+          "description": "The entry."
+        },
+        "path": {
+          "$ref": "#/$defs/FieldPath"
+        }
+      },
+      "required": [
+        "function",
+        "path"
+      ],
+      "type": "object"
     },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
@@ -49,6 +126,40 @@
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
+    },
+    "ParamEntry": {
+      "additionalProperties": false,
+      "description": "A parameter's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "param": {
+          "$ref": "#/$defs/ParamTarget"
+        }
+      },
+      "required": [
+        "param",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "ParamTarget": {
+      "additionalProperties": false,
+      "description": "A declared function's parameter, by name. An entry's parameters are\nits signature's, the names a host starts it with; another function's are\nits own.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/Name"
+        },
+        "param": {
+          "$ref": "#/$defs/Name"
+        }
+      },
+      "required": [
+        "function",
+        "param"
+      ],
+      "type": "object"
     },
     "Site": {
       "additionalProperties": false,
@@ -68,6 +179,23 @@
       },
       "required": [
         "unit"
+      ],
+      "type": "object"
+    },
+    "SiteEntry": {
+      "additionalProperties": false,
+      "description": "A site's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "caption"
       ],
       "type": "object"
     },
@@ -111,7 +239,7 @@
   "$id": "https://lash.dev/schemas/kernel-captions/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The captions of one document, by site: strictly ascending and unique,\neach a captionable site of the document of identity `document`. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds it; lash stores none.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its sites.",
+  "description": "The captions of one document, by target: strictly ascending and unique,\neach a target the document of identity `document` lets a caption name. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds it; lash stores none.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its targets.",
   "properties": {
     "document": {
       "$ref": "#/$defs/DocumentId"

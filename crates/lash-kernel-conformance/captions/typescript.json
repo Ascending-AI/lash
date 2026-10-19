@@ -316,6 +316,134 @@
           }
         }
       ]
+    },
+    {
+      "name": "parameters and the fields of their and the result's types",
+      "source": "type Topic = {\n  /** Not a caption: a named type's fields are not the entry's */\n  title: string;\n};\n/** Triage a card */\nexport async function triage(\n  /**\n   * The card that was answered\n   *\n   * Sent by the review queue.\n   */\n  event: {\n    /** What the reviewer picked */\n    choice: string;\n    /** Notes, when written */\n    notes?: string;\n    reviewer: {\n      /** Who reviewed it */\n      name: string;\n    };\n  },\n  /** Items to echo */\n  items: Array<{\n    /** The item's title */\n    title: string;\n  }>,\n  /** @param flag tags alone are no caption */\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  /** Whether the card was escalated */\n  escalated: boolean;\n}> {\n  /** Start counting */\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n",
+      "stripped": "type Topic = {\n  title: string;\n};\nexport async function triage(\n  event: {\n    choice: string;\n    notes?: string;\n    reviewer: {\n      name: string;\n    };\n  },\n  items: Array<{\n    title: string;\n  }>,\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  escalated: boolean;\n}> {\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "triage"
+            }
+          },
+          "caption": {
+            "title": "Triage a card"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "triage"
+            },
+            "path": [
+              0
+            ]
+          },
+          "caption": {
+            "title": "Start counting"
+          }
+        },
+        {
+          "param": {
+            "function": "triage",
+            "param": "event"
+          },
+          "caption": {
+            "title": "The card that was answered",
+            "description": "Sent by the review queue."
+          }
+        },
+        {
+          "param": {
+            "function": "triage",
+            "param": "items"
+          },
+          "caption": {
+            "title": "Items to echo"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "choice"
+              ]
+            }
+          },
+          "caption": {
+            "title": "What the reviewer picked"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "notes"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Notes, when written"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "reviewer",
+                "name"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Who reviewed it"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "items"
+              },
+              "fields": [
+                "title"
+              ]
+            }
+          },
+          "caption": {
+            "title": "The item's title"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": "result",
+              "fields": [
+                "escalated"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Whether the card was escalated"
+          }
+        }
+      ]
     }
   ],
   "readback": [
@@ -326,6 +454,10 @@
     {
       "name": "closures, hoisted work and predeclarations",
       "source": "/** Hoisted work */\nexport async function hoisted(flag: boolean) {\n  /** Read the value later via t1 */\n  const read = () => value;\n  /** Greet first */\n  await greet(\"a\");\n  /** Set the value */\n  let value = await corpus.echo(\"v\");\n  /** Pick one */\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  /** Greet someone */\n  async function greet(name: string) {\n    /** Echo the name */\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n"
+    },
+    {
+      "name": "typed parameters and result",
+      "source": "export async function triage(event: { choice: string; notes?: string; reviewer: { name: string } }, items: { title: string; \"first-tag\": string }[], flag: boolean | null): Promise<{ escalated: boolean; reasons: string[] }> {\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true, reasons: [] };\n}\n"
     }
   ]
 }

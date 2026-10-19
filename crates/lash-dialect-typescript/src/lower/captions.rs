@@ -86,7 +86,14 @@ impl Lowerer<'_> {
         let caption = spelled.statements.get(&start);
         if let Some(entry) = entry {
             if let Some(caption) = caption {
-                self.function_captions.insert(entry, caption.clone());
+                self.declared_captions
+                    .push(lash_kernel_doc::CaptionEntry::site(
+                        lash_kernel_doc::Site::new(
+                            lash_kernel_doc::Unit::Function(entry),
+                            Vec::new(),
+                        ),
+                        caption.clone(),
+                    ));
             }
             return;
         }

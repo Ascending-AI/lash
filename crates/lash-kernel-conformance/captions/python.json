@@ -342,6 +342,134 @@
           }
         }
       ]
+    },
+    {
+      "name": "parameters and the fields of their and the result's types",
+      "source": "class Reviewer(TypedDict):\n    #: Who reviewed it\n    name: str\n\n#: Not a caption: a class names no step\nclass Answer(TypedDict):\n    \"\"\"A docstring is never a caption.\"\"\"\n    #: What the reviewer picked\n    choice: str\n    #: Notes, when written\n    notes: NotRequired[str]\n    reviewer: Reviewer\n\nclass Item(TypedDict):\n    #: The item's title\n    title: str\n\nclass Outcome(TypedDict):\n    #: Whether the card was escalated\n    escalated: bool\n\n#: Triage a card\nasync def triage(\n    #: The card that was answered\n    #: Sent by the review queue.\n    event: Answer,\n    #: Items to echo\n    items: list[Item],\n    flag: bool | None,\n) -> Outcome:\n    #: Start counting\n    count = 0\n    await corpus.echo(event)\n    return {\"escalated\": flag == True}\n",
+      "stripped": "class Reviewer(TypedDict):\n    name: str\n\nclass Answer(TypedDict):\n    \"\"\"A docstring is never a caption.\"\"\"\n    choice: str\n    notes: NotRequired[str]\n    reviewer: Reviewer\n\nclass Item(TypedDict):\n    title: str\n\nclass Outcome(TypedDict):\n    escalated: bool\n\nasync def triage(\n    event: Answer,\n    items: list[Item],\n    flag: bool | None,\n) -> Outcome:\n    count = 0\n    await corpus.echo(event)\n    return {\"escalated\": flag == True}\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "triage"
+            }
+          },
+          "caption": {
+            "title": "Triage a card"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "triage"
+            },
+            "path": [
+              0
+            ]
+          },
+          "caption": {
+            "title": "Start counting"
+          }
+        },
+        {
+          "param": {
+            "function": "triage",
+            "param": "event"
+          },
+          "caption": {
+            "title": "The card that was answered",
+            "description": "Sent by the review queue."
+          }
+        },
+        {
+          "param": {
+            "function": "triage",
+            "param": "items"
+          },
+          "caption": {
+            "title": "Items to echo"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "choice"
+              ]
+            }
+          },
+          "caption": {
+            "title": "What the reviewer picked"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "notes"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Notes, when written"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "event"
+              },
+              "fields": [
+                "reviewer",
+                "name"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Who reviewed it"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": {
+                "param": "items"
+              },
+              "fields": [
+                "title"
+              ]
+            }
+          },
+          "caption": {
+            "title": "The item's title"
+          }
+        },
+        {
+          "field": {
+            "function": "triage",
+            "path": {
+              "root": "result",
+              "fields": [
+                "escalated"
+              ]
+            }
+          },
+          "caption": {
+            "title": "Whether the card was escalated"
+          }
+        }
+      ]
     }
   ],
   "readback": [
@@ -364,6 +492,10 @@
     {
       "name": "generic suites",
       "source": "async def generic(flag: bool, items: list[str]):\n    if (await corpus.echo(\"a\") if flag else \"b\"):\n        result = \"yes\"\n    else:\n        result = \"no\"\n    while (await corpus.echo(\"go\") if flag else False):\n        flag = False\n    else:\n        result = \"stopped\"\n    for item in (items if flag else []):\n        result = item\n    else:\n        result = \"walked\"\n    check = lambda value: value if flag else None\n    return [result, check(result)]\n"
+    },
+    {
+      "name": "typed parameters and result",
+      "source": "class Reviewer(TypedDict):\n    name: str\n\nclass Answer(TypedDict):\n    choice: str\n    notes: NotRequired[str]\n    reviewer: Reviewer\n\nclass Item(TypedDict):\n    title: str\n\nclass Outcome(TypedDict):\n    escalated: bool\n    reasons: list[str]\n\nasync def triage(event: Answer, items: list[Item] | None, flag: bool | None) -> Outcome:\n    count = 0\n    await corpus.echo(event)\n    return {\"escalated\": flag == True, \"reasons\": []}\n"
     }
   ]
 }

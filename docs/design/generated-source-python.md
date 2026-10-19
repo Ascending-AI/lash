@@ -40,8 +40,19 @@ Captions print as `#:` lines directly above what they caption, at its
 indentation: a statement's first line; the `else:`, `except BaseException as
 …:` or `finally:` line of an arm, or its `with k.block():` line in a generic
 suite; and a declared function's `def`. A captioned else arm never folds
-into `elif`, and an empty one prints `else:` with `pass`. Caption Sites are
-tracked whether or not a map is collected, and none is dropped. The reader
+into `elif`, and an empty one prints `else:` with `pass`. A function whose
+parameters or whose types' fields carry captions prints one parameter a line,
+each below its `#:` lines. Each parameter or result with a captioned field is
+annotated with its type from the entry's signature, and every record in such
+an annotation becomes a `TypedDict` class above all functions, named from the
+function, the root and the path, apart from every name the program writes.
+Each field of the class sits below its caption. The reader takes the classes
+and annotations only to place field captions: the types stay the base
+document's. A record with a field no class body can name prints as
+`dict[str, Any]`, and the captions below it are dropped, as are an entry's
+parameter and field captions when its function takes other parameters than
+its signature names. Caption Sites are tracked whether or not a map is
+collected, and no other caption is dropped. The reader
 numbers statements in the order it begins them, which is the order a walk of
 the document meets them, and resolves each caption to its Site once the
 document is whole; any other comment, and a `#:` run above anything else, is

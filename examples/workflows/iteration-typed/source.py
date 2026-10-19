@@ -1,5 +1,8 @@
 #: Add up the numbers
-async def demo(items: list[int]):
+async def demo(
+    #: The numbers to add
+    items: list[int],
+):
     #: Start the total at zero
     total = 0
     #: Go through each number

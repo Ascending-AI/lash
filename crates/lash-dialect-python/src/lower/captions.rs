@@ -2,7 +2,10 @@
 //! the construct is lowered (spec §2): exactly one per construct, and never
 //! scaffolding, a predeclaration or another construct's statement.
 
-use lash_kernel_doc::{Caption, Expr, Name, Node, Stmt};
+use lash_kernel_doc::{
+    Caption, CaptionEntry, CaptionTarget, Expr, FieldPath, FieldRoot, FieldTarget, Name, Node,
+    ParamTarget, Site, Stmt, Unit,
+};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 
@@ -67,6 +70,55 @@ impl Lowerer<'_> {
         self.caption_at(attempt.handlers.first()?.start())
     }
 
+    /// The captions `#:` lines spell above the parameters of the entry
+    /// `def`, each written on its own line, and above the fields of the
+    /// `TypedDict`s its parameters and result are annotated with. `names`
+    /// are its parameters, in order.
+    pub(super) fn signature_captions(
+        &self,
+        def: &ast::StmtFunctionDef,
+        names: &[Name],
+    ) -> Vec<CaptionEntry> {
+        let function = Name::new(def.name.id.as_str());
+        let above = |at: TextSize| self.caption_at(at);
+        let field = |root: FieldRoot, (fields, caption): (Vec<String>, Caption)| CaptionEntry {
+            target: CaptionTarget::Field(FieldTarget {
+                function: function.clone(),
+                path: FieldPath { root, fields },
+            }),
+            caption,
+        };
+        let mut entries = Vec::new();
+        for (param, name) in def.parameters.args.iter().zip(names) {
+            if let Some(caption) = above(param.start()) {
+                entries.push(CaptionEntry {
+                    target: CaptionTarget::Param(ParamTarget {
+                        function: function.clone(),
+                        param: name.clone(),
+                    }),
+                    caption,
+                });
+            }
+            if let Some(annotation) = param.parameter.annotation.as_deref() {
+                entries.extend(
+                    super::typed_dicts::field_captions(annotation, &self.typed_dicts, &above)
+                        .into_iter()
+                        .map(|found| field(FieldRoot::Param(name.clone()), found)),
+                );
+            }
+        }
+        if let Some(returns) = def.returns.as_deref() {
+            entries.extend(
+                super::typed_dicts::field_captions(returns, &self.typed_dicts, &above)
+                    .into_iter()
+                    .map(|found| field(FieldRoot::Result, found)),
+            );
+        }
+        entries.sort_by(|a, b| a.target.cmp(&b.target));
+        entries.dedup_by(|later, first| later.target == first.target);
+        entries
+    }
+
     /// Gives `caption` to `arm` of the statement just emitted.
     pub(super) fn caption_arm(&mut self, arm: Arm, caption: Option<Caption>) {
         let (Some(caption), Some(note)) = (caption, self.buf.notes.last_mut()) else {
@@ -98,8 +150,10 @@ impl Lowerer<'_> {
         };
         let owner = match statement {
             PyStmt::FunctionDef(def) if self.entry_defs.contains(&def.range) => {
-                self.entry_captions
-                    .insert(Name::new(def.name.id.as_str()), caption);
+                self.declared_captions.push(CaptionEntry::site(
+                    Site::new(Unit::Function(Name::new(def.name.id.as_str())), Vec::new()),
+                    caption,
+                ));
                 return;
             }
             PyStmt::If(_) => last(|stmt| matches!(stmt, Stmt::If { .. })),

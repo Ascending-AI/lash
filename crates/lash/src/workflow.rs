@@ -234,11 +234,13 @@ pub mod document {
         required_declarations, testkit, validate_definition, validate_definition_with_limits,
         validate_document, validate_document_with_limits,
     };
-    /// Plain-language captions for a document's steps, held beside it like
-    /// its source map (`K-CAP-001`..`K-CAP-006`).
+    /// Plain-language captions for a document's steps, its entries'
+    /// parameters and the fields of their types, held beside it like its
+    /// source map (`K-CAP-001`..`K-CAP-007`).
     pub use lash_kernel_doc::{
         CAPTION_DESCRIPTION_BYTES, CAPTION_TITLE_BYTES, Caption, CaptionEntry, CaptionField,
-        CaptionKind, CaptionRefusal, Captions, CaptionsRefusal, Rekeyed,
+        CaptionKind, CaptionRefusal, CaptionTarget, Captions, CaptionsRefusal, FieldPath,
+        FieldRoot, FieldTarget, ParamTarget, Rekeyed,
     };
 }
 
@@ -295,7 +297,8 @@ pub mod view {
     };
     /// A view's captions, joined by view location ([`WorkflowView::captions`]).
     pub use lash_kernel_view::{
-        ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption,
+        ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption, NodeCaption,
+        ParamCaption,
     };
 }
 

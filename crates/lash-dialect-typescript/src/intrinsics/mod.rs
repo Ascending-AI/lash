@@ -25,8 +25,9 @@ pub(crate) struct Reader {
     /// which moving the block into the document keeps: each statement's,
     /// by its index, and those of its arms, by the arm's child index.
     captioned: HashMap<*const k::Stmt, Vec<StatementCaptions>>,
-    /// The captions of declared functions.
-    function_captions: Vec<(k::Name, k::Caption)>,
+    /// The captions of declared functions, their parameters and their
+    /// types' fields.
+    declared: Vec<k::CaptionEntry>,
     limits: k::KernelDataLimits,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
@@ -237,7 +238,7 @@ fn read_module(
     let mut reader = Reader {
         comments,
         captioned: HashMap::new(),
-        function_captions: Vec::new(),
+        declared: Vec::new(),
         limits: k::KernelDataLimits::standard(),
         names: plan
             .names
@@ -277,8 +278,16 @@ fn read_module(
                 "expected one main after declarations; trailing text is forbidden",
             ));
         }
-        let function = reader.read_function(&declaration.function)?;
+        let function = reader.read_function(&declaration.function, true)?;
         let caption = reader.comments.before(item.span().lo.0 as usize).cloned();
+        let signature = reader.comments.signature(
+            &declaration.function.params,
+            declaration
+                .function
+                .return_type
+                .as_ref()
+                .map(|annotation| annotation.type_ann.as_ref()),
+        );
         if declaration.ident.sym == "main" {
             if exported {
                 return Err(format_error("main is not an entry and is not exported"));
@@ -299,8 +308,14 @@ fn read_module(
                 )));
             }
             if let Some(caption) = caption {
-                reader.function_captions.push((name.clone(), caption));
+                reader.declared.push(k::CaptionEntry::site(
+                    k::Site::new(k::Unit::Function(name.clone()), Vec::new()),
+                    caption,
+                ));
             }
+            reader
+                .declared
+                .extend(signature.entries(&name, &function.params));
             if document.functions.insert(name, function).is_some() {
                 return Err(format_error("duplicate declaration"));
             }
@@ -366,14 +381,12 @@ impl Reader {
         }
     }
 
-    /// Every caption read, at its site in `document`.
+    /// Every caption read, at its target in `document`. A parameter's or a
+    /// field's that names nothing the document declares is a comment.
     fn located(&mut self, document: &k::Document) -> Vec<k::CaptionEntry> {
-        let mut entries: Vec<_> = std::mem::take(&mut self.function_captions)
+        let mut entries: Vec<_> = std::mem::take(&mut self.declared)
             .into_iter()
-            .map(|(name, caption)| k::CaptionEntry {
-                site: k::Site::new(k::Unit::Function(name), Vec::new()),
-                caption,
-            })
+            .filter(|entry| entry.target.site().is_some() || entry.target.kind(document).is_some())
             .collect();
         if self.captioned.is_empty() {
             return entries;
@@ -393,13 +406,10 @@ impl Reader {
                     for statement in captions {
                         let at = site.child(statement.index);
                         for (child, caption) in statement.arms {
-                            entries.push(k::CaptionEntry {
-                                site: at.child(child),
-                                caption,
-                            });
+                            entries.push(k::CaptionEntry::site(at.child(child), caption));
                         }
                         if let Some(caption) = statement.caption {
-                            entries.push(k::CaptionEntry { site: at, caption });
+                            entries.push(k::CaptionEntry::site(at, caption));
                         }
                     }
                 }

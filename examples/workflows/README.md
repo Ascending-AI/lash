@@ -121,13 +121,16 @@ async def demo():
 ```
 
 A caption before a function names the workflow; before a statement, that
-step; before `else`, `catch`/the first `except` or `finally`, that branch.
+step; before `else`, `catch`/the first `except` or `finally`, that branch;
+before an entry's parameter, written on its own line, that parameter
+(`iteration-typed` captions its `items`).
 Cells carry none: a cell's front end reads no captions.
 
 The generated outputs show where captions go. `view.<lang>.txt` ends with
 lash's join of the captions with the view (`WorkflowView::captions`): one
 `caption callable` line for the workflow title, a `caption node` line per
-captioned step and a `caption arm` line per captioned branch.
+captioned step, a `caption arm` line per captioned branch and a
+`caption param` or `caption field` line per captioned parameter or field.
 `printed.<lang>` spells them back, and regeneration checks that reading it
 returns the same captions. `edits/1.<lang>.txt` lists the captions the edit
 marks for review (`Captions::rekey`'s `touched`) and reprints the edited

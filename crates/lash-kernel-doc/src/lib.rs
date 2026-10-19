@@ -21,7 +21,8 @@ mod source_map_codec;
 mod source_map_tests;
 pub use caption::{
     CAPTION_DESCRIPTION_BYTES, CAPTION_TITLE_BYTES, Caption, CaptionEntry, CaptionField,
-    CaptionKind, CaptionRefusal, Captions, CaptionsRefusal, Rekeyed,
+    CaptionKind, CaptionRefusal, CaptionTarget, Captions, CaptionsRefusal, FieldPath, FieldRoot,
+    FieldTarget, ParamTarget, Rekeyed,
 };
 pub use correspondence::{Correspondence, Survivor};
 pub use declarations::{

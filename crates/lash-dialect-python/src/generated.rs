@@ -44,8 +44,9 @@ fn depth_error() -> Diagnostic {
 /// bindings, helper identities and name renames come from `base`.
 ///
 /// The captions are those the source spells as `#:` lines above a
-/// statement, a clause or a `def` ([`crate::captions`]); any other comment
-/// is ignored.
+/// statement, a clause, a `def`, a parameter written on its own line or a
+/// field of a `TypedDict` its annotations name ([`crate::captions`]); any
+/// other comment is ignored.
 pub fn read(
     source: &str,
     base: &k::Document,
@@ -413,6 +414,80 @@ impl<'a> Reader<'a> {
             .copied()
             .ok_or_else(|| invalid("undeclared helper alias"))
     }
+    /// A `TypedDict` above the functions, after its `class Name`: its
+    /// fields as written and the caption above each. The source spells
+    /// types only for their fields' captions; the document's are the
+    /// base's.
+    fn class(&mut self, c: &mut Cursor<'_>) -> Result<Vec<captioned::ClassField>> {
+        let header = c.text.trim_end();
+        if !(header.starts_with("(TypedDict") && header.ends_with("):")) {
+            return Err(format_error("a class is a TypedDict"));
+        }
+        let mut fields = Vec::new();
+        while self.more(1) {
+            let caption = self.caption();
+            let (mut line, _) = self.line(1)?;
+            if line.take("pass") {
+                line.finish()?;
+                continue;
+            }
+            let name = line.word()?.to_owned();
+            line.expect(":")?;
+            fields.push(captioned::ClassField {
+                name,
+                annotation: line.text.trim().to_owned(),
+                caption,
+            });
+        }
+        Ok(fields)
+    }
+    /// A `def`'s parameters and the `:` that ends its header: on its line,
+    /// or one a line, each below the caption above it and with the
+    /// annotation it is written with, then `)`, the result's annotation
+    /// and `:` on a line of their own.
+    fn signature(
+        &mut self,
+        c: &mut Cursor<'_>,
+    ) -> Result<(Vec<k::Name>, Vec<captioned::WrittenParam>, Option<String>)> {
+        if c.text.trim() != "(" {
+            let params = self.parameters(c)?;
+            c.expect(":")?;
+            c.finish()?;
+            return Ok((params, Vec::new(), None));
+        }
+        let mut params = Vec::new();
+        let mut written = Vec::new();
+        while self.more(1) {
+            let caption = self.caption();
+            let (mut line, _) = self.line(1)?;
+            params.push(self.name(&mut line)?);
+            let rest = line.text.trim();
+            let rest = rest
+                .strip_suffix(',')
+                .ok_or_else(|| invalid("expected , after a parameter"))?;
+            let annotation = match rest.strip_prefix(':') {
+                Some(annotation) => Some(annotation.trim().to_owned()),
+                None if rest.trim().is_empty() => None,
+                None => return Err(invalid("expected : or , after a parameter")),
+            };
+            written.push(captioned::WrittenParam {
+                caption,
+                annotation,
+            });
+        }
+        let (mut close, _) = self.line(0)?;
+        close.expect(")")?;
+        let rest = close.text.trim();
+        let rest = rest
+            .strip_suffix(':')
+            .ok_or_else(|| invalid("expected : after a signature"))?;
+        let result = match rest.trim().strip_prefix("->") {
+            Some(annotation) => Some(annotation.trim().to_owned()),
+            None if rest.trim().is_empty() => None,
+            None => return Err(invalid("expected -> or : after a signature")),
+        };
+        Ok((params, written, result))
+    }
     fn parameters(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Name>> {
         c.expect("(")?;
         let mut params = vec![];
@@ -578,9 +653,18 @@ impl<'a> Reader<'a> {
             main: vec![],
         };
         let mut main = false;
+        let mut classes = captioned::Classes::new();
         while self.more(0) {
             let caption = self.caption();
             let (mut c, suite) = self.line(0)?;
+            if !suite && document.functions.is_empty() && !main && c.take("class ") {
+                let name = c.word()?.to_owned();
+                let fields = self.class(&mut c)?;
+                if classes.insert(name, fields).is_some() {
+                    return Err(format_error("duplicate class"));
+                }
+                continue;
+            }
             if !suite && (c.take("async def ") || c.take("def ")) && !main {
                 let alias = c.word()?;
                 let name = if alias == "main" {
@@ -590,9 +674,13 @@ impl<'a> Reader<'a> {
                 };
                 let unit = name.clone().map_or(k::Unit::Main, k::Unit::Function);
                 self.found.root(unit, caption);
-                let params = self.parameters(&mut c)?;
-                c.expect(":")?;
-                c.finish()?;
+                let (params, written, result) = self.signature(&mut c)?;
+                if let Some(name) = &name {
+                    self.found
+                        .signature(name, &params, written, result.as_deref(), &classes);
+                } else if !written.is_empty() || result.is_some() {
+                    return Err(format_error("main takes no annotated parameters"));
+                }
                 self.main = name.is_none();
                 self.scope = BindingScope::new(&params);
                 let body = self.readable_block(1, 0)?;

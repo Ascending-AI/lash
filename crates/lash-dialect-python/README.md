@@ -218,14 +218,24 @@ document indentation, explicit empty blocks, exact literals, aliases and limits.
 
 ## Captions
 
-A workflow module spells a step's caption (`K-CAP-001`..`K-CAP-006`) as `#:`
+A workflow module spells a step's caption (`K-CAP-001`..`K-CAP-007`) as `#:`
 lines directly above it, at its indentation, with no blank line between: the
 first line is the title, the rest the description, and a bare `#:` a blank
 line in it. Above a statement it captions the statement, above a top-level
 `async def` the entry (the workflow's title), and above `else:` (of an `if`,
 `for` or `while`), the first `except` or `finally:` that arm; above `elif` it
-captions the nested `if`. `CAPTIONS` declares every kind and its `guide` says
-this for a model's prompt.
+captions the nested `if`. Above an entry's parameter written on its own line
+it captions the parameter, and above a field of a `TypedDict` an entry's
+parameter or result is annotated with it captions that field
+(`K-CAP-007`), also through `list[...]` and an optional (`| None`) type.
+`CAPTIONS` declares every kind and its `guide` says this for a model's
+prompt.
+
+A workflow module may declare `TypedDict` classes at its top level: one
+`TypedDict` base, no keyword, decorator or type parameter, and a body of
+annotated field names (a field may be `NotRequired[...]`), docstrings and
+`pass`. Such a class declares a closed record type for entry annotations and
+nothing else: it emits no statement, and its name is no value.
 
 The front end decides the owner as it lowers each construct: a control's own
 statement, a `def`'s binding, else the statement holding the construct's

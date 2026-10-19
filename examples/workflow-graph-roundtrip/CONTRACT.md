@@ -73,9 +73,9 @@ here.
 | `sourceMap` | Lash's `SourceMap` for `source` (snake_case, lash's shape): UTF-8 byte ranges of `source` for each site of the document. |
 | `authored` | `{ dialect, text, version, sourceMapId?, sourceMap?, mapUnavailable? }`: the imported source, read back through the publication's held map id. Authoring edits retain historical text but drop the map and id. A printed read or opening a kernel document drops authored source. |
 | `captions` | The version's captions, lash's `kernel-captions` shape (snake_case): `{ document, entries: [{ site, caption: { title, description? } }] }`, keyed to `identity`. Import and printed reads replace them with the source's; an edit rekeys them; a kernel document opens with none. |
-| `captionView` | `captions` joined with `view` by lash's `WorkflowView::captions`, the `kernel-caption-view` shape: `{ document, nodes: [{ node, site, caption }], arms: [{ node, arm, block, caption }], callables: [{ callable, block, caption }] }`, indexing `view.nodes`, a node's `arms` and `view.callables`. Absent with `view`, or with `captionsUnavailable`. |
+| `captionView` | `captions` joined with `view` by lash's `WorkflowView::captions`, the `kernel-caption-view` shape: `{ document, nodes: [{ node, site, caption }], arms: [{ node, arm, block, caption }], callables: [{ callable, block, caption }], params: [{ index, name, caption }], fields: [{ path: { root, fields }, caption }] }`, indexing `view.nodes`, a node's `arms` and `view.callables`; `params` and `fields` caption what the entry takes and gives back. Absent with `view`, or with `captionsUnavailable`. |
 | `captionsToReview` | Captioned sites an edit has written at or beneath since their caption was saved (`Rekeyed.touched`, carried through later edits). |
-| `captionsDropped` | Captions `source` could not spell; absent when it spells all of them. |
+| `captionsDropped` | The targets (`{ site }`, `{ param }` or `{ field }`) of captions `source` could not spell; absent when it spells all of them. |
 | `captionGuide` | How to write a caption in `sourceDialect`, in that dialect's words. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.

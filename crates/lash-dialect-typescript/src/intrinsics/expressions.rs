@@ -16,15 +16,19 @@ impl Reader {
         if function.ident.is_some() {
             return Err(invalid("closure has no expression name", Some(expr.span())));
         }
-        self.read_function(&function.function)
+        self.read_function(&function.function, false)
     }
+    /// A function the source writes. A declared one may annotate its
+    /// parameters and result, as a printer writes the types whose fields
+    /// carry captions; the annotations name nothing the document holds.
     pub(super) fn read_function(
         &mut self,
         function: &s::Function,
+        declared: bool,
     ) -> Result<k::Function, Diagnostic> {
         if function.is_generator
             || function.type_params.is_some()
-            || function.return_type.is_some()
+            || (function.return_type.is_some() && !declared)
             || !function.decorators.is_empty()
         {
             return Err(invalid(
@@ -37,7 +41,7 @@ impl Reader {
             .iter()
             .map(|param| match &param.pat {
                 s::Pat::Ident(binding)
-                    if binding.type_ann.is_none()
+                    if (binding.type_ann.is_none() || declared)
                         && !binding.id.optional
                         && param.decorators.is_empty() =>
                 {

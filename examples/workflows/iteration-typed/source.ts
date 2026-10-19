@@ -1,5 +1,8 @@
 /** Add up the numbers */
-export async function demo(items: number[]) {
+export async function demo(
+  /** The numbers to add */
+  items: number[],
+) {
   /** Start the total at zero */
   let total = 0;
   /** Go through each number */

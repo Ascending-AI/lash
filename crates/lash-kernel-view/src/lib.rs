@@ -36,7 +36,10 @@ mod activity;
 mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
 mod captions;
-pub use captions::{ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption};
+pub use captions::{
+    ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption, NodeCaption,
+    ParamCaption,
+};
 mod coarse;
 mod comparison;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};

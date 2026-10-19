@@ -344,8 +344,9 @@ pub(crate) struct Lowerer<'a> {
     /// The captions the source spells, which lowering hands each to the one
     /// statement that owns its construct.
     spelled: &'a crate::captions::Spelled,
-    /// The captions of the module's entries.
-    function_captions: BTreeMap<Name, lash_kernel_doc::Caption>,
+    /// The captions of the module's entries, their parameters and their
+    /// types' fields.
+    declared_captions: Vec<lash_kernel_doc::CaptionEntry>,
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
@@ -453,7 +454,7 @@ pub(crate) fn lower(
         saved_used: BTreeSet::new(),
         written: None,
         spelled: &program.captions,
-        function_captions: BTreeMap::new(),
+        declared_captions: Vec::new(),
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
@@ -510,7 +511,7 @@ pub(crate) fn lower(
         lash_kernel_doc::SourceLanguage::TypeScript,
         &main.notes,
         &lowerer.declared_notes,
-        &lowerer.function_captions,
+        &lowerer.declared_captions,
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {

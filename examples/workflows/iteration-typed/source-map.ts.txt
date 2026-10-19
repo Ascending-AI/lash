@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
-main/0 [33..284] "async function demo(items: number[]) {\n  /** Start the total at zero */\n  let total = 0;\n  /** Go through each number */\n  for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }\n  /** Give back the total */\n  return total;\n}"
-fn demo/0 [107..121] "let total = 0;"
-fn demo/1 [156..237] "for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }"
-fn demo/1/1/0 [219..233] "total += item;"
-fn demo/2 [269..282] "return total;"
+main/0 [33..317] "async function demo(\n  /** The numbers to add */\n  items: number[],\n) {\n  /** Start the total at zero */\n  let total = 0;\n  /** Go through each number */\n  for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }\n  /** Give back the total */\n  return total;\n}"
+fn demo/0 [140..154] "let total = 0;"
+fn demo/1 [189..270] "for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }"
+fn demo/1/1/0 [252..266] "total += item;"
+fn demo/2 [302..315] "return total;"

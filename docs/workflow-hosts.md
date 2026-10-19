@@ -625,17 +625,47 @@ serialises as the `kernel-captions` host schema. Your host holds it; lash
 stores none, and no edit, draft, admission, checkpoint or identity reads it
 (`K-CAP-001`).
 
-A caption may name a statement, a clause arm (an `if`'s else block, a
-`try`'s catch or finally block, a loop's non-empty else block) or a declared
-function's body: `CaptionKind::captionable(&document)` lists them. A then-arm
-or loop body is named by its statement, and the entry function's caption is
-the workflow's title. Build a value with `Caption::new(title, description)`
-and `Captions::new(&document, entries)`; both refuse text outside the one
-domain every dialect can spell (`CaptionRefusal`: one trimmed title line of at
-most 200 bytes, at most 2 KiB of description, no `*/`, no `@` line, no
-control characters or line separators other than `\n`) and sites that are
-not captionable (`CaptionsRefusal`). There is no edit operation for a
-caption: to change one, build a new `Captions` and keep it.
+A caption names a `CaptionTarget`: a site, a parameter or a field.
+`CaptionKind::captionable(&document)` lists every target a document has.
+
+- **A site:** a statement, a clause arm (an `if`'s else block, a `try`'s
+  catch or finally block, a loop's non-empty else block) or a declared
+  function's body. A then-arm or loop body is named by its statement, and
+  the entry function's caption is the workflow's title.
+- **A parameter** (`ParamTarget { function, param }`): a declared function's
+  parameter, by name. An entry's parameters are its signature's, the names a
+  start passes its arguments by.
+- **A field** (`FieldTarget { function, path }`): a named field of a record
+  type an entry's parameter or result has. `FieldPath { root, fields }`
+  starts at a parameter (`FieldRoot::Param(name)`) or the result
+  (`FieldRoot::Result`) and names one record field a step, so
+  `event.answer.choice` is root `event`, fields `["answer", "choice"]`. A
+  list is walked to its element and an optional value (a union whose
+  members other than null and absent are one type) to that type, so
+  `items.title` names the title of each record in a list `items`. A map, a
+  set, a tuple, a record's rest and a union of two records are not walked.
+
+Use parameter and field captions to say in plain words what a workflow takes
+and what it gives back. In JSON an entry names its target by exactly one of
+`site`, `param` and `field`:
+
+```json
+{ "param": { "function": "triage", "param": "event" },
+  "caption": { "title": "The card that was answered" } }
+{ "field": { "function": "triage",
+             "path": { "root": { "param": "event" }, "fields": ["choice"] } },
+  "caption": { "title": "What the reviewer picked" } }
+```
+
+Build a value with `Caption::new(title, description)` and
+`Captions::new(&document, entries)`. Both refuse text outside the one domain
+every dialect can spell (`CaptionRefusal`: one trimmed title line of at most
+200 bytes, at most 2 KiB of description, no `*/`, no `@` line, no control
+characters or line separators other than `\n`). `Captions::new` also refuses
+a site that is not captionable, a parameter the function does not have and a
+path its types do not resolve (`CaptionsRefusal`). There is no edit operation
+for a caption: to change one, build a new `Captions` and keep it.
+`captions.get(&target)` reads one caption, and `captions.at(&site)` a site's.
 
 **Authority.** The sidecar you hold is authoritative. Importing a source
 (`WorkflowImport::Imported { captions, .. }`) or reading back printed source
@@ -644,34 +674,62 @@ spells; replace the sidecar with them wholesale. Once a version has any
 change that did not come from its source, a canvas edit or a caption change,
 show `print(document, Some(&captions), options)` in your source editor rather
 than the stored authored source, so the next save cannot revert captions.
-Captions a dialect cannot spell are listed in `PrintedSource::dropped`
-(`K-CAP-006`): the source read back will not have them, so tell the author
-before a source edit replaces them.
+Captions a dialect cannot spell are listed, by target, in
+`PrintedSource::dropped` (`K-CAP-006`): the source read back will not have
+them, so tell the author before a source edit replaces them. A printer drops
+an entry's parameter and field captions when the printed function takes other
+parameters than its signature names (a TypeScript entry that reads `this` or
+`arguments`), and Python drops a field's below a record with a field name no
+`TypedDict` class body can declare.
 
 **Through edits.** After an applied transaction,
 `captions.rekey(&applied.correspondence, draft.document())` answers
 `Rekeyed { captions, touched }`: the captions whose step survived, at their
 new sites, and the sites of those whose step, or anything beneath it, the
 edit wrote or made new (`K-CAP-004`). Mark the `touched` captions for review:
-"Email the team" may no longer describe a step whose recipient changed.
+"Email the team" may no longer describe a step whose recipient changed. A
+parameter's or field's caption is keyed by name, not position, so moving
+statements never moves it. It survives while its function still has the
+parameter, or still resolves the path, and is dropped once the parameter or
+field is gone. It is never `touched` (`K-CAP-007`).
 
-**Showing them.** `view.captions(&captions)` joins them with a
-`WorkflowView` by view location, as the `kernel-caption-view` schema: an
-action or control node shows its carrier statement's caption (a statement
-with several actions shows it on the node of its first), a code node every
-caption among its `members` and their arms, a control its `arms`' by
-`ControlArm.block`, and a callable its function's, on `CallableView.block`.
-The view itself is unchanged by captions, so a caption-only change keeps its
-identity. Wording for a step without a caption is yours.
+**Showing them.** `view.captions(&workflow_document, &captions)` joins them
+with a `WorkflowView` by view location, as the `kernel-caption-view` schema.
+`workflow_document` is the `WorkflowDocument` the view was derived from: its
+entry's signature names and orders the parameters.
+
+- An action or control node shows its carrier statement's caption. A
+  statement with several actions shows it on the node of its first.
+- A code node shows every caption among its `members` and their arms.
+- A control shows its `arms`' captions, by `ControlArm.block`.
+- A callable shows its function's caption, on `CallableView.block`.
+- `params` lists the entry's captioned parameters as
+  `ParamCaption { index, name, caption }`, in signature order.
+- `fields` lists the captioned fields of its parameter and result types as
+  `FieldCaption { path, caption }`, by path.
+
+A Start/End panel reads `params` and `fields` and shows any parameter
+without a caption by its name. The view itself is unchanged by captions, so
+a caption-only change keeps its identity. Wording for a step without a
+caption is yours.
 
 **Telling a model.** Each dialect declares the caption kinds it spells and a
 short guide in its own syntax (`lash::typescript::CAPTIONS`,
 `lash::python::CAPTIONS`, a `CaptionSupport`). Put the `guide` in a model's
 prompt rather than hard-coding a syntax. Both dialects spell every kind.
-TypeScript uses a JSDoc block, `/** Send the weekly report */`, right
-before the statement, function or `else`/`catch`/`finally` keyword it
-names. Python uses `#:` lines directly above what they caption, at its
-indentation: `#: Send the weekly report`.
+
+- **TypeScript** uses a JSDoc block, `/** Send the weekly report */`, right
+  before the statement, function or `else`/`catch`/`finally` keyword it
+  names. Put one before an entry's parameter to caption it, and before a
+  property of an object type written inline in a parameter's or the
+  result's (`Promise<{ ... }>`) annotation to caption that field. A named
+  `type` or `interface` is not resolved into an entry's signature, so its
+  properties take no caption. `@param` tags are not captions.
+- **Python** uses `#:` lines directly above what they caption, at its
+  indentation: `#: Send the weekly report`. Write an entry's parameters one
+  a line to caption them. To caption fields, annotate a parameter or the
+  result with a `TypedDict` class the module declares and put `#:` lines
+  above its fields. Field annotations may use `NotRequired[...]`.
 
 ## TypeScript is a lens
 

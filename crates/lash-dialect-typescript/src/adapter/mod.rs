@@ -212,6 +212,9 @@ pub(crate) struct Function {
     /// function's (ECMA-262 lexical `this`), and its `arguments` binds the
     /// enclosing non-arrow function's arguments object, not one of its own.
     pub(crate) is_arrow: bool,
+    /// What a workflow module's source captions of its parameters and
+    /// their and its result's types; nothing for a cell or an arrow.
+    pub(crate) captions: crate::captions::SignatureCaptions,
 }
 
 #[derive(Clone, Debug)]
@@ -1174,6 +1177,7 @@ impl Adapter<'_> {
                         .map(|annotation| types::convert_return_type(&annotation.type_ann)),
                     is_async: function.is_async,
                     is_arrow: true,
+                    captions: Default::default(),
                 })
             }
             swc::Expr::Unary(expr) => {

@@ -230,7 +230,7 @@ pub(crate) async fn caption(
     let review = current
         .review
         .iter()
-        .filter(|site| !request.reviewed.contains(site) && captions.get(site).is_some())
+        .filter(|site| !request.reviewed.contains(site) && captions.at(site).is_some())
         .cloned()
         .collect();
     let (saved, _) = state

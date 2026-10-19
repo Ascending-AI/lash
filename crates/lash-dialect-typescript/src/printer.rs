@@ -10,12 +10,19 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc as k;
 
+mod signature;
+
 /// Print without compilation, library lookup or admission. The manifest,
 /// entries' result types, private bindings, helper identities and name
 /// renames are not written: [`crate::read`] takes them from the base document.
 /// Each caption is a JSDoc block before what it names; an `else` arm with a
-/// caption is written even when it is empty. The dialect spells every kind,
-/// so [`PrintedSource::dropped`] is empty.
+/// caption is written even when it is empty. A function whose parameters or
+/// whose types' fields carry captions takes one parameter a line, and each
+/// parameter or result with a captioned field is annotated with its type,
+/// written from the entry's signature. The dialect spells every kind, so
+/// [`PrintedSource::dropped`] lists only an entry's parameter and field
+/// captions when its function takes other parameters than its signature
+/// names.
 pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
@@ -35,7 +42,7 @@ pub fn print(
     };
     for (name, function) in &document.functions {
         let root = k::Site::new(k::Unit::Function(name.clone()), Vec::new());
-        if let Some(caption) = renderer.out.take_caption(&root) {
+        if let Some(caption) = renderer.out.take_caption(root) {
             renderer.caption(&caption);
         }
         renderer.out.write(if document.entries.contains_key(name) {
@@ -48,7 +55,7 @@ pub fn print(
             .out
             .tracks_sites()
             .then(|| k::Unit::Function(name.clone()));
-        renderer.parameters(&function.params);
+        renderer.signature(document, name, function);
         renderer.types = Default::default();
         renderer.node(k::Node::Block(&function.body), unit.as_ref());
         renderer.out.write("\n");
@@ -242,7 +249,7 @@ impl Renderer<'_> {
     /// The caption of the node the writer opens next, taken to be spelled.
     fn next_caption(&mut self) -> Option<k::Caption> {
         let site = self.out.next_site(None)?;
-        self.out.take_caption(&site)
+        self.out.take_caption(site)
     }
     /// A clause's keyword after the arm before it, with the caption of the
     /// arm it opens on the lines before it.

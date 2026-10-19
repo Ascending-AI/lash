@@ -1,7 +1,8 @@
 //! The dialect's caption syntax, which the front end and the reader of
 //! generated source share: a run of `#:` comment lines, each alone on its
 //! line and all at one indentation, directly above the line that begins
-//! what they caption, at the same indentation. The first line is the title
+//! what they caption, at the same indentation: a statement, a clause, a
+//! `def`, a parameter on its own line or a `TypedDict` field. The first line is the title
 //! and the rest the description; a bare `#:` is a blank line in it.
 //!
 //! A run placed otherwise, or whose text the caption rule refuses, is an
@@ -24,9 +25,26 @@ ones the description, and a bare `#:` a blank line in it:
 
 A caption above an `async def` titles that workflow. Above `else:` (of an `if`, \
 `for` or `while`), the first `except` or `finally:` it names that branch; above \
-`elif` it names the nested check. A title is one line of at most 200 bytes and \
-a description at most 2048 bytes. No line may start with `@` or contain `*/`. \
-Docstrings and ordinary `#` comments are not captions.";
+`elif` it names the nested check.
+
+Caption what a workflow takes and gives back the same way: above a parameter of \
+the `async def` written on its own line, and above a field of a `TypedDict` its \
+parameters or its result are annotated with, also inside `list[...]` or an \
+optional (`| None`) type:
+
+    class Answer(TypedDict):
+        #: What the reviewer picked
+        choice: str
+        notes: NotRequired[str]
+
+    async def triage(
+        #: The card that was answered
+        event: Answer,
+    ) -> Outcome:
+
+A title is one line of at most 200 bytes and a description at most 2048 bytes. \
+No line may start with `@` or contain `*/`. Docstrings and ordinary `#` comments \
+are not captions.";
 
 const MARKER: &str = "#:";
 

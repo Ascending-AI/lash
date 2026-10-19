@@ -4,7 +4,7 @@
 // list a rename saves. The backend turns that list into a Captions value.
 import { siteKey } from "./projection.mjs";
 
-const NO_CAPTIONS = { nodes: [], arms: [], callables: [] };
+const NO_CAPTIONS = { nodes: [], arms: [], callables: [], params: [], fields: [] };
 const joined = (workflow) => workflow?.captionView ?? NO_CAPTIONS;
 const reviewing = (workflow, site) =>
   (workflow?.captionsToReview ?? []).some((item) => siteKey(item) === siteKey(site));
@@ -40,9 +40,12 @@ export function captionSite(node) {
 }
 
 // The whole entry list with `site` captioned `caption`, or uncaptioned when
-// `caption` is undefined. Every other entry is kept as it is.
+// `caption` is undefined. Every other entry, a parameter's or a field's too,
+// is kept as it is.
 export function withCaption(captions, site, caption) {
-  const kept = (captions?.entries ?? []).filter((entry) => siteKey(entry.site) !== siteKey(site));
+  const kept = (captions?.entries ?? []).filter(
+    (entry) => !entry.site || siteKey(entry.site) !== siteKey(site),
+  );
   return caption ? [...kept, { site, caption }] : kept;
 }
 

@@ -78,6 +78,68 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FieldCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "path": {
+          "$ref": "#/$defs/FieldPath",
+          "description": "The field, from the entry's parameter or result."
+        }
+      },
+      "required": [
+        "path",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "FieldPath": {
+      "additionalProperties": false,
+      "description": "A walk from a parameter's or the result's type to a named record field.\nEach step names a field of a record. A list is walked to its element\ntype, and a union whose members other than null and absent are exactly\none is walked to that member, so `items.title` names the `title` of each\nrecord of a list `items`, and `reply.note` the `note` of an optional\n`reply`. A map, a set, a tuple, a record's rest and a union of two\nrecords are not walked.",
+      "properties": {
+        "fields": {
+          "description": "At least one field name.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "root": {
+          "$ref": "#/$defs/FieldRoot"
+        }
+      },
+      "required": [
+        "root",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "FieldRoot": {
+      "description": "Where a [`FieldPath`] starts.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The type of the entry's parameter of this name.",
+          "properties": {
+            "param": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "param"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "result",
+          "description": "The entry's result type.",
+          "type": "string"
+        }
+      ]
+    },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -106,6 +168,29 @@
       "required": [
         "node",
         "site",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "ParamCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "index": {
+          "description": "The parameter's position among the entry's.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        }
+      },
+      "required": [
+        "index",
+        "name",
         "caption"
       ],
       "type": "object"
@@ -190,10 +275,24 @@
     "document": {
       "$ref": "#/$defs/DocumentId"
     },
+    "fields": {
+      "description": "By path: the captioned fields of the entry's parameter and result\ntypes, ascending.",
+      "items": {
+        "$ref": "#/$defs/FieldCaption"
+      },
+      "type": "array"
+    },
     "nodes": {
       "description": "By node, then site. An action or control node has its carrier\nstatement's caption; a statement with several actions gives it to\nthe node of its first. A code node has the caption of every member,\nand of every clause arm of a member, that has one.",
       "items": {
         "$ref": "#/$defs/NodeCaption"
+      },
+      "type": "array"
+    },
+    "params": {
+      "description": "By parameter: the entry's parameters that have a caption, in the\norder the entry takes them.",
+      "items": {
+        "$ref": "#/$defs/ParamCaption"
       },
       "type": "array"
     }
@@ -202,7 +301,9 @@
     "document",
     "nodes",
     "arms",
-    "callables"
+    "callables",
+    "params",
+    "fields"
   ],
   "title": "CaptionView",
   "type": "object",

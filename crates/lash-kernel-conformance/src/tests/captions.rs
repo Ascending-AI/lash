@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Environment, Mode, NamedLibrary, Package, SourceFormat};
 use lash_kernel_doc::{
-    ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal, Captions,
-    CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node, Param, Signature, Site, Stmt,
-    Type, Unit, parse_document,
+    ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal,
+    CaptionTarget, Captions, CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node,
+    Param, Signature, Site, Stmt, Type, Unit, parse_document,
 };
 use lash_kernel_edit::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use lash_kernel_edit::{Draft, Position, Transaction};
@@ -34,6 +34,10 @@ pub(super) fn verify(rule: &str) {
         "K-CAP-002" => each_dialect(|dialect| dialect.readback()),
         "K-CAP-003" => each_dialect(|dialect| dialect.authored()),
         "K-CAP-006" => each_dialect(|dialect| dialect.dropped()),
+        "K-CAP-007" => {
+            signature_targets();
+            each_dialect(signature_view);
+        }
         _ => unreachable!("{rule} is not a caption rule"),
     }
 }
@@ -253,10 +257,7 @@ fn text_domain() {
         "kernel 1\nnumbers float\nfn helper() { return null }\nmain { let flag = true if flag { print 1 } else { print 2 } }\n",
     )
     .expect("document");
-    let entry = |site: Site| CaptionEntry {
-        site,
-        caption: caption("Send"),
-    };
+    let entry = |site: Site| CaptionEntry::site(site, caption("Send"));
     let other = parse_document("kernel 1\nnumbers float\nmain { }\n").expect("document");
     let refusals = [
         (
@@ -296,7 +297,7 @@ fn text_domain() {
         (
             vec![entry(main_site(&[0])), entry(main_site(&[0]))],
             CaptionsRefusal::Duplicate {
-                site: main_site(&[0]),
+                target: CaptionTarget::Site(main_site(&[0])),
             },
         ),
     ];
@@ -314,8 +315,8 @@ fn text_domain() {
     )
     .expect("statements, an else arm and a function root");
     assert_eq!(valid.validate(&other), Err(CaptionsRefusal::Document));
-    assert_eq!(valid.get(&main_site(&[1, 2])), Some(&caption("Send")));
-    assert_eq!(valid.get(&main_site(&[1])), None);
+    assert_eq!(valid.at(&main_site(&[1, 2])), Some(&caption("Send")));
+    assert_eq!(valid.at(&main_site(&[1])), None);
     // Decoding checks the order; validation then checks the document.
     let mut json = serde_json::to_value(&valid).expect("encodes");
     assert_eq!(
@@ -327,6 +328,286 @@ fn text_domain() {
     let first = json["entries"][1].clone();
     json["entries"][0] = first;
     assert!(serde_json::from_value::<Captions>(json).is_err());
+}
+
+/// `K-CAP-007`: a caption names an entry's parameter by its name in the
+/// signature, and a field by a path of record field names through its
+/// parameter's or result's type, walking a list to its element and an
+/// optional value to the value. Validation refuses a parameter the function
+/// lacks and a path the types do not resolve. Rekeying keeps a parameter's
+/// and a field's caption while its name resolves, never touching it, and
+/// drops it once the parameter is gone.
+fn signature_targets() {
+    use lash_kernel_doc::{FieldPath, FieldRoot, FieldTarget, ParamTarget};
+    let document = parse_document(concat!(
+        "kernel 1\nnumbers float\n",
+        "entry flow(event: Record{answer: Record{choice: Text}}, ",
+        "items: List(Union(Record{name: Text, tags: Map(Text, Record{x: Int})}, Null)), n: Int) ",
+        "-> Record{seen: Int}\n",
+        "fn flow(event, items, n) { return null }\n",
+        "fn helper(x) { return x }\n",
+        "main { }\n",
+    ))
+    .expect("document");
+    let param = |function: &str, param: &str| {
+        CaptionTarget::Param(ParamTarget {
+            function: Name::new(function),
+            param: Name::new(param),
+        })
+    };
+    let field = |function: &str, root: Option<&str>, fields: &[&str]| {
+        CaptionTarget::Field(FieldTarget {
+            function: Name::new(function),
+            path: FieldPath {
+                root: root.map_or(FieldRoot::Result, |root| FieldRoot::Param(Name::new(root))),
+                fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+            },
+        })
+    };
+    let entry = |target: CaptionTarget| CaptionEntry {
+        target,
+        caption: caption("Named"),
+    };
+    let refused = |target: CaptionTarget| match &target {
+        CaptionTarget::Param(param) => CaptionsRefusal::Param {
+            target: param.clone(),
+        },
+        CaptionTarget::Field(field) => CaptionsRefusal::Field {
+            target: field.clone(),
+        },
+        CaptionTarget::Site(_) => unreachable!("a parameter or a field"),
+    };
+    let unresolved = [
+        param("flow", "missing"),
+        param("absent", "x"),
+        field("flow", Some("event"), &["answer", "missing"]),
+        // A text has no fields; a map, a record's rest and a bare name are
+        // not walked.
+        field("flow", Some("event"), &["answer", "choice", "length"]),
+        field("flow", Some("items"), &["tags", "x"]),
+        field("flow", Some("event"), &[]),
+        field("flow", Some("missing"), &["answer"]),
+        // A function that is no entry states no types.
+        field("helper", Some("x"), &["y"]),
+    ];
+    for target in unresolved {
+        assert_eq!(
+            Captions::new(&document, vec![entry(target.clone())]),
+            Err(refused(target.clone())),
+            "{target}"
+        );
+    }
+    let named = [
+        param("flow", "n"),
+        param("helper", "x"),
+        field("flow", Some("event"), &["answer"]),
+        field("flow", Some("event"), &["answer", "choice"]),
+        // Through the list and the optional record.
+        field("flow", Some("items"), &["name"]),
+        field("flow", None, &["seen"]),
+    ];
+    let captions = Captions::new(&document, named.iter().cloned().map(entry).collect())
+        .expect("every parameter and resolved path");
+    let listed: BTreeSet<CaptionTarget> = CaptionKind::captionable(&document)
+        .into_iter()
+        .filter(|(_, kind)| matches!(kind, CaptionKind::Param | CaptionKind::Field))
+        .map(|(target, _)| target)
+        .collect();
+    assert!(named.iter().all(|target| listed.contains(target)));
+    assert_eq!(
+        captions.get(&field("flow", None, &["seen"])),
+        Some(&caption("Named"))
+    );
+    // The JSON form names each target by its own key.
+    let json = serde_json::to_value(&captions).expect("encodes");
+    assert_eq!(
+        json["entries"][0]["param"],
+        serde_json::json!({"function": "flow", "param": "n"})
+    );
+    assert_eq!(
+        serde_json::from_value::<Captions>(json.clone()).expect("decodes"),
+        captions
+    );
+    let mut two = json.clone();
+    two["entries"][0]["site"] = serde_json::json!({"unit": "main"});
+    assert!(serde_json::from_value::<Captions>(two).is_err());
+
+    // Inserting a statement moves no parameter or field: their captions
+    // stay, and none is touched.
+    let base = document.identity();
+    let send = EffectName::new("send").expect("a tool's name");
+    let registry = lash_kernel_doc::FunctionRegistry::new();
+    let mut environment = lash_kernel_check::Environment::new(&registry);
+    environment.effects.insert(
+        send.clone(),
+        Signature {
+            params: vec![Param {
+                name: Name::new("value"),
+                ty: Type::Any,
+                optional: false,
+            }],
+            result: Type::Any,
+        },
+    );
+    let mut draft = Draft::open(document.clone()).expect("a draft");
+    let insert = Operation::InsertStep {
+        base,
+        at: Position::before(Site::new(Unit::Function(Name::new("flow")), [0]))
+            .expect("a statement of the body"),
+        effect: send,
+        args: vec![DataValue::Literal(Literal::Text("new".into()))],
+        result: Type::Any,
+        binding: None,
+    };
+    let applied = draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![insert],
+            },
+            &environment,
+        )
+        .expect("a step inserted in the body");
+    let rekeyed = captions
+        .rekey(&applied.correspondence, draft.document())
+        .expect("the edit starts at the captions");
+    assert_eq!(rekeyed.captions.entries(), captions.entries());
+    assert!(rekeyed.touched.is_empty());
+
+    // A parameter removed takes its caption and its fields' with it; the
+    // others keep theirs.
+    let removed = parse_document(concat!(
+        "kernel 1\nnumbers float\n",
+        "entry flow(items: List(Union(Record{name: Text, tags: Map(Text, Record{x: Int})}, Null)), n: Int) ",
+        "-> Record{seen: Int}\n",
+        "fn flow(items, n) { return null }\n",
+        "fn helper(x) { return x }\n",
+        "main { }\n",
+    ))
+    .expect("document");
+    let roots = ["flow", "helper"]
+        .map(|function| Site::new(Unit::Function(Name::new(function)), Vec::new()));
+    let correspondence = lash_kernel_doc::Correspondence::of(
+        base,
+        removed.identity(),
+        roots
+            .iter()
+            .map(|root| lash_kernel_doc::Survivor::new(root.clone(), root.clone(), false))
+            .collect(),
+    )
+    .expect("a correspondence");
+    let rekeyed = captions
+        .rekey(&correspondence, &removed)
+        .expect("the correspondence starts at the captions");
+    let kept: Vec<CaptionTarget> = rekeyed
+        .captions
+        .entries()
+        .iter()
+        .map(|entry| entry.target.clone())
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            param("flow", "n"),
+            param("helper", "x"),
+            field("flow", Some("items"), &["name"]),
+            field("flow", None, &["seen"]),
+        ]
+    );
+    assert!(rekeyed.touched.is_empty());
+}
+
+/// `K-CAP-007`, for the captions a dialect imports: each authored entry's
+/// view shows its parameters' captions by their position in its signature
+/// and its fields' by path, and some case of a dialect that spells them
+/// captions both.
+fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessError> {
+    let fail =
+        |case: &str, message: String| crate::HarnessError(format!("K-CAP-007 {case}: {message}"));
+    let (mut params, mut fields) = (0, 0);
+    for case in &dialect.corpus.authored {
+        let lowered = dialect
+            .package
+            .front_end
+            .lower(&case.source, &dialect.environment, Mode::Module)
+            .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
+        let document = lowered.document.document();
+        for (name, entry) in &document.entries {
+            let holder = lash_kernel_check::WorkflowDocument::derive(
+                document.clone(),
+                lash_kernel_doc::WorkflowDocumentEntry::Entry {
+                    function: name.clone(),
+                },
+                dialect.environment.library,
+            )
+            .map_err(|error| fail(&case.name, error.to_string()))?;
+            let view = lash_kernel_view::derive(&holder)
+                .map_err(|error| fail(&case.name, error.to_string()))?;
+            let joined = view
+                .captions(&holder, &lowered.captions)
+                .map_err(|error| fail(&case.name, error.to_string()))?;
+            let expected_params: Vec<(usize, Name, Caption)> = entry
+                .signature
+                .params
+                .iter()
+                .enumerate()
+                .filter_map(|(index, param)| {
+                    let target = CaptionTarget::Param(lash_kernel_doc::ParamTarget {
+                        function: name.clone(),
+                        param: param.name.clone(),
+                    });
+                    Some((
+                        index,
+                        param.name.clone(),
+                        lowered.captions.get(&target)?.clone(),
+                    ))
+                })
+                .collect();
+            let shown_params: Vec<(usize, Name, Caption)> = joined
+                .params
+                .iter()
+                .map(|param| (param.index, param.name.clone(), param.caption.clone()))
+                .collect();
+            if shown_params != expected_params {
+                return Err(fail(
+                    &case.name,
+                    format!("view params {shown_params:?}, expected {expected_params:?}"),
+                ));
+            }
+            let expected_fields: Vec<_> = lowered
+                .captions
+                .entries()
+                .iter()
+                .filter_map(|caption| match &caption.target {
+                    CaptionTarget::Field(field) if field.function == *name => {
+                        Some((field.path.clone(), caption.caption.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let shown_fields: Vec<_> = joined
+                .fields
+                .iter()
+                .map(|field| (field.path.clone(), field.caption.clone()))
+                .collect();
+            if shown_fields != expected_fields {
+                return Err(fail(
+                    &case.name,
+                    format!("view fields {shown_fields:?}, expected {expected_fields:?}"),
+                ));
+            }
+            params += shown_params.len();
+            fields += shown_fields.len();
+        }
+    }
+    let spells = |kind| dialect.package.captions.supports(kind);
+    if (spells(CaptionKind::Param) && params == 0) || (spells(CaptionKind::Field) && fields == 0) {
+        return Err(fail(
+            "corpus",
+            "no authored case captions a parameter and a field".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Texts at the boundaries the rule admits.
@@ -353,7 +634,8 @@ fn admitted() -> Vec<(String, Option<String>)> {
 fn rekey() {
     let mut document = parse_document(concat!(
         "kernel 1\nnumbers float\neffect send(value: Any) -> Any\n",
-        "fn helper() { return null }\n",
+        "entry helper(item: Record{title: Text}) -> Any\n",
+        "fn helper(item) { return null }\n",
         "main {\n",
         " do perform send(\"a\") as Any\n",
         " let flag = true\n",
@@ -391,8 +673,8 @@ fn rekey() {
         captionable
             .iter()
             .enumerate()
-            .map(|(index, (site, _))| CaptionEntry {
-                site: site.clone(),
+            .map(|(index, (target, _))| CaptionEntry {
+                target: target.clone(),
                 caption: caption(&format!("Step {index}")),
             })
             .collect(),
@@ -495,15 +777,15 @@ fn rekey() {
                 .entries()
                 .iter()
                 .filter_map(|entry| {
-                    let site = correspondence.successor(&entry.site)?;
-                    CaptionKind::of(result, site)?;
+                    let target = successor(correspondence, &entry.target)?;
+                    target.kind(result)?;
                     Some(CaptionEntry {
-                        site: site.clone(),
+                        target,
                         caption: entry.caption.clone(),
                     })
                 })
                 .collect();
-            kept.sort_by(|a, b| a.site.cmp(&b.site));
+            kept.sort_by(|a, b| a.target.cmp(&b.target));
             kept
         };
         assert_eq!(rekeyed.captions.entries(), expected.as_slice(), "{name}");
@@ -516,23 +798,23 @@ fn rekey() {
             "remove a step" => assert!(
                 expected
                     .iter()
-                    .all(|entry| Some(&entry.caption) != captions.get(&main_site(&[0])))
+                    .all(|entry| Some(&entry.caption) != captions.at(&main_site(&[0])))
             ),
             // A moved or wrapped step keeps its caption where it went.
             "move a step" => assert_eq!(
-                rekeyed.captions.get(&main_site(&[3, 1, 1])),
-                captions.get(&main_site(&[0]))
+                rekeyed.captions.at(&main_site(&[3, 1, 1])),
+                captions.at(&main_site(&[0]))
             ),
             "wrap a step" => assert_eq!(
-                rekeyed.captions.get(&main_site(&[0, 1, 0])),
-                captions.get(&main_site(&[0]))
+                rekeyed.captions.at(&main_site(&[0, 1, 0])),
+                captions.at(&main_site(&[0]))
             ),
             // The unwrapped statement's caption moves out; its wrapper's and
             // the wrapper's empty else arm's go.
             "unwrap a step" => {
                 assert_eq!(
-                    rekeyed.captions.get(&main_site(&[5])),
-                    captions.get(&main_site(&[5, 1, 0]))
+                    rekeyed.captions.at(&main_site(&[5])),
+                    captions.at(&main_site(&[5, 1, 0]))
                 );
                 assert_eq!(
                     rekeyed.captions.entries().len(),
@@ -613,15 +895,12 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             .entries()
             .iter()
             .map(|entry| CaptionEntry {
-                site: applied
-                    .correspondence
-                    .successor(&entry.site)
-                    .expect("an insertion removes nothing")
-                    .clone(),
+                target: successor(&applied.correspondence, &entry.target)
+                    .expect("an insertion removes nothing"),
                 caption: entry.caption.clone(),
             })
             .collect();
-        expected.sort_by(|a, b| a.site.cmp(&b.site));
+        expected.sort_by(|a, b| a.target.cmp(&b.target));
         // Every caption in the body moved one statement on.
         assert_ne!(
             expected.as_slice(),
@@ -637,7 +916,7 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         );
         let touched: Vec<Site> = lowered
             .captions
-            .get(&root)
+            .at(&root)
             .map(|_| root)
             .into_iter()
             .collect();
@@ -732,7 +1011,7 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                 .captions
                 .entries()
                 .iter()
-                .map(|entry| entry.site.clone())
+                .filter_map(|entry| entry.target.site().cloned())
                 .filter(|site| site.unit == written.unit && written.path.starts_with(&site.path))
                 .collect();
             if rekeyed.touched != above {
@@ -748,6 +1027,48 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
         return Err(fail("corpus", "no authored case takes an edit".into()));
     }
     Ok(())
+}
+
+/// Where `target` goes through `correspondence`: a site to its node's
+/// successor, a parameter or a field to the same name of its function's
+/// body's successor.
+fn successor(
+    correspondence: &lash_kernel_doc::Correspondence,
+    target: &CaptionTarget,
+) -> Option<CaptionTarget> {
+    Some(match target {
+        CaptionTarget::Site(site) => CaptionTarget::Site(correspondence.successor(site)?.clone()),
+        CaptionTarget::Param(param) => {
+            let Unit::Function(function) = &correspondence
+                .successor(&Site::new(
+                    Unit::Function(param.function.clone()),
+                    Vec::new(),
+                ))?
+                .unit
+            else {
+                return None;
+            };
+            CaptionTarget::Param(lash_kernel_doc::ParamTarget {
+                function: function.clone(),
+                param: param.param.clone(),
+            })
+        }
+        CaptionTarget::Field(field) => {
+            let Unit::Function(function) = &correspondence
+                .successor(&Site::new(
+                    Unit::Function(field.function.clone()),
+                    Vec::new(),
+                ))?
+                .unit
+            else {
+                return None;
+            };
+            CaptionTarget::Field(lash_kernel_doc::FieldTarget {
+                function: function.clone(),
+                path: field.path.clone(),
+            })
+        }
+    })
 }
 
 /// The Site of the first node of `document` that `wanted` picks, in a walk

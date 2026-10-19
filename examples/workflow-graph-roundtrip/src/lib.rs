@@ -210,12 +210,12 @@ impl SavedWorkflow {
                 Some(refusal.to_string()),
             ),
         };
-        let (caption_view, captions_unavailable) = match &view {
-            Some(view) => match view.captions(&self.captions) {
+        let (caption_view, captions_unavailable) = match (&view, &derived) {
+            (Some(view), Ok(derived)) => match view.captions(derived, &self.captions) {
                 Ok(joined) => (Some(joined), None),
                 Err(refusal) => (None, Some(refusal.to_string())),
             },
-            None => (None, None),
+            _ => (None, None),
         };
         WorkflowView {
             version: self.version,
@@ -276,7 +276,7 @@ impl SavedWorkflow {
             .review
             .iter()
             .filter_map(|site| correspondence.successor(site))
-            .filter(|site| rekeyed.captions.get(site).is_some())
+            .filter(|site| rekeyed.captions.at(site).is_some())
             .cloned()
             .chain(rekeyed.touched)
             .collect();

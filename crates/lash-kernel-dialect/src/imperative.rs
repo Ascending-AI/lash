@@ -1,7 +1,7 @@
 //! Bounded final-text writing and optional Site collection for generated codecs.
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Caption, Captions, Document, Node, Site, Unit};
+use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, Node, Site, Unit};
 use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
 
 /// Generated source is a separate, disposable format from stored documents.
@@ -55,10 +55,11 @@ pub struct PrintedSource {
     pub format: SourceFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_map: Option<SourceMap>,
-    /// The captions the dialect could not spell, ascending: every one of a
-    /// kind its [`crate::CaptionSupport`] lacks (`K-CAP-006`).
+    /// The captions the dialect could not spell, ascending by target: every
+    /// one of a kind its [`crate::CaptionSupport`] lacks, and any its syntax
+    /// has no place for (`K-CAP-006`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dropped: Vec<Site>,
+    pub dropped: Vec<CaptionTarget>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PrintError {
@@ -303,8 +304,8 @@ pub struct SourceWriter {
     error: Option<PrintError>,
     frames: Option<Vec<Frame>>,
     sites: Option<Vec<SourceSite>>,
-    /// The captions not yet spelled, by site.
-    captions: BTreeMap<Site, Caption>,
+    /// The captions not yet spelled, by target.
+    captions: BTreeMap<CaptionTarget, Caption>,
     #[cfg(test)]
     map_work: usize,
 }
@@ -338,7 +339,7 @@ impl SourceWriter {
             writer.captions = captions
                 .entries()
                 .iter()
-                .map(|entry| (entry.site.clone(), entry.caption.clone()))
+                .map(|entry| (entry.target.clone(), entry.caption.clone()))
                 .collect();
             writer.frames.get_or_insert_with(Vec::new);
         }
@@ -355,10 +356,15 @@ impl SourceWriter {
         let parent = self.frames.as_ref()?.last()?;
         Some(parent.site.child(index.unwrap_or(parent.child)))
     }
-    /// The caption of `site`, taken to be spelled: a caption never taken is
-    /// reported dropped.
-    pub fn take_caption(&mut self, site: &Site) -> Option<Caption> {
-        self.captions.remove(site)
+    /// The caption of `target`, taken to be spelled: a caption never taken
+    /// is reported dropped.
+    pub fn take_caption(&mut self, target: impl Into<CaptionTarget>) -> Option<Caption> {
+        self.captions.remove(&target.into())
+    }
+    /// Whether a caption not yet spelled names a target `wanted` picks, as
+    /// a codec asks before it lays out what would spell it.
+    pub fn holds_caption(&self, wanted: impl Fn(&CaptionTarget) -> bool) -> bool {
+        self.captions.keys().any(wanted)
     }
     pub fn write(&mut self, text: &str) {
         if self.error.is_some() {
@@ -538,9 +544,11 @@ mod tests {
             "kernel 1\nnumbers float\nmain { if true { print 1 } else { print 2 } return null }\n",
         )
         .unwrap();
-        let entry = |path: &[u32], title: &str| CaptionEntry {
-            site: Site::new(Unit::Main, path.to_vec()),
-            caption: Caption::new(title, None).unwrap(),
+        let entry = |path: &[u32], title: &str| {
+            CaptionEntry::site(
+                Site::new(Unit::Main, path.to_vec()),
+                Caption::new(title, None).unwrap(),
+            )
         };
         let captions = Captions::new(
             &document,
@@ -563,7 +571,7 @@ mod tests {
             let mut spelled = Vec::new();
             for _ in 0..2 {
                 let site = writer.next_site(None).expect("tracked");
-                if let Some(caption) = writer.take_caption(&site) {
+                if let Some(caption) = writer.take_caption(site) {
                     spelled.push(caption.title().to_owned());
                 }
                 writer.begin_node(None);
@@ -575,7 +583,10 @@ mod tests {
                 .finish(&document, SourceFormat::TypeScriptV1)
                 .unwrap();
             assert_eq!(spelled, ["Decide", "Done"]);
-            assert_eq!(printed.dropped, [Site::new(Unit::Main, vec![0, 2])]);
+            assert_eq!(
+                printed.dropped,
+                [CaptionTarget::Site(Site::new(Unit::Main, vec![0, 2]))]
+            );
             assert_eq!(printed.source_map.is_some(), source_map);
         }
         let tight = PrintOptions {

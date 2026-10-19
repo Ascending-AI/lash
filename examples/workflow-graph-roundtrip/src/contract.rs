@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{CaptionEntry, Captions, Document, Name, Site, SourceMap};
+use lash::workflow::document::{
+    CaptionEntry, CaptionTarget, Captions, Document, Name, Site, SourceMap,
+};
 use lash::workflow::view::{CaptionView, PathStep, WorkflowCoverage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,7 +75,7 @@ pub struct WorkflowView {
     pub captions_to_review: Vec<Site>,
     /// Captions `source` could not spell; a printed read would lose them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub captions_dropped: Vec<Site>,
+    pub captions_dropped: Vec<CaptionTarget>,
 }
 
 /// Authored source, the dialect it is written in, and the version

@@ -3,7 +3,9 @@
 //!
 //! A caption is a JSDoc block, `/** … */`, with only whitespace and no blank
 //! line between its end and what it names: a statement, a function
-//! declaration, or the `else`, `catch` or `finally` keyword of a clause arm.
+//! declaration, the `else`, `catch` or `finally` keyword of a clause arm, a
+//! parameter, or a property of an object type literal an entry's parameter or
+//! result is annotated with.
 //! Its first line is the title; the lines after it, each without its ` * `
 //! prefix, are the description. The block's tag section, from its first line
 //! that starts with `@`, is not caption text, so a JSDoc of tags alone is no
@@ -13,8 +15,12 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use lash_kernel_doc::{Caption, CaptionKind};
+use lash_kernel_doc::{
+    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget, Name,
+    ParamTarget,
+};
 use swc_common::comments::{CommentKind, SingleThreadedComments};
+use swc_ecma_ast as swc;
 
 /// The caption syntax the dialect spells, for a host's model prompts.
 pub(crate) const GUIDE: &str = "\
@@ -30,12 +36,87 @@ are an optional description of at most 2 KiB:
    */
 A caption before a statement names that step; before a top-level function it names the function, \
 and the entry function's caption is the workflow's title. Write one before `else`, `catch` or \
-`finally` to caption that clause; one before `else if` names the inner `if`. Lines starting with \
-`@` (JSDoc tags) are not caption text, `//` and `/* */` comments are ordinary comments, and a \
-caption never contains `*/`.";
+`finally` to caption that clause; one before `else if` names the inner `if`.
+Caption what a workflow takes and gives back the same way: before a parameter of the entry \
+function, and before a property of an object type written inline in a parameter's or the \
+result's annotation, also inside an array or an optional (`| null`, `| undefined`) type:
+  export async function triage(
+    /** The card that was answered */
+    event: {
+      /** What the reviewer picked */
+      choice: string;
+      notes?: string;
+    },
+  ): Promise<{
+    /** Whether the card was escalated */
+    escalated: boolean;
+  }> {
+A property of a named `type` or `interface` is not captioned: write the object type inline. \
+Lines starting with `@` (JSDoc tags such as `@param`) are not caption text, `//` and `/* */` \
+comments are ordinary comments, and a caption never contains `*/`.";
 
 /// Every kind a TypeScript source spells.
 pub(crate) const KINDS: &[CaptionKind] = &CaptionKind::ALL;
+
+/// The fields of a written type that captions name, by path.
+pub(crate) type FieldCaptions = Vec<(Vec<String>, Caption)>;
+
+/// What a function's written signature captions: each parameter and the
+/// properties of its annotation, and the properties of its result's.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SignatureCaptions {
+    pub(crate) params: Vec<ParamCaptions>,
+    pub(crate) result: FieldCaptions,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ParamCaptions {
+    pub(crate) caption: Option<Caption>,
+    pub(crate) fields: FieldCaptions,
+}
+
+impl SignatureCaptions {
+    /// The captions of declared function `function`, whose parameters
+    /// these are, in order, under `names`. Of two on one target the first
+    /// written wins.
+    pub(crate) fn entries(&self, function: &Name, names: &[Name]) -> Vec<CaptionEntry> {
+        let field = |root: FieldRoot, fields: &Vec<String>, caption: &Caption| CaptionEntry {
+            target: CaptionTarget::Field(FieldTarget {
+                function: function.clone(),
+                path: FieldPath {
+                    root,
+                    fields: fields.clone(),
+                },
+            }),
+            caption: caption.clone(),
+        };
+        let mut entries = Vec::new();
+        for (param, name) in self.params.iter().zip(names) {
+            if let Some(caption) = &param.caption {
+                entries.push(CaptionEntry {
+                    target: CaptionTarget::Param(ParamTarget {
+                        function: function.clone(),
+                        param: name.clone(),
+                    }),
+                    caption: caption.clone(),
+                });
+            }
+            entries.extend(
+                param.fields.iter().map(|(fields, caption)| {
+                    field(FieldRoot::Param(name.clone()), fields, caption)
+                }),
+            );
+        }
+        entries.extend(
+            self.result
+                .iter()
+                .map(|(fields, caption)| field(FieldRoot::Result, fields, caption)),
+        );
+        entries.sort_by(|a, b| a.target.cmp(&b.target));
+        entries.dedup_by(|later, first| later.target == first.target);
+        entries
+    }
+}
 
 /// The comments of one source: where each is, and the caption each JSDoc
 /// spells, by the offset of the token it stands immediately before.
@@ -88,12 +169,112 @@ impl SourceComments {
         self.captions.get(&offset).map(|(_, caption)| caption)
     }
 
+    /// The captions `params`, a function's parameters, and its `result`
+    /// annotation spell.
+    pub(crate) fn signature<'p>(
+        &self,
+        params: impl IntoIterator<Item = &'p swc::Param>,
+        result: Option<&swc::TsType>,
+    ) -> SignatureCaptions {
+        let params = params
+            .into_iter()
+            .map(|param| {
+                let mut fields = Vec::new();
+                if let swc::Pat::Ident(binding) = &param.pat
+                    && let Some(annotation) = &binding.type_ann
+                {
+                    self.fields(&annotation.type_ann, &mut Vec::new(), &mut fields);
+                }
+                ParamCaptions {
+                    caption: self.before(param.span.lo.0 as usize).cloned(),
+                    fields,
+                }
+            })
+            .collect();
+        let mut fields = Vec::new();
+        if let Some(result) = result {
+            self.fields(settled(result), &mut Vec::new(), &mut fields);
+        }
+        SignatureCaptions {
+            params,
+            result: fields,
+        }
+    }
+
+    /// The captions before the properties of the object type literals `ty`
+    /// holds, below `path`: through arrays and unions, as a field path
+    /// walks a list and an optional value.
+    fn fields(&self, ty: &swc::TsType, path: &mut Vec<String>, out: &mut FieldCaptions) {
+        match ty {
+            swc::TsType::TsParenthesizedType(inner) => self.fields(&inner.type_ann, path, out),
+            swc::TsType::TsArrayType(array) => self.fields(&array.elem_type, path, out),
+            swc::TsType::TsTypeRef(reference) => {
+                if let swc::TsEntityName::Ident(name) = &reference.type_name
+                    && matches!(name.sym.as_ref(), "Array" | "ReadonlyArray")
+                    && let Some(params) = &reference.type_params
+                    && let [element] = params.params.as_slice()
+                {
+                    self.fields(element, path, out);
+                }
+            }
+            swc::TsType::TsUnionOrIntersectionType(
+                swc::TsUnionOrIntersectionType::TsUnionType(union),
+            ) => {
+                for member in &union.types {
+                    self.fields(member, path, out);
+                }
+            }
+            swc::TsType::TsTypeLit(literal) => {
+                for member in &literal.members {
+                    let swc::TsTypeElement::TsPropertySignature(property) = member else {
+                        continue;
+                    };
+                    let name = match property.key.as_ref() {
+                        swc::Expr::Ident(name) => name.sym.to_string(),
+                        swc::Expr::Lit(swc::Lit::Str(name)) => {
+                            name.value.to_string_lossy().into_owned()
+                        }
+                        _ => continue,
+                    };
+                    path.push(name);
+                    if let Some(caption) = self.before(property.span.lo.0 as usize) {
+                        out.push((path.clone(), caption.clone()));
+                    }
+                    if let Some(annotation) = &property.type_ann {
+                        self.fields(&annotation.type_ann, path, out);
+                    }
+                    path.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The caption standing immediately before the first token after
     /// `offset`, where code ends: that of the keyword that follows it, when
     /// only whitespace and comments lie between.
     pub(crate) fn before_next(&self, offset: usize) -> Option<&Caption> {
         let (_, (trivia, caption)) = self.captions.range(offset..).next()?;
         (*trivia <= offset).then_some(caption)
+    }
+}
+
+/// What an async function's result annotation settles to: `T` of
+/// `Promise<T>`.
+fn settled(ty: &swc::TsType) -> &swc::TsType {
+    match ty {
+        swc::TsType::TsParenthesizedType(inner) => settled(&inner.type_ann),
+        swc::TsType::TsTypeRef(reference) if matches!(&reference.type_name, swc::TsEntityName::Ident(name) if &*name.sym == "Promise") => {
+            match reference
+                .type_params
+                .as_deref()
+                .map(|params| params.params.as_slice())
+            {
+                Some([inner]) => settled(inner),
+                _ => ty,
+            }
+        }
+        _ => ty,
     }
 }
 

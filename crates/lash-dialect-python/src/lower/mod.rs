@@ -16,6 +16,7 @@ mod range;
 mod repairs;
 mod saved;
 mod statements;
+mod typed_dicts;
 
 use lash_kernel_doc::Span;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -201,8 +202,11 @@ pub(crate) struct Lowerer<'a> {
     /// The captions the module spells, by where what each captions starts;
     /// none for a cell.
     captions: BTreeMap<usize, lash_kernel_doc::Caption>,
-    /// The captions of the module's entries.
-    entry_captions: BTreeMap<Name, lash_kernel_doc::Caption>,
+    /// The captions of the module's entries, their parameters and their
+    /// types' fields.
+    declared_captions: Vec<lash_kernel_doc::CaptionEntry>,
+    /// The `TypedDict`s a workflow module declares, by name.
+    typed_dicts: typed_dicts::TypedDicts,
 }
 
 /// No module or restored session binding may mask the dialect's built-ins,
@@ -349,7 +353,8 @@ pub(crate) fn lower_with_calls(
         inline_closures: Vec::new(),
         captured: std::cell::RefCell::new(None),
         captions: spelled.captions,
-        entry_captions: BTreeMap::new(),
+        declared_captions: Vec::new(),
+        typed_dicts: typed_dicts::TypedDicts::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -418,7 +423,7 @@ pub(crate) fn lower_with_calls(
         lash_kernel_doc::SourceLanguage::Python,
         &main.notes,
         &lowerer.declared_notes,
-        &lowerer.entry_captions,
+        &lowerer.declared_captions,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     let mut mapped: BTreeSet<_> = source_map
@@ -859,6 +864,16 @@ impl Lowerer<'_> {
                 range,
                 format!(
                     "call `{id}` with its required arguments and await the call; use `asyncio.create_task` to run that call beside this code"
+                ),
+            );
+        }
+        if self.typed_dicts.contains_key(id) {
+            return diagnostics::with_repair(
+                Code::ClassUnsupported,
+                format!("the TypedDict `{id}` is a type, not a value in this dialect"),
+                range,
+                format!(
+                    "annotate an entry's parameter or result with `{id}`; build the value as a dict"
                 ),
             );
         }

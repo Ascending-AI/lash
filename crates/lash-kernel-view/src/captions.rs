@@ -2,7 +2,11 @@
 //! location. The view itself stays a pure function of the document: a
 //! caption-only change keeps its identity, so captions never enter it.
 
-use lash_kernel_doc::{Caption, Captions, DocumentId, Site};
+use lash_kernel_check::WorkflowDocument;
+use lash_kernel_doc::{
+    Caption, CaptionTarget, Captions, Document, DocumentId, FieldPath, Name, ParamTarget, Site,
+    Unit,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +28,29 @@ pub struct CaptionView {
     /// By callable: a declared function's caption, on its
     /// [`crate::CallableView`]. The entry's is the workflow's title.
     pub callables: Vec<CallableCaption>,
+    /// By parameter: the entry's parameters that have a caption, in the
+    /// order the entry takes them.
+    pub params: Vec<ParamCaption>,
+    /// By path: the captioned fields of the entry's parameter and result
+    /// types, ascending.
+    pub fields: Vec<FieldCaption>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ParamCaption {
+    /// The parameter's position among the entry's.
+    pub index: usize,
+    pub name: Name,
+    pub caption: Caption,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FieldCaption {
+    /// The field, from the entry's parameter or result.
+    pub path: FieldPath,
+    pub caption: Caption,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -64,22 +91,40 @@ pub enum CaptionViewRefusal {
         view: DocumentId,
         captions: DocumentId,
     },
+    /// The view was derived from another document than the one given,
+    /// whose signatures name the entry's parameters.
+    #[error("the view is of document {view}, the workflow document given is {given}")]
+    Workflow { view: DocumentId, given: DocumentId },
 }
 
 impl WorkflowView {
     /// `captions`, of this view's document, keyed by view location.
+    /// `document` is the one the view was derived from: its entry's
+    /// signature orders and names the parameters, which a view's dataflow
+    /// may hold under other names.
     ///
     /// # Errors
     ///
-    /// [`CaptionViewRefusal::Document`] for captions of another document.
-    pub fn captions(&self, captions: &Captions) -> Result<CaptionView, CaptionViewRefusal> {
+    /// [`CaptionViewRefusal::Document`] for captions of another document,
+    /// [`CaptionViewRefusal::Workflow`] for another workflow document.
+    pub fn captions(
+        &self,
+        document: &WorkflowDocument,
+        captions: &Captions,
+    ) -> Result<CaptionView, CaptionViewRefusal> {
+        if document.identity() != self.document {
+            return Err(CaptionViewRefusal::Workflow {
+                view: self.document,
+                given: document.identity(),
+            });
+        }
         if captions.document() != self.document {
             return Err(CaptionViewRefusal::Document {
                 view: self.document,
                 captions: captions.document(),
             });
         }
-        let caption = |site: &Site| captions.get(site).cloned();
+        let caption = |site: &Site| captions.at(site).cloned();
         let mut nodes = Vec::new();
         let mut arms = Vec::new();
         for (index, node) in self.nodes.iter().enumerate() {
@@ -100,15 +145,16 @@ impl WorkflowView {
                     let mut found: Vec<_> = captions
                         .entries()
                         .iter()
-                        .filter(|entry| {
-                            node.members.iter().any(|member| {
-                                entry.site == *member || self.is_arm_of(&entry.site, member)
-                            })
+                        .filter_map(|entry| Some((entry.target.site()?, &entry.caption)))
+                        .filter(|(site, _)| {
+                            node.members
+                                .iter()
+                                .any(|member| *site == member || self.is_arm_of(site, member))
                         })
-                        .map(|entry| NodeCaption {
+                        .map(|(site, caption)| NodeCaption {
                             node: index,
-                            site: entry.site.clone(),
-                            caption: entry.caption.clone(),
+                            site: site.clone(),
+                            caption: caption.clone(),
                         })
                         .collect();
                     found.sort_by(|a, b| a.site.cmp(&b.site));
@@ -138,12 +184,74 @@ impl WorkflowView {
                 })
             })
             .collect();
+        let (params, fields) = self.signature_captions(document.document(), captions);
         Ok(CaptionView {
             document: self.document,
             nodes,
             arms,
             callables,
+            params,
+            fields,
         })
+    }
+
+    /// The captions of the entry's parameters, by position, and of its
+    /// types' fields, by path.
+    fn signature_captions(
+        &self,
+        document: &Document,
+        captions: &Captions,
+    ) -> (Vec<ParamCaption>, Vec<FieldCaption>) {
+        let entry = self
+            .scopes
+            .iter()
+            .find(|scope| scope.kind == crate::ScopeKind::Entry)
+            .map(|scope| &scope.block.unit);
+        let Some(Unit::Function(function)) = entry else {
+            return (Vec::new(), Vec::new());
+        };
+        // An entry takes what its signature names; another declared
+        // function its own parameters.
+        let names: Vec<&Name> = match document.entries.get(function) {
+            Some(entry) => entry
+                .signature
+                .params
+                .iter()
+                .map(|param| &param.name)
+                .collect(),
+            None => document
+                .functions
+                .get(function)
+                .map(|declared| declared.params.iter().collect())
+                .unwrap_or_default(),
+        };
+        let params = names
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                let target = CaptionTarget::Param(ParamTarget {
+                    function: function.clone(),
+                    param: name.clone(),
+                });
+                Some(ParamCaption {
+                    index,
+                    name: name.clone(),
+                    caption: captions.get(&target)?.clone(),
+                })
+            })
+            .collect();
+        let fields = captions
+            .entries()
+            .iter()
+            .filter_map(|entry| match &entry.target {
+                CaptionTarget::Field(field) if field.function == *function => Some(FieldCaption {
+                    path: field.path.clone(),
+                    caption: entry.caption.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        (params, fields)
     }
 
     /// Whether `site` is a block of the statement at `statement`.

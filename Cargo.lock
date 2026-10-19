@@ -3252,6 +3252,7 @@ dependencies = [
  "lash-kernel-exec",
  "lash-kernel-lib",
  "lash-kernel-state",
+ "lash-kernel-view",
  "lash-kernel-vm",
  "serde",
  "serde_json",

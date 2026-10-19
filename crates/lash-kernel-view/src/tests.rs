@@ -888,11 +888,16 @@ main { finish null }
 /// K-CAP-003's view join: an action or control node shows its carrier
 /// statement's caption, a statement with several actions only on the node
 /// of its first, a code node every caption among its members and their
-/// arms, a control its arms', and a function's on its callable. Captions of
-/// another document are refused.
+/// arms, a control its arms', and a function's on its callable. K-CAP-007's:
+/// the entry's parameters show by their position in its signature, and its
+/// types' fields by path. Captions of another document, and a workflow
+/// document the view is not of, are refused.
 #[test]
-fn captions_join_the_view_by_node_arm_and_callable() {
-    use lash_kernel_doc::{Caption, CaptionEntry, Captions};
+fn captions_join_the_view_by_node_arm_callable_parameter_and_field() {
+    use lash_kernel_doc::{
+        Caption, CaptionEntry, CaptionTarget, Captions, FieldPath, FieldRoot, FieldTarget,
+        ParamTarget,
+    };
     let document = parse_document(
         r#"kernel 1
 numbers float
@@ -900,8 +905,8 @@ effect one() -> Any
 effect two() -> Any
 effect test() -> Bool
 effect send(x: Any) -> Any
-entry flow() -> Any
-fn flow() {
+entry flow(event: Record{answer: Record{choice: Text}}, n: Int) -> Record{seen: Int}
+fn flow(event, n) {
   let a = 1
   let b = 2
   if true { let c = 3 } else { let d = 4 }
@@ -913,10 +918,19 @@ main { finish null }
 "#,
     )
     .expect("workflow");
-    let view = view_of(&document, "flow");
-    let entry = |path: &[u32], title: &str| CaptionEntry {
-        site: site("flow", path),
-        caption: Caption::new(title, None).expect("caption"),
+    let holder = checked(&document, "flow", &FunctionRegistry::default());
+    let view = derive(&holder).expect("view");
+    let caption = |title: &str| Caption::new(title, None).expect("caption");
+    let entry = |path: &[u32], title: &str| CaptionEntry::site(site("flow", path), caption(title));
+    let field = |root: FieldRoot, fields: &[&str], title: &str| CaptionEntry {
+        target: CaptionTarget::Field(FieldTarget {
+            function: Name::new("flow"),
+            path: FieldPath {
+                root,
+                fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+            },
+        }),
+        caption: caption(title),
     };
     let captions = Captions::new(
         &document,
@@ -927,10 +941,23 @@ main { finish null }
             entry(&[4], "Decide"),
             entry(&[4, 2], "Otherwise"),
             entry(&[], "Workflow"),
+            CaptionEntry {
+                target: CaptionTarget::Param(ParamTarget {
+                    function: Name::new("flow"),
+                    param: Name::new("n"),
+                }),
+                caption: caption("How many"),
+            },
+            field(FieldRoot::Result, &["seen"], "Seen"),
+            field(
+                FieldRoot::Param(Name::new("event")),
+                &["answer", "choice"],
+                "The choice",
+            ),
         ],
     )
     .expect("captions");
-    let joined = view.captions(&captions).expect("one document");
+    let joined = view.captions(&holder, &captions).expect("one document");
     let node = |kind: crate::WorkflowNodeKind, statement: &[u32]| {
         view.nodes
             .iter()
@@ -983,9 +1010,36 @@ main { finish null }
         })
         .collect();
     assert_eq!(titled, [(site("flow", &[]), "Workflow")]);
+    let params: Vec<_> = joined
+        .params
+        .iter()
+        .map(|param| (param.index, param.name.as_str(), param.caption.title()))
+        .collect();
+    assert_eq!(params, [(1, "n", "How many")]);
+    let fields: Vec<_> = joined
+        .fields
+        .iter()
+        .map(|field| (field.path.to_string(), field.caption.title()))
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            ("event.answer.choice".to_owned(), "The choice"),
+            ("return.seen".to_owned(), "Seen"),
+        ]
+    );
     let other = parse_document("kernel 1\nnumbers float\nmain { finish null }\n").expect("other");
     assert!(matches!(
-        view.captions(&Captions::empty(other.identity())),
+        view.captions(&holder, &Captions::empty(other.identity())),
         Err(crate::CaptionViewRefusal::Document { .. })
+    ));
+    let another = parse_document(
+        "kernel 1\nnumbers float\nentry flow() -> Any\nfn flow() { return null }\nmain { finish null }\n",
+    )
+    .expect("another");
+    let other_holder = checked(&another, "flow", &FunctionRegistry::default());
+    assert!(matches!(
+        view.captions(&other_holder, &captions),
+        Err(crate::CaptionViewRefusal::Workflow { .. })
     ));
 }

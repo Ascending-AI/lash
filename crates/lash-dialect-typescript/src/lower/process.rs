@@ -92,6 +92,13 @@ impl Lowerer<'_> {
         let entry = Name::new(name);
         let span = self.span;
         let signature = self.start_signature(function)?;
+        let names: Vec<Name> = signature
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        self.declared_captions
+            .extend(function.captions.entries(&entry, &names));
         let (params, body, packed) = self.lift(function)?;
         let function = lash_kernel_doc::Function {
             params,

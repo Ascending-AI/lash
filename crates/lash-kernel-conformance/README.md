@@ -139,13 +139,14 @@ in each fixture; sizes and magnitudes are never inferred from the machine.
 The owner-completion law also rejects any of these 26 rules reappearing in
 `pending.json`.
 
-`captions` is the caption harness (`K-CAP-001`..`K-CAP-006`), the same for
+`captions` is the caption harness (`K-CAP-001`..`K-CAP-007`), the same for
 every dialect: `CaptionDialect` takes a dialect `Package`, what its modules
 lower against and its corpus (`captions/<dialect>.json`), and each K-CAP
 shard's law runs it for TypeScript and Python. Readback cases are printed
-with a caption on every captionable site and read back; authored cases pair
-a source with its stripped twin and the exact `(site, caption)` table it
-imports with. A dialect that spells captions declares the kinds in its
+with a caption on every captionable target (every site, every declared
+function's parameter and every field path of an entry's signature) and read
+back; authored cases pair a source with its stripped twin and the exact
+`(target, caption)` table it imports with. A dialect that spells captions declares the kinds in its
 `CaptionSupport` and adds authored cases; the laws stay as they are.
 Rekeying (`K-CAP-004`) runs over kernel documents with one edit of each
 operation, and over each dialect's authored cases twice. A step inserted
@@ -153,3 +154,6 @@ ahead of the entry's body keeps every caption at its step's new site. A
 canvas edit of a tool's argument, or of an action-free condition, keeps
 every imported caption and touches exactly those at or above what it
 wrote. The text domain (`K-CAP-005`) takes no dialect and runs once.
+Parameters and fields (`K-CAP-007`) are validated and rekeyed over a kernel
+document once, and each dialect's authored entries are joined with their
+views: the view lists exactly the parameter and field captions imported.

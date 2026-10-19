@@ -243,7 +243,10 @@ impl Lowerer<'_> {
             }
             PyStmt::FunctionDef(def) => self.function_def(def),
             PyStmt::ClassDef(class) => {
-                if self.in_module() && self.classes.contains(class.name.id.as_str()) {
+                let name = class.name.id.as_str();
+                if self.in_module()
+                    && (self.classes.contains(name) || self.typed_dicts.contains_key(name))
+                {
                     return Ok(());
                 }
                 Err(class_refusal(class.range, class.name.id.as_str()))
@@ -981,14 +984,22 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    /// Records the exception classes the module declares, so a use may
-    /// stand before its `class` statement.
+    /// Records the exception classes the module declares, and a workflow
+    /// module's `TypedDict`s, so a use may stand before its `class`
+    /// statement.
     pub(super) fn declare_classes(&mut self, body: &[PyStmt]) -> Lowering<()> {
         for statement in body {
             let PyStmt::ClassDef(class) = statement else {
                 continue;
             };
             let name = class.name.id.as_str();
+            if self.module.is_some()
+                && self.variable(name).is_none()
+                && let Some(typed) = super::typed_dicts::declared(class)
+            {
+                self.typed_dicts.insert(name.to_owned(), typed);
+                continue;
+            }
             let trivial = class.body.iter().all(|statement| match statement {
                 PyStmt::Pass(_) => true,
                 PyStmt::Expr(expression) => expression.value.is_literal_expr(),
