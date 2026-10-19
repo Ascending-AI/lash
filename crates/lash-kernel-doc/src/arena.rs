@@ -69,13 +69,13 @@ impl ShortText {
     pub const MAX: usize = 14;
 
     /// `text` inline, when it is short enough.
-    pub fn new(text: &str) -> Option<Self> {
+    pub const fn new(text: &str) -> Option<Self> {
         let len = text.len();
         if len > Self::MAX {
             return None;
         }
         let mut bytes = [0; Self::MAX];
-        bytes[..len].copy_from_slice(text.as_bytes());
+        bytes.split_at_mut(len).0.copy_from_slice(text.as_bytes());
         Some(Self {
             len: len as u8,
             bytes,

@@ -2064,7 +2064,6 @@ fn ts_number_parts_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(2, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -2413,7 +2412,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                         let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                                         if let Some(value) = (|| {
                                             if !matches!(v6, Value::Bool(true)) { return None; }
-                                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                                         })() { return Some(value); }
                                         if let Some(value) = (|| {
                                             if !matches!(v6, Value::Bool(false)) { return None; }
@@ -2421,13 +2420,13 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                                 let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                                 if let Some(value) = (|| {
                                                     if !matches!(v7, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                                 })() { return Some(value); }
                                                 if let Some(value) = (|| {
                                                     if !matches!(v7, Value::Bool(false)) { return None; }
                                                     let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                                     if !matches!(v8, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                                 })() { return Some(value); }
                                                 None
                                             })() { return Some(value); }
@@ -2449,7 +2448,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                             let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
                             if let Some(value) = (|| {
                                 if !matches!(v11, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v11, Value::Bool(false)) { return None; }
@@ -2457,13 +2456,13 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                     let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
                                     if let Some(value) = (|| {
                                         if !matches!(v12, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v12, Value::Bool(false)) { return None; }
                                         let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
                                         if !matches!(v13, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -2502,7 +2501,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                         let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                                         if let Some(value) = (|| {
                                             if !matches!(v6, Value::Bool(true)) { return None; }
-                                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                                         })() { return Some(value); }
                                         if let Some(value) = (|| {
                                             if !matches!(v6, Value::Bool(false)) { return None; }
@@ -2510,13 +2509,13 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                                 let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                                 if let Some(value) = (|| {
                                                     if !matches!(v7, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                                 })() { return Some(value); }
                                                 if let Some(value) = (|| {
                                                     if !matches!(v7, Value::Bool(false)) { return None; }
                                                     let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                                     if !matches!(v8, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                                 })() { return Some(value); }
                                                 None
                                             })() { return Some(value); }
@@ -2538,7 +2537,7 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                             let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                             if let Some(value) = (|| {
                                 if !matches!(v9, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v9, Value::Bool(false)) { return None; }
@@ -2546,13 +2545,13 @@ fn ts_number_to_string_template(args: &[Value], natives: &[lash_kernel_doc::Prep
                                     let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
                                     if let Some(value) = (|| {
                                         if !matches!(v10, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v10, Value::Bool(false)) { return None; }
                                         let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
                                         if !matches!(v11, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -2595,7 +2594,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                 if !matches!(v6, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2608,7 +2607,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v6, Value::Bool(false)) { return None; }
                 let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                 if !matches!(v7, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2623,7 +2622,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v7, Value::Bool(false)) { return None; }
                 let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                 if !matches!(v8, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2631,7 +2630,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
                 if !matches!(v22, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2641,7 +2640,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v22, Value::Bool(false)) { return None; }
                 let v23 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v23;
                 if !matches!(v23, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
@@ -2653,7 +2652,7 @@ fn ts_number_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
                 if !matches!(v23, Value::Bool(false)) { return None; }
                 let v24 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v24;
                 if !matches!(v24, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
             })() { return Some(value); }
             None
         },
@@ -2844,7 +2843,6 @@ fn ts_number_round_decimal_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
     let _ = (&heap, natives);
     match args {
         [Value::Int(_) | Value::Float(_), Value::Int(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -3109,9 +3107,9 @@ fn ts_regexp_escaped_source_template(args: &[Value], natives: &[lash_kernel_doc:
     match args {
         [Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("(?:)")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?))
             })() { return Some(value); }
             None
         },
@@ -3123,9 +3121,9 @@ fn ts_regexp_escaped_source_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     match args {
         [Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])? }; let _ = v0;
+                let v0 = match (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])? }; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("(?:)")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?))
             })() { return Some(value); }
             None
         },
@@ -3181,11 +3179,11 @@ fn ts_regexp_spell_template(args: &[Value], natives: &[lash_kernel_doc::Prepared
     match args {
         [Value::Text(_), Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), args[1]])?; let _ = v1;
-                let v2 = (natives[1].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("(?:)")?), v1])?; let _ = v2;
-                let v3 = (natives[1].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v2])?; let _ = v3;
+                let v1 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?), v1])?; let _ = v2;
+                let v3 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2])?; let _ = v3;
                 Some(v3)
             })() { return Some(value); }
             None
@@ -3197,13 +3195,12 @@ fn ts_regexp_spell_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[1].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), args[1]]) { Some(value) => value, None => heap.call(1, &[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), args[1]])? }; let _ = v1;
+                let v1 = match (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]]) { Some(value) => value, None => heap.call(1, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]])? }; let _ = v1;
                 let v2 = match (natives[1].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
-                let v3 = match (natives[1].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v2]) { Some(value) => value, None => heap.call(1, &[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v2])? }; let _ = v3;
+                let v3 = match (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2]) { Some(value) => value, None => heap.call(1, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2])? }; let _ = v3;
                 Some(v3)
             })() { return Some(value); }
             None
@@ -3499,10 +3496,8 @@ fn ts_exotic_to_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::Map(_), Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("[object Map]")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("[object Map]") }?))
             })() { return Some(value); }
             None
         },
@@ -3706,66 +3701,8 @@ fn ts_exotic_get_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNa
 fn ts_exotic_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Absent, Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
+        [Value::LongText(_) | Value::List(_) | Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null, Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?), None)?;
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        [Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] | [Value::Text(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 Some(Value::Absent)
             })() { return Some(value); }
             None
@@ -4366,31 +4303,31 @@ fn ts_receiver_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNati
     match args {
         [Value::Absent] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?))
             })() { return Some(value); }
             None
         },
         [Value::Bool(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?))
             })() { return Some(value); }
             None
         },
         [Value::Null] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?))
             })() { return Some(value); }
             None
         },
         [Value::Int(_) | Value::Float(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("number")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?))
             })() { return Some(value); }
             None
         },
         [Value::Text(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?))
             })() { return Some(value); }
             None
         },
@@ -4401,26 +4338,20 @@ fn ts_receiver_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?))
             })() { return Some(value); }
             None
         },
         [Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?))
             })() { return Some(value); }
             None
         },
         [Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?))
             })() { return Some(value); }
             None
         },
@@ -4850,34 +4781,14 @@ fn ts_is_primitive_template(args: &[Value], natives: &[lash_kernel_doc::Prepared
 fn ts_is_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_)] => {
-            heap.path();
+        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Map(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
                 Some(Value::Bool(false))
             })() { return Some(value); }
             None
         },
         [Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 Some(Value::Bool(true))
             })() { return Some(value); }
             None
@@ -5127,10 +5038,8 @@ fn ts_require_object_coercible_heap(heap: &mut dyn p::TemplateHeap, args: &[Valu
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -5300,7 +5209,7 @@ fn ts_to_boolean_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNa
         },
         [Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[3].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v0 = (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -5312,35 +5221,15 @@ fn ts_to_boolean_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNa
 fn ts_to_boolean_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_)] => {
-            heap.path();
+        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Map(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
                 Some(Value::Bool(true))
             })() { return Some(value); }
             None
         },
         [Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
-                let v0 = match (natives[3].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])? }; let _ = v0;
+                let v0 = match (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])? }; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -5411,7 +5300,7 @@ fn ts_not_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
         },
         [Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[3].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("")?)])?; let _ = v0;
+                let v0 = (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
                 Some(v2)
@@ -5451,10 +5340,8 @@ fn ts_not_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -5558,31 +5445,31 @@ fn ts_typeof_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative
     match args {
         [Value::Bool(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("boolean")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("boolean") }?))
             })() { return Some(value); }
             None
         },
         [Value::Int(_) | Value::Float(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("number")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?))
             })() { return Some(value); }
             None
         },
         [Value::Null] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("object")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("object") }?))
             })() { return Some(value); }
             None
         },
         [Value::Text(_)] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("string")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("string") }?))
             })() { return Some(value); }
             None
         },
         [Value::Absent] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?))
             })() { return Some(value); }
             None
         },
@@ -5717,13 +5604,13 @@ fn ts_primitive_to_string_template(args: &[Value], natives: &[lash_kernel_doc::P
     match args {
         [Value::Null] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?))
             })() { return Some(value); }
             None
         },
         [Value::Absent] => {
             if let Some(value) = (|| {
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?))
             })() { return Some(value); }
             None
         },
@@ -5736,11 +5623,11 @@ fn ts_primitive_to_string_template(args: &[Value], natives: &[lash_kernel_doc::P
         [Value::Bool(_)] => {
             if let Some(value) = (|| {
                 if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("true")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("false")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
             })() { return Some(value); }
             None
         },
@@ -5769,7 +5656,7 @@ if let Some(value) = (|| {
                             let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(false)) { return None; }
@@ -5777,13 +5664,13 @@ if let Some(value) = (|| {
                                     let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(false)) { return None; }
                                         let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                         if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -5805,7 +5692,7 @@ if let Some(value) = (|| {
                 let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                 if let Some(value) = (|| {
                     if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                 })() { return Some(value); }
                 if let Some(value) = (|| {
                     if !matches!(v9, Value::Bool(false)) { return None; }
@@ -5813,13 +5700,13 @@ if let Some(value) = (|| {
                         let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
                         if let Some(value) = (|| {
                             if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                         })() { return Some(value); }
                         if let Some(value) = (|| {
                             if !matches!(v10, Value::Bool(false)) { return None; }
                             let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
                             if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                         })() { return Some(value); }
                         None
                     })() { return Some(value); }
@@ -5866,7 +5753,7 @@ if let Some(value) = (|| {
                             let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(false)) { return None; }
@@ -5874,13 +5761,13 @@ if let Some(value) = (|| {
                                     let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(false)) { return None; }
                                         let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                         if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -5902,7 +5789,7 @@ if let Some(value) = (|| {
                 let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
                 if let Some(value) = (|| {
                     if !matches!(v11, Value::Bool(true)) { return None; }
-                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                 })() { return Some(value); }
                 if let Some(value) = (|| {
                     if !matches!(v11, Value::Bool(false)) { return None; }
@@ -5910,13 +5797,13 @@ if let Some(value) = (|| {
                         let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
                         if let Some(value) = (|| {
                             if !matches!(v12, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                         })() { return Some(value); }
                         if let Some(value) = (|| {
                             if !matches!(v12, Value::Bool(false)) { return None; }
                             let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
                             if !matches!(v13, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                         })() { return Some(value); }
                         None
                     })() { return Some(value); }
@@ -5944,31 +5831,17 @@ let _ = v16;
 fn ts_primitive_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Float(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?), None)?;
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?), None)?;
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
         [Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
             })() { return Some(value); }
             None
         },
@@ -6141,9 +6014,7 @@ fn ts_primitive_to_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
@@ -6255,10 +6126,8 @@ fn ts_to_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -6413,7 +6282,7 @@ if let Some(value) = (|| {
                             let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(false)) { return None; }
@@ -6421,13 +6290,13 @@ if let Some(value) = (|| {
                                     let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(false)) { return None; }
                                         let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                         if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -6449,7 +6318,7 @@ if let Some(value) = (|| {
                 let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
                 if let Some(value) = (|| {
                     if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                 })() { return Some(value); }
                 if let Some(value) = (|| {
                     if !matches!(v9, Value::Bool(false)) { return None; }
@@ -6457,13 +6326,13 @@ if let Some(value) = (|| {
                         let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
                         if let Some(value) = (|| {
                             if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                         })() { return Some(value); }
                         if let Some(value) = (|| {
                             if !matches!(v10, Value::Bool(false)) { return None; }
                             let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
                             if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                         })() { return Some(value); }
                         None
                     })() { return Some(value); }
@@ -6510,7 +6379,7 @@ if let Some(value) = (|| {
                             let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                             })() { return Some(value); }
                             if let Some(value) = (|| {
                                 if !matches!(v6, Value::Bool(false)) { return None; }
@@ -6518,13 +6387,13 @@ if let Some(value) = (|| {
                                     let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                                     })() { return Some(value); }
                                     if let Some(value) = (|| {
                                         if !matches!(v7, Value::Bool(false)) { return None; }
                                         let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
                                         if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                                     })() { return Some(value); }
                                     None
                                 })() { return Some(value); }
@@ -6546,7 +6415,7 @@ if let Some(value) = (|| {
                 let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
                 if let Some(value) = (|| {
                     if !matches!(v11, Value::Bool(true)) { return None; }
-                    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("NaN")?))
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
                 })() { return Some(value); }
                 if let Some(value) = (|| {
                     if !matches!(v11, Value::Bool(false)) { return None; }
@@ -6554,13 +6423,13 @@ if let Some(value) = (|| {
                         let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
                         if let Some(value) = (|| {
                             if !matches!(v12, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
                         })() { return Some(value); }
                         if let Some(value) = (|| {
                             if !matches!(v12, Value::Bool(false)) { return None; }
                             let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
                             if !matches!(v13, Value::Bool(true)) { return None; }
-                            Some(Value::Text(lash_kernel_doc::arena::ShortText::new("-Infinity")?))
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
                         })() { return Some(value); }
                         None
                     })() { return Some(value); }
@@ -6588,18 +6457,17 @@ let _ = v16;
 fn ts_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
+        [Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
         [Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::LongText(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
             })() { return Some(value); }
             None
         },
@@ -6738,9 +6606,8 @@ fn ts_to_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("number")?)])?; let _ = v0;
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(1, &[v0])?; let _ = v1;
                 heap.bind(v1, None)?;
@@ -7123,28 +6990,28 @@ fn ts_add_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
         },
         [Value::Null, Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("null")?), args[1]])?; let _ = v0;
+                let v0 = (natives[2].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), args[1]])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
         },
         [Value::Absent, Value::Text(_)] => {
             if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?), args[1]])?; let _ = v0;
+                let v0 = (natives[2].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), args[1]])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
         },
         [Value::Text(_), Value::Null] => {
             if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("null")?)])?; let _ = v0;
+                let v0 = (natives[2].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?)])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
         },
         [Value::Text(_), Value::Absent] => {
             if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?)])?; let _ = v0;
+                let v0 = (natives[2].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?)])?; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
             None
@@ -7254,11 +7121,11 @@ let _ = v1;
                 let v0 = (|| {
 if let Some(value) = (|| {
     if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("true")?))
+    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
 })() { return Some(value); }
 if let Some(value) = (|| {
     if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("false")?))
+    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
 })() { return Some(value); }
 None
 })()?;
@@ -7334,11 +7201,11 @@ let _ = v0;
                 let v0 = (|| {
 if let Some(value) = (|| {
     if !matches!(args[1], Value::Bool(true)) { return None; }
-    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("true")?))
+    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
 })() { return Some(value); }
 if let Some(value) = (|| {
     if !matches!(args[1], Value::Bool(false)) { return None; }
-    Some(Value::Text(lash_kernel_doc::arena::ShortText::new("false")?))
+    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
 })() { return Some(value); }
 None
 })()?;
@@ -7356,9 +7223,7 @@ fn ts_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 let v0 = match (natives[2].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(1, &[args[0], args[1]])? }; let _ = v0;
                 Some(v0)
             })() { return Some(value); }
@@ -7674,7 +7539,6 @@ fn ts_sub_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -7970,7 +7834,6 @@ fn ts_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -8260,7 +8123,6 @@ fn ts_div_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -8550,7 +8412,6 @@ fn ts_rem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -8722,7 +8583,6 @@ fn ts_pow_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -8889,7 +8749,6 @@ fn ts_neg_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -9013,7 +8872,6 @@ fn ts_to_int32_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -9178,7 +9036,6 @@ fn ts_shift_count_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -9465,13 +9322,12 @@ fn ts_bit_and_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(0, &[args[1]])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("and")?)])?; let _ = v2;
+                let v2 = heap.call(1, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("and") }?)])?; let _ = v2;
                 heap.bind(v2, None)?;
                 let v3 = (natives[6].entry)(&[v2])?; let _ = v3;
                 Some(v3)
@@ -9568,13 +9424,12 @@ fn ts_bit_or_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(0, &[args[1]])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("or")?)])?; let _ = v2;
+                let v2 = heap.call(1, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("or") }?)])?; let _ = v2;
                 heap.bind(v2, None)?;
                 let v3 = (natives[6].entry)(&[v2])?; let _ = v3;
                 Some(v3)
@@ -9671,13 +9526,12 @@ fn ts_bit_xor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(0, &[args[1]])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("xor")?)])?; let _ = v2;
+                let v2 = heap.call(1, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("xor") }?)])?; let _ = v2;
                 heap.bind(v2, None)?;
                 let v3 = (natives[6].entry)(&[v2])?; let _ = v3;
                 Some(v3)
@@ -9764,7 +9618,6 @@ fn ts_bit_not_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -9876,7 +9729,6 @@ fn ts_shl_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -9979,7 +9831,6 @@ fn ts_shr_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -10083,7 +9934,6 @@ fn ts_ushr_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -10287,10 +10137,8 @@ fn ts_strict_not_equals_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -10428,10 +10276,8 @@ fn ts_loose_not_equals_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
@@ -13034,9 +12880,7 @@ fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 let v0 = heap.call(3, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v1;
@@ -13051,14 +12895,13 @@ fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 let v0 = heap.call(3, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[1]])?; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2, Value::Text(lash_kernel_doc::arena::ShortText::new("length")?)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Text(lash_kernel_doc::arena::ShortText::new("length")?)])? }; let _ = v3;
+                let v3 = match (natives[0].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("length") }?)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("length") }?)])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 let v10 = heap.call(9, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v10;
                 heap.bind(v10, Some(v0))?;
@@ -13073,9 +12916,7 @@ fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
             None
         },
         [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
                 let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
                 let v1 = heap.tuple(&[])?; let _ = v1;
                 let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
@@ -14377,10 +14218,34 @@ fn ts_has_own(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
+        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
+                let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
+                let v1 = heap.tuple(&[])?; let _ = v1;
+                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
+                let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(3, &[args[1]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5_entry = heap.lookup(p::Table::Record, args[0], v4)?; let v5 = Value::Bool(v5_entry.is_some()); let v5_found = v5_entry.unwrap_or(Value::Absent); let _ = (v5, v5_found);
+                Some(v5)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
+                let v1 = heap.tuple(&[])?; let _ = v1;
+                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
+                let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v4 = Value::Bool(v4_entry.is_some()); let v4_found = v4_entry.unwrap_or(Value::Absent); let _ = (v4, v4_found);
+                Some(v4)
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(0, &[args[1], v0])?; let _ = v1;
@@ -14393,7 +14258,6 @@ fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.call(0, &[args[1], v0])?; let _ = v1;
@@ -14407,36 +14271,6 @@ fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 let v6 = match (natives[0].entry)(&[v4, v5]) { Some(value) => value, None => heap.call(1, &[v4, v5])? }; let _ = v6;
                 let v7 = (natives[2].entry)(&[v6])?; let _ = v7;
                 Some(v7)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
-                let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(3, &[args[1]])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = heap.contains(p::Table::Record, args[0], v4)?; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
-                let v3 = (natives[2].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.contains(p::Table::Record, args[0], args[1])?; let _ = v4;
-                Some(v4)
             })() { return Some(value); }
             None
         },
@@ -14687,19 +14521,16 @@ fn ts_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v1 = heap.call(1, &[args[0]])?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = heap.call(2, &[args[1]])?; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)]) { Some(value) => value, None => heap.call(3, &[v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)])? }; let _ = v3;
+                let v3 = match (natives[0].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(3, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v3;
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 let v4 = heap.call(4, &[args[0], v2])?; let _ = v4;
-                heap.bind(v4, None)?;
                 if !matches!(v4, Value::Bool(true)) { return None; }
                 Some(Value::Bool(true))
             })() { return Some(value); }
@@ -15944,9 +15775,7 @@ fn ts_boundary_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 Some(args[0])
             })() { return Some(value); }
             None
@@ -16775,8 +16604,8 @@ fn ts_map_key_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.tuple(&[Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?), Value::Text(lash_kernel_doc::arena::ShortText::new("key")?)])?; let _ = v0;
-                let v1 = match (natives[0].entry)(&[args[0], v0, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)]) { Some(value) => value, None => heap.call(0, &[args[0], v0, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)])? }; let _ = v1;
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("key") }?)])?; let _ = v0;
+                let v1 = match (natives[0].entry)(&[args[0], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             None
@@ -17385,11 +17214,10 @@ fn ts_map_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::Map(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?), Value::Text(lash_kernel_doc::arena::ShortText::new("key")?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)]) { Some(value) => value, None => heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)])? }; let _ = v2;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("key") }?)])?; let _ = v1;
+                let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(1, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v2;
                 heap.bind(v2, None)?;
                 let v3 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v3;
                 heap.set_index(args[0], v2, v3)?;
@@ -17556,13 +17384,12 @@ fn ts_map_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     let _ = (&heap, natives);
     match args {
         [Value::Map(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(lash_kernel_doc::arena::ShortText::new("undefined")?), Value::Text(lash_kernel_doc::arena::ShortText::new("key")?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)]) { Some(value) => value, None => heap.call(1, &[v0, v1, Value::Text(lash_kernel_doc::arena::ShortText::new("error")?)])? }; let _ = v2;
+                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("key") }?)])?; let _ = v1;
+                let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(1, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = heap.contains(p::Table::Map, args[0], v2)?; let _ = v3;
+                let v3_entry = heap.lookup(p::Table::Map, args[0], v2)?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
                 Some(v3)
             })() { return Some(value); }
             None
@@ -19504,9 +19331,7 @@ fn ts_set_other_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 Some(args[0])
             })() { return Some(value); }
             None
@@ -19568,14 +19393,14 @@ fn ts_set_contains_other_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     match args {
         [Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Map, args[0], args[1])?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 Some(v0)
             })() { return Some(value); }
             None
         },
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Set, args[0], args[1])?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Set, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 Some(v0)
             })() { return Some(value); }
             None
@@ -20762,14 +20587,12 @@ fn ts_boolean_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
                 Some(v2)
             })() { return Some(value); }
             None
@@ -20883,11 +20706,11 @@ fn ts_boolean_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
         [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             if let Some(value) = (|| {
                 if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("true")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
             })() { return Some(value); }
             if let Some(value) = (|| {
                 if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("false")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
             })() { return Some(value); }
             None
         },
@@ -21141,7 +20964,6 @@ fn ts_object_own_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -21234,17 +21056,14 @@ fn ts_object_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 let v3 = heap.call(2, &[v1])?; let _ = v3;
-                heap.bind(v3, None)?;
                 if !matches!(v3, Value::Bool(false)) { return None; }
                 Some(v1)
             })() { return Some(value); }
@@ -23713,14 +23532,12 @@ fn ts_object_isprototypeof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
@@ -23869,21 +23686,18 @@ fn ts_object_is_instance_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 let v1 = heap.call(1, &[args[0]])?; let _ = v1;
                 heap.bind(v1, None)?;
-                let v2 = match (natives[0].entry)(&[v1, Value::Text(lash_kernel_doc::arena::ShortText::new("builtin")?)]) { Some(value) => value, None => heap.call(2, &[v1, Value::Text(lash_kernel_doc::arena::ShortText::new("builtin")?)])? }; let _ = v2;
+                let v2 = match (natives[0].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)]) { Some(value) => value, None => heap.call(2, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(false)) { return None; }
                 Some(Value::Bool(true))
             })() { return Some(value); }
@@ -23972,7 +23786,6 @@ fn ts_math_abs_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24068,7 +23881,6 @@ fn ts_math_floor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24164,7 +23976,6 @@ fn ts_math_ceil_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24260,7 +24071,6 @@ fn ts_math_trunc_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24356,7 +24166,6 @@ fn ts_math_sign_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24452,7 +24261,6 @@ fn ts_math_acos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24548,7 +24356,6 @@ fn ts_math_asin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24644,7 +24451,6 @@ fn ts_math_acosh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24740,7 +24546,6 @@ fn ts_math_asinh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24836,7 +24641,6 @@ fn ts_math_atan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -24932,7 +24736,6 @@ fn ts_math_atanh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25028,7 +24831,6 @@ fn ts_math_cbrt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25124,7 +24926,6 @@ fn ts_math_cos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25220,7 +25021,6 @@ fn ts_math_cosh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25316,7 +25116,6 @@ fn ts_math_exp_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25412,7 +25211,6 @@ fn ts_math_expm1_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25508,7 +25306,6 @@ fn ts_math_log_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25604,7 +25401,6 @@ fn ts_math_log1p_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25700,7 +25496,6 @@ fn ts_math_log10_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25796,7 +25591,6 @@ fn ts_math_log2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25892,7 +25686,6 @@ fn ts_math_sin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -25988,7 +25781,6 @@ fn ts_math_sinh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26084,7 +25876,6 @@ fn ts_math_tan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26180,7 +25971,6 @@ fn ts_math_tanh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26276,7 +26066,6 @@ fn ts_math_sqrt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26372,7 +26161,6 @@ fn ts_math_round_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26493,7 +26281,6 @@ fn ts_math_atan2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -26601,7 +26388,6 @@ fn ts_math_pow_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -27839,7 +27625,6 @@ fn ts_number_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
@@ -28229,7 +28014,6 @@ fn ts_number_parsefloat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -28360,7 +28144,6 @@ fn ts_number_parseint_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -28449,11 +28232,10 @@ fn ts_number_receiver_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("number")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("number")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -28501,7 +28283,6 @@ fn ts_number_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -30217,7 +29998,6 @@ fn ts_number_global_isfinite_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -30313,7 +30093,6 @@ fn ts_number_global_isnan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -30901,10 +30680,8 @@ fn ts_date_require_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -30993,7 +30770,6 @@ fn ts_date_parse_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31067,7 +30843,6 @@ fn ts_date_utc_2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31442,7 +31217,6 @@ fn ts_date_getutcfullyear_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31497,7 +31271,6 @@ fn ts_date_getutcmonth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31552,7 +31325,6 @@ fn ts_date_getutcdate_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31607,7 +31379,6 @@ fn ts_date_getutcday_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31662,7 +31433,6 @@ fn ts_date_getutchours_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31717,7 +31487,6 @@ fn ts_date_getutcminutes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31772,7 +31541,6 @@ fn ts_date_getutcseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -31827,7 +31595,6 @@ fn ts_date_getutcmilliseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -33866,9 +33633,8 @@ fn ts_error_new_error_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("Error")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("Error") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -34008,9 +33774,8 @@ fn ts_error_new_typeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("TypeError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("TypeError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -34207,9 +33972,8 @@ fn ts_error_new_rangeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("RangeError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("RangeError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -34406,9 +34170,8 @@ fn ts_error_new_syntaxerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("SyntaxError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("SyntaxError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -34605,9 +34368,8 @@ fn ts_error_new_referenceerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Valu
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("ReferenceError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("ReferenceError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -34804,9 +34566,8 @@ fn ts_error_new_urierror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("URIError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("URIError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -35003,9 +34764,8 @@ fn ts_error_new_evalerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("EvalError")?), args[1], Value::Bool(false)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("EvalError") }?), args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -35202,9 +34962,8 @@ fn ts_error_new_aggregateerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Valu
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(lash_kernel_doc::arena::ShortText::new("AggregateError")?), args[1], Value::Bool(true)])?; let _ = v0;
+                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("AggregateError") }?), args[1], Value::Bool(true)])?; let _ = v0;
                 heap.bind(v0, None)?;
                 Some(v0)
             })() { return Some(value); }
@@ -38768,10 +38527,9 @@ fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.tuple(&[Value::Text(lash_kernel_doc::arena::ShortText::new("toJSON")?), Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?)])?; let _ = v0;
-                let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(lash_kernel_doc::arena::ShortText::new("0")?), Value::Text(lash_kernel_doc::arena::ShortText::new(":")?)])?; let _ = v1;
+                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("toJSON") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?)])?; let _ = v0;
+                let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?)])?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = (natives[0].entry)(&[v1, Value::Int(2)])?; let _ = v2;
                 let v3 = match (natives[1].entry)(&[v2, Value::Int(1)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Int(1)])? }; let _ = v3;
@@ -39097,11 +38855,10 @@ fn ts_array_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0], args[1], args[2]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -39229,14 +38986,12 @@ fn ts_array_remove_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0], args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
                 Some(v2)
             })() { return Some(value); }
             None
@@ -39497,7 +39252,6 @@ fn ts_array_integer_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -39952,11 +39706,10 @@ fn ts_array_callback_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("closure")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("closure")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -40172,7 +39925,6 @@ fn ts_array_bound_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
                 if !matches!(v0, Value::Bool(true)) { return None; }
@@ -40204,7 +39956,6 @@ fn ts_array_bound_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
             None
         },
         [Value::Null, Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -40438,7 +40189,6 @@ fn ts_array_spread_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -41694,7 +41444,6 @@ fn ts_array_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -42530,65 +42279,24 @@ fn ts_array_primitive_template(args: &[Value], natives: &[lash_kernel_doc::Prepa
 fn ts_array_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Map(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
         [Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Bool(true))
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Bool(true))
+            })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
-                Some(Value::Bool(true))
+                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v1;
+                Some(v1)
             })() { return Some(value); }
             None
         },
@@ -42744,20 +42452,18 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 fn ts_array_searchable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::List(_), Value::List(_)] => {
-            heap.path();
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                if !matches!(v1, Value::Bool(false)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
             None
         },
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+        [Value::List(_), Value::List(_)] => {
             if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(1, &[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(false)) { return None; }
                 Some(Value::Bool(false))
             })() { return Some(value); }
             None
@@ -43269,7 +42975,6 @@ fn ts_array_generic_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -43634,7 +43339,6 @@ fn ts_array_generic_lastindexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Val
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -44017,7 +43721,6 @@ fn ts_array_generic_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -48184,7 +47887,6 @@ fn ts_array_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -51961,66 +51663,8 @@ fn ts_for_of_item_template(args: &[Value], natives: &[lash_kernel_doc::PreparedN
 fn ts_for_of_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Absent, Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
+        [Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null, Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        [Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] | [Value::Text(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("text")?), None)?;
                 Some(args[1])
             })() { return Some(value); }
             None
@@ -52645,7 +52289,7 @@ fn ts_promise_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
                 let v1 = heap.field(args[0], "__ts_type")?; let _ = v1;
                 let v2 = heap.tuple(&[v0, v1])?; let _ = v2;
                 let v3 = heap.tuple(&[])?; let _ = v3;
-                let v4 = heap.tuple(&[v3, Value::Text(lash_kernel_doc::arena::ShortText::new("brand:Promise")?)])?; let _ = v4;
+                let v4 = heap.tuple(&[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("brand:Promise") }?)])?; let _ = v4;
                 let v5 = match (natives[0].entry)(&[v2, v4]) { Some(value) => value, None => heap.call(0, &[v2, v4])? }; let _ = v5;
                 Some(v5)
             })() { return Some(value); }
@@ -52995,7 +52639,6 @@ fn ts_promise_reject_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -53064,11 +52707,10 @@ fn ts_promise_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("closure")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("closure")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)])? }; let _ = v1;
                 Some(v1)
             })() { return Some(value); }
             None
@@ -54235,7 +53877,6 @@ fn ts_string_integer_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -54544,7 +54185,6 @@ fn ts_string_length_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], n
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -54647,7 +54287,6 @@ fn ts_string_uint32_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -54929,12 +54568,11 @@ fn ts_string_create_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Text(lash_kernel_doc::arena::ShortText::new("")?))
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?))
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
@@ -55012,7 +54650,6 @@ fn ts_string_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -55521,15 +55158,19 @@ fn ts_string_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
 fn ts_string_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Absent, None)?;
+                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
+            if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                heap.bind(Value::Bool(true), None)?;
-                heap.bind(Value::Int(0), None)?;
                 let v4 = heap.call(2, &[args[0]])?; let _ = v4;
                 heap.bind(v4, None)?;
                 let v5 = (natives[0].entry)(&[Value::Int(0), v4])?; let _ = v5;
@@ -55538,30 +55179,16 @@ fn ts_string_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Absent, None)?;
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
-                heap.bind(Value::Bool(true), None)?;
-                heap.bind(Value::Int(0), None)?;
                 let v4 = heap.call(2, &[args[0]])?; let _ = v4;
                 heap.bind(v4, None)?;
                 let v5 = (natives[0].entry)(&[Value::Int(0), v4])?; let _ = v5;
                 if !matches!(v5, Value::Bool(true)) { return None; }
-                heap.bind(Value::Int(0), None)?;
-                heap.bind(Value::Int(1), None)?;
                 let v6 = heap.call(3, &[args[0], Value::Int(0), Value::Int(1)])?; let _ = v6;
                 heap.bind(v6, None)?;
                 Some(v6)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
             })() { return Some(value); }
             None
         },
@@ -56517,7 +56144,6 @@ fn ts_string_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -56999,7 +56625,6 @@ fn ts_string_substring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -57349,7 +56974,6 @@ fn ts_string_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -57358,7 +56982,6 @@ fn ts_string_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -58396,7 +58019,6 @@ fn ts_string_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -58405,7 +58027,6 @@ fn ts_string_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -58611,7 +58232,6 @@ fn ts_string_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -58620,7 +58240,6 @@ fn ts_string_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -58852,7 +58471,6 @@ fn ts_string_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -58861,7 +58479,6 @@ fn ts_string_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -59223,7 +58840,6 @@ fn ts_string_tolowercase_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59295,7 +58911,6 @@ fn ts_string_touppercase_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59399,7 +59014,6 @@ fn ts_string_trim_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59410,7 +59024,6 @@ fn ts_string_trim_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(1, &[args[0], Value::Bool(true), Value::Bool(true)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59514,7 +59127,6 @@ fn ts_string_trimstart_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59525,7 +59137,6 @@ fn ts_string_trimstart_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(1, &[args[0], Value::Bool(true), Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59629,7 +59240,6 @@ fn ts_string_trimend_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59640,7 +59250,6 @@ fn ts_string_trimend_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(1, &[args[0], Value::Bool(false), Value::Bool(true)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -59786,7 +59395,6 @@ fn ts_string_repeat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -61063,10 +60671,8 @@ fn ts_string_apply_arguments_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
     let _ = (&heap, natives);
     match args {
         [Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -61243,10 +60849,8 @@ fn ts_regexp_require_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -63220,22 +62824,20 @@ fn ts_regexp_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(1, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("source")?)])?; let _ = v1;
+                let v1 = heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("source") }?)])?; let _ = v1;
                 heap.bind(v1, None)?;
                 let v2 = heap.call(2, &[v1])?; let _ = v2;
                 heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flags")?)])?; let _ = v3;
+                let v3 = heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flags") }?)])?; let _ = v3;
                 heap.bind(v3, None)?;
                 let v4 = heap.call(2, &[v3])?; let _ = v4;
                 heap.bind(v4, None)?;
-                let v5 = match (natives[0].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v4]) { Some(value) => value, None => heap.call(3, &[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v4])? }; let _ = v5;
+                let v5 = match (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v4]) { Some(value) => value, None => heap.call(3, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v4])? }; let _ = v5;
                 let v6 = match (natives[0].entry)(&[v2, v5]) { Some(value) => value, None => heap.call(3, &[v2, v5])? }; let _ = v6;
-                let v7 = match (natives[0].entry)(&[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v6]) { Some(value) => value, None => heap.call(3, &[Value::Text(lash_kernel_doc::arena::ShortText::new("/")?), v6])? }; let _ = v7;
+                let v7 = match (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v6]) { Some(value) => value, None => heap.call(3, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v6])? }; let _ = v7;
                 Some(v7)
             })() { return Some(value); }
             None
@@ -63326,10 +62928,8 @@ fn ts_regexp_argument_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(args[0])
             })() { return Some(value); }
@@ -64437,7 +64037,6 @@ fn ts_string_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -64446,7 +64045,6 @@ fn ts_string_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
             None
         },
         [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
                 let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
@@ -65611,7 +65209,6 @@ fn ts_string_replace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1], Value::Bool(false)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -65684,7 +65281,6 @@ fn ts_string_replaceall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1], Value::Bool(true)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -66590,7 +66186,6 @@ fn ts_uri_encodeuri_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -66695,7 +66290,6 @@ fn ts_uri_decodeuri_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -66800,7 +66394,6 @@ fn ts_uri_encodeuricomponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -66905,7 +66498,6 @@ fn ts_uri_decodeuricomponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value]
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
                 heap.bind(v0, None)?;
@@ -68400,10 +67992,8 @@ fn ts_in_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_ke
     let _ = (&heap, natives);
     match args {
         [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 Some(Value::Bool(true))
             })() { return Some(value); }
@@ -73813,16 +73403,14 @@ fn ts_member_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("append")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("append") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("append")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -75053,16 +74641,14 @@ fn ts_member_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("at")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("at") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("at")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -78635,16 +78221,14 @@ fn ts_member_concat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("concat")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("concat") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("concat")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -79605,16 +79189,14 @@ fn ts_member_constructor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("constructor")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("constructor") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("constructor")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -79895,16 +79477,14 @@ fn ts_member_copywithin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("copyWithin")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("copyWithin") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("copyWithin")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -81526,16 +81106,14 @@ fn ts_member_delete_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("delete")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("delete") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("delete")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -82417,16 +81995,14 @@ fn ts_member_entries_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("entries")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("entries") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("entries")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -82924,16 +82500,14 @@ fn ts_member_every_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("every")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("every") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("every")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -83179,16 +82753,14 @@ fn ts_member_exec_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("exec")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("exec") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("exec")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -83903,16 +83475,14 @@ fn ts_member_fill_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("fill")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("fill") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("fill")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -84193,16 +83763,14 @@ fn ts_member_filter_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("filter")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("filter") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("filter")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -84718,16 +84286,14 @@ fn ts_member_find_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("find")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("find")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -85008,16 +84574,14 @@ fn ts_member_findindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findIndex")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findIndex") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findIndex")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -85298,16 +84862,14 @@ fn ts_member_findlast_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLast")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findLast") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLast")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -85588,16 +85150,14 @@ fn ts_member_findlastindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLastIndex")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findLastIndex") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("findLastIndex")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -85878,16 +85438,14 @@ fn ts_member_flat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flat")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flat") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flat")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -86168,16 +85726,14 @@ fn ts_member_flatmap_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flatMap")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flatMap") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("flatMap")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -86786,16 +86342,14 @@ fn ts_member_foreach_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("forEach")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("forEach") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("forEach")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -88380,16 +87934,14 @@ fn ts_member_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("get")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("get") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("get")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -88635,16 +88187,14 @@ fn ts_member_getall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("getAll")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("getAll") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("getAll")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -94841,16 +94391,14 @@ fn ts_member_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("has")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("has") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("has")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -95544,16 +95092,14 @@ fn ts_member_hasownproperty_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("hasOwnProperty")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("hasOwnProperty") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("hasOwnProperty")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -96305,16 +95851,14 @@ fn ts_member_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("includes")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("includes") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("includes")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -96632,16 +96176,14 @@ fn ts_member_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("indexOf")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("indexOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("indexOf")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -99324,16 +98866,14 @@ fn ts_member_isprototypeof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("isPrototypeOf")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isPrototypeOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("isPrototypeOf")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -100518,16 +100058,14 @@ fn ts_member_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("join")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("join")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -100940,16 +100478,14 @@ fn ts_member_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("keys")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("keys") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("keys")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -101267,16 +100803,14 @@ fn ts_member_lastindexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("lastIndexOf")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lastIndexOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("lastIndexOf")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -102904,16 +102438,14 @@ fn ts_member_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("map")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("map")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -106498,16 +106030,14 @@ fn ts_member_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("pop")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("pop") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("pop")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -108226,16 +107756,14 @@ fn ts_member_push_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("push")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("push") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("push")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -109167,16 +108695,14 @@ fn ts_member_reduce_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduce")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reduce") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduce")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -109457,16 +108983,14 @@ fn ts_member_reduceright_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], na
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduceRight")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reduceRight") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reduceRight")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -110886,16 +110410,14 @@ fn ts_member_reverse_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reverse")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reverse") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("reverse")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -111847,16 +111369,14 @@ fn ts_member_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("set")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("set") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("set")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -116149,16 +115669,14 @@ fn ts_member_shift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("shift")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("shift") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("shift")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -117358,16 +116876,14 @@ fn ts_member_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("slice")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("slice") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("slice")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -117648,16 +117164,14 @@ fn ts_member_some_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("some")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("some") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("some")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -117976,16 +117490,14 @@ fn ts_member_sort_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("sort")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("sort") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("sort")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -118266,16 +117778,14 @@ fn ts_member_splice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("splice")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splice") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("splice")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -120329,16 +119839,14 @@ fn ts_member_test_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("test")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("test") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("test")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -122686,16 +122194,14 @@ fn ts_member_tolocalestring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value],
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toLocaleString")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toLocaleString") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toLocaleString")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -123936,16 +123442,14 @@ fn ts_member_toreversed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toReversed")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toReversed") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toReversed")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -124226,16 +123730,14 @@ fn ts_member_tosorted_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSorted")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toSorted") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSorted")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -124516,16 +124018,14 @@ fn ts_member_tospliced_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSpliced")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toSpliced") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toSpliced")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -125295,16 +124795,14 @@ fn ts_member_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toString")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toString") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("toString")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -127483,16 +126981,14 @@ fn ts_member_unshift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("unshift")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("unshift") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("unshift")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -128102,16 +127598,14 @@ fn ts_member_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("valueOf")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("valueOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("valueOf")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -128523,16 +128017,14 @@ fn ts_member_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("values")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("values") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("values")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -129030,16 +128522,14 @@ fn ts_member_with_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     let _ = (&heap, natives);
     match args {
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
                 heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)])? }; let _ = v1;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("with")?))?; let _ = v2;
+                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("with") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
                 if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.index(args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("with")?))?; let _ = v3;
-                Some(v3)
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -129738,12 +129228,10 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     let _ = (&heap, natives);
     match args {
         [Value::Absent] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("absent")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129752,12 +129240,10 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Bool(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("bool")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129766,12 +129252,10 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Float(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("float")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129780,12 +129264,10 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Int(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129793,23 +129275,11 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             })() { return Some(value); }
             None
         },
-        [Value::List(_)] => {
-            heap.path();
-            if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
         [Value::Map(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("map")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129818,12 +129288,10 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             None
         },
         [Value::Null] => {
-            heap.path();
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?), None)?;
                 let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v1;
+                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?)))?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
                 if !matches!(v1, Value::Bool(true)) { return None; }
                 let v2 = heap.call(2, &[args[0]])?; let _ = v2;
                 heap.bind(v2, None)?;
@@ -129831,17 +129299,23 @@ fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
             })() { return Some(value); }
             None
         },
-        [Value::Record(_)] => {
-            heap.path();
+        [Value::List(_)] => {
             if let Some(value) = (|| {
-                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?), None)?;
+                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                Some(v0)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_)] => {
+            if let Some(value) = (|| {
                 let v0 = heap.field(args[0], "__ts_brand")?; let _ = v0;
                 let v1 = heap.tuple(&[])?; let _ = v1;
                 let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
                 if !matches!(v2, Value::Bool(true)) { return None; }
                 let v3 = heap.field(args[0], "__ts_type")?; let _ = v3;
-                heap.bind(v3, Some(Value::Text(lash_kernel_doc::arena::ShortText::new("record")?)))?;
-                let v4 = match (natives[0].entry)(&[v3, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)]) { Some(value) => value, None => heap.call(1, &[v3, Value::Text(lash_kernel_doc::arena::ShortText::new("list")?)])? }; let _ = v4;
+                heap.bind(v3, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)))?;
+                let v4 = match (natives[0].entry)(&[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v4;
                 if !matches!(v4, Value::Bool(true)) { return None; }
                 let v5 = heap.call(2, &[args[0]])?; let _ = v5;
                 heap.bind(v5, None)?;
@@ -143857,11 +143331,9 @@ fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     let _ = (&heap, natives);
     match args {
         [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?))?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                heap.bind(Value::Absent, None)?;
                 let v7 = heap.index(args[0], args[1])?; let _ = v7;
                 heap.bind(v7, Some(Value::Absent))?;
                 let v8 = match (natives[0].entry)(&[v7, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v7, Value::Absent])? }; let _ = v8;
@@ -143871,9 +143343,8 @@ fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?))?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                heap.bind(Value::Absent, None)?;
                 let v7 = heap.index(args[0], args[1])?; let _ = v7;
                 heap.bind(v7, Some(Value::Absent))?;
                 let v8 = match (natives[0].entry)(&[v7, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v7, Value::Absent])? }; let _ = v8;
@@ -143885,14 +143356,13 @@ fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?))?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.field(args[0], "__ts_brand")?; let _ = v1;
                 let v2 = heap.tuple(&[])?; let _ = v2;
                 let v3 = match (natives[0].entry)(&[v1, v2]) { Some(value) => value, None => heap.call(0, &[v1, v2])? }; let _ = v3;
                 let v4 = (natives[1].entry)(&[v3])?; let _ = v4;
                 if !matches!(v4, Value::Bool(true)) { return None; }
-                heap.bind(Value::Absent, None)?;
                 let v5 = heap.index(args[0], args[1])?; let _ = v5;
                 heap.bind(v5, Some(Value::Absent))?;
                 let v6 = match (natives[0].entry)(&[v5, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v5, Value::Absent])? }; let _ = v6;
@@ -143902,11 +143372,9 @@ fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
             None
         },
         [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?))?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 if !matches!(v0, Value::Bool(false)) { return None; }
-                heap.bind(Value::Absent, None)?;
                 let v7 = heap.index(args[0], args[1])?; let _ = v7;
                 heap.bind(v7, Some(Value::Absent))?;
                 let v8 = match (natives[0].entry)(&[v7, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v7, Value::Absent])? }; let _ = v8;
@@ -143916,14 +143384,13 @@ fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
             })() { return Some(value); }
             heap.path();
             if let Some(value) = (|| {
-                let v0 = heap.contains(p::Table::Record, args[0], Value::Text(lash_kernel_doc::arena::ShortText::new("__ts_brand")?))?; let _ = v0;
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__ts_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
                 if !matches!(v0, Value::Bool(true)) { return None; }
                 let v1 = heap.field(args[0], "__ts_brand")?; let _ = v1;
                 let v2 = heap.tuple(&[])?; let _ = v2;
                 let v3 = match (natives[0].entry)(&[v1, v2]) { Some(value) => value, None => heap.call(0, &[v1, v2])? }; let _ = v3;
                 let v4 = (natives[1].entry)(&[v3])?; let _ = v4;
                 if !matches!(v4, Value::Bool(true)) { return None; }
-                heap.bind(Value::Absent, None)?;
                 let v5 = heap.index(args[0], args[1])?; let _ = v5;
                 heap.bind(v5, Some(Value::Absent))?;
                 let v6 = match (natives[0].entry)(&[v5, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v5, Value::Absent])? }; let _ = v6;

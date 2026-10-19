@@ -1350,9 +1350,22 @@ fn linear_text_accumulators_agree_with_the_reference() {
             prepare_with_layout(Arc::clone(registry), Layout(OFF)),
         ));
     }
+    agree_with_the_reference(&cases, "text-accumulators", began);
+}
+
+/// Each of `cases`, its loop regions formed, makes the run the reference
+/// makes (PLAN-INDEP, as [`regions_on_and_off_agree`] states it), with
+/// memory off and tight, and holds what it holds (as
+/// [`allocating_regions_hold_what_the_reference_holds`] does) at every
+/// slice.
+fn agree_with_the_reference(
+    cases: &[(Case, PreparedLibrary, PreparedLibrary)],
+    family: &str,
+    began: std::time::Instant,
+) {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
-    for (case, on, off) in &cases {
+    for (case, on, off) in cases {
         let plans = formed_alike(on, off, case);
         assert!(plans.0 > 0, "{}: no loop region forms", case.name);
         let work = check(on, off, case, &mut counts, &mut failures);
@@ -1365,7 +1378,7 @@ fn linear_text_accumulators_agree_with_the_reference() {
         tight.name = format!("{} (memory {TIGHT})", case.name);
         tight.environment.bounds.memory = TIGHT;
         check(on, off, &tight, &mut counts, &mut failures);
-        let program = case_program(on, case).expect("an accumulator program is admitted");
+        let program = case_program(on, case).expect("the program is admitted");
         let reference = Program {
             library: off.clone(),
             ..program.clone()
@@ -1386,7 +1399,7 @@ fn linear_text_accumulators_agree_with_the_reference() {
             }
         }
     }
-    counts.report(0, "text-accumulators", began);
+    counts.report(0, family, began);
     assert!(
         failures.is_empty(),
         "{} of {} paired runs disagree:\n{}",
@@ -1394,6 +1407,31 @@ fn linear_text_accumulators_agree_with_the_reference() {
         counts.runs,
         failures.join("\n")
     );
+}
+
+/// FIG-6846: subscripts that look their key up once per level and
+/// f-strings built by concatenation make the run the reference makes and
+/// hold what it holds, as [`linear_text_accumulators_agree_with_the_reference`]
+/// states it. A lookup that answered a stale or missing entry, or a part
+/// concatenated out of order, makes a run disagree.
+#[test]
+fn single_lookup_subscripts_and_fstrings_agree_with_the_reference() {
+    let began = std::time::Instant::now();
+    let cases: Vec<(Case, PreparedLibrary, PreparedLibrary)> =
+        crate::helper_plans::subscript_and_fstring_programs()
+            .into_iter()
+            .map(|(lowered, program)| {
+                let registry = program.library.registry();
+                let mut case = program_case(&lowered.id, "main { return null }", 16);
+                case.document = print_document(&program.document);
+                (
+                    case,
+                    prepare_with_layout(Arc::clone(registry), Layout(ON)),
+                    prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+                )
+            })
+            .collect();
+    agree_with_the_reference(&cases, "subscripts-and-fstrings", began);
 }
 
 /// A loop plan retires in the machine whose entries kept missing, never in

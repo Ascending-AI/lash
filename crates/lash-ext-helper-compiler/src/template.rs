@@ -59,7 +59,7 @@ impl Symbol {
                 value.get().to_bits()
             ),
             Value::Text(value) => format!(
-                "Value::Text(lash_kernel_doc::arena::ShortText::new({:?})?)",
+                "Value::Text(const {{ lash_kernel_doc::arena::ShortText::new({:?}) }}?)",
                 value.as_str()
             ),
             _ => return None,
@@ -91,8 +91,6 @@ struct Effects {
     declines: bool,
     /// It builds an object, or makes a call that may.
     builds: bool,
-    /// It grows a plan variable.
-    binds: bool,
     /// It writes an arena object: only the path's return may follow.
     writes: bool,
     /// It reads, builds or writes an arena object, or calls for what may
@@ -104,7 +102,6 @@ impl Effects {
     const DECLINES: Self = Self {
         declines: true,
         builds: false,
-        binds: false,
         writes: false,
         arena: false,
     };
@@ -113,7 +110,6 @@ impl Effects {
         Self {
             declines: self.declines || other.declines,
             builds: self.builds || other.builds,
-            binds: self.binds || other.binds,
             writes: self.writes || other.writes,
             arena: self.arena || other.arena,
         }
@@ -136,8 +132,9 @@ enum Form {
         target: String,
     },
     /// Whether a table holds a key, by the [`lash_kernel_doc::plan::Table`]
-    /// variant its native names.
-    Contains {
+    /// variant its native names, and the entry it holds there: one probe
+    /// answers both (FIG-6846).
+    Lookup {
         table: &'static str,
         target: String,
         key: String,
@@ -203,7 +200,7 @@ impl Step {
                     Form::Field { .. }
                     | Form::Index { .. }
                     | Form::Len { .. }
-                    | Form::Contains { .. } => (false, true),
+                    | Form::Lookup { .. } => (false, true),
                     Form::Call { builds, arena, .. } => (*builds, *arena),
                 };
                 Effects {
@@ -212,16 +209,12 @@ impl Step {
                     ..Effects::DECLINES
                 }
             }
-            Self::Entry { .. } | Self::Guard { .. } => Effects::DECLINES,
             Self::Fallback { builds, .. } => Effects {
                 builds: *builds,
                 arena: true,
                 ..Effects::DECLINES
             },
-            Self::Bind { .. } => Effects {
-                binds: true,
-                ..Effects::DECLINES
-            },
+            Self::Entry { .. } | Self::Guard { .. } | Self::Bind { .. } => Effects::DECLINES,
             Self::SetIndex { .. } => Effects {
                 writes: true,
                 arena: true,
@@ -246,8 +239,8 @@ impl std::fmt::Display for Form {
             Self::Len { collection, target } => {
                 write!(f, "heap.len(p::Collection::{collection}, {target})")
             }
-            Self::Contains { table, target, key } => {
-                write!(f, "heap.contains(p::Table::{table}, {target}, {key})")
+            Self::Lookup { table, target, key } => {
+                write!(f, "heap.lookup(p::Table::{table}, {target}, {key})")
             }
             Self::Call { callee, args, .. } => write!(f, "heap.call({callee}, &[{args}])"),
         }
@@ -257,6 +250,15 @@ impl std::fmt::Display for Form {
 impl std::fmt::Display for Step {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // A lookup's value is whether the table holds the key; the
+            // entry it found is read only where a guard proved it held.
+            Self::Heap {
+                name,
+                form: form @ Form::Lookup { .. },
+            } => write!(
+                f,
+                "let {name}_entry = {form}?; let {name} = Value::Bool({name}_entry.is_some()); let {name}_found = {name}_entry.unwrap_or(Value::Absent); let _ = ({name}, {name}_found);"
+            ),
             Self::Heap { name, form } => write!(f, "let {name} = {form}?; let _ = {name};"),
             Self::Entry { name, native, args } => write!(
                 f,
@@ -355,11 +357,27 @@ fn tree(code: &mut String, alternatives: &[(&[Step], &str)], pad: &str) {
     }
 }
 
+/// A table lookup a heap path made: the name of whether the key is held,
+/// what it looked up, at which step, and whether a guard since proved the
+/// key held.
+#[derive(Clone)]
+struct Probe {
+    name: String,
+    target: String,
+    key: String,
+    at: usize,
+    held: bool,
+}
+
 #[derive(Clone, Default)]
 struct State {
     vars: BTreeMap<Name, Symbol>,
     steps: Vec<Step>,
     depth: u32,
+    probes: Vec<Probe>,
+    /// Whether the path declared or assigned a plan variable, with a bind
+    /// step or without one.
+    declares: bool,
 }
 
 impl State {
@@ -367,6 +385,37 @@ impl State {
         self.steps.iter().fold(Effects::default(), |effects, step| {
             effects.or(step.effects())
         })
+    }
+
+    /// The name of the entry a lookup of `key` in `target` found, where a
+    /// guard proved the table held it and no step since the lookup can
+    /// have changed the table: `target[key]` reads it without a second
+    /// probe (FIG-6846).
+    fn found(&self, target: &str, key: &str) -> Option<String> {
+        let probe = self
+            .probes
+            .iter()
+            .rev()
+            .find(|probe| probe.held && probe.target == target && probe.key == key)?;
+        self.steps[probe.at + 1..]
+            .iter()
+            .all(|step| {
+                matches!(
+                    step,
+                    Step::Bind { .. }
+                        | Step::Guard { .. }
+                        | Step::Entry { .. }
+                        | Step::Heap {
+                            form: Form::Field { .. }
+                                | Form::Index { .. }
+                                | Form::Len { .. }
+                                | Form::Lookup { .. }
+                                | Form::Tuple(_),
+                            ..
+                        }
+                )
+            })
+            .then(|| format!("{}_found", probe.name))
     }
 
     /// Whether a step that may decline follows the path's first build:
@@ -455,7 +504,7 @@ fn read(name: &str, args: &[Symbol]) -> Option<Form> {
             },
             target: target.code.clone(),
         }),
-        ("contains", [target, key]) => Some(Form::Contains {
+        ("contains", [target, key]) => Some(Form::Lookup {
             table: match collection {
                 "map" => "Map",
                 "set" => "Set",
@@ -537,6 +586,15 @@ impl Evaluator<'_> {
         (kind, calls): (Option<ValueKind>, usize),
     ) -> Symbol {
         let name = self.fresh();
+        if let Form::Lookup { target, key, .. } = &form {
+            state.probes.push(Probe {
+                name: name.clone(),
+                target: target.clone(),
+                key: key.clone(),
+                at: state.steps.len(),
+                held: false,
+            });
+        }
         state.steps.push(Step::Heap {
             name: name.clone(),
             form,
@@ -612,6 +670,9 @@ impl Evaluator<'_> {
                     let target = self.expr(target, state, depth)?;
                     let index = self.expr(index, state, depth)?;
                     let calls = target.calls + index.calls;
+                    if let Some(found) = state.found(&target.code, &index.code) {
+                        return Some(Symbol::computed(found, None, calls));
+                    }
                     let form = Form::Index {
                         target: target.code,
                         index: index.code,
@@ -823,6 +884,8 @@ impl Evaluator<'_> {
                 .map(|(param, arg)| (param.name.clone(), arg))
                 .collect(),
             depth: depth + 1,
+            probes: Vec::new(),
+            declares: false,
         };
         let mut results = self.block(&body.block, &mut nested, depth + 1);
         if results.is_empty() {
@@ -933,7 +996,10 @@ impl Evaluator<'_> {
                 };
                 if self.heap {
                     // The plan's variable grows by the value, past what an
-                    // assignment replaces; a captured one is a cell.
+                    // assignment replaces; a captured one is a cell. An
+                    // immediate grows nothing the arena holds: a constant,
+                    // or a null, absent, bool or float (an integer may be a
+                    // big one) is bound without a step (FIG-6846).
                     let previous = match stmt {
                         Stmt::Let { .. } => Some(None),
                         _ => state.vars.get(name).map(|old| Some(old.code.clone())),
@@ -941,10 +1007,23 @@ impl Evaluator<'_> {
                     let Some(previous) = previous.filter(|_| !self.captured.contains(name)) else {
                         return Vec::new();
                     };
-                    state.steps.push(Step::Bind {
-                        value: value.code.clone(),
-                        previous,
-                    });
+                    state.declares = true;
+                    let immediate = value.constant.is_some()
+                        || matches!(
+                            value.kind,
+                            Some(
+                                ValueKind::Null
+                                    | ValueKind::Absent
+                                    | ValueKind::Bool
+                                    | ValueKind::Float
+                            )
+                        );
+                    if !immediate {
+                        state.steps.push(Step::Bind {
+                            value: value.code.clone(),
+                            previous,
+                        });
+                    }
                 }
                 state.vars.insert(name.clone(), value);
                 self.block(rest, state, depth)
@@ -994,6 +1073,9 @@ impl Evaluator<'_> {
                             test: test.code.clone(),
                             holds: guard,
                         });
+                        for probe in &mut next.probes {
+                            probe.held |= guard && probe.name == test.code;
+                        }
                     }
                     self.enter(branch, next, state, rest, depth, &mut outcomes);
                 }
@@ -1188,13 +1270,14 @@ impl Evaluator<'_> {
                 pass.arms.entry(code).or_default().push(names);
                 continue;
             }
-            // What an earlier alternative declared is not a later one's.
-            let binds = results.iter().any(|(state, _)| state.effects().binds);
-            for (state, value) in results {
+            // What an earlier alternative declared is not a later one's;
+            // the first begins where the paths do.
+            let binds = results.iter().any(|(state, _)| state.declares);
+            for (index, (state, value)) in results.into_iter().enumerate() {
                 let value = value.or_else(|| Symbol::constant(Value::Null))?;
                 pass.depth = pass.depth.max(state.depth);
                 pass.writes |= state.effects().writes;
-                if binds {
+                if binds && index > 0 {
                     let _ = writeln!(code, "            heap.path();");
                 }
                 let _ = writeln!(code, "            if let Some(value) = (|| {{");

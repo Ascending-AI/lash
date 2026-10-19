@@ -4,6 +4,7 @@ mod captured;
 mod conformance;
 mod controls;
 mod deviations;
+mod fstrings;
 mod machine;
 mod module;
 mod pages;

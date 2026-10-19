@@ -338,9 +338,17 @@ impl Cx<'_> {
     }
 
     /// `<table>.contains(target, key)`, looked up as the native's call
-    /// looks it up, through the same views, without its call: it builds and
-    /// reserves nothing. `None` where the call raises or must decode first.
+    /// looks it up ([`Self::entry`]).
     fn member(&self, table: Table, target: Value, key: Value) -> Option<Value> {
+        Some(Value::Bool(self.entry(table, target, key)?.is_some()))
+    }
+
+    /// `target`'s entry under `key`, looked up as `<table>.contains`'s call
+    /// looks it up, through the same views, without its call: it builds and
+    /// reserves nothing. `Some(None)` where the table holds no `key`, and a
+    /// set's member is `true`, as `target[key]` reads them; `None` where
+    /// the call raises or must decode first.
+    fn entry(&self, table: Table, target: Value, key: Value) -> Option<Option<Value>> {
         if !matches!(
             (table, target),
             (Table::Map, Value::Map(_))
@@ -357,7 +365,11 @@ impl Cx<'_> {
             Table::Record => {}
             Table::Map | Table::Set => legal_key(&args, &key)?,
         }
-        Some(Value::Bool(args.lookup(view, &key).ok()?.is_some()))
+        let found = args.lookup(view, &key).ok()?;
+        Some(found.map(|value| match table {
+            Table::Set => Value::Bool(true),
+            Table::Map | Table::Record => *value,
+        }))
     }
 
     /// `call` on a window holding `values`, released after it.
@@ -886,12 +898,12 @@ impl TemplateHeap for HeapCx<'_, '_> {
         Some(Value::Int(length as i64))
     }
 
-    /// Looks the key up as the native's call does ([`Cx::member`]).
-    fn contains(&mut self, table: Table, target: Value, key: Value) -> Option<Value> {
+    /// Looks the key up once, as the native's call does ([`Cx::entry`]).
+    fn lookup(&mut self, table: Table, target: Value, key: Value) -> Option<Option<Value>> {
         if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
-        self.cx.member(table, target, key)
+        self.cx.entry(table, target, key)
     }
 }
 

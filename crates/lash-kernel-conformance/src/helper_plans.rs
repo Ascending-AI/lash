@@ -1280,6 +1280,24 @@ pub(crate) fn text_accumulator_programs() -> Vec<(runner::Case, Program)> {
     region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
 }
 
+/// FIG-6846: subscripts that look their key up once per level, at keys
+/// found, missing and normalized, in dicts nested in dicts, and f-strings
+/// built by concatenation, with conversions, format specifications and a
+/// long text among their parts.
+pub(crate) fn subscript_and_fstring_programs() -> Vec<(runner::Case, Program)> {
+    let python = [
+        (
+            "nested subscripts",
+            "def build():\n    tree = {\"level\": {\"rows\": [[0], [1], [2]], \"counters\": {\"c\": 0, 1: 10, None: 20}}}\n    for n in range(9):\n        tree[\"level\"][\"rows\"][n % 3] = [n]\n        tree[\"level\"][\"counters\"][\"c\"] = tree[\"level\"][\"counters\"][\"c\"] + 1\n    found = []\n    for key in [\"c\", 1, 1.0, True, None, \"gone\", 2]:\n        try:\n            found.append(tree[\"level\"][\"counters\"][key])\n        except KeyError as error:\n            found.append(str(error))\n    return [tree, found]\nresult = build()\n",
+        ),
+        (
+            "f-strings",
+            "def build():\n    counts = {}\n    for n in range(9):\n        key = f\"key_{n % 4}\"\n        counts[key] = counts.get(key, 0) + n\n    long = \"a-long-text-past-the-inline-limit\"\n    lines = []\n    for n in range(3):\n        lines.append(f\"<{n:>3}|{long!r}|{n / 4:.2f}|{long}{n}>\")\n    return [counts, lines]\nresult = build()\n",
+        ),
+    ];
+    region_programs(&[("python", &python[..])])
+}
+
 /// Each dialect's `(name, source)` programs, lowered.
 fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     let mut programs = Vec::new();

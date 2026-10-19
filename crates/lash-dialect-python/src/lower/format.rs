@@ -150,42 +150,51 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn fstring(&mut self, fstring: &ast::ExprFString) -> Lowering<Operand> {
-        // Each part is a literal or is bound where it is formatted, so the
-        // parts are joined from values no later field can change.
+        let elements = || {
+            fstring.value.iter().flat_map(|part| match part {
+                ast::FStringPart::Literal(literal) => vec![Err(&*literal.value)],
+                ast::FStringPart::FString(inner) => inner
+                    .elements
+                    .iter()
+                    .map(|element| match element {
+                        ast::InterpolatedStringElement::Literal(literal) => Err(&*literal.value),
+                        ast::InterpolatedStringElement::Interpolation(field) => Ok(field),
+                    })
+                    .collect(),
+            })
+        };
+        // Python formats every field before it builds the text: with more
+        // than one field, each is bound where it is formatted, so no
+        // concatenation runs before a later field and no later field's
+        // statements change an earlier one.
+        let pinned = elements().filter(Result::is_ok).count() > 1;
         let mut parts: Vec<Expr> = Vec::new();
-        for part in &fstring.value {
-            match part {
-                ast::FStringPart::Literal(literal) => {
-                    parts.push(Expr::Literal(Literal::Text(literal.value.to_string())));
+        for element in elements() {
+            match (element, parts.last_mut()) {
+                (Err(literal), Some(Expr::Literal(Literal::Text(text)))) => {
+                    text.push_str(literal);
                 }
-                ast::FStringPart::FString(inner) => {
-                    for element in &*inner.elements {
-                        match element {
-                            ast::InterpolatedStringElement::Literal(literal) => {
-                                parts.push(Expr::Literal(Literal::Text(literal.value.to_string())));
-                            }
-                            ast::InterpolatedStringElement::Interpolation(field) => {
-                                let shown = self.field(field)?;
-                                parts.push(shown.expr);
-                            }
-                        }
-                    }
+                (Err(literal), _) => parts.push(Expr::Literal(Literal::Text(literal.to_string()))),
+                (Ok(field), _) => {
+                    let shown = self.field(field)?;
+                    let shown = if pinned { self.pin(shown) } else { shown };
+                    parts.push(shown.expr);
                 }
             }
         }
-        if let [Expr::Literal(Literal::Text(text))] = parts.as_slice() {
-            return Ok(Operand::text(text.clone()));
-        }
-        if parts.is_empty() {
-            return Ok(Operand::text(""));
-        }
-        let joined = self.native(
-            "text.join",
-            vec![
-                Expr::List(parts),
-                Expr::Literal(Literal::Text(String::new())),
-            ],
-        )?;
+        // Every part is a text: they are concatenated in order, with no
+        // list to build and no general join (FIG-6846).
+        let mut parts = parts.into_iter();
+        let joined = match parts.next() {
+            None => return Ok(Operand::text("")),
+            Some(Expr::Literal(Literal::Text(text))) if parts.len() == 0 => {
+                return Ok(Operand::text(text));
+            }
+            Some(first) => first,
+        };
+        let joined = parts.try_fold(joined, |joined, part| {
+            self.native("text.concat", vec![joined, part])
+        })?;
         Ok(Operand::inline(joined, Ty::Str))
     }
 

@@ -100,7 +100,7 @@ pub struct HelperTemplate {
 /// one write, if it writes: a path that declines has written nothing. Its
 /// immediate calls use the template's resolved prepared natives
 /// ([`HelperTemplate::callees`]), its collection lengths and membership
-/// tests [`TemplateHeap::len`] and [`TemplateHeap::contains`] (FIG-6815),
+/// tests [`TemplateHeap::len`] and [`TemplateHeap::lookup`] (FIG-6815),
 /// its other calls the general call of `callees`.
 #[derive(Debug)]
 pub struct HeapTemplate {
@@ -125,7 +125,8 @@ pub trait TemplateHeap {
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value>;
     /// The body's variable declared with `value`, or assigned it over
     /// `previous`: the memory the plan's variable grows by, held as the
-    /// plan holds it once the path answers.
+    /// plan holds it once the path answers. A path binds no immediate,
+    /// which grows nothing the arena holds.
     fn bind(&mut self, value: Value, previous: Option<Value>) -> Option<()>;
     /// An alternative path begins: what an earlier one declared is not its.
     fn path(&mut self);
@@ -140,8 +141,11 @@ pub trait TemplateHeap {
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()>;
     /// `<collection>.len(target)`, as the native answers it.
     fn len(&mut self, collection: Collection, target: Value) -> Option<Value>;
-    /// `<table>.contains(target, key)`, as the native answers it.
-    fn contains(&mut self, table: Table, target: Value, key: Value) -> Option<Value>;
+    /// `<table>.contains(target, key)`, as the native answers it, and the
+    /// entry `target[key]` reads where it holds, from one probe of the
+    /// table (FIG-6846): `Some(None)` where the table holds no `key`. A
+    /// set's member reads as `true`.
+    fn lookup(&mut self, table: Table, target: Value, key: Value) -> Option<Option<Value>>;
 }
 
 /// The collection a heap path's length read names: `list.len` reads a
