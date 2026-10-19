@@ -215,6 +215,9 @@ impl<'call> Args<'call> {
         match value {
             Value::Text(short) => Ok(Some(TextView::Short(short))),
             Value::LongText(object) => match self.body(*object)? {
+                Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
+                    "a text whose storage moved was read",
+                )),
                 Body::LongText(text) => Ok(Some(TextView::Long {
                     object: *object,
                     text,

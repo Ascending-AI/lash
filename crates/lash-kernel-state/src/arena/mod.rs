@@ -49,6 +49,7 @@ mod keys;
 mod ops;
 mod reach;
 mod tables;
+mod texts;
 
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
@@ -625,7 +626,7 @@ impl Arena {
         }
     }
 
-    fn long_text(&mut self, text: Box<str>) -> ArenaHandle {
+    fn long_text(&mut self, text: String) -> ArenaHandle {
         self.insert(Body::LongText(resident_text(text)), Facts::default())
     }
 
@@ -1307,7 +1308,7 @@ pub enum Raise {
     TooDeep,
 }
 
-fn resident_text(text: Box<str>) -> LongText {
+fn resident_text(text: String) -> LongText {
     LongText {
         summary: text_summary(&text),
         chunks: Box::new([Chunk::Resident(text)]),

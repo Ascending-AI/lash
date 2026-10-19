@@ -92,6 +92,28 @@ pub(crate) struct Cx<'a> {
     /// The running statement's guest call ran: its value, or `None` where
     /// its island stopped. The statement stands in its call from then on.
     pub(crate) called: Option<Option<Value>>,
+    /// The running statement is a linear text accumulator's
+    /// (`CompiledStep::Write::accumulates`) whose slot holds a long text.
+    pub(crate) accumulator: Option<Accumulator>,
+}
+
+/// A running accumulator statement's text (FIG-6795): the long text its
+/// slot holds, whether that text's storage may move, and what the
+/// statement's concatenation of it made.
+pub(crate) struct Accumulator {
+    pub(crate) left: ArenaHandle,
+    /// The accumulator made `left` and no older version of it is
+    /// observable: a concatenation of it may take its storage.
+    pub(crate) owned: bool,
+    pub(crate) made: Option<Made>,
+}
+
+/// What an accumulator statement's concatenation made: a fresh long text
+/// and, where it took its operand's storage, the length that operand had.
+#[derive(Clone, Copy)]
+pub(crate) struct Made {
+    pub(crate) text: ArenaHandle,
+    pub(crate) moved: Option<usize>,
 }
 
 impl Cx<'_> {
@@ -267,6 +289,12 @@ impl Cx<'_> {
             Some(limit) => Some(self.formula(limit, &self.args[args.clone()], None)?),
             None => None,
         };
+        let accumulating = self.accumulating(function, &args);
+        if accumulating == Some(true)
+            && let Some(extended) = self.extended(args.clone())
+        {
+            return extended;
+        }
         let mut counter = WorkCounter::new(limit);
         let (value, held, new) = {
             let semantics = self.arena.semantics().with_limits(self.limits);
@@ -297,7 +325,93 @@ impl Cx<'_> {
         if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
             return None;
         }
+        if accumulating.is_some()
+            && let (Some(accumulator), Value::LongText(text)) = (&mut self.accumulator, value)
+        {
+            accumulator.made = Some(Made { text, moved: None });
+        }
         Some(value)
+    }
+
+    /// Whether native `function`, called on `args`, is
+    /// the running accumulator statement's concatenation of its text, and
+    /// if so whether that text's storage may move.
+    #[inline]
+    fn accumulating(&self, function: &Lib, args: &Range<usize>) -> Option<bool> {
+        let accumulator = self.accumulator.as_ref()?;
+        (accumulator.made.is_none()
+            && matches!(self.args[args.clone()].first(), Some(Value::LongText(left)) if *left == accumulator.left)
+            && function.definition.name.as_str() == "text.concat")
+            .then_some(accumulator.owned)
+    }
+
+    /// `text.concat` of the accumulator's text and the text after it, in
+    /// the storage the accumulator's text gives (FIG-6795), admitted as
+    /// the native's call is and its storage's growth before it grows:
+    /// `Some(None)` where the room refuses, as the native's call misses;
+    /// `None`, having changed nothing, where the operand is not a resident
+    /// text, for the native's call to answer.
+    fn extended(&mut self, args: Range<usize>) -> Option<Option<Value>> {
+        let (Some(&Value::LongText(from)), Some(&right)) = (
+            self.args[args.clone()].first(),
+            self.args[args.clone()].get(1),
+        ) else {
+            return None;
+        };
+        let short;
+        let long;
+        let part = match right {
+            Value::Text(text) => {
+                short = text;
+                short.as_str()
+            }
+            Value::LongText(_) => {
+                let semantics = self.arena.semantics().with_limits(self.limits);
+                let view = Args::new(&self.args[args.clone()], self.arena.objects(), &semantics);
+                long = view.text(&right).ok()??.as_str()?.to_owned();
+                &long
+            }
+            _ => return None,
+        };
+        let bytes = self.arena.body(from).ok().and_then(|body| match body {
+            lash_kernel_doc::arena::Body::LongText(text) => Some(text.summary.utf8_bytes),
+            _ => None,
+        })?;
+        let len = bytes.checked_add(part.len() as u64)?;
+        let free = self.free();
+        let held = if self.memory {
+            // The native holds its result's bytes as its work and builds
+            // the result: both must fit the room.
+            let bound = self.arena.text_install_bound(len).checked_add(len)?;
+            if bound > free {
+                return Some(None);
+            }
+            len
+        } else {
+            0
+        };
+        let memory = self.memory;
+        let (text, moved) = self
+            .arena
+            .extend_text(from, part, |grown| !memory || grown <= free)?;
+        self.transient += held;
+        if let Some(accumulator) = &mut self.accumulator {
+            accumulator.made = Some(Made {
+                text,
+                moved: Some(moved),
+            });
+        }
+        Some(Some(Value::LongText(text)))
+    }
+
+    /// Whether the running accumulator statement's concatenation answered:
+    /// a heap path reads and builds nothing after it, so that the text it
+    /// made is the statement's value and nothing else holds it.
+    #[inline]
+    fn concatenated(&self) -> bool {
+        self.accumulator
+            .as_ref()
+            .is_some_and(|accumulator| accumulator.made.is_some())
     }
 
     /// Operator `function`'s call on `args`: its prepared entry, charged
@@ -480,7 +594,7 @@ impl<'c, 'a> HeapCx<'c, 'a> {
 
 impl TemplateHeap for HeapCx<'_, '_> {
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {
-        if self.cx.held.is_some() {
+        if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
         let exe = self.cx.exe;
@@ -511,7 +625,7 @@ impl TemplateHeap for HeapCx<'_, '_> {
     fn bind(&mut self, _value: Value, _previous: Option<Value>) -> Option<()> {
         // A plan variable is a register: the capacity meter counts no
         // value it holds again.
-        self.cx.held.is_none().then_some(())
+        (self.cx.held.is_none() && !self.cx.concatenated()).then_some(())
     }
 
     fn path(&mut self) {
@@ -519,14 +633,14 @@ impl TemplateHeap for HeapCx<'_, '_> {
     }
 
     fn index(&mut self, target: Value, index: Value) -> Option<Value> {
-        if self.cx.held.is_some() {
+        if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
         read_index(self.cx, None, target, index)
     }
 
     fn field(&mut self, target: Value, field: &str) -> Option<Value> {
-        if self.cx.held.is_some() {
+        if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
         match target {
@@ -542,7 +656,7 @@ impl TemplateHeap for HeapCx<'_, '_> {
     }
 
     fn tuple(&mut self, items: &[Value]) -> Option<Value> {
-        if self.cx.held.is_some() {
+        if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
         self.grown(|paths| {
@@ -558,7 +672,7 @@ impl TemplateHeap for HeapCx<'_, '_> {
     /// Checks the write as the reference's member write does and holds it
     /// until the statement commits.
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()> {
-        if self.cx.held.is_some() {
+        if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
         let (write, bound) = prepare(self.cx, &Place::Index, target, index, value)?;

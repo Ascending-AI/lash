@@ -444,6 +444,27 @@ on (`.kiln/FIG-6741/check/`).
   each allocating program unsliced and under two slices, with memory
   accounted and off, and requires the memory counter to equal the
   reference's at every slice return and at the end.
+- **Linear text accumulators (FIG-6795).** Lowering marks a write
+  `set s = f(s, x)` of an allocating plan whose first operand is the plan's
+  only read of `s` and which makes no guest call: no statement of the plan
+  observes the value the write replaces. While the region runs, the long
+  text such a statement's own `text.concat` made and wrote is the slot's
+  token. The next `text.concat` of a token text that no member holds and no
+  projection saw takes its storage: it appends the part into the storage's
+  spare capacity, doubling it when it runs out, and makes a new text there;
+  growth is admitted against the room before it grows, as well as what the
+  native's call admits. The old text keeps its summary, so the meter and
+  every formula read it as before, and a read of its bytes is refused as
+  malformed. A heap path reads and builds nothing after that concatenation,
+  and a statement that misses after it gives the storage back. Every
+  concatenation still makes its own text and charges its own formula; the
+  token is process-local and dies with the region's run, and projection
+  seals only the bytes. The law
+  `tests::regions::linear_text_accumulators_agree_with_the_reference`
+  runs accumulators of the kernel and both dialects, and an aliased-prefix
+  control, whose first text another variable holds and whose older
+  versions a variable and a list keep, as the two laws above run
+  allocating programs.
 
 ### 3.6 Session bindings (R6)
 

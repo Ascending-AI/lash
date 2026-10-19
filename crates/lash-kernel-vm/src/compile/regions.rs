@@ -51,13 +51,14 @@ use lash_kernel_doc::FunctionId;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 
+mod accumulators;
 mod cx;
 mod nodes;
 mod verify;
 
-pub(crate) use cx::{Cx, Guests, measured_formula};
+pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Hook, Meter, Place, Role,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Hook, Meter, Node, Place, Role,
     SessionSlot, Taken, position, scalar, store,
 };
 
@@ -1719,7 +1720,7 @@ impl LoopPlan {
                 };
                 Some(CompiledLoop {
                     head,
-                    body: compile_body(stream, &libs, &self.body)?,
+                    body: compile_body(stream, &libs, self, &self.body)?,
                 })
             })
             .as_ref()
@@ -1776,8 +1777,13 @@ fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
     }
 }
 
-/// `body`'s statements, compiled.
-fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<CompiledBody> {
+/// `body`'s statements, compiled; `plan` is the loop's.
+fn compile_body(
+    stream: &Stream,
+    libs: &Libs<'_>,
+    plan: &LoopPlan,
+    body: &Body,
+) -> Option<CompiledBody> {
     let steps = body
         .steps
         .iter()
@@ -1788,6 +1794,7 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
                         value: value(stream, libs, summary)?,
                         at,
                         commit: summary.into(),
+                        accumulates: accumulators::accumulates(libs, plan, summary, at),
                     },
                     RegionSlot::Session(at) => CompiledStep::Session {
                         value: value(stream, libs, summary)?,
@@ -1810,8 +1817,8 @@ fn compile_body(stream: &Stream, libs: &Libs<'_>, body: &Body) -> Option<Compile
                 } => CompiledStep::If {
                     condition: value(stream, libs, test)?,
                     commit: test.into(),
-                    then: compile_body(stream, libs, then)?,
-                    otherwise: compile_body(stream, libs, otherwise)?,
+                    then: compile_body(stream, libs, plan, then)?,
+                    otherwise: compile_body(stream, libs, plan, otherwise)?,
                 },
                 Step::Continue(summary) => CompiledStep::Continue(summary.into()),
                 Step::Store(summary) => {

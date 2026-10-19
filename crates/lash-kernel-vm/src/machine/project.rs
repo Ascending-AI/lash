@@ -123,7 +123,7 @@ fn resident_text(text: &str) -> TextRef {
 fn whole_text(text: &LongText) -> Result<&str, HeapFault> {
     match &*text.chunks {
         [Chunk::Resident(text)] => Ok(text),
-        [] => Ok(""),
+        [] if !text.moved() => Ok(""),
         _ => Err(malformed("a long text with no page form is not resident")),
     }
 }
@@ -243,7 +243,7 @@ pub(crate) fn admit(
                 None => Value::LongFunction(arena.immutable(
                     Body::LongFunction(LongText {
                         summary: text.summary,
-                        chunks: Box::new([Chunk::Resident(Box::from(&*name))]),
+                        chunks: Box::new([Chunk::Resident(String::from(&*name))]),
                     }),
                     Summary::default(),
                     Some(value.clone()),
@@ -342,7 +342,7 @@ fn admit_text(arena: &mut Arena, text: &TextRef, page: &PageValue) -> Result<Val
             None => Value::LongText(arena.immutable(
                 Body::LongText(LongText {
                     summary: text.summary,
-                    chunks: Box::new([Chunk::Resident(Box::from(&**held))]),
+                    chunks: Box::new([Chunk::Resident(String::from(&**held))]),
                 }),
                 Summary::default(),
                 Some(page.clone()),
@@ -613,7 +613,7 @@ fn warm_immutable(
     let body = match (arena.body(handle).map_err(arena_fault)?, page) {
         (Body::LongText(text), PageValue::Text(paged)) => Body::LongText(LongText {
             summary: text.summary,
-            chunks: Box::new([Chunk::Resident(Box::from(&*page_reads::text(
+            chunks: Box::new([Chunk::Resident(String::from(&*page_reads::text(
                 pages, paged,
             )?))]),
         }),

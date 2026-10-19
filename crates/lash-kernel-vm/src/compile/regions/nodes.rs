@@ -182,10 +182,13 @@ pub(crate) struct CompiledBody {
 }
 
 pub(crate) enum CompiledStep {
+    /// `set` of an unshared slot: a linear text accumulator's when
+    /// `accumulates` (`accumulators::accumulates`).
     Write {
         value: Node,
         at: u32,
         commit: Commit,
+        accumulates: bool,
     },
     Bind {
         value: Node,

@@ -1192,13 +1192,45 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "function build(n) {\n  const rows = [[0], [1], [2]];\n  for (let i = 0; i < n; i++) {\n    rows[i % 3] = [i];\n  }\n  return rows;\n}\nconst result = build(9);\nconst call = build;\ncall(2);\n",
         ),
     ];
+    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+}
+
+/// FIG-6795: a linear text accumulator by `+` and by `+=`, the second's
+/// first text another variable's, and the aliased-prefix control, which
+/// keeps every older version, in each dialect.
+pub(crate) fn text_accumulator_programs() -> Vec<(runner::Case, Program)> {
+    let python = [
+        (
+            "text accumulated",
+            "def build():\n    text = \"\"\n    parts = []\n    for n in range(8):\n        part = \"row-\" + str(n)\n        text = text + part\n        parts.append(part)\n    more = text\n    for n in range(3):\n        more += str(n)\n    return [text, \"|\".join(parts), more]\nresult = build()\n",
+        ),
+        (
+            "text accumulated with older versions kept",
+            "def build():\n    text = \"a prefix past the inline limit\"\n    kept = []\n    for n in range(6):\n        text = text + str(n)\n        kept.append(text)\n    return kept\nresult = build()\n",
+        ),
+    ];
+    let typescript = [
+        (
+            "text accumulated",
+            "function build(n) {\n  let text = \"\";\n  const parts = [];\n  for (let i = 0; i < n; i++) {\n    const part = \"row-\" + String(i);\n    text = text + part;\n    parts.push(part);\n  }\n  let more = text;\n  for (let i = 0; i < 3; i++) {\n    more += String(i);\n  }\n  return [text, parts.join(\"|\"), more];\n}\nconst result = build(8);\nconst call = build;\ncall(2);\n",
+        ),
+        (
+            "text accumulated with older versions kept",
+            "function build(n) {\n  let text = \"a prefix past the inline limit\";\n  const kept = [];\n  for (let i = 0; i < n; i++) {\n    text = text + String(i);\n    kept.push(text);\n  }\n  return kept;\n}\nconst result = build(6);\nconst call = build;\ncall(2);\n",
+        ),
+    ];
+    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+}
+
+/// Each dialect's `(name, source)` programs, lowered.
+fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     let mut programs = Vec::new();
-    for (dialect, sources) in [("python", &python[..]), ("typescript", &typescript[..])] {
+    for (dialect, sources) in groups {
         let runner = runner::Runner::new(dialect).unwrap();
-        for (name, source) in sources {
+        for (name, source) in *sources {
             let case = runner::Case {
                 id: format!("{dialect} region: {name}"),
-                dialect: dialect.into(),
+                dialect: (*dialect).into(),
                 source: (*source).into(),
                 bits: 0,
                 stride: 0,

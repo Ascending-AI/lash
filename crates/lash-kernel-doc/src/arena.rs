@@ -510,11 +510,21 @@ impl Table {
 /// scalar boundaries. A text on payload pages starts as one cold chunk of
 /// its whole payload; decoding a chunk that names an index page gives one
 /// cold chunk per child, and one that names a leaf gives its text, so a
-/// read decodes only the leaves it reaches and their index path.
+/// read decodes only the leaves it reaches and their index path. A text a
+/// region's accumulator built holds spare capacity past its bytes, which
+/// the next concatenation of it grows into (FIG-6795).
 #[derive(Debug)]
 pub struct LongText {
     pub summary: TextSummary,
-    pub chunks: Box<[Chunk<Box<str>>]>,
+    pub chunks: Box<[Chunk<String>]>,
+}
+
+impl LongText {
+    /// Whether a concatenation took the text's storage: it keeps its
+    /// summary and holds no chunk, and nothing may read its bytes.
+    pub fn moved(&self) -> bool {
+        self.chunks.is_empty() && self.summary.utf8_bytes != 0
+    }
 }
 
 /// Bytes, in chunks.

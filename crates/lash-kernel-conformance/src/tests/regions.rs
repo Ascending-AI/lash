@@ -280,6 +280,24 @@ const ALLOCATING: &[(&str, &str)] = &[
     ),
 ];
 
+/// FIG-6795: a linear text accumulator, whose concatenations take the
+/// storage of the text the one before made; and the aliased-prefix
+/// control, whose accumulator's first text is also another variable's,
+/// and whose second loop keeps every older version in a variable before
+/// it keeps it in a list.
+const ACCUMULATORS: &[(&str, &str)] = &[
+    (
+        "a text accumulated by concatenation, no older version of it observed",
+        "fn build(n) { let i = 0 let s = text.concat(\"a text past the inline\", \" limit\") while num.lt(i, n) { set s = text.concat(s, text.concat(\"-row-\", num.to_text(i))) set i = num.add(i, 1) } return s }\n\
+         main { let r = call build(12) finish r }",
+    ),
+    (
+        "a text accumulated over a prefix another variable holds, then with its older versions kept",
+        "fn build(n) { let i = 0 let start = text.concat(\"a prefix past the inline\", \" limit\") let s = start while num.lt(i, n) { set s = text.concat(s, num.to_text(i)) set i = num.add(i, 1) } let kept = [] let prev = s let j = 0 while num.lt(j, n) { set prev = s set s = text.concat(s, num.to_text(j)) set kept[list.len(kept)] = prev set j = num.add(j, 1) } return (start, s, kept) }\n\
+         main { let r = call build(9) finish r }",
+    ),
+];
+
 /// Top-level programs (`docs/design/kernel-regions.md` §6): their
 /// variables are session bindings, which a region holds as slots between
 /// boundaries. Each names what it reaches, and whether it parks on a
@@ -1280,6 +1298,87 @@ fn allocating_regions_hold_what_the_reference_holds() {
         "allocating regions hold what the reference holds: programs={} paired runs={}",
         ALLOCATING.len() + dialect.len(),
         (ALLOCATING.len() + dialect.len()) * 6
+    );
+}
+
+/// FIG-6795: linear text accumulators make the run the reference makes
+/// (PLAN-INDEP, as [`regions_on_and_off_agree`] states it) and hold what it
+/// holds (as [`allocating_regions_hold_what_the_reference_holds`] does),
+/// in the kernel's own programs and in both dialects'. A concatenation
+/// that took the storage of a text an older version still observes, or
+/// gave it back wrong, makes a run read a moved text or disagree. Its own
+/// law, so that the shards keep their work.
+#[test]
+fn linear_text_accumulators_agree_with_the_reference() {
+    let began = std::time::Instant::now();
+    let registry = Arc::new(super::corpus_registry());
+    let kernel = (
+        prepare_with_layout(Arc::clone(&registry), Layout(ON)),
+        prepare_with_layout(Arc::clone(&registry), Layout(OFF)),
+    );
+    let mut cases: Vec<(Case, PreparedLibrary, PreparedLibrary)> = ACCUMULATORS
+        .iter()
+        .map(|(name, text)| {
+            (
+                program_case(name, text, 16),
+                kernel.0.clone(),
+                kernel.1.clone(),
+            )
+        })
+        .collect();
+    for (lowered, program) in crate::helper_plans::text_accumulator_programs() {
+        let registry = program.library.registry();
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        cases.push((
+            case,
+            prepare_with_layout(Arc::clone(registry), Layout(ON)),
+            prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+        ));
+    }
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (case, on, off) in &cases {
+        let plans = formed_alike(on, off, case);
+        assert!(plans.0 > 0, "{}: no loop region forms", case.name);
+        let work = check(on, off, case, &mut counts, &mut failures);
+        ran(&case.name, plans, work, &mut failures);
+        let mut unaccounted = case.clone();
+        unaccounted.name = format!("{} (memory off)", case.name);
+        unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
+        check(on, off, &unaccounted, &mut counts, &mut failures);
+        let mut tight = case.clone();
+        tight.name = format!("{} (memory {TIGHT})", case.name);
+        tight.environment.bounds.memory = TIGHT;
+        check(on, off, &tight, &mut counts, &mut failures);
+        let program = case_program(on, case).expect("an accumulator program is admitted");
+        let reference = Program {
+            library: off.clone(),
+            ..program.clone()
+        };
+        for memory_meter in [
+            lash_kernel_vm::MemoryMeter::On,
+            lash_kernel_vm::MemoryMeter::Off,
+        ] {
+            let mut metered = case.clone();
+            metered.environment.bounds.memory_meter = memory_meter;
+            for slice in [7, 50, u64::MAX] {
+                assert_eq!(
+                    finished::<ON>(&program, &metered, slice),
+                    finished::<OFF>(&reference, &metered, slice),
+                    "{}, memory {memory_meter:?}, slice {slice}",
+                    case.name
+                );
+            }
+        }
+    }
+    counts.report(0, "text-accumulators", began);
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
     );
 }
 

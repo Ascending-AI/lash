@@ -116,6 +116,7 @@ fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
         counters: None,
         guests: None,
         called: None,
+        accumulator: None,
     };
     let answer = allocated_during(|| value(&[], &mut cx));
     assert!(cx.fault.is_none(), "the statement met no fault");

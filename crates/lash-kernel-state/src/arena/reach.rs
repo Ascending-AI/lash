@@ -63,6 +63,13 @@ impl Arena {
         })
     }
 
+    /// What [`Self::install_bound`] gives for a new long text of `bytes`
+    /// UTF-8 bytes.
+    #[inline]
+    pub fn text_install_bound(&self, bytes: u64) -> u64 {
+        body_bytes(bytes / 16)
+    }
+
     /// No more than [`Self::install_bound`] gives for a new list, set, map
     /// or record of `members` members (a map's or a record's entries), nor
     /// than a new tuple of `members` members: what a region admits before

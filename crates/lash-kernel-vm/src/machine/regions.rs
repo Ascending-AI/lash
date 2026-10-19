@@ -42,9 +42,9 @@ use super::loops::{Cursor, Guard, Header, counted};
 use super::ops::Flow;
 use super::{Control, Eval, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
-    Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx, Event,
-    Executable, GuestCall, Hook, Kept, LoopPlan, Meter, NESTING, RegionSlot, Role, SessionSlot,
-    Taken, UNPRODUCTIVE, scalar, store,
+    Accumulator, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx,
+    Event, Executable, GuestCall, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node, RegionSlot,
+    Role, SessionSlot, Taken, UNPRODUCTIVE, scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -128,6 +128,9 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// A `for`'s step missed in its `item` or `check` hook, before its
     /// iteration's first body statement.
     head_missed: bool,
+    /// Each accumulator slot whose long text its own statement made while
+    /// the region ran, which no older version observes (FIG-6795).
+    texts: Vec<(u32, ArenaHandle)>,
 }
 
 impl KernelMachine {
@@ -351,6 +354,7 @@ impl KernelMachine {
                 counters: INVOKES.then_some(&mut state.counters),
                 guests: Some(&mut guests),
                 called: None,
+                accumulator: None,
             },
             tape,
             admit: Admit {
@@ -365,6 +369,7 @@ impl KernelMachine {
             declined: false,
             progressed: false,
             head_missed: false,
+            texts: Vec::new(),
         };
         let batch = run.batch(plan, compiled, walk.as_mut(), bound, slice_end);
         // The region's charge is the machine's, however its batch ended.
@@ -716,10 +721,21 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 false
             } else {
                 match step {
-                    CompiledStep::Write { value, at, commit } => {
+                    CompiledStep::Write {
+                        value,
+                        at,
+                        commit,
+                        accumulates: false,
+                    } => {
                         let value = value(self.frame.slot_states(), &mut self.cx);
                         self.write(value, *at, commit)?
                     }
+                    CompiledStep::Write {
+                        value,
+                        at,
+                        commit,
+                        accumulates: true,
+                    } => self.accumulate(value, *at, commit)?,
                     CompiledStep::Bind { value, at, commit } => {
                         let value = value(self.frame.slot_states(), &mut self.cx);
                         self.bind(value, *at, commit)?
@@ -830,6 +846,49 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         self.frame.set_slot(at, SlotState::Value(value));
         self.commit(commit)?;
         Ok(true)
+    }
+
+    /// Runs linear text accumulator `value`, a write of the slot at `at`
+    /// (FIG-6795). Where the slot holds a long text this statement made
+    /// that no member holds and no projection saw, its concatenation may
+    /// take that text's storage. A statement that misses after it did
+    /// gives the storage back, so the reference runs it over the text it
+    /// read. One that writes the text its concatenation made leaves that
+    /// text to the slot's next concatenation.
+    fn accumulate(&mut self, value: &Node, at: u32, commit: &Commit) -> Result<bool, Halt> {
+        let left = match self.frame.slot(at) {
+            SlotState::Value(Value::LongText(text)) => Some(*text),
+            _ => None,
+        };
+        let owned = left
+            .is_some_and(|text| self.texts.contains(&(at, text)) && self.cx.arena.extensible(text));
+        self.texts.retain(|(slot, _)| *slot != at);
+        self.cx.accumulator = left.map(|left| Accumulator {
+            left,
+            owned,
+            made: None,
+        });
+        let value = value(self.frame.slot_states(), &mut self.cx);
+        let made = self
+            .cx
+            .accumulator
+            .take()
+            .and_then(|accumulator| accumulator.made);
+        let fresh =
+            matches!((value, made), (Some(Value::LongText(text)), Some(made)) if text == made.text);
+        // Storage a concatenation took belongs to the value it made, or
+        // goes back: the statement misses.
+        let moved = made.and_then(|made| made.moved.map(|len| (made.text, len)));
+        let value = value.filter(|_| fresh || moved.is_none());
+        let ran = self.write(value, at, commit)?;
+        match (made, moved, left) {
+            (Some(Made { text, .. }), _, _) if ran && fresh => self.texts.push((at, text)),
+            (_, Some((text, len)), Some(left)) if !ran => {
+                self.cx.arena.unextend_text(left, text, len);
+            }
+            _ => {}
+        }
+        Ok(ran)
     }
 
     /// Assigns `value`, the statement's, to the session slot at `at`, which

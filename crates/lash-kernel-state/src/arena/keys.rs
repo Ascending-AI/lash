@@ -97,6 +97,9 @@ pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str
     match value {
         Value::Text(short) | Value::Function(short) => Ok(short.as_str()),
         Value::LongText(handle) | Value::LongFunction(handle) => match body(objects, *handle)? {
+            Body::LongText(long) if long.moved() => Err(NativeError::Malformed(
+                "a text whose storage moved was read",
+            )),
             Body::LongText(long) | Body::LongFunction(long) => {
                 Ok(whole(*handle, &long.chunks)?.map_or("", |text| text))
             }

@@ -377,9 +377,11 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
   (`Chunk::Cold { page, len }` to `Chunk::Resident`).
 - **Resident chunks own their storage by value** (ruled 2026-10-17, FIG-6708):
   a list's, tuple's, map's, set's or record's values are `Chunks`, and
-  immutable payloads keep boxed exact-size storage. A boxed slice cannot
-  grow, so an append would copy the whole object; amortized O(1) append is
-  required. A whole body (what the run built, or one joined once every chunk
+  immutable payloads keep boxed exact-size storage, except a long text's
+  resident chunk: a `String`, whose spare capacity a region's linear text
+  accumulator grows into (FIG-6795, `docs/design/kernel-regions.md` §3.5).
+  A boxed slice cannot grow, so an append would copy the whole object;
+  amortized O(1) append is required. A whole body (what the run built, or one joined once every chunk
   is resident) holds up to `Chunks::INLINE` (2) values inline, so a fresh
   `[n]` or pair allocates no storage and frees none at release, and is
   otherwise one `Vec<Value>` with no chunk list; only a large object opened
