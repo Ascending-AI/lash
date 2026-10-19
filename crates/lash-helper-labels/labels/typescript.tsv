@@ -4,6 +4,8 @@ ts.array.argument	TypeScript array argument
 ts.array.at	TypeScript array at
 ts.array.bound	TypeScript array bound
 ts.array.callback	TypeScript array callback
+ts.array.callback_slots2	TypeScript array two operand callback
+ts.array.callback_slots3	TypeScript array three operand callback
 ts.array.concat	TypeScript array concat
 ts.array.construct	TypeScript array construct
 ts.array.copyWithin	TypeScript array copyWithin
@@ -12,6 +14,7 @@ ts.array.entries	TypeScript array entries
 ts.array.every	TypeScript array every
 ts.array.fill	TypeScript array fill
 ts.array.filter	TypeScript array filter
+ts.array.filter_slots	TypeScript array filter
 ts.array.find	TypeScript array find
 ts.array.findIndex	TypeScript array findIndex
 ts.array.findLast	TypeScript array findLast
@@ -37,6 +40,7 @@ ts.array.lastIndexOf	TypeScript array lastIndexOf
 ts.array.length	TypeScript array length
 ts.array.length_property	TypeScript array length property
 ts.array.map	TypeScript array map
+ts.array.map_slots	TypeScript array map
 ts.array.match_length	TypeScript array match length
 ts.array.of	TypeScript array of
 ts.array.pop	TypeScript array pop
@@ -55,6 +59,7 @@ ts.array.slice	TypeScript array slice
 ts.array.slice_generic	TypeScript array slice generic
 ts.array.some	TypeScript array some
 ts.array.sort	TypeScript array sort
+ts.array.sort_slots	TypeScript array sort
 ts.array.splice	TypeScript array splice
 ts.array.spread	TypeScript array spread
 ts.array.toLocaleString	TypeScript array toLocaleString

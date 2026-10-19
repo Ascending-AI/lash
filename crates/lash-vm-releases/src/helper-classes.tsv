@@ -124,6 +124,8 @@ ts.array.argument	total
 ts.array.at	operation
 ts.array.bound	operation
 ts.array.callback	total
+ts.array.callback_slots2	operation
+ts.array.callback_slots3	operation
 ts.array.concat	operation
 ts.array.construct	operation
 ts.array.copyWithin	operation
@@ -132,6 +134,7 @@ ts.array.entries	operation
 ts.array.every	operation
 ts.array.fill	operation
 ts.array.filter	operation
+ts.array.filter_slots	operation
 ts.array.find	operation
 ts.array.findIndex	operation
 ts.array.findLast	operation
@@ -157,6 +160,7 @@ ts.array.lastIndexOf	operation
 ts.array.length	operation
 ts.array.length_property	total
 ts.array.map	operation
+ts.array.map_slots	operation
 ts.array.match_length	total
 ts.array.of	total
 ts.array.pop	operation
@@ -175,6 +179,7 @@ ts.array.slice	operation
 ts.array.slice_generic	operation
 ts.array.some	operation
 ts.array.sort	operation
+ts.array.sort_slots	operation
 ts.array.splice	operation
 ts.array.spread	body
 ts.array.toLocaleString	total

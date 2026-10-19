@@ -315,18 +315,18 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    /// A packed exported entry normalizes arguments into one positional body.
-    /// The body is a private captured closure, which saved-function freezing
-    /// includes as an unnamed helper rather than a second exported function.
-    pub(super) fn positional_closure(
+    /// A fixed callback's body takes the helper's operands directly. Extra
+    /// helper operands have named unused slots so island calls need no adapter;
+    /// missing source parameters are filled with absent by the kernel call.
+    pub(super) fn callback_closure(
         &mut self,
         function: &ast::Function,
-        entry: &super::Positional,
-    ) -> Lowering<Operand> {
+        arity: usize,
+    ) -> Lowering<(Operand, bool)> {
         let this = self.fresh("this");
         let mut params = vec![this.clone()];
         self.functions.push(FunctionFrame {
-            arrow: false,
+            arrow: function.is_arrow,
             async_body: function.is_async,
             this: Some(this),
             args: None,
@@ -356,7 +356,20 @@ impl Lowerer<'_> {
             unreachable!("positional function frame is active");
         };
         let body = body?;
-        let made = self.emit_closure(params, body, None);
+        params.resize_with(params.len().max(arity + 1), || self.fresh("unused"));
+        self.written = Some(self.written(function));
+        Ok((self.emit_closure(params, body, None), frame.context_used))
+    }
+
+    /// A packed exported entry normalizes arguments into one positional body.
+    /// The body is a private captured closure, which saved-function freezing
+    /// includes as an unnamed helper rather than a second exported function.
+    pub(super) fn positional_closure(
+        &mut self,
+        function: &ast::Function,
+        entry: &super::Positional,
+    ) -> Lowering<Operand> {
+        let (made, context_used) = self.callback_closure(function, entry.arity)?;
         self.store(Place::Variable(entry.name.clone()), made);
 
         let this = self.fresh("this");
@@ -384,7 +397,7 @@ impl Lowerer<'_> {
         self.written = Some(self.written(function));
         let start = self.start_adapter(function);
         let closure = self.emit_closure(vec![this, args], body, start);
-        self.set_start_convention(frame.context_used || frame.arguments_used)?;
+        self.set_start_convention(context_used)?;
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),
             ..closure

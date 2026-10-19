@@ -51,6 +51,11 @@ use ts.array.is
 use ts.array.is_array
 use ts.array.callback
 use ts.array.reusable_callback
+use ts.array.callback_slots2
+use ts.array.callback_slots3
+use ts.array.map_slots
+use ts.array.filter_slots
+use ts.array.sort_slots
 use ts.array.bound
 use ts.array.dense
 use ts.array.spread
@@ -256,6 +261,38 @@ body {
     return answer
   }
   return owned
+}
+
+# Array traversal carries operands as slots. Packed callbacks keep one reusable
+# input list; reusable_callback owns any copying required by a foreign callable.
+function ts.array.callback_slots2(input: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let callback = invoke ts.array.reusable_callback(input)
+  let passed = [absent, absent]
+  return fn(context, first, second) {
+    set passed[0] = first
+    set passed[1] = second
+    let output = apply callback(context, passed)
+    return output
+  }
+}
+
+function ts.array.callback_slots3(input: Any, receiver: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let callback = invoke ts.array.reusable_callback(input)
+  let passed = [absent, 0.0, receiver]
+  return fn(context, value, index, source) {
+    set passed[0] = value
+    set passed[1] = index
+    let output = apply callback(context, passed)
+    return output
+  }
 }
 
 function ts.array.bound(value: Any, length: Number, fallback: Number) -> Number
@@ -736,16 +773,11 @@ body {
   return output
 }
 
-function ts.array.map(this: Any, args: List(Any)) -> Any
+function ts.array.map_slots(this: Any, length: Number, context: Any, callback: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, size(this), deep(args), size(result))
+charge sum(8, size(this), deep(context), size(result))
 body {
-  let length = invoke ts.array.length(this)
-  let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.reusable_callback(input)
-  let context = invoke ts.array.argument(args, 1)
-  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     # The result starts as a copy, of the source's length and with its
@@ -756,9 +788,7 @@ body {
     for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) { set output[index] = () } else {
-        set passed[0] = value
-        set passed[1] = index
-        set output[index] = apply callback(context, passed)
+        set output[index] = apply callback(context, value, index, this)
       }
       set index = num.add(index, 1.0)
     }
@@ -775,39 +805,44 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      set passed[0] = value
-      set passed[1] = index
-      set output[index] = apply callback(context, passed)
+      set output[index] = apply callback(context, value, index, this)
     }
     set index = num.add(index, 1.0)
   }
   return output
 }
 
-# filter, forEach, every, some and reduce visit a list with a `for` loop,
-# which reads it live by position as the generic loop does, and skips its
-# holes. A callback that shortens the list ends that loop early; the
-# generic loop then tests the slots that remain, none of them present.
-
-function ts.array.filter(this: Any, args: List(Any)) -> Any
+function ts.array.map(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.reusable_callback(input)
+  let callback = invoke ts.array.callback_slots3(input, this)
   let context = invoke ts.array.argument(args, 1)
-  let passed = [absent, 0.0, this]
+  let output = invoke ts.array.map_slots(this, length, context, callback)
+  return output
+}
+
+
+# filter, forEach, every, some and reduce visit a list with a `for` loop,
+# which reads it live by position as the generic loop does, and skips its
+# holes. A callback that shortens the list ends that loop early; the
+# generic loop then tests the slots that remain, none of them present.
+
+function ts.array.filter_slots(this: Any, length: Number, context: Any, callback: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, size(this), deep(context), size(result))
+body {
   let output = []
   let index = 0.0
   if same(kind(this), "list") {
     for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
-        set passed[0] = value
-        set passed[1] = index
-        let answer = apply callback(context, passed)
+        let answer = apply callback(context, value, index, this)
         if same(answer, true) { set output[list.len(output)] = value } else {
           if same(answer, false) {} else {
             let truth = invoke ts.to_boolean(answer)
@@ -822,9 +857,7 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      set passed[0] = value
-      set passed[1] = index
-      let answer = apply callback(context, passed)
+      let answer = apply callback(context, value, index, this)
       let truth = invoke ts.to_boolean(answer)
       if truth { set output[list.len(output)] = value }
     }
@@ -832,6 +865,20 @@ body {
   }
   return output
 }
+
+function ts.array.filter(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, size(this), deep(args), size(result))
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback_slots3(input, this)
+  let context = invoke ts.array.argument(args, 1)
+  let output = invoke ts.array.filter_slots(this, length, context, callback)
+  return output
+}
+
 
 function ts.array.forEach(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -1473,14 +1520,11 @@ body {
   return output
 }
 
-function ts.array.sort(this: Any, args: List(Any)) -> Any
+function ts.array.sort_slots(this: Any, length: Number, callback: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, size(this), deep(args), size(result))
+charge sum(8, size(this), size(result))
 body {
-  let length = invoke ts.array.length(this)
-  let callback = invoke ts.array.argument(args, 0)
-  if same(callback, absent) {} else { set callback = invoke ts.array.reusable_callback(callback) }
   let values = []
   let undefined_count = 0
   let index = 0.0
@@ -1509,7 +1553,6 @@ body {
     let sorted = values
     let out = []
     let n = list.len(sorted)
-    let passed = [absent, absent]
     let width = 1
     while num.lt(width, n) metered 2 {
       let mid = 0
@@ -1527,9 +1570,9 @@ body {
         let from_right = false
         if num.lt(left, mid) {
           if num.lt(right, end) {
-            set passed[0] = list.get(sorted, left)
-            set passed[1] = list.get(sorted, right)
-            let output = apply callback(absent, passed)
+            let first = list.get(sorted, left)
+            let second = list.get(sorted, right)
+            let output = apply callback(absent, first, second)
             let order = invoke ts.to_number(output)
             if num.lt(0, order) { set from_right = true }
           }
@@ -1565,6 +1608,18 @@ body {
     set index = num.add(index, 1)
   }
   return this
+}
+
+function ts.array.sort(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, size(this), deep(args), size(result))
+body {
+  let length = invoke ts.array.length(this)
+  let callback = invoke ts.array.argument(args, 0)
+  if same(callback, absent) {} else { set callback = invoke ts.array.callback_slots2(callback) }
+  let output = invoke ts.array.sort_slots(this, length, callback)
+  return output
 }
 
 function ts.array.toSorted(this: Any, args: List(Any)) -> Any

@@ -1295,6 +1295,12 @@ impl Lowerer<'_> {
                 ast::CallArg::Spread(_) => None,
             })
             .collect();
+        if let Some(values) = &values
+            && let Some(callback) = values.first()
+            && let Some(result) = self.call_array_callback(object, name, callback, values)?
+        {
+            return Ok(result);
+        }
         if name == "push"
             && let Some(values) = values
         {

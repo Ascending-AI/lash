@@ -1003,6 +1003,16 @@ impl<'a> Collector<'a> {
                 {
                     self.direct_calls.insert(name);
                 }
+                if let Expr::Member {
+                    property: MemberProperty::Field(method),
+                    ..
+                } = callee.as_ref()
+                    && crate::builtins::array_callback(method).is_some()
+                    && args.iter().all(|arg| matches!(arg, CallArg::Value(_)))
+                    && let Some(CallArg::Value(Expr::Ident(name, _))) = args.first()
+                {
+                    self.direct_calls.insert(name);
+                }
                 self.plain.call(callee, args);
                 self.expr(callee);
                 self.args(args);

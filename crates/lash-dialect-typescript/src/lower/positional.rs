@@ -6,13 +6,23 @@ use crate::adapter::{
 };
 
 pub(super) fn eligible(function: &ast::Function) -> bool {
-    !function.is_async
-        && !function.is_arrow
+    !function.is_arrow
+        && callback_eligible(function)
         && function.params.iter().all(|p| match p {
             Pattern::Ident(..) => true,
             Pattern::Assign { target, .. } => matches!(target.as_ref(), Pattern::Ident(..)),
             _ => false,
         })
+}
+
+/// A callback can share the surrounding arrow receiver, but cannot observe
+/// an argument list or bind a rest parameter.
+pub(super) fn callback_eligible(function: &ast::Function) -> bool {
+    !function.is_async
+        && !function
+            .params
+            .iter()
+            .any(|p| matches!(p, Pattern::Rest(_)))
         && !function_reads_arguments(function)
 }
 
@@ -216,5 +226,81 @@ fn reads_arguments(expr: &Expr) -> bool {
                 })
         }
         Expr::Update { target, .. } => target_reads_arguments(target),
+    }
+}
+
+impl super::Lowerer<'_> {
+    /// Only a proven list method and a proven function body can bypass the
+    /// token's packed entry. Unknown or reassigned values use the normal call.
+    pub(super) fn call_array_callback(
+        &mut self,
+        object: &super::Operand,
+        method: &str,
+        callback: &ast::Expr,
+        arguments: &[&ast::Expr],
+    ) -> super::Lowering<Option<super::Operand>> {
+        use super::{Operand, Ty};
+        use lash_kernel_doc::{ActKind, Callee, Expr as KExpr, Name, Stmt as KStmt};
+        let Some((helper, arity)) = crate::builtins::array_callback(method) else {
+            return Ok(None);
+        };
+        let callback = match callback {
+            ast::Expr::Function(function)
+                if function.name.is_none() && callback_eligible(function) =>
+            {
+                self.callback_closure(function, arity)?.0
+            }
+            ast::Expr::Ident(name, _) => {
+                let Some(entry) = self
+                    .binding_mut(name)
+                    .and_then(|(_, binding)| binding.positional.clone())
+                else {
+                    return Ok(None);
+                };
+                // Read the binding now, before later argument effects. Its
+                // stable private entry carries the identical function body.
+                let value = self.lower_expr(callback)?;
+                self.discard(value);
+                if entry.arity >= arity {
+                    Operand::variable(entry.name, Ty::Unknown)
+                } else {
+                    let params: Vec<Name> = (0..=arity).map(|_| self.fresh("operand")).collect();
+                    let body = self.block(|lowerer| {
+                        let value = lowerer.action(
+                            ActKind::Call(Callee::Value(entry.name)),
+                            params[..=entry.arity]
+                                .iter()
+                                .cloned()
+                                .map(KExpr::Variable)
+                                .collect(),
+                            Ty::Unknown,
+                        );
+                        lowerer.emit(KStmt::Return {
+                            value: value.expr(),
+                        });
+                        Ok(())
+                    })?;
+                    self.emit_closure(params, body, None)
+                }
+            }
+            _ => return Ok(None),
+        };
+        let callback = self.pin(callback);
+        let values = self.operands(&arguments[1..])?;
+        let mut context = Operand::undefined();
+        for (index, value) in values.into_iter().enumerate() {
+            if index == 0 && method != "sort" {
+                context = self.pin(value);
+            } else {
+                self.discard(value);
+            }
+        }
+        let length = self.invoke("ts.array.length", std::slice::from_ref(object), Ty::Unknown)?;
+        let mut passed = vec![object.clone(), length];
+        if method != "sort" {
+            passed.push(context);
+        }
+        passed.push(callback);
+        Ok(Some(self.invoke(helper, &passed, Ty::Unknown)?))
     }
 }

@@ -21,7 +21,6 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &TS_MEMBER_TOSORTED_PLAN,
     &TS_BOOLEAN_TOSTRING_PLAN,
     &TS_MEMBER_SIZE_PLAN,
     &TS_MEMBER_ALLSETTLED_PLAN,
@@ -30,6 +29,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_KEYS_PLAN,
     &TS_MATH_ATANH_PLAN,
     &TS_URL_SEARCH_PARAMS_KEYS_PLAN,
+    &TS_ARRAY_FILTER_SLOTS_PLAN,
     &TS_NUMBER_RECEIVER_PLAN,
     &TS_STRING_NORMALIZE_PLAN,
     &TS_ERROR_NEW_RANGEERROR_PLAN,
@@ -44,6 +44,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_EXOTIC_TO_PRIMITIVE_PLAN,
     &TS_MEMBER_REJECT_PLAN,
     &TS_ARRAY_FLAT_PLAN,
+    &TS_ARRAY_TOSORTED_PLAN,
     &TS_STRING_RECEIVER_PLAN,
     &TS_NUMBER_ISNAN_PLAN,
     &TS_SET_DIFFERENCE_PLAN,
@@ -181,7 +182,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ATANH_PLAN,
     &TS_STRING_RELATIVE_PLAN,
     &TS_URL_SEARCH_PARAMS_TOSTRING_PLAN,
-    &TS_MEMBER_MAP_PLAN,
     &TS_ARRAY_GENERIC_INCLUDES_PLAN,
     &TS_MEMBER_DEBUG_PLAN,
     &TS_MATH_SQRT_PLAN,
@@ -199,6 +199,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_ASINH_PLAN,
     &TS_ARRAY_KEYS_PLAN,
     &TS_REGEXP_STICKY_PLAN,
+    &TS_MEMBER_SORT_PLAN,
     &TS_MEMBER_TOLOCALETIMESTRING_PLAN,
     &TS_DATE_GETDATE_PLAN,
     &TS_LOOSE_NOT_EQUALS_PLAN,
@@ -218,6 +219,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_SETMONTH_PLAN,
     &TS_REQUIRES_NEW_PLAN,
     &TS_MEMBER_SETUTCDATE_PLAN,
+    &TS_ARRAY_SORT_SLOTS_PLAN,
     &TS_NUMBER_TO_STRING_PLAN,
     &TS_ARRAY_SLICE_GENERIC_PLAN,
     &TS_DATE_TOJSON_PLAN,
@@ -327,6 +329,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_TAN_PLAN,
     &TS_MEMBER_CANPARSE_PLAN,
     &TS_ARRAY_SEARCHABLE_PLAN,
+    &TS_ARRAY_MAP_SLOTS_PLAN,
     &TS_ARRAY_FOREACH_PLAN,
     &TS_OBJECT_ISFROZEN_PLAN,
     &TS_ARRAY_REDUCERIGHT_PLAN,
@@ -342,6 +345,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_BUILTIN_NAME_PLAN,
     &TS_ARRAY_COPYWITHIN_PLAN,
     &TS_STRING_SUBSTITUTE_PLAN,
+    &TS_ARRAY_CALLBACK_SLOTS2_PLAN,
     &TS_STRING_REPEAT_PLAN,
     &TS_MATH_HYPOT_PLAN,
     &TS_MEMBER_FINDLASTINDEX_PLAN,
@@ -359,8 +363,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETDATE_PLAN,
     &TS_MATH_ROUND_PLAN,
     &TS_PROMISE_FINALLY_PLAN,
+    &TS_ARRAY_CALLBACK_SLOTS3_PLAN,
     &TS_ARRAY_CONCAT_PLAN,
-    &TS_ARRAY_FILTER_PLAN,
     &TS_MEMBER_NEGATIVE_INFINITY_PLAN,
     &TS_MEMBER_REPEAT_PLAN,
     &TS_STRING_AT_PLAN,
@@ -430,6 +434,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_SET_VALUES_PLAN,
     &TS_DATE_PARSE_PLAN,
     &TS_PROMISE_ALL_PLAN,
+    &TS_MEMBER_TOSORTED_PLAN,
     &TS_ARGUMENTS_PLAN,
     &TS_TO_INT32_PLAN,
     &TS_NUMBER_TOEXPONENTIAL_PLAN,
@@ -448,6 +453,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ERROR_TOSTRING_PLAN,
     &TS_MEMBER_LOG2E_PLAN,
     &TS_ARRAY_MATCH_LENGTH_PLAN,
+    &TS_ARRAY_SORT_PLAN,
     &TS_DATE_SETSECONDS_PLAN,
     &TS_ARRAY_FLATMAP_PLAN,
     &TS_MEMBER_TOLOCALESTRING_PLAN,
@@ -463,6 +469,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_DATE_TOISOSTRING_PLAN,
     &TS_MEMBER_SIGN_PLAN,
     &TS_FUNCTION_TOSTRING_PLAN,
+    &TS_ARRAY_FILTER_PLAN,
     &TS_FOR_OF_OPEN_PLAN,
     &TS_MEMBER_VALUES_PLAN,
     &TS_MEMBER_UNION_PLAN,
@@ -475,7 +482,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_FINALLY_PLAN,
     &TS_DATE_GETUTCSECONDS_PLAN,
     &TS_DATE_GETUTCMONTH_PLAN,
-    &TS_ARRAY_SORT_PLAN,
     &TS_SET_UNION_PLAN,
     &TS_DATE_SETUTCMILLISECONDS_PLAN,
     &TS_MATH_ABS_PLAN,
@@ -499,7 +505,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_HASOWNPROPERTY_PLAN,
     &TS_DATE_GETUTCDATE_PLAN,
     &TS_HOLE_VALUE_PLAN,
-    &TS_ARRAY_TOSORTED_PLAN,
     &TS_MEMBER_OF_PLAN,
     &TS_MEMBER_CLZ32_PLAN,
     &TS_STRING_TRIM_PLAN,
@@ -518,6 +523,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_ISSAFEINTEGER_PLAN,
     &TS_MEMBER_CHARCODEAT_PLAN,
     &TS_BOUNDARY_PLAN,
+    &TS_MEMBER_MAP_PLAN,
     &TS_OBJECT_ISEXTENSIBLE_PLAN,
     &TS_MEMBER_WARN_PLAN,
     &TS_MEMBER_CHARAT_PLAN,
@@ -554,7 +560,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_URL_IS_PLAN,
     &TS_MEMBER_ENTRIES_PLAN,
     &TS_MATH_CEIL_PLAN,
-    &TS_ARRAY_MAP_PLAN,
     &TS_STRING_RAW_PLAN,
     &TS_MEMBER_FOREACH_PLAN,
     &TS_MATH_TRUNC_PLAN,
@@ -597,6 +602,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ISSUPERSETOF_PLAN,
     &TS_OBJECT_ENTRIES_PLAN,
     &TS_MEMBER_PROPERTYISENUMERABLE_PLAN,
+    &TS_ARRAY_MAP_PLAN,
     &TS_OBJECT_SEAL_PLAN,
     &TS_OBJECT_IS_PLAN,
     &TS_REGEXP_GLOBAL_PLAN,
@@ -623,6 +629,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_REST_PLAN,
     &TS_MEMBER_GETFULLYEAR_PLAN,
     &TS_DATE_SETHOURS_PLAN,
+    &TS_MEMBER_FILTER_PLAN,
     &TS_MAP_KEYS_PLAN,
     &TS_MATH_LOG2_PLAN,
     &TS_PROPERTY_STICKY_PLAN,
@@ -637,7 +644,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_CREATE_PLAN,
     &TS_MEMBER_MAX_SAFE_INTEGER_PLAN,
     &TS_STRING_REPLACE_PLAN,
-    &TS_MEMBER_SORT_PLAN,
     &TS_ARRAY_TOLOCALESTRING_PLAN,
     &TS_ERROR_NEW_AGGREGATEERROR_PLAN,
     &TS_MEMBER_TOSTRING_PLAN,
@@ -651,7 +657,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_COS_PLAN,
     &TS_MEMBER_ATAN_PLAN,
     &TS_MEMBER_MAX_VALUE_PLAN,
-    &TS_MEMBER_FILTER_PLAN,
     &TS_MEMBER_ACOS_PLAN,
     &TS_ARRAY_CONSTRUCT_PLAN,
     &TS_STRING_MATCH_PLAN,
@@ -722,7 +727,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_REGEXP_NATIVE_EXEC_PLAN,
     &TS_ADD_PLAN,
     &TS_STRING_CREATE_PLAN,
-    &TS_GET_COMPUTED_PLAN,
     &TS_MEMBER_EXPM1_PLAN,
     &TS_DATE_GETMINUTES_PLAN,
     &TS_MEMBER_IS_PLAN,
@@ -750,6 +754,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GROUPBY_PLAN,
     &TS_URL_SEARCH_PARAMS_HAS_PLAN,
     &TS_MATH_ACOS_PLAN,
+    &TS_GET_COMPUTED_PLAN,
     &TS_MAP_SET_PLAN,
     &TS_MEMBER_COSH_PLAN,
 ];
@@ -39803,6 +39808,94 @@ fn ts_array_reusable_callback(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(ctx.take(0))
 }
 
+const TS_ARRAY_CALLBACK_SLOTS2_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.callback_slots2",
+    function: p::function("6f9bb7f907051af80b1437fe92d49e591c265d24a28b9014d255149bf940afd5"),
+    callees: &[
+        p::function("0e815ee57fe3f4a2832b155b8a948753f86433145b6ecbde4f7d96389a7bc008"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "callback", path: &[0] },
+        p::PlanLocal { name: "passed", path: &[1] },
+    ],
+    closures: &[
+        &[2, 0],
+    ],
+    sites: &[],
+    run: ts_array_callback_slots2,
+    template: None,
+};
+
+/// `ts.array.callback_slots2`.
+fn ts_array_callback_slots2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.list(0, 2)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    Ok(ctx.take(0))
+}
+
+const TS_ARRAY_CALLBACK_SLOTS3_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.callback_slots3",
+    function: p::function("77e228ff3a4c1e9c676a0200e3afd7965263a1b560c8a0db3d1c608f7482a715"),
+    callees: &[
+        p::function("0e815ee57fe3f4a2832b155b8a948753f86433145b6ecbde4f7d96389a7bc008"),
+    ],
+    literals: &[
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Float(0x0000000000000000),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "input", path: &[] },
+        p::PlanLocal { name: "receiver", path: &[] },
+        p::PlanLocal { name: "callback", path: &[0] },
+        p::PlanLocal { name: "passed", path: &[1] },
+    ],
+    closures: &[
+        &[2, 0],
+    ],
+    sites: &[],
+    run: ts_array_callback_slots3,
+    template: None,
+};
+
+/// `ts.array.callback_slots3`.
+fn ts_array_callback_slots3(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.literal(0, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.local(1, 2)?;
+    ctx.list(0, 3)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.closure(0, 0)?;
+    Ok(ctx.take(0))
+}
+
 const TS_ARRAY_BOUND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.bound",
     function: p::function("658a58572adba06da202c550dd33bc86929b2ead184e8d25fd65a2bf83f3f2ad"),
@@ -43834,13 +43927,10 @@ fn ts_array_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "ts.array.map",
-    function: p::function("ba0f59b8273e0fb777fc93bd760ee112d5878abbd852c8a1ad14d515dfb2a0d4"),
+const TS_ARRAY_MAP_SLOTS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.map_slots",
+    function: p::function("696144eb540a5a680e6f1f7b6d6887122be9b20a44df6fd257c99bad90c43f53"),
     callees: &[
-        p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"),
-        p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"),
-        p::function("0e815ee57fe3f4a2832b155b8a948753f86433145b6ecbde4f7d96389a7bc008"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"),
@@ -43851,9 +43941,6 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("b8c83b344544eba1035d986219809f037415b43fef2b20acaf6c05c881b8e73e"),
     ],
     literals: &[
-        p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Int("1"),
-        p::PlanLiteral::Absent,
         p::PlanLiteral::Float(0x0000000000000000),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Float(0x3ff0000000000000),
@@ -43861,7 +43948,305 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "length", path: &[] },
+        p::PlanLocal { name: "context", path: &[] },
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "index", path: &[0] },
+        p::PlanLocal { name: "output", path: &[1, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[1, 1, 1, 1] },
+        p::PlanLocal { name: "output", path: &[2] },
+        p::PlanLocal { name: "present", path: &[4, 1, 0] },
+        p::PlanLocal { name: "value", path: &[4, 1, 1, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 1, 1, 1, 1, 2, 0, 2],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 7],
+            loops: &[p::PlanLoop::For { walked: 6 }],
+        },
+        p::PlanSite {
+            path: &[3, 0],
+            call: p::SiteCall::Invoke(5),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 8],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[4, 1, 0, 0],
+            call: p::SiteCall::Invoke(6),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 8],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[4, 1, 1, 1, 0, 0],
+            call: p::SiteCall::Invoke(7),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 8, 9],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[4, 1, 1, 1, 1, 2],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 8, 9, 10],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
+    run: ts_array_map_slots,
+    template: None,
+};
+
+/// `ts.array.map_slots`.
+fn ts_array_map_slots(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
+        }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.call(2, 0, 1)?;
+                ctx.bind(5, 0)?;
+            }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
+                'l0: loop {
+                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        ctx.local(1, 1)?;
+                        ctx.call(1, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.unbind(7);
+                            break 'l0;
+                        }
+                    }
+                    if r == 0 || matches!(r, 1) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(7, 0)?;
+                            ctx.tuple(1, 0)?;
+                            ctx.call(1, 0, 2)?;
+                        }
+                        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { false };
+                        if t1 {
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.tuple(0, 0)?;
+                                ctx.pin(0)?;
+                                ctx.local(5, 1)?;
+                                ctx.local(4, 2)?;
+                                ctx.set_index(1, 0)?;
+                            }
+                        } else {
+                            if r == 0 || matches!(r, 1) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 { ctx.local(3, 0)?; }
+                                if r == 0 { ctx.local(2, 1)?; }
+                                if r == 0 { ctx.local(7, 2)?; }
+                                if r == 0 { ctx.local(4, 3)?; }
+                                if r == 0 { ctx.local(0, 4)?; }
+                                if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 4)?; }
+                                if r == 0 { ctx.pin(0)?; }
+                                if r == 0 {
+                                    ctx.local(5, 1)?;
+                                }
+                                if r == 0 {
+                                    ctx.local(4, 2)?;
+                                }
+                                if r == 0 { ctx.set_index(1, 0)?; }
+                            }
+                        }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(4, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.call(3, 0, 2)?;
+                        ctx.assign(4, 0)?;
+                    }
+                    if r == 0 { ctx.unbind(7); }
+                    if r == 0 { ctx.begin()?; }
+                }
+                ctx.close(c0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                'l0: loop {
+                    ctx.meter(2)?;
+                    ctx.local(4, 0)?;
+                    ctx.local(1, 1)?;
+                    ctx.call(4, 0, 2)?;
+                    if !ctx.test(0, p::Test::While)? {
+                        break 'l0;
+                    }
+                    ctx.begin()?;
+                    ctx.tuple(0, 0)?;
+                    ctx.pin(0)?;
+                    ctx.local(5, 1)?;
+                    ctx.local(4, 2)?;
+                    ctx.set_index(1, 0)?;
+                    ctx.begin()?;
+                    ctx.local(4, 0)?;
+                    ctx.literal(2, 1)?;
+                    ctx.call(3, 0, 2)?;
+                    ctx.assign(4, 0)?;
+                    ctx.begin()?;
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(8, 0)?;
+    }
+    if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(8, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(3, 1)?;
+        }
+        if r == 0 {
+            ctx.local(1, 2)?;
+        }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 5, 0, 3)?; }
+    }
+    if r == 0 || matches!(r, 3..=5) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 3..=5) { break 'l0; }
+            if r == 0 {
+                ctx.local(4, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(4, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 3) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(0, 0)?; }
+                if r == 0 { ctx.local(4, 1)?; }
+                if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 6, 0, 2)?; }
+                if r == 0 { ctx.bind(9, 0)?; }
+            }
+            if r == 0 || matches!(r, 4..=5) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(9, 0)?;
+                }
+                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4..=5) };
+                if t2 {
+                    if r == 0 || matches!(r, 4) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(0, 0)?; }
+                        if r == 0 { ctx.local(4, 1)?; }
+                        if r == 4 { r = 0; } else if r == 0 { ctx.invoke(3, 7, 0, 2)?; }
+                        if r == 0 { ctx.bind(10, 0)?; }
+                    }
+                    if r == 0 || matches!(r, 5) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(3, 0)?; }
+                        if r == 0 { ctx.local(2, 1)?; }
+                        if r == 0 { ctx.local(10, 2)?; }
+                        if r == 0 { ctx.local(4, 3)?; }
+                        if r == 0 { ctx.local(0, 4)?; }
+                        if r == 5 { r = 0; } else if r == 0 { ctx.apply(4, 0, 4)?; }
+                        if r == 0 { ctx.pin(0)?; }
+                        if r == 0 {
+                            ctx.local(8, 1)?;
+                        }
+                        if r == 0 {
+                            ctx.local(4, 2)?;
+                        }
+                        if r == 0 { ctx.set_index(1, 0)?; }
+                    }
+                    if r == 0 { ctx.unbind(10); }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.literal(2, 1)?;
+                ctx.call(3, 0, 2)?;
+                ctx.assign(4, 0)?;
+            }
+            if r == 0 { ctx.unbind(9); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(8, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.map",
+    function: p::function("c9654147d6f6e0fd64ab51e9f281d2211ef3e031322ee1a5956a31ccf67707bf"),
+    callees: &[
+        p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"),
+        p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"),
+        p::function("77e228ff3a4c1e9c676a0200e3afd7965263a1b560c8a0db3d1c608f7482a715"),
+        p::function("696144eb540a5a680e6f1f7b6d6887122be9b20a44df6fd257c99bad90c43f53"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
@@ -43869,14 +44254,7 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "input", path: &[1] },
         p::PlanLocal { name: "callback", path: &[2] },
         p::PlanLocal { name: "context", path: &[3] },
-        p::PlanLocal { name: "passed", path: &[4] },
-        p::PlanLocal { name: "index", path: &[5] },
-        p::PlanLocal { name: "output", path: &[6, 1, 0] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "value", path: &[6, 1, 1, 1] },
-        p::PlanLocal { name: "output", path: &[7] },
-        p::PlanLocal { name: "present", path: &[9, 1, 0] },
-        p::PlanLocal { name: "value", path: &[9, 1, 1, 1, 0] },
+        p::PlanLocal { name: "output", path: &[4] },
     ],
     closures: &[
     ],
@@ -43890,48 +44268,16 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[],
         },
         p::PlanSite {
-            path: &[6, 1, 1, 1, 1, 2, 2, 2],
-            call: p::SiteCall::Apply,
+            path: &[4, 0],
+            call: p::SiteCall::Invoke(3),
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 10],
-            loops: &[p::PlanLoop::For { walked: 9 }],
-        },
-        p::PlanSite {
-            path: &[8, 0],
-            call: p::SiteCall::Invoke(8),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 11],
+            bound: &[0, 1, 2, 3, 4, 5],
             loops: &[],
-        },
-        p::PlanSite {
-            path: &[9, 1, 0, 0],
-            call: p::SiteCall::Invoke(9),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 11],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[9, 1, 1, 1, 0, 0],
-            call: p::SiteCall::Invoke(10),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 11, 12],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[9, 1, 1, 1, 3, 2],
-            call: p::SiteCall::Apply,
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13],
-            loops: &[p::PlanLoop::While],
         },
     ],
     run: ts_array_map,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_map_heap, depth: 2, writes: false, callees: &[p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("77e228ff3a4c1e9c676a0200e3afd7965263a1b560c8a0db3d1c608f7482a715"), p::function("696144eb540a5a680e6f1f7b6d6887122be9b20a44df6fd257c99bad90c43f53"), ] }) }),
 };
 
 /// `ts.array.map`.
@@ -43955,7 +44301,8 @@ fn ts_array_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.call(2, 0, 1)?;
+        ctx.local(0, 1)?;
+        ctx.call(2, 0, 2)?;
         ctx.bind(4, 0)?;
     }
     if r == 0 {
@@ -43965,247 +44312,331 @@ fn ts_array_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
         ctx.call(1, 0, 2)?;
         ctx.bind(5, 0)?;
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(2, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.local(0, 2)?;
-        ctx.list(0, 3)?;
-        ctx.bind(6, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.bind(7, 0)?;
-    }
     if r == 0 || matches!(r, 2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 0 { ctx.local(2, 1)?; }
+        if r == 0 { ctx.local(5, 2)?; }
+        if r == 0 { ctx.local(4, 3)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 3, 0, 4)?; }
+        if r == 0 { ctx.bind(6, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(6, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn ts_array_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(1, &[args[1], Value::Int(0)])?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = heap.call(2, &[v1, args[0]])?; let _ = v2;
+                heap.bind(v2, None)?;
+                let v3 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v3;
+                heap.bind(v3, None)?;
+                let v4 = heap.call(3, &[args[0], v0, v3, v2])?; let _ = v4;
+                heap.bind(v4, None)?;
+                Some(v4)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const TS_ARRAY_FILTER_SLOTS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.filter_slots",
+    function: p::function("059bf0c8c591f4fbe8c9fc82b22b3d412197a868bd38e8854d69145e97f237fe"),
+    callees: &[
+        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
+        p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("745adddb299cef9774dc2455bc559540fb6faf39a158649dfdd40d7a07559897"),
+        p::function("b8c83b344544eba1035d986219809f037415b43fef2b20acaf6c05c881b8e73e"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Bool(true),
+        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Float(0x3ff0000000000000),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 5,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "length", path: &[] },
+        p::PlanLocal { name: "context", path: &[] },
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "output", path: &[0] },
+        p::PlanLocal { name: "index", path: &[1] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[2, 1, 0, 1] },
+        p::PlanLocal { name: "answer", path: &[2, 1, 0, 1, 1, 2, 0] },
+        p::PlanLocal { name: "truth", path: &[2, 1, 0, 1, 1, 2, 1, 2, 0, 2, 0] },
+        p::PlanLocal { name: "present", path: &[3, 1, 0] },
+        p::PlanLocal { name: "value", path: &[3, 1, 1, 1, 0] },
+        p::PlanLocal { name: "answer", path: &[3, 1, 1, 1, 1] },
+        p::PlanLocal { name: "truth", path: &[3, 1, 1, 1, 2] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[2, 1, 0, 1, 1, 2, 0, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 7],
+            loops: &[p::PlanLoop::For { walked: 6 }],
+        },
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(6),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[3, 1, 1, 1, 0, 0],
+            call: p::SiteCall::Invoke(7),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 10],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[3, 1, 1, 1, 1, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 10, 11],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
+    run: ts_array_filter_slots,
+    template: None,
+};
+
+/// `ts.array.filter_slots`.
+fn ts_array_filter_slots(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 { ctx.adopt(3, 3)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(0, 0)?;
-            ctx.call(3, 0, 1)?;
-            ctx.literal(4, 1)?;
-            ctx.call(4, 0, 2)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
         }
-        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
         if t0 {
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(0, 0)?;
-                ctx.call(5, 0, 1)?;
-                ctx.bind(8, 0)?;
-            }
-            if r == 0 || matches!(r, 2) {
+            if r == 0 || matches!(r, 1) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
                     ctx.local(0, 0)?;
                 }
-                let c0 = if r == 0 { ctx.open(0, 9)? } else { p::Cursor(0) };
+                let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
                 'l0: loop {
-                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(10, 0)?; } else if !matches!(r, 2) { break 'l0; }
+                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
                     if r == 0 {
                         ctx.begin()?;
-                        ctx.local(7, 0)?;
-                        ctx.local(2, 1)?;
-                        ctx.call(4, 0, 2)?;
+                        ctx.local(5, 0)?;
+                        ctx.local(1, 1)?;
+                        ctx.call(1, 0, 2)?;
                         if ctx.test(0, p::Test::If)? {
                             ctx.begin()?;
-                            ctx.unbind(10);
+                            ctx.unbind(7);
                             break 'l0;
                         }
                     }
-                    if r == 0 || matches!(r, 2) {
+                    if r == 0 || matches!(r, 1) {
                         if r == 0 { ctx.begin()?; }
                         if r == 0 {
-                            ctx.local(10, 0)?;
+                            ctx.local(7, 0)?;
                             ctx.tuple(1, 0)?;
-                            ctx.call(4, 0, 2)?;
+                            ctx.call(1, 0, 2)?;
                         }
                         let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { false };
                         if t1 {
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.tuple(0, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(8, 1)?;
-                                ctx.local(7, 2)?;
-                                ctx.set_index(1, 0)?;
-                            }
                         } else {
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(10, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(6, 1)?;
-                                ctx.literal(0, 2)?;
-                                ctx.set_index(1, 0)?;
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(7, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(6, 1)?;
-                                ctx.literal(1, 2)?;
-                                ctx.set_index(1, 0)?;
-                            }
-                            if r == 0 || matches!(r, 2) {
+                            if r == 0 || matches!(r, 1) {
                                 if r == 0 { ctx.begin()?; }
-                                if r == 0 { ctx.local(4, 0)?; }
-                                if r == 0 { ctx.local(5, 1)?; }
-                                if r == 0 { ctx.local(6, 2)?; }
-                                if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 2)?; }
-                                if r == 0 { ctx.pin(0)?; }
-                                if r == 0 {
-                                    ctx.local(8, 1)?;
-                                }
-                                if r == 0 {
-                                    ctx.local(7, 2)?;
-                                }
-                                if r == 0 { ctx.set_index(1, 0)?; }
+                                if r == 0 { ctx.local(3, 0)?; }
+                                if r == 0 { ctx.local(2, 1)?; }
+                                if r == 0 { ctx.local(7, 2)?; }
+                                if r == 0 { ctx.local(5, 3)?; }
+                                if r == 0 { ctx.local(0, 4)?; }
+                                if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 4)?; }
+                                if r == 0 { ctx.bind(8, 0)?; }
                             }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(8, 0)?;
+                                ctx.literal(2, 1)?;
+                                ctx.call(1, 0, 2)?;
+                                if ctx.test(0, p::Test::If)? {
+                                    ctx.begin()?;
+                                    ctx.local(7, 0)?;
+                                    ctx.pin(0)?;
+                                    ctx.local(4, 1)?;
+                                    ctx.local(4, 2)?;
+                                    ctx.call(2, 2, 1)?;
+                                    ctx.set_index(1, 0)?;
+                                } else {
+                                    ctx.begin()?;
+                                    ctx.local(8, 0)?;
+                                    ctx.literal(3, 1)?;
+                                    ctx.call(1, 0, 2)?;
+                                    if ctx.test(0, p::Test::If)? {
+                                    } else {
+                                        ctx.begin()?;
+                                        ctx.local(8, 0)?;
+                                        ctx.call(3, 0, 1)?;
+                                        ctx.bind(9, 0)?;
+                                        ctx.begin()?;
+                                        ctx.local(9, 0)?;
+                                        if ctx.test(0, p::Test::If)? {
+                                            ctx.begin()?;
+                                            ctx.local(7, 0)?;
+                                            ctx.pin(0)?;
+                                            ctx.local(4, 1)?;
+                                            ctx.local(4, 2)?;
+                                            ctx.call(2, 2, 1)?;
+                                            ctx.set_index(1, 0)?;
+                                        }
+                                        ctx.unbind(9);
+                                    }
+                                }
+                            }
+                            if r == 0 { ctx.unbind(8); }
                         }
                     }
                     if r == 0 {
                         ctx.begin()?;
-                        ctx.local(7, 0)?;
-                        ctx.literal(5, 1)?;
-                        ctx.call(6, 0, 2)?;
-                        ctx.assign(7, 0)?;
+                        ctx.local(5, 0)?;
+                        ctx.literal(4, 1)?;
+                        ctx.call(4, 0, 2)?;
+                        ctx.assign(5, 0)?;
                     }
-                    if r == 0 { ctx.unbind(10); }
+                    if r == 0 { ctx.unbind(7); }
                     if r == 0 { ctx.begin()?; }
                 }
                 ctx.close(c0);
             }
-            if r == 0 {
-                ctx.begin()?;
-                'l0: loop {
-                    ctx.meter(2)?;
-                    ctx.local(7, 0)?;
-                    ctx.local(2, 1)?;
-                    ctx.call(7, 0, 2)?;
-                    if !ctx.test(0, p::Test::While)? {
-                        break 'l0;
-                    }
-                    ctx.begin()?;
-                    ctx.tuple(0, 0)?;
-                    ctx.pin(0)?;
-                    ctx.local(8, 1)?;
-                    ctx.local(7, 2)?;
-                    ctx.set_index(1, 0)?;
-                    ctx.begin()?;
-                    ctx.local(7, 0)?;
-                    ctx.literal(5, 1)?;
-                    ctx.call(6, 0, 2)?;
-                    ctx.assign(7, 0)?;
-                    ctx.begin()?;
-                }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                return Ok(ctx.take(0));
-            }
         }
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.list(0, 0)?;
-        ctx.bind(11, 0)?;
-    }
-    if r == 0 || matches!(r, 3) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(11, 0)?;
-        }
-        if r == 0 {
-            ctx.literal(6, 1)?;
-        }
-        if r == 0 {
-            ctx.local(2, 2)?;
-        }
-        if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 8, 0, 3)?; }
-    }
-    if r == 0 || matches!(r, 4..=6) {
+    if r == 0 || matches!(r, 2..=4) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.enter_while(); }
         'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 4..=6) { break 'l0; }
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 2..=4) { break 'l0; }
             if r == 0 {
-                ctx.local(7, 0)?;
-                ctx.local(2, 1)?;
-                ctx.call(7, 0, 2)?;
+                ctx.local(5, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(5, 0, 2)?;
             }
             if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-            if r == 0 || matches!(r, 4) {
+            if r == 0 || matches!(r, 2) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 { ctx.local(0, 0)?; }
-                if r == 0 { ctx.local(7, 1)?; }
-                if r == 4 { r = 0; } else if r == 0 { ctx.invoke(3, 9, 0, 2)?; }
-                if r == 0 { ctx.bind(12, 0)?; }
+                if r == 0 { ctx.local(5, 1)?; }
+                if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 6, 0, 2)?; }
+                if r == 0 { ctx.bind(10, 0)?; }
             }
-            if r == 0 || matches!(r, 5..=6) {
+            if r == 0 || matches!(r, 3..=4) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
-                    ctx.local(12, 0)?;
+                    ctx.local(10, 0)?;
                 }
-                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 5..=6) };
+                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 3..=4) };
                 if t2 {
-                    if r == 0 || matches!(r, 5) {
+                    if r == 0 || matches!(r, 3) {
                         if r == 0 { ctx.begin()?; }
                         if r == 0 { ctx.local(0, 0)?; }
-                        if r == 0 { ctx.local(7, 1)?; }
-                        if r == 5 { r = 0; } else if r == 0 { ctx.invoke(4, 10, 0, 2)?; }
-                        if r == 0 { ctx.bind(13, 0)?; }
+                        if r == 0 { ctx.local(5, 1)?; }
+                        if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 7, 0, 2)?; }
+                        if r == 0 { ctx.bind(11, 0)?; }
+                    }
+                    if r == 0 || matches!(r, 4) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(3, 0)?; }
+                        if r == 0 { ctx.local(2, 1)?; }
+                        if r == 0 { ctx.local(11, 2)?; }
+                        if r == 0 { ctx.local(5, 3)?; }
+                        if r == 0 { ctx.local(0, 4)?; }
+                        if r == 4 { r = 0; } else if r == 0 { ctx.apply(3, 0, 4)?; }
+                        if r == 0 { ctx.bind(12, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(12, 0)?;
+                        ctx.call(3, 0, 1)?;
+                        ctx.bind(13, 0)?;
                     }
                     if r == 0 {
                         ctx.begin()?;
                         ctx.local(13, 0)?;
-                        ctx.pin(0)?;
-                        ctx.local(6, 1)?;
-                        ctx.literal(0, 2)?;
-                        ctx.set_index(1, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(7, 0)?;
-                        ctx.pin(0)?;
-                        ctx.local(6, 1)?;
-                        ctx.literal(1, 2)?;
-                        ctx.set_index(1, 0)?;
-                    }
-                    if r == 0 || matches!(r, 6) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(4, 0)?; }
-                        if r == 0 { ctx.local(5, 1)?; }
-                        if r == 0 { ctx.local(6, 2)?; }
-                        if r == 6 { r = 0; } else if r == 0 { ctx.apply(5, 0, 2)?; }
-                        if r == 0 { ctx.pin(0)?; }
-                        if r == 0 {
-                            ctx.local(11, 1)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(11, 0)?;
+                            ctx.pin(0)?;
+                            ctx.local(4, 1)?;
+                            ctx.local(4, 2)?;
+                            ctx.call(2, 2, 1)?;
+                            ctx.set_index(1, 0)?;
                         }
-                        if r == 0 {
-                            ctx.local(7, 2)?;
-                        }
-                        if r == 0 { ctx.set_index(1, 0)?; }
                     }
                     if r == 0 { ctx.unbind(13); }
+                    if r == 0 { ctx.unbind(12); }
+                    if r == 0 { ctx.unbind(11); }
                 }
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
-                ctx.literal(5, 1)?;
-                ctx.call(6, 0, 2)?;
-                ctx.assign(7, 0)?;
+                ctx.local(5, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.assign(5, 0)?;
             }
-            if r == 0 { ctx.unbind(12); }
+            if r == 0 { ctx.unbind(10); }
             if r == 0 { ctx.begin()?; }
         }
         ctx.leave_while(0);
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(11, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -44217,33 +44648,20 @@ fn ts_array_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
 
 const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.filter",
-    function: p::function("78684d44b265c4a57d8e3ac459bc03c180cc1e4abe55364b4cb809d809e521e0"),
+    function: p::function("9bcbbe2b9622a5e793b31f1641155ce8bd0f2845ceb08cf20fd57bbc76f4f606"),
     callees: &[
         p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"),
         p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"),
-        p::function("0e815ee57fe3f4a2832b155b8a948753f86433145b6ecbde4f7d96389a7bc008"),
-        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
-        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"),
-        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
-        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
-        p::function("745adddb299cef9774dc2455bc559540fb6faf39a158649dfdd40d7a07559897"),
-        p::function("b8c83b344544eba1035d986219809f037415b43fef2b20acaf6c05c881b8e73e"),
+        p::function("77e228ff3a4c1e9c676a0200e3afd7965263a1b560c8a0db3d1c608f7482a715"),
+        p::function("059bf0c8c591f4fbe8c9fc82b22b3d412197a868bd38e8854d69145e97f237fe"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Int("1"),
-        p::PlanLiteral::Absent,
-        p::PlanLiteral::Float(0x0000000000000000),
-        p::PlanLiteral::Text("list"),
-        p::PlanLiteral::Bool(true),
-        p::PlanLiteral::Bool(false),
-        p::PlanLiteral::Float(0x3ff0000000000000),
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 4,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
@@ -44251,17 +44669,7 @@ const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "input", path: &[1] },
         p::PlanLocal { name: "callback", path: &[2] },
         p::PlanLocal { name: "context", path: &[3] },
-        p::PlanLocal { name: "passed", path: &[4] },
-        p::PlanLocal { name: "output", path: &[5] },
-        p::PlanLocal { name: "index", path: &[6] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "value", path: &[7, 1, 0, 1] },
-        p::PlanLocal { name: "answer", path: &[7, 1, 0, 1, 1, 2, 2] },
-        p::PlanLocal { name: "truth", path: &[7, 1, 0, 1, 1, 2, 3, 2, 0, 2, 0] },
-        p::PlanLocal { name: "present", path: &[8, 1, 0] },
-        p::PlanLocal { name: "value", path: &[8, 1, 1, 1, 0] },
-        p::PlanLocal { name: "answer", path: &[8, 1, 1, 1, 3] },
-        p::PlanLocal { name: "truth", path: &[8, 1, 1, 1, 4] },
+        p::PlanLocal { name: "output", path: &[4] },
     ],
     closures: &[
     ],
@@ -44275,40 +44683,16 @@ const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[],
         },
         p::PlanSite {
-            path: &[7, 1, 0, 1, 1, 2, 2, 0],
-            call: p::SiteCall::Apply,
+            path: &[4, 0],
+            call: p::SiteCall::Invoke(3),
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 10],
-            loops: &[p::PlanLoop::For { walked: 9 }],
-        },
-        p::PlanSite {
-            path: &[8, 1, 0, 0],
-            call: p::SiteCall::Invoke(9),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[8, 1, 1, 1, 0, 0],
-            call: p::SiteCall::Invoke(10),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 13],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[8, 1, 1, 1, 3, 0],
-            call: p::SiteCall::Apply,
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 14],
-            loops: &[p::PlanLoop::While],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[],
         },
     ],
     run: ts_array_filter,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_filter_heap, depth: 2, writes: false, callees: &[p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("77e228ff3a4c1e9c676a0200e3afd7965263a1b560c8a0db3d1c608f7482a715"), p::function("059bf0c8c591f4fbe8c9fc82b22b3d412197a868bd38e8854d69145e97f237fe"), ] }) }),
 };
 
 /// `ts.array.filter`.
@@ -44332,7 +44716,8 @@ fn ts_array_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.call(2, 0, 1)?;
+        ctx.local(0, 1)?;
+        ctx.call(2, 0, 2)?;
         ctx.bind(4, 0)?;
     }
     if r == 0 {
@@ -44342,238 +44727,18 @@ fn ts_array_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
         ctx.call(1, 0, 2)?;
         ctx.bind(5, 0)?;
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(2, 0)?;
-        ctx.literal(3, 1)?;
-        ctx.local(0, 2)?;
-        ctx.list(0, 3)?;
-        ctx.bind(6, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.list(0, 0)?;
-        ctx.bind(7, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        ctx.bind(8, 0)?;
-    }
     if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(0, 0)?;
-            ctx.call(3, 0, 1)?;
-            ctx.literal(4, 1)?;
-            ctx.call(4, 0, 2)?;
-        }
-        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
-        if t0 {
-            if r == 0 || matches!(r, 2) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(0, 0)?;
-                }
-                let c0 = if r == 0 { ctx.open(0, 9)? } else { p::Cursor(0) };
-                'l0: loop {
-                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(10, 0)?; } else if !matches!(r, 2) { break 'l0; }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(8, 0)?;
-                        ctx.local(2, 1)?;
-                        ctx.call(4, 0, 2)?;
-                        if ctx.test(0, p::Test::If)? {
-                            ctx.begin()?;
-                            ctx.unbind(10);
-                            break 'l0;
-                        }
-                    }
-                    if r == 0 || matches!(r, 2) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 {
-                            ctx.local(10, 0)?;
-                            ctx.tuple(1, 0)?;
-                            ctx.call(4, 0, 2)?;
-                        }
-                        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { false };
-                        if t1 {
-                        } else {
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(10, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(6, 1)?;
-                                ctx.literal(0, 2)?;
-                                ctx.set_index(1, 0)?;
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(8, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(6, 1)?;
-                                ctx.literal(1, 2)?;
-                                ctx.set_index(1, 0)?;
-                            }
-                            if r == 0 || matches!(r, 2) {
-                                if r == 0 { ctx.begin()?; }
-                                if r == 0 { ctx.local(4, 0)?; }
-                                if r == 0 { ctx.local(5, 1)?; }
-                                if r == 0 { ctx.local(6, 2)?; }
-                                if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 2)?; }
-                                if r == 0 { ctx.bind(11, 0)?; }
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(11, 0)?;
-                                ctx.literal(5, 1)?;
-                                ctx.call(4, 0, 2)?;
-                                if ctx.test(0, p::Test::If)? {
-                                    ctx.begin()?;
-                                    ctx.local(10, 0)?;
-                                    ctx.pin(0)?;
-                                    ctx.local(7, 1)?;
-                                    ctx.local(7, 2)?;
-                                    ctx.call(5, 2, 1)?;
-                                    ctx.set_index(1, 0)?;
-                                } else {
-                                    ctx.begin()?;
-                                    ctx.local(11, 0)?;
-                                    ctx.literal(6, 1)?;
-                                    ctx.call(4, 0, 2)?;
-                                    if ctx.test(0, p::Test::If)? {
-                                    } else {
-                                        ctx.begin()?;
-                                        ctx.local(11, 0)?;
-                                        ctx.call(6, 0, 1)?;
-                                        ctx.bind(12, 0)?;
-                                        ctx.begin()?;
-                                        ctx.local(12, 0)?;
-                                        if ctx.test(0, p::Test::If)? {
-                                            ctx.begin()?;
-                                            ctx.local(10, 0)?;
-                                            ctx.pin(0)?;
-                                            ctx.local(7, 1)?;
-                                            ctx.local(7, 2)?;
-                                            ctx.call(5, 2, 1)?;
-                                            ctx.set_index(1, 0)?;
-                                        }
-                                        ctx.unbind(12);
-                                    }
-                                }
-                            }
-                            if r == 0 { ctx.unbind(11); }
-                        }
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(8, 0)?;
-                        ctx.literal(7, 1)?;
-                        ctx.call(7, 0, 2)?;
-                        ctx.assign(8, 0)?;
-                    }
-                    if r == 0 { ctx.unbind(10); }
-                    if r == 0 { ctx.begin()?; }
-                }
-                ctx.close(c0);
-            }
-        }
-    }
-    if r == 0 || matches!(r, 3..=5) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.enter_while(); }
-        'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 3..=5) { break 'l0; }
-            if r == 0 {
-                ctx.local(8, 0)?;
-                ctx.local(2, 1)?;
-                ctx.call(8, 0, 2)?;
-            }
-            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-            if r == 0 || matches!(r, 3) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 { ctx.local(0, 0)?; }
-                if r == 0 { ctx.local(8, 1)?; }
-                if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 9, 0, 2)?; }
-                if r == 0 { ctx.bind(13, 0)?; }
-            }
-            if r == 0 || matches!(r, 4..=5) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(13, 0)?;
-                }
-                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4..=5) };
-                if t2 {
-                    if r == 0 || matches!(r, 4) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(0, 0)?; }
-                        if r == 0 { ctx.local(8, 1)?; }
-                        if r == 4 { r = 0; } else if r == 0 { ctx.invoke(3, 10, 0, 2)?; }
-                        if r == 0 { ctx.bind(14, 0)?; }
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(14, 0)?;
-                        ctx.pin(0)?;
-                        ctx.local(6, 1)?;
-                        ctx.literal(0, 2)?;
-                        ctx.set_index(1, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(8, 0)?;
-                        ctx.pin(0)?;
-                        ctx.local(6, 1)?;
-                        ctx.literal(1, 2)?;
-                        ctx.set_index(1, 0)?;
-                    }
-                    if r == 0 || matches!(r, 5) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(4, 0)?; }
-                        if r == 0 { ctx.local(5, 1)?; }
-                        if r == 0 { ctx.local(6, 2)?; }
-                        if r == 5 { r = 0; } else if r == 0 { ctx.apply(4, 0, 2)?; }
-                        if r == 0 { ctx.bind(15, 0)?; }
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(15, 0)?;
-                        ctx.call(6, 0, 1)?;
-                        ctx.bind(16, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(16, 0)?;
-                        if ctx.test(0, p::Test::If)? {
-                            ctx.begin()?;
-                            ctx.local(14, 0)?;
-                            ctx.pin(0)?;
-                            ctx.local(7, 1)?;
-                            ctx.local(7, 2)?;
-                            ctx.call(5, 2, 1)?;
-                            ctx.set_index(1, 0)?;
-                        }
-                    }
-                    if r == 0 { ctx.unbind(16); }
-                    if r == 0 { ctx.unbind(15); }
-                    if r == 0 { ctx.unbind(14); }
-                }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.literal(7, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(8, 0)?;
-            }
-            if r == 0 { ctx.unbind(13); }
-            if r == 0 { ctx.begin()?; }
-        }
-        ctx.leave_while(0);
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 0 { ctx.local(2, 1)?; }
+        if r == 0 { ctx.local(5, 2)?; }
+        if r == 0 { ctx.local(4, 3)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 3, 0, 4)?; }
+        if r == 0 { ctx.bind(6, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(7, 0)?;
+        ctx.local(6, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -44581,6 +44746,28 @@ fn ts_array_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn ts_array_filter_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(1, &[args[1], Value::Int(0)])?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = heap.call(2, &[v1, args[0]])?; let _ = v2;
+                heap.bind(v2, None)?;
+                let v3 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v3;
+                heap.bind(v3, None)?;
+                let v4 = heap.call(3, &[args[0], v0, v3, v2])?; let _ = v4;
+                heap.bind(v4, None)?;
+                Some(v4)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const TS_ARRAY_FOREACH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -50103,17 +50290,14 @@ fn ts_array_with(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-const TS_ARRAY_SORT_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "ts.array.sort",
-    function: p::function("9e7b65b3ba834670e5829e53c108c5602e86fe3e0e81da49ef1b0abd38da4d06"),
+const TS_ARRAY_SORT_SLOTS_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.sort_slots",
+    function: p::function("42ef23b52da62199a9db60436b1da777adb36055a4cf80473d29ad4fde80e857"),
     callees: &[
-        p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"),
-        p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"),
-        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("0e815ee57fe3f4a2832b155b8a948753f86433145b6ecbde4f7d96389a7bc008"),
         p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
         p::function("745adddb299cef9774dc2455bc559540fb6faf39a158649dfdd40d7a07559897"),
         p::function("b8c83b344544eba1035d986219809f037415b43fef2b20acaf6c05c881b8e73e"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("6170581f51aff984855635161a0c261444c8f9ad14740734c6ecf0e35511aa02"),
@@ -50126,11 +50310,629 @@ const TS_ARRAY_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Absent,
         p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Absent,
         p::PlanLiteral::Int("1"),
         p::PlanLiteral::Bool(false),
         p::PlanLiteral::Bool(true),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "length", path: &[] },
+        p::PlanLocal { name: "callback", path: &[] },
+        p::PlanLocal { name: "values", path: &[0] },
+        p::PlanLocal { name: "undefined_count", path: &[1] },
+        p::PlanLocal { name: "index", path: &[2] },
+        p::PlanLocal { name: "present", path: &[3, 1, 0] },
+        p::PlanLocal { name: "value", path: &[3, 1, 1, 1, 0] },
+        p::PlanLocal { name: "compare", path: &[4, 1, 0] },
+        p::PlanLocal { name: "sorted", path: &[4, 2, 0] },
+        p::PlanLocal { name: "out", path: &[4, 2, 1] },
+        p::PlanLocal { name: "n", path: &[4, 2, 2] },
+        p::PlanLocal { name: "width", path: &[4, 2, 3] },
+        p::PlanLocal { name: "mid", path: &[4, 2, 4, 1, 0] },
+        p::PlanLocal { name: "end", path: &[4, 2, 4, 1, 1] },
+        p::PlanLocal { name: "left", path: &[4, 2, 4, 1, 2] },
+        p::PlanLocal { name: "right", path: &[4, 2, 4, 1, 3] },
+        p::PlanLocal { name: "dest", path: &[4, 2, 4, 1, 4] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "placed", path: &[4, 2, 4, 1, 5, 1] },
+        p::PlanLocal { name: "from_right", path: &[4, 2, 4, 1, 5, 1, 1] },
+        p::PlanLocal { name: "first", path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 0] },
+        p::PlanLocal { name: "second", path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 1] },
+        p::PlanLocal { name: "output", path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 2] },
+        p::PlanLocal { name: "order", path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 3] },
+        p::PlanLocal { name: "previous", path: &[4, 2, 4, 1, 6] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "value", path: &[6, 1] },
+    ],
+    closures: &[
+        &[4, 1, 0, 0],
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[3, 1, 0, 0],
+            call: p::SiteCall::Invoke(1),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[3, 1, 1, 1, 0, 0],
+            call: p::SiteCall::Invoke(2),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 6],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[4, 1, 1, 0],
+            call: p::SiteCall::Invoke(6),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 8],
+            loops: &[],
+        },
+        p::PlanSite {
+            path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 2, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22],
+            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 18 }],
+        },
+        p::PlanSite {
+            path: &[4, 2, 4, 1, 5, 1, 2, 1, 0, 1, 3, 0],
+            call: p::SiteCall::Invoke(9),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23],
+            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 18 }],
+        },
+        p::PlanSite {
+            path: &[6, 1, 0, 0],
+            call: p::SiteCall::Invoke(10),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5, 27],
+            loops: &[p::PlanLoop::For { walked: 26 }],
+        },
+        p::PlanSite {
+            path: &[7, 1, 0, 0],
+            call: p::SiteCall::Invoke(10),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[p::PlanLoop::While],
+        },
+        p::PlanSite {
+            path: &[8, 1, 0, 0],
+            call: p::SiteCall::Invoke(12),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3, 4, 5],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
+    run: ts_array_sort_slots,
+    template: None,
+};
+
+/// `ts.array.sort_slots`.
+fn ts_array_sort_slots(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 { ctx.adopt(2, 2)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.bind(4, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.bind(5, 0)?;
+    }
+    if r == 0 || matches!(r, 1..=2) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1..=2) { break 'l0; }
+            if r == 0 {
+                ctx.local(5, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(0, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(0, 0)?; }
+                if r == 0 { ctx.local(5, 1)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 1, 0, 2)?; }
+                if r == 0 { ctx.bind(6, 0)?; }
+            }
+            if r == 0 || matches!(r, 2) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(6, 0)?;
+                }
+                let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
+                if t0 {
+                    if r == 0 || matches!(r, 2) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(0, 0)?; }
+                        if r == 0 { ctx.local(5, 1)?; }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 2, 0, 2)?; }
+                        if r == 0 { ctx.bind(7, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(7, 0)?;
+                        ctx.literal(2, 1)?;
+                        ctx.call(3, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(4, 0)?;
+                            ctx.literal(3, 1)?;
+                            ctx.call(4, 0, 2)?;
+                            ctx.assign(4, 0)?;
+                        } else {
+                            ctx.begin()?;
+                            ctx.local(7, 0)?;
+                            ctx.pin(0)?;
+                            ctx.local(3, 1)?;
+                            ctx.local(3, 2)?;
+                            ctx.call(5, 2, 1)?;
+                            ctx.set_index(1, 0)?;
+                        }
+                    }
+                    if r == 0 { ctx.unbind(7); }
+                }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.assign(5, 0)?;
+            }
+            if r == 0 { ctx.unbind(6); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 || matches!(r, 3..=5) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(2, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
+        }
+        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 3) };
+        if t1 {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.closure(0, 0)?;
+                ctx.bind(8, 0)?;
+            }
+            if r == 0 || matches!(r, 3) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(3, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(8, 1)?;
+                }
+                if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 6, 0, 2)?; }
+            }
+            if r == 0 { ctx.unbind(8); }
+        } else {
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.bind(9, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.list(0, 0)?;
+                ctx.bind(10, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.call(5, 0, 1)?;
+                ctx.bind(11, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.bind(12, 0)?;
+            }
+            if r == 0 || matches!(r, 4..=5) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.enter_while(); }
+                'l0: loop {
+                    if r == 0 { ctx.meter(2)?; } else if !matches!(r, 4..=5) { break 'l0; }
+                    if r == 0 {
+                        ctx.local(12, 0)?;
+                        ctx.local(11, 1)?;
+                        ctx.call(0, 0, 2)?;
+                    }
+                    if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(0, 0)?;
+                        ctx.bind(13, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(0, 0)?;
+                        ctx.bind(14, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(0, 0)?;
+                        ctx.bind(15, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(0, 0)?;
+                        ctx.bind(16, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.literal(0, 0)?;
+                        ctx.bind(17, 0)?;
+                    }
+                    if r == 0 || matches!(r, 4..=5) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 {
+                            ctx.local(9, 0)?;
+                        }
+                        let c1 = if r == 0 { ctx.open(0, 18)? } else { p::Cursor(0) };
+                        'l1: loop {
+                            if r == 0 { ctx.meter(2)?; if !ctx.next(c1, 0)? { break 'l1; } ctx.bind(19, 0)?; } else if !matches!(r, 4..=5) { break 'l1; }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(17, 0)?;
+                                ctx.local(14, 1)?;
+                                ctx.call(3, 0, 2)?;
+                                if ctx.test(0, p::Test::If)? {
+                                    ctx.begin()?;
+                                    ctx.local(17, 0)?;
+                                    ctx.local(12, 1)?;
+                                    ctx.call(4, 0, 2)?;
+                                    ctx.local(11, 1)?;
+                                    ctx.call(7, 0, 2)?;
+                                    ctx.assign(13, 0)?;
+                                    ctx.begin()?;
+                                    ctx.local(13, 0)?;
+                                    ctx.local(12, 1)?;
+                                    ctx.call(4, 0, 2)?;
+                                    ctx.local(11, 1)?;
+                                    ctx.call(7, 0, 2)?;
+                                    ctx.assign(14, 0)?;
+                                    ctx.begin()?;
+                                    ctx.local(17, 0)?;
+                                    ctx.assign(15, 0)?;
+                                    ctx.begin()?;
+                                    ctx.local(13, 0)?;
+                                    ctx.assign(16, 0)?;
+                                }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.literal(4, 0)?;
+                                ctx.bind(20, 0)?;
+                            }
+                            if r == 0 || matches!(r, 4..=5) {
+                                if r == 0 { ctx.begin()?; }
+                                if r == 0 {
+                                    ctx.local(15, 0)?;
+                                    ctx.local(13, 1)?;
+                                    ctx.call(0, 0, 2)?;
+                                }
+                                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4..=5) };
+                                if t2 {
+                                    if r == 0 || matches!(r, 4..=5) {
+                                        if r == 0 { ctx.begin()?; }
+                                        if r == 0 {
+                                            ctx.local(16, 0)?;
+                                            ctx.local(14, 1)?;
+                                            ctx.call(0, 0, 2)?;
+                                        }
+                                        let t3 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4..=5) };
+                                        if t3 {
+                                            if r == 0 {
+                                                ctx.begin()?;
+                                                ctx.local(9, 0)?;
+                                                ctx.local(15, 1)?;
+                                                ctx.call(8, 0, 2)?;
+                                                ctx.bind(21, 0)?;
+                                            }
+                                            if r == 0 {
+                                                ctx.begin()?;
+                                                ctx.local(9, 0)?;
+                                                ctx.local(16, 1)?;
+                                                ctx.call(8, 0, 2)?;
+                                                ctx.bind(22, 0)?;
+                                            }
+                                            if r == 0 || matches!(r, 4) {
+                                                if r == 0 { ctx.begin()?; }
+                                                if r == 0 { ctx.local(2, 0)?; }
+                                                if r == 0 { ctx.literal(2, 1)?; }
+                                                if r == 0 { ctx.local(21, 2)?; }
+                                                if r == 0 { ctx.local(22, 3)?; }
+                                                if r == 4 { r = 0; } else if r == 0 { ctx.apply(3, 0, 3)?; }
+                                                if r == 0 { ctx.bind(23, 0)?; }
+                                            }
+                                            if r == 0 || matches!(r, 5) {
+                                                if r == 0 { ctx.begin()?; }
+                                                if r == 0 { ctx.local(23, 0)?; }
+                                                if r == 5 { r = 0; } else if r == 0 { ctx.invoke(4, 9, 0, 1)?; }
+                                                if r == 0 { ctx.bind(24, 0)?; }
+                                            }
+                                            if r == 0 {
+                                                ctx.begin()?;
+                                                ctx.literal(0, 0)?;
+                                                ctx.local(24, 1)?;
+                                                ctx.call(0, 0, 2)?;
+                                                if ctx.test(0, p::Test::If)? {
+                                                    ctx.begin()?;
+                                                    ctx.literal(5, 0)?;
+                                                    ctx.assign(20, 0)?;
+                                                }
+                                            }
+                                            if r == 0 { ctx.unbind(24); }
+                                            if r == 0 { ctx.unbind(23); }
+                                            if r == 0 { ctx.unbind(22); }
+                                            if r == 0 { ctx.unbind(21); }
+                                        }
+                                    }
+                                } else {
+                                    if r == 0 {
+                                        ctx.begin()?;
+                                        ctx.literal(5, 0)?;
+                                        ctx.assign(20, 0)?;
+                                    }
+                                }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(20, 0)?;
+                                if ctx.test(0, p::Test::If)? {
+                                    ctx.begin()?;
+                                    ctx.local(9, 0)?;
+                                    ctx.local(16, 1)?;
+                                    ctx.call(8, 0, 2)?;
+                                    ctx.pin(0)?;
+                                    ctx.local(10, 1)?;
+                                    ctx.local(17, 2)?;
+                                    ctx.set_index(1, 0)?;
+                                    ctx.begin()?;
+                                    ctx.local(16, 0)?;
+                                    ctx.literal(3, 1)?;
+                                    ctx.call(4, 0, 2)?;
+                                    ctx.assign(16, 0)?;
+                                } else {
+                                    ctx.begin()?;
+                                    ctx.local(9, 0)?;
+                                    ctx.local(15, 1)?;
+                                    ctx.call(8, 0, 2)?;
+                                    ctx.pin(0)?;
+                                    ctx.local(10, 1)?;
+                                    ctx.local(17, 2)?;
+                                    ctx.set_index(1, 0)?;
+                                    ctx.begin()?;
+                                    ctx.local(15, 0)?;
+                                    ctx.literal(3, 1)?;
+                                    ctx.call(4, 0, 2)?;
+                                    ctx.assign(15, 0)?;
+                                }
+                            }
+                            if r == 0 {
+                                ctx.begin()?;
+                                ctx.local(17, 0)?;
+                                ctx.literal(3, 1)?;
+                                ctx.call(4, 0, 2)?;
+                                ctx.assign(17, 0)?;
+                            }
+                            if r == 0 { ctx.unbind(20); }
+                            if r == 0 { ctx.unbind(19); }
+                            if r == 0 { ctx.begin()?; }
+                        }
+                        ctx.close(c1);
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(9, 0)?;
+                        ctx.bind(25, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(10, 0)?;
+                        ctx.assign(9, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(25, 0)?;
+                        ctx.assign(10, 0)?;
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(12, 0)?;
+                        ctx.local(12, 1)?;
+                        ctx.call(4, 0, 2)?;
+                        ctx.assign(12, 0)?;
+                    }
+                    if r == 0 { ctx.unbind(25); }
+                    if r == 0 { ctx.unbind(17); }
+                    if r == 0 { ctx.unbind(16); }
+                    if r == 0 { ctx.unbind(15); }
+                    if r == 0 { ctx.unbind(14); }
+                    if r == 0 { ctx.unbind(13); }
+                    if r == 0 { ctx.begin()?; }
+                }
+                ctx.leave_while(0);
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(12); }
+            if r == 0 { ctx.unbind(11); }
+            if r == 0 { ctx.unbind(10); }
+            if r == 0 { ctx.unbind(9); }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        ctx.assign(5, 0)?;
+    }
+    if r == 0 || matches!(r, 6) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(3, 0)?;
+        }
+        let c0 = if r == 0 { ctx.open(0, 26)? } else { p::Cursor(0) };
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(27, 0)?; } else if !matches!(r, 6) { break 'l0; }
+            if r == 0 || matches!(r, 6) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(5, 1)?;
+                }
+                if r == 0 {
+                    ctx.local(27, 2)?;
+                }
+                if r == 6 { r = 0; } else if r == 0 { ctx.invoke(5, 10, 0, 3)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.assign(5, 0)?;
+            }
+            if r == 0 { ctx.unbind(27); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.close(c0);
+    }
+    if r == 0 || matches!(r, 7) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 7) { break 'l0; }
+            if r == 0 {
+                ctx.literal(0, 0)?;
+                ctx.local(4, 1)?;
+                ctx.call(0, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 7) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(5, 1)?;
+                }
+                if r == 0 {
+                    ctx.literal(2, 2)?;
+                }
+                if r == 7 { r = 0; } else if r == 0 { ctx.invoke(6, 10, 0, 3)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.assign(5, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(11, 0, 2)?;
+                ctx.assign(4, 0)?;
+            }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 || matches!(r, 8) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 8) { break 'l0; }
+            if r == 0 {
+                ctx.local(5, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(0, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 8) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 {
+                    ctx.local(0, 0)?;
+                }
+                if r == 0 {
+                    ctx.local(5, 1)?;
+                }
+                if r == 8 { r = 0; } else if r == 0 { ctx.invoke(7, 12, 0, 2)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(5, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+                ctx.assign(5, 0)?;
+            }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_ARRAY_SORT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.sort",
+    function: p::function("96c5aa2108ec6f342d1b3397b2a1d311467ba64616b5564521eff60a6ab9994e"),
+    callees: &[
+        p::function("14eac1b5d81538db5d02fc3c169127ca1ff9edd557d05471bc70901c9efec1c5"),
+        p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("6f9bb7f907051af80b1437fe92d49e591c265d24a28b9014d255149bf940afd5"),
+        p::function("42ef23b52da62199a9db60436b1da777adb36055a4cf80473d29ad4fde80e857"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Absent,
     ],
     fields: &[],
     records: &[],
@@ -50140,33 +50942,9 @@ const TS_ARRAY_SORT_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "args", path: &[] },
         p::PlanLocal { name: "length", path: &[0] },
         p::PlanLocal { name: "callback", path: &[1] },
-        p::PlanLocal { name: "values", path: &[3] },
-        p::PlanLocal { name: "undefined_count", path: &[4] },
-        p::PlanLocal { name: "index", path: &[5] },
-        p::PlanLocal { name: "present", path: &[6, 1, 0] },
-        p::PlanLocal { name: "value", path: &[6, 1, 1, 1, 0] },
-        p::PlanLocal { name: "compare", path: &[7, 1, 0] },
-        p::PlanLocal { name: "sorted", path: &[7, 2, 0] },
-        p::PlanLocal { name: "out", path: &[7, 2, 1] },
-        p::PlanLocal { name: "n", path: &[7, 2, 2] },
-        p::PlanLocal { name: "passed", path: &[7, 2, 3] },
-        p::PlanLocal { name: "width", path: &[7, 2, 4] },
-        p::PlanLocal { name: "mid", path: &[7, 2, 5, 1, 0] },
-        p::PlanLocal { name: "end", path: &[7, 2, 5, 1, 1] },
-        p::PlanLocal { name: "left", path: &[7, 2, 5, 1, 2] },
-        p::PlanLocal { name: "right", path: &[7, 2, 5, 1, 3] },
-        p::PlanLocal { name: "dest", path: &[7, 2, 5, 1, 4] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "placed", path: &[7, 2, 5, 1, 5, 1] },
-        p::PlanLocal { name: "from_right", path: &[7, 2, 5, 1, 5, 1, 1] },
-        p::PlanLocal { name: "output", path: &[7, 2, 5, 1, 5, 1, 2, 1, 0, 1, 2] },
-        p::PlanLocal { name: "order", path: &[7, 2, 5, 1, 5, 1, 2, 1, 0, 1, 3] },
-        p::PlanLocal { name: "previous", path: &[7, 2, 5, 1, 6] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "value", path: &[9, 1] },
+        p::PlanLocal { name: "output", path: &[3] },
     ],
     closures: &[
-        &[7, 1, 0, 0],
     ],
     sites: &[
         p::PlanSite {
@@ -50178,68 +50956,12 @@ const TS_ARRAY_SORT_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[],
         },
         p::PlanSite {
-            path: &[6, 1, 0, 0],
-            call: p::SiteCall::Invoke(5),
+            path: &[3, 0],
+            call: p::SiteCall::Invoke(4),
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[6, 1, 1, 1, 0, 0],
-            call: p::SiteCall::Invoke(6),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[7, 1, 1, 0],
-            call: p::SiteCall::Invoke(9),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 9],
+            bound: &[0, 1, 2, 3],
             loops: &[],
-        },
-        p::PlanSite {
-            path: &[7, 2, 5, 1, 5, 1, 2, 1, 0, 1, 2, 0],
-            call: p::SiteCall::Apply,
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22],
-            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 20 }],
-        },
-        p::PlanSite {
-            path: &[7, 2, 5, 1, 5, 1, 2, 1, 0, 1, 3, 0],
-            call: p::SiteCall::Invoke(12),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23],
-            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 20 }],
-        },
-        p::PlanSite {
-            path: &[9, 1, 0, 0],
-            call: p::SiteCall::Invoke(13),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 27],
-            loops: &[p::PlanLoop::For { walked: 26 }],
-        },
-        p::PlanSite {
-            path: &[10, 1, 0, 0],
-            call: p::SiteCall::Invoke(13),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6],
-            loops: &[p::PlanLoop::While],
-        },
-        p::PlanSite {
-            path: &[11, 1, 0, 0],
-            call: p::SiteCall::Invoke(15),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6],
-            loops: &[p::PlanLoop::While],
         },
     ],
     run: ts_array_sort,
@@ -50277,500 +50999,17 @@ fn ts_array_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
             ctx.assign(3, 0)?;
         }
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.list(0, 0)?;
-        ctx.bind(4, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(0, 0)?;
-        ctx.bind(5, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.literal(2, 0)?;
-        ctx.bind(6, 0)?;
-    }
-    if r == 0 || matches!(r, 2..=3) {
+    if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.enter_while(); }
-        'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 2..=3) { break 'l0; }
-            if r == 0 {
-                ctx.local(6, 0)?;
-                ctx.local(2, 1)?;
-                ctx.call(4, 0, 2)?;
-            }
-            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-            if r == 0 || matches!(r, 2) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 { ctx.local(0, 0)?; }
-                if r == 0 { ctx.local(6, 1)?; }
-                if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 5, 0, 2)?; }
-                if r == 0 { ctx.bind(7, 0)?; }
-            }
-            if r == 0 || matches!(r, 3) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(7, 0)?;
-                }
-                let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 3) };
-                if t0 {
-                    if r == 0 || matches!(r, 3) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(0, 0)?; }
-                        if r == 0 { ctx.local(6, 1)?; }
-                        if r == 3 { r = 0; } else if r == 0 { ctx.invoke(2, 6, 0, 2)?; }
-                        if r == 0 { ctx.bind(8, 0)?; }
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(8, 0)?;
-                        ctx.literal(1, 1)?;
-                        ctx.call(2, 0, 2)?;
-                        if ctx.test(0, p::Test::If)? {
-                            ctx.begin()?;
-                            ctx.local(5, 0)?;
-                            ctx.literal(3, 1)?;
-                            ctx.call(7, 0, 2)?;
-                            ctx.assign(5, 0)?;
-                        } else {
-                            ctx.begin()?;
-                            ctx.local(8, 0)?;
-                            ctx.pin(0)?;
-                            ctx.local(4, 1)?;
-                            ctx.local(4, 2)?;
-                            ctx.call(8, 2, 1)?;
-                            ctx.set_index(1, 0)?;
-                        }
-                    }
-                    if r == 0 { ctx.unbind(8); }
-                }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(6, 0)?;
-            }
-            if r == 0 { ctx.unbind(7); }
-            if r == 0 { ctx.begin()?; }
-        }
-        ctx.leave_while(0);
-    }
-    if r == 0 || matches!(r, 4..=6) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(3, 0)?;
-            ctx.literal(1, 1)?;
-            ctx.call(2, 0, 2)?;
-        }
-        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 4) };
-        if t1 {
-            if r == 0 {
-                ctx.begin()?;
-                ctx.closure(0, 0)?;
-                ctx.bind(9, 0)?;
-            }
-            if r == 0 || matches!(r, 4) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(4, 0)?;
-                }
-                if r == 0 {
-                    ctx.local(9, 1)?;
-                }
-                if r == 4 { r = 0; } else if r == 0 { ctx.invoke(3, 9, 0, 2)?; }
-            }
-            if r == 0 { ctx.unbind(9); }
-        } else {
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(4, 0)?;
-                ctx.bind(10, 0)?;
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.list(0, 0)?;
-                ctx.bind(11, 0)?;
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(10, 0)?;
-                ctx.call(8, 0, 1)?;
-                ctx.bind(12, 0)?;
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.literal(1, 0)?;
-                ctx.literal(1, 1)?;
-                ctx.list(0, 2)?;
-                ctx.bind(13, 0)?;
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.literal(3, 0)?;
-                ctx.bind(14, 0)?;
-            }
-            if r == 0 || matches!(r, 5..=6) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 { ctx.enter_while(); }
-                'l0: loop {
-                    if r == 0 { ctx.meter(2)?; } else if !matches!(r, 5..=6) { break 'l0; }
-                    if r == 0 {
-                        ctx.local(14, 0)?;
-                        ctx.local(12, 1)?;
-                        ctx.call(4, 0, 2)?;
-                    }
-                    if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(0, 0)?;
-                        ctx.bind(15, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(0, 0)?;
-                        ctx.bind(16, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(0, 0)?;
-                        ctx.bind(17, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(0, 0)?;
-                        ctx.bind(18, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(0, 0)?;
-                        ctx.bind(19, 0)?;
-                    }
-                    if r == 0 || matches!(r, 5..=6) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 {
-                            ctx.local(10, 0)?;
-                        }
-                        let c1 = if r == 0 { ctx.open(0, 20)? } else { p::Cursor(0) };
-                        'l1: loop {
-                            if r == 0 { ctx.meter(2)?; if !ctx.next(c1, 0)? { break 'l1; } ctx.bind(21, 0)?; } else if !matches!(r, 5..=6) { break 'l1; }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(19, 0)?;
-                                ctx.local(16, 1)?;
-                                ctx.call(2, 0, 2)?;
-                                if ctx.test(0, p::Test::If)? {
-                                    ctx.begin()?;
-                                    ctx.local(19, 0)?;
-                                    ctx.local(14, 1)?;
-                                    ctx.call(7, 0, 2)?;
-                                    ctx.local(12, 1)?;
-                                    ctx.call(10, 0, 2)?;
-                                    ctx.assign(15, 0)?;
-                                    ctx.begin()?;
-                                    ctx.local(15, 0)?;
-                                    ctx.local(14, 1)?;
-                                    ctx.call(7, 0, 2)?;
-                                    ctx.local(12, 1)?;
-                                    ctx.call(10, 0, 2)?;
-                                    ctx.assign(16, 0)?;
-                                    ctx.begin()?;
-                                    ctx.local(19, 0)?;
-                                    ctx.assign(17, 0)?;
-                                    ctx.begin()?;
-                                    ctx.local(15, 0)?;
-                                    ctx.assign(18, 0)?;
-                                }
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.literal(4, 0)?;
-                                ctx.bind(22, 0)?;
-                            }
-                            if r == 0 || matches!(r, 5..=6) {
-                                if r == 0 { ctx.begin()?; }
-                                if r == 0 {
-                                    ctx.local(17, 0)?;
-                                    ctx.local(15, 1)?;
-                                    ctx.call(4, 0, 2)?;
-                                }
-                                let t2 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 5..=6) };
-                                if t2 {
-                                    if r == 0 || matches!(r, 5..=6) {
-                                        if r == 0 { ctx.begin()?; }
-                                        if r == 0 {
-                                            ctx.local(18, 0)?;
-                                            ctx.local(16, 1)?;
-                                            ctx.call(4, 0, 2)?;
-                                        }
-                                        let t3 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 5..=6) };
-                                        if t3 {
-                                            if r == 0 {
-                                                ctx.begin()?;
-                                                ctx.local(10, 0)?;
-                                                ctx.local(17, 1)?;
-                                                ctx.call(11, 0, 2)?;
-                                                ctx.pin(0)?;
-                                                ctx.local(13, 1)?;
-                                                ctx.literal(0, 2)?;
-                                                ctx.set_index(1, 0)?;
-                                            }
-                                            if r == 0 {
-                                                ctx.begin()?;
-                                                ctx.local(10, 0)?;
-                                                ctx.local(18, 1)?;
-                                                ctx.call(11, 0, 2)?;
-                                                ctx.pin(0)?;
-                                                ctx.local(13, 1)?;
-                                                ctx.literal(3, 2)?;
-                                                ctx.set_index(1, 0)?;
-                                            }
-                                            if r == 0 || matches!(r, 5) {
-                                                if r == 0 { ctx.begin()?; }
-                                                if r == 0 { ctx.local(3, 0)?; }
-                                                if r == 0 { ctx.literal(1, 1)?; }
-                                                if r == 0 { ctx.local(13, 2)?; }
-                                                if r == 5 { r = 0; } else if r == 0 { ctx.apply(4, 0, 2)?; }
-                                                if r == 0 { ctx.bind(23, 0)?; }
-                                            }
-                                            if r == 0 || matches!(r, 6) {
-                                                if r == 0 { ctx.begin()?; }
-                                                if r == 0 { ctx.local(23, 0)?; }
-                                                if r == 6 { r = 0; } else if r == 0 { ctx.invoke(5, 12, 0, 1)?; }
-                                                if r == 0 { ctx.bind(24, 0)?; }
-                                            }
-                                            if r == 0 {
-                                                ctx.begin()?;
-                                                ctx.literal(0, 0)?;
-                                                ctx.local(24, 1)?;
-                                                ctx.call(4, 0, 2)?;
-                                                if ctx.test(0, p::Test::If)? {
-                                                    ctx.begin()?;
-                                                    ctx.literal(5, 0)?;
-                                                    ctx.assign(22, 0)?;
-                                                }
-                                            }
-                                            if r == 0 { ctx.unbind(24); }
-                                            if r == 0 { ctx.unbind(23); }
-                                        }
-                                    }
-                                } else {
-                                    if r == 0 {
-                                        ctx.begin()?;
-                                        ctx.literal(5, 0)?;
-                                        ctx.assign(22, 0)?;
-                                    }
-                                }
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(22, 0)?;
-                                if ctx.test(0, p::Test::If)? {
-                                    ctx.begin()?;
-                                    ctx.local(10, 0)?;
-                                    ctx.local(18, 1)?;
-                                    ctx.call(11, 0, 2)?;
-                                    ctx.pin(0)?;
-                                    ctx.local(11, 1)?;
-                                    ctx.local(19, 2)?;
-                                    ctx.set_index(1, 0)?;
-                                    ctx.begin()?;
-                                    ctx.local(18, 0)?;
-                                    ctx.literal(3, 1)?;
-                                    ctx.call(7, 0, 2)?;
-                                    ctx.assign(18, 0)?;
-                                } else {
-                                    ctx.begin()?;
-                                    ctx.local(10, 0)?;
-                                    ctx.local(17, 1)?;
-                                    ctx.call(11, 0, 2)?;
-                                    ctx.pin(0)?;
-                                    ctx.local(11, 1)?;
-                                    ctx.local(19, 2)?;
-                                    ctx.set_index(1, 0)?;
-                                    ctx.begin()?;
-                                    ctx.local(17, 0)?;
-                                    ctx.literal(3, 1)?;
-                                    ctx.call(7, 0, 2)?;
-                                    ctx.assign(17, 0)?;
-                                }
-                            }
-                            if r == 0 {
-                                ctx.begin()?;
-                                ctx.local(19, 0)?;
-                                ctx.literal(3, 1)?;
-                                ctx.call(7, 0, 2)?;
-                                ctx.assign(19, 0)?;
-                            }
-                            if r == 0 { ctx.unbind(22); }
-                            if r == 0 { ctx.unbind(21); }
-                            if r == 0 { ctx.begin()?; }
-                        }
-                        ctx.close(c1);
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(10, 0)?;
-                        ctx.bind(25, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(11, 0)?;
-                        ctx.assign(10, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(25, 0)?;
-                        ctx.assign(11, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(14, 0)?;
-                        ctx.local(14, 1)?;
-                        ctx.call(7, 0, 2)?;
-                        ctx.assign(14, 0)?;
-                    }
-                    if r == 0 { ctx.unbind(25); }
-                    if r == 0 { ctx.unbind(19); }
-                    if r == 0 { ctx.unbind(18); }
-                    if r == 0 { ctx.unbind(17); }
-                    if r == 0 { ctx.unbind(16); }
-                    if r == 0 { ctx.unbind(15); }
-                    if r == 0 { ctx.begin()?; }
-                }
-                ctx.leave_while(0);
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(10, 0)?;
-                ctx.assign(4, 0)?;
-            }
-            if r == 0 { ctx.unbind(14); }
-            if r == 0 { ctx.unbind(13); }
-            if r == 0 { ctx.unbind(12); }
-            if r == 0 { ctx.unbind(11); }
-            if r == 0 { ctx.unbind(10); }
-        }
+        if r == 0 { ctx.local(0, 0)?; }
+        if r == 0 { ctx.local(2, 1)?; }
+        if r == 0 { ctx.local(3, 2)?; }
+        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 4, 0, 3)?; }
+        if r == 0 { ctx.bind(4, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(2, 0)?;
-        ctx.assign(6, 0)?;
-    }
-    if r == 0 || matches!(r, 7) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(4, 0)?;
-        }
-        let c0 = if r == 0 { ctx.open(0, 26)? } else { p::Cursor(0) };
-        'l0: loop {
-            if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(27, 0)?; } else if !matches!(r, 7) { break 'l0; }
-            if r == 0 || matches!(r, 7) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(0, 0)?;
-                }
-                if r == 0 {
-                    ctx.local(6, 1)?;
-                }
-                if r == 0 {
-                    ctx.local(27, 2)?;
-                }
-                if r == 7 { r = 0; } else if r == 0 { ctx.invoke(6, 13, 0, 3)?; }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(6, 0)?;
-            }
-            if r == 0 { ctx.unbind(27); }
-            if r == 0 { ctx.begin()?; }
-        }
-        ctx.close(c0);
-    }
-    if r == 0 || matches!(r, 8) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.enter_while(); }
-        'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 8) { break 'l0; }
-            if r == 0 {
-                ctx.literal(0, 0)?;
-                ctx.local(5, 1)?;
-                ctx.call(4, 0, 2)?;
-            }
-            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-            if r == 0 || matches!(r, 8) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(0, 0)?;
-                }
-                if r == 0 {
-                    ctx.local(6, 1)?;
-                }
-                if r == 0 {
-                    ctx.literal(1, 2)?;
-                }
-                if r == 8 { r = 0; } else if r == 0 { ctx.invoke(7, 13, 0, 3)?; }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(6, 0)?;
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(5, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(14, 0, 2)?;
-                ctx.assign(5, 0)?;
-            }
-            if r == 0 { ctx.begin()?; }
-        }
-        ctx.leave_while(0);
-    }
-    if r == 0 || matches!(r, 9) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.enter_while(); }
-        'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 9) { break 'l0; }
-            if r == 0 {
-                ctx.local(6, 0)?;
-                ctx.local(2, 1)?;
-                ctx.call(4, 0, 2)?;
-            }
-            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
-            if r == 0 || matches!(r, 9) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 {
-                    ctx.local(0, 0)?;
-                }
-                if r == 0 {
-                    ctx.local(6, 1)?;
-                }
-                if r == 9 { r = 0; } else if r == 0 { ctx.invoke(8, 15, 0, 2)?; }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(6, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(6, 0)?;
-            }
-            if r == 0 { ctx.begin()?; }
-        }
-        ctx.leave_while(0);
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -50782,10 +51021,10 @@ fn ts_array_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const TS_ARRAY_TOSORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toSorted",
-    function: p::function("a62f513bf172adde10de87396071161a6dd1a6b8e05e4ac1012092aabec4951f"),
+    function: p::function("0d2081805a44e95a6ba9304078be3c6663bfc63d6d2b8bcf0c8a6494159d3c08"),
     callees: &[
         p::function("c426ba01fb36c004295adbc8419e4a549c2b3468bb2131acef70cf7977b2c617"),
-        p::function("9e7b65b3ba834670e5829e53c108c5602e86fe3e0e81da49ef1b0abd38da4d06"),
+        p::function("96c5aa2108ec6f342d1b3397b2a1d311467ba64616b5564521eff60a6ab9994e"),
     ],
     literals: &[],
     fields: &[],
@@ -83810,7 +84049,7 @@ fn ts_member_fill_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const TS_MEMBER_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.filter",
-    function: p::function("e0d024dccbb8a79df881c724b34a0034db9f45979c0fec92f58c69e6e698974a"),
+    function: p::function("d2b95e896808bbcf14e4d7f534a28b0a9439268ab4817698cec7ad56f51a0275"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -102480,7 +102719,7 @@ fn ts_member_log2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_MEMBER_MAP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.map",
-    function: p::function("369917ff96f3d3239fd61e08ad0f58d8719d589a3c14dcc5ba9efc926866d909"),
+    function: p::function("acbfb05e511793354edb5786f557496aab12b5a62dd758bf59e0654298c788a5"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -117494,7 +117733,7 @@ fn ts_member_some_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const TS_MEMBER_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sort",
-    function: p::function("dcbefacc975f87fbe3836d76fbb0e6587cfb182a80daf49ed91260ab26b6dda1"),
+    function: p::function("3c2f15788c49057862c82147d1dfeaa677aade28e13a0ede86f4c608337dd5aa"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -123764,7 +124003,7 @@ fn ts_member_toreversed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const TS_MEMBER_TOSORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toSorted",
-    function: p::function("01987fa1fc5697ae2620d51b9e74ecc60c91da2fff1bb00193c85a89951707da"),
+    function: p::function("8e4722bcfbfa698c5c42c50492c28183b624ff253cd57e1024a2085690c20628"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -134305,7 +134544,7 @@ fn ts_builtin_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
-    function: p::function("f6b649b343330494de1291f781d6bcee15b35fb829d7f655171f3a8339bd1a6f"),
+    function: p::function("feb33e1bb7f638b477a68b231a384326c8d6f994c0a44e2a142586e64b29191a"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -134386,7 +134625,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("b63b98de8f9befb794c088bd6b35e704b34fd76a785a255f3fceaf93f87aa7bb"),
         p::function("f754f954ada52de53187256fa3e3258001d152d76939f0afbb4013539a263db9"),
         p::function("19fa9fa183ad8e7d48d7f886476a92c8fe8c0147fdb56fa8c9b3fe40ea4af4b2"),
-        p::function("e0d024dccbb8a79df881c724b34a0034db9f45979c0fec92f58c69e6e698974a"),
+        p::function("d2b95e896808bbcf14e4d7f534a28b0a9439268ab4817698cec7ad56f51a0275"),
         p::function("9dbefdf9be6a3e672a4f271417c9a3812d91d5dca8967c6e13806c44373ab6f1"),
         p::function("5c1b233a718009c2b7ee29adbf0b915dae7cded221ff4804188151b64035197f"),
         p::function("1ad62b8abc45ec5fa2aa591a6927904f67929ec666f5fe765f77a28791b3a135"),
@@ -134462,7 +134701,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("51fda1bdc485ff149f8e924f7f6bf6ff46def88a165097d2a3b1b6bb03b79c2e"),
         p::function("217e4ca7efe7d904a515ac68e8f81b109a2d22f50f88564742be27beae3a9a6e"),
         p::function("3b8ef08465bd4ddde0ab3c8eb2bcc4f8cb80b24d0493b3ffa8c1658d7ff102d3"),
-        p::function("369917ff96f3d3239fd61e08ad0f58d8719d589a3c14dcc5ba9efc926866d909"),
+        p::function("acbfb05e511793354edb5786f557496aab12b5a62dd758bf59e0654298c788a5"),
         p::function("939b523aabf8b7c1a043692f7e6f9070b71d9ef49172d7548460b50cf6dd0736"),
         p::function("2b3f083e6452ccc3e9e67b5e20f9d439a0fe6a9e096366ebd58fb787768a7f58"),
         p::function("eec7644330e037c8b94a0fc485460d313affcf49c097f881c6f50f8d91d46a55"),
@@ -134522,7 +134761,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("d943782a2a02ace8aa2fa46bae4133dbb9fc35962854fde960dc817158d60057"),
         p::function("2ca2f921ac2bd800e6cc19abaaf2ba6607ced7eb365a02397b41bae52ff1e2da"),
         p::function("9d93959c207654cb804af5cec207b16e7074b4caee66628527a717fc14d726a9"),
-        p::function("dcbefacc975f87fbe3836d76fbb0e6587cfb182a80daf49ed91260ab26b6dda1"),
+        p::function("3c2f15788c49057862c82147d1dfeaa677aade28e13a0ede86f4c608337dd5aa"),
         p::function("a2dfe794a7aafb92435922b491eb5140b420839b3cf8c8c65de5bc6abf0acd4d"),
         p::function("dddb09cad7fe738d68be6d1a382912e7bedd21047ddbf04fe43e1526a0745497"),
         p::function("66bd8e20f7d59adbb68243958b8b0e122b9375b57e238e279e6d778038618e3c"),
@@ -134549,7 +134788,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("c7a763fcb5d158ff611dce167e03d72e91ff3f1b9354a9d64d276310f0783dec"),
         p::function("ea2050c39b655a521293d5466bbf764a027bf2e83b646441f079d27ec6596e48"),
         p::function("20b167dfd9458bc3045fa70f3f48b827d66e08dc8dad4af6e7639b5f02198910"),
-        p::function("01987fa1fc5697ae2620d51b9e74ecc60c91da2fff1bb00193c85a89951707da"),
+        p::function("8e4722bcfbfa698c5c42c50492c28183b624ff253cd57e1024a2085690c20628"),
         p::function("569440ace1eeca68f32e27b0892ba969354f6600ac31dfe807f0858d20961c8d"),
         p::function("dd0b8423db084d01ace63c9aa1b5dc8dd3a13df44583b5c5d61ecb52255468fa"),
         p::function("f3202d287fa16d5a62cdf69acae13b4730d96f37456746e0420c5c47830b2eeb"),
