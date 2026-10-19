@@ -1407,6 +1407,14 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "texts echoed by root call actions in a loop",
             "function pure_echo(item) { return item; }\nfunction demo(items) {\n  const out = [];\n  for (const item of items) { out.push(pure_echo(item)); }\n  return out;\n}\nconst result = demo([\"item-0\", \"item-1\", \"item-2\"]);\n",
         ),
+        // FIG-6845: the same loop over an array with a hole, whose item
+        // only the reference binds, as undefined: the region leaves the
+        // hole's iteration to it and walks the items around it.
+        (
+            "typescript",
+            "an array's hole echoed in a loop",
+            "function pure_echo(item) { return item; }\nfunction demo(items) {\n  const out = [];\n  for (const item of items) { out.push(pure_echo(item)); }\n  return out;\n}\nconst result = demo([\"item-0\", , \"item-2\"]);\n",
+        ),
         (
             "python",
             "text returns and a discarded call",

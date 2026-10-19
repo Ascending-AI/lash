@@ -1731,7 +1731,9 @@ body {
 
 # What a pass of `for...of` binds: an array's hole is undefined, a Map's
 # entry is `[key, value]` with its value read now, and a Set's member is
-# its JavaScript value.
+# its JavaScript value. A hole is the empty tuple, so only a tuple item is
+# compared with one: every other item keeps a generated path that builds
+# nothing, and a loop region walks the array (FIG-6845).
 function ts.for_of.item(source: Any, raw: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
@@ -1740,7 +1742,9 @@ native
 body {
   let k = kind(source)
   if same(k, "list") {
-    if same(raw, ()) { return absent }
+    if same(kind(raw), "tuple") {
+      if same(raw, ()) { return absent }
+    }
     return raw
   }
   if same(k, "map") {

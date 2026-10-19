@@ -386,7 +386,7 @@ ts.array.entries	501a5db37a160abc4008c742353931c1708a24f3f7d5772d7017c0ff0904974
 ts.array.iterator	58fa5c4f20428068663f4493e4bdad9344c0075c875a29c41b4ebdcb642063b4	callback	invoke ts.iterate	true	0	false	8	segment of 1 sites
 ts.for_of.open	431bde067f24b09236adb541008b8ad7b3adc936a88e098485d5f81a8aa2a419	callback	invoke ts.array.iterator	true	0	false	sum(8, size(subject), size(result))	segment of 1 sites
 ts.for_of.next	3b30fcd7b78d0f4e366d210f2394b02857662bc9f8de907cea751c3b5764ffa9	callback	apply next; invoke ts.get	false	0	false	sum(8, size(driver), size(result))	segment of 3 sites
-ts.for_of.item	ab76adc47904f735262818289c18d512ce4c2ddcf096ec2531f87c4691ec9db8	closed	-	false	0	false	sum(128, size(raw), nested_size(raw))	generated
+ts.for_of.item	5eca9e843218eca2ef0717ba9efed7426a407f8c1fdf26de8a2ebb2c984bca10	closed	-	false	0	false	sum(128, size(raw), nested_size(raw))	generated
 ts.array.from	0d7ede585561ae1d20781c7514f8458872db6829a0e71a7dc820b7fdd03c8a2c	callback	apply mapping; apply mapping; apply next; apply mapping; invoke ts.get; invoke ts.array.iterator; invoke ts.array.length	true	0	true	sum(8, deep_size(args), size(result))	segment of 7 sites
 ts.promise.is	9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f	closed	-	false	0	false	6	generated
 ts.promise.pending	656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be	closed	-	false	0	false	5	generated

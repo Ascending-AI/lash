@@ -933,10 +933,6 @@ const LEFT_TO_THE_REFERENCE: &[&str] = &[
     "python region: long text keys",
     "typescript region: branded record",
     "typescript region: inherited name",
-    // Not by design: a `for...of` over an array, whose `ts.for_of.item`
-    // hook has no generated list path, since its hole test `same(raw, ())`
-    // builds a tuple before a guard that may decline.
-    "typescript islands: texts echoed by root call actions in a loop",
 ];
 
 /// Programs whose helpers' plans run a loop as a region over its cursor
@@ -1662,6 +1658,52 @@ fn region_heap_writes_commit_with_their_statement() {
     println!(
         "region heap writes commit with their statement: programs={} runs={runs}",
         programs.len()
+    );
+}
+
+/// FIG-6845: a TypeScript `for...of` over an array inside a called
+/// function runs its iterations in its loop region, as Python's `for...in`
+/// over the same list does (`docs/design/kernel-regions.md` §1, loop
+/// region): the `ts.for_of.item` hook answers the array's items on its
+/// generated path, so the two dialects' loops commit the same iterations
+/// in their regions and finish as the reference does.
+#[test]
+fn typescript_for_of_over_an_array_runs_in_its_region_as_python_for_in_does() {
+    let programs = crate::helper_plans::island_programs();
+    let mut iterations = Vec::new();
+    for id in [
+        "typescript islands: texts echoed by root call actions in a loop",
+        "python islands: texts echoed in a loop",
+    ] {
+        let (_, program) = programs
+            .iter()
+            .find(|(lowered, _)| lowered.id == id)
+            .unwrap_or_else(|| panic!("{id} is an island program"));
+        let registry = program.library.registry();
+        let on = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(ON)),
+            ..program.clone()
+        };
+        let off = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+            ..program.clone()
+        };
+        let roomy = Environment::default().bounds.charge;
+        let (natural, work) = limited::<ON>(&on, id, roomy, None);
+        let (reference, _) = limited::<OFF>(&off, id, roomy, None);
+        assert_eq!(natural, reference, "{id}: regions on and off disagree");
+        iterations.push((id, work.iterations));
+    }
+    let [(_, typescript), (_, python)] = iterations[..] else {
+        unreachable!("two programs ran")
+    };
+    assert!(
+        python > 0,
+        "the Python loop runs in its region: {iterations:?}"
+    );
+    assert_eq!(
+        typescript, python,
+        "the TypeScript loop commits the iterations Python's does: {iterations:?}"
     );
 }
 

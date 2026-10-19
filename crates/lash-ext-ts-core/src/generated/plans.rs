@@ -51849,7 +51849,7 @@ fn ts_for_of_next(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_FOR_OF_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.for_of.item",
-    function: p::function("ab76adc47904f735262818289c18d512ce4c2ddcf096ec2531f87c4691ec9db8"),
+    function: p::function("5eca9e843218eca2ef0717ba9efed7426a407f8c1fdf26de8a2ebb2c984bca10"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -51857,6 +51857,7 @@ const TS_FOR_OF_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Absent,
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("set"),
@@ -51875,7 +51876,7 @@ const TS_FOR_OF_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_for_of_item,
-    template: Some(p::HelperTemplate { entry: Some(ts_for_of_item_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_for_of_item_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("3fb9e43ef811b5bf9101ac77219851b073447a74463783645121f1061a32a454"), ] }) }),
+    template: Some(p::HelperTemplate { entry: Some(ts_for_of_item_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_for_of_item_heap, depth: 1, writes: false, callees: &[p::function("3fb9e43ef811b5bf9101ac77219851b073447a74463783645121f1061a32a454"), ] }) }),
 };
 
 /// `ts.for_of.item`.
@@ -51893,12 +51894,19 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.tuple(1, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(1, 0)?;
-            return Ok(ctx.take(0));
+            ctx.local(1, 0)?;
+            ctx.tuple(1, 0)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                return Ok(ctx.take(0));
+            }
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
@@ -51906,7 +51914,7 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(2, 1)?;
+    ctx.literal(3, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -51923,7 +51931,7 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(3, 1)?;
+    ctx.literal(4, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
@@ -51981,6 +51989,14 @@ fn ts_for_of_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
             heap.path();
             if let Some(value) = (|| {
                 heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("integer")?), None)?;
+                Some(args[1])
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            heap.path();
+            if let Some(value) = (|| {
+                heap.bind(Value::Text(lash_kernel_doc::arena::ShortText::new("list")?), None)?;
                 Some(args[1])
             })() { return Some(value); }
             None
