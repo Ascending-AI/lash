@@ -347,8 +347,26 @@ const SESSION_WITNESSES: usize = 2;
 /// default: past a region's nursery, short of what the longest run holds.
 const TIGHT: u64 = 96 * 1024;
 
-/// Independent libtest laws, assigned to the target's existing Buck shards.
-const SHARDS: usize = 8;
+/// Independent libtest laws, one per Buck shard of the target, so no law
+/// carries more than a sixteenth of the program families.
+const SHARDS: usize = 16;
+
+/// Deals one law's programs to the [`SHARDS`] laws in a single sequence
+/// across every family, so a family shorter than [`SHARDS`] starts where
+/// the one before it stopped instead of stacking on the first laws.
+struct Deal {
+    shard: usize,
+    next: usize,
+}
+
+impl Deal {
+    /// Whether the next program in the sequence is this law's.
+    fn mine(&mut self) -> bool {
+        let mine = self.next % SHARDS == self.shard;
+        self.next += 1;
+        mine
+    }
+}
 
 /// One run of a case under a plan: what it observed, its charge program,
 /// its projections and the work regions committed in it.
@@ -951,11 +969,8 @@ fn regions_on_and_off_agree(shard: usize) {
     let mut counts = Counts::default();
     let mut failures = Vec::new();
     let mut regions = 0;
-    let programs = PROGRAMS
-        .iter()
-        .enumerate()
-        .filter_map(|(index, program)| (index % SHARDS == shard).then_some(program))
-        .chain(EXIT_PROGRAMS);
+    let mut deal = Deal { shard, next: 0 };
+    let programs = PROGRAMS.iter().filter(|_| deal.mine()).chain(EXIT_PROGRAMS);
     let mut region_programs = 0;
     for (name, text, call_depth) in programs {
         region_programs += 1;
@@ -966,8 +981,8 @@ fn regions_on_and_off_agree(shard: usize) {
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
     }
-    for (index, (name, text)) in ALLOCATING.iter().enumerate() {
-        if index % SHARDS != shard {
+    for (name, text) in ALLOCATING {
+        if !deal.mine() {
             continue;
         }
         region_programs += 1;
@@ -987,7 +1002,7 @@ fn regions_on_and_off_agree(shard: usize) {
         check(&on, &off, &tight, &mut counts, &mut failures);
     }
     for (index, (name, text, parks)) in SESSIONS.iter().enumerate() {
-        if index >= SESSION_WITNESSES && index % SHARDS != shard {
+        if index >= SESSION_WITNESSES && !deal.mine() {
             continue;
         }
         region_programs += 1;
@@ -1008,11 +1023,8 @@ fn regions_on_and_off_agree(shard: usize) {
             sessions_hold(&on, &off, &case, &mut counts, &mut failures);
         }
     }
-    for (index, (lowered, program)) in crate::helper_plans::top_level_region_programs()
-        .into_iter()
-        .enumerate()
-    {
-        if index % SHARDS != shard {
+    for (lowered, program) in crate::helper_plans::top_level_region_programs() {
+        if !deal.mine() {
             continue;
         }
         region_programs += 1;
@@ -1030,11 +1042,7 @@ fn regions_on_and_off_agree(shard: usize) {
     }
     counts.report(shard, "region-programs", began);
     let (mut island_programs, mut islands) = (0, 0);
-    for (name, text, call_depth) in ISLANDS
-        .iter()
-        .enumerate()
-        .filter_map(|(index, program)| (index % SHARDS == shard).then_some(program))
-    {
+    for (name, text, call_depth) in ISLANDS.iter().filter(|_| deal.mine()) {
         island_programs += 1;
         let case = program_case(name, text, *call_depth);
         let plans = formed_alike(&on, &off, &case);
@@ -1048,11 +1056,8 @@ fn regions_on_and_off_agree(shard: usize) {
     // occurrences and continuations, including declines and zero division;
     // FIG-6758: both dialects' heap paths and the kinds they decline.
     // Assign each extra program once, like the existing program families.
-    for (index, (lowered, program)) in crate::helper_plans::dialect_region_programs()
-        .into_iter()
-        .enumerate()
-    {
-        if index % SHARDS != shard {
+    for (lowered, program) in crate::helper_plans::dialect_region_programs() {
+        if !deal.mine() {
             continue;
         }
         let registry = program.library.registry();
@@ -1073,11 +1078,8 @@ fn regions_on_and_off_agree(shard: usize) {
     counts.report(shard, "dialect-invokes", began);
     // FIG-6759: lowered guest calls, root call actions and the callbacks a
     // helper's plan applies run as islands, under both depths around them.
-    for (index, (lowered, program)) in crate::helper_plans::island_programs()
-        .into_iter()
-        .enumerate()
-    {
-        if index % SHARDS != shard {
+    for (lowered, program) in crate::helper_plans::island_programs() {
+        if !deal.mine() {
             continue;
         }
         let registry = program.library.registry();
@@ -1096,12 +1098,8 @@ fn regions_on_and_off_agree(shard: usize) {
         }
     }
     counts.report(shard, "dialect-islands", began);
-    for (index, case) in super::corpus_shards()
-        .iter()
-        .flat_map(|shard| &shard.cases)
-        .enumerate()
-    {
-        if index % SHARDS == shard {
+    for case in super::corpus_shards().iter().flat_map(|shard| &shard.cases) {
+        if deal.mine() {
             check(&on, &off, case, &mut counts, &mut failures);
             if let Some(wrapped) = wrapped(case) {
                 check(&on, &off, &wrapped, &mut counts, &mut failures);
@@ -1667,4 +1665,12 @@ program_shards! {
     regions_on_and_off_agree_programs_5: 5,
     regions_on_and_off_agree_programs_6: 6,
     regions_on_and_off_agree_programs_7: 7,
+    regions_on_and_off_agree_programs_8: 8,
+    regions_on_and_off_agree_programs_9: 9,
+    regions_on_and_off_agree_programs_10: 10,
+    regions_on_and_off_agree_programs_11: 11,
+    regions_on_and_off_agree_programs_12: 12,
+    regions_on_and_off_agree_programs_13: 13,
+    regions_on_and_off_agree_programs_14: 14,
+    regions_on_and_off_agree_programs_15: 15,
 }
