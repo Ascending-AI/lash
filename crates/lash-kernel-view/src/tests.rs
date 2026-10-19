@@ -941,7 +941,7 @@ main { finish null }
 
 /// K-CAP-003's view join: an action or control node shows its carrier
 /// statement's caption, a statement with several actions only on the node
-/// of its first, a code node every caption among its members and their
+/// of its first outermost action, a code node every caption among its members and their
 /// arms, a control its arms', and a function's on its callable. K-CAP-007's:
 /// the entry's parameters show by their position in its signature, and its
 /// types' fields by path. Captions of another document, and a workflow
@@ -1019,7 +1019,28 @@ main { finish null }
             .expect("node")
     };
     let code = node(crate::WorkflowNodeKind::Code, &[0]);
-    let first_action = node(crate::WorkflowNodeKind::Action, &[3]);
+    let first_action = joined
+        .nodes
+        .iter()
+        .find(|caption| caption.site == site("flow", &[3]))
+        .expect("statement caption")
+        .node;
+    assert!(
+        view.nodes[first_action].within.is_none(),
+        "K-CAP-003: the statement caption belongs to its outermost action"
+    );
+    assert_eq!(
+        view.dataflow
+            .actions
+            .iter()
+            .find(|action| action.site == view.nodes[first_action].site)
+            .expect("caption's action")
+            .callee,
+        Some(CalleeView::Effect(
+            EffectName::new("send").expect("effect name")
+        )),
+        "the caption joins to the perform that consumes the argument actions"
+    );
     let control = node(crate::WorkflowNodeKind::Control, &[4]);
     assert_eq!(
         view.nodes

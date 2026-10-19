@@ -3,8 +3,9 @@
 //! identity like a source map, that a dialect reads from and writes into
 //! source and a host holds (`K-CAP-001`..`K-CAP-007`).
 //!
-//! A caption never changes behaviour or the document's identity. Nothing a
-//! run, an edit, a checkpoint or a continuation holds names one.
+//! A caption never changes behaviour or the document's identity. Function
+//! values and saved function metadata carry source captions as data; they
+//! do not alter executable documents or continuations.
 
 use std::collections::BTreeSet;
 
@@ -366,7 +367,8 @@ impl CaptionKind {
 /// The captions of one document, by target: strictly ascending and unique,
 /// each a target the document of identity `document` lets a caption name. It is
 /// separate from the [`crate::SourceMap`]: captions outlive the source bytes
-/// a map is keyed to. A host holds it; lash stores none.
+/// a map is keyed to. A host holds workflow captions; extracted cell function
+/// values carry their statement captions.
 ///
 /// Decoding checks the order; validate a decoded value against its document
 /// before using its targets.
@@ -675,6 +677,46 @@ impl<'de> Deserialize<'de> for Captions {
             entries: wire.entries,
         };
         captions.check_order().map_err(serde::de::Error::custom)?;
+        Ok(captions)
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for Caption {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        out.text(&self.title);
+        self.description.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        let title = String::decode(input)?;
+        let description = Option::decode(input)?;
+        Self::new(title, description)
+            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for Captions {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.document.encode(out);
+        self.entries.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        let captions = Self {
+            document: DocumentId::decode(input)?,
+            entries: Vec::decode(input)?,
+        };
+        captions
+            .check_order()
+            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))?;
         Ok(captions)
     }
 }

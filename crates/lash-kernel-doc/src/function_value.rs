@@ -51,6 +51,9 @@ pub const FUNCTION_VALUE_ENTRY: &str = "run";
 pub struct FunctionValue {
     pub document: Document,
     pub entry: Name,
+    /// Source captions, re-keyed to this value's document. They do not
+    /// participate in the document's executable identity.
+    pub captions: crate::Captions,
 }
 
 /// How a function a closure makes is started from outside its run: the
@@ -271,6 +274,11 @@ impl FunctionValue {
                 problem: error.to_string(),
             }
         })?;
+        self.captions
+            .validate(&self.document)
+            .map_err(|error| FunctionValueRefusal::Invalid {
+                problem: error.to_string(),
+            })?;
         if self.signature().is_none() || !self.document.functions.contains_key(&self.entry) {
             return Err(FunctionValueRefusal::NoEntry {
                 entry: self.entry.clone(),
@@ -305,7 +313,7 @@ impl FunctionValue {
         Ok(value)
     }
 
-    /// The `{document, entry}` payload, its document read under the
+    /// The `{document, entry, captions}` payload, its document read under the
     /// document's own version and depth rules.
     fn from_payload(
         payload: &serde_json::Value,
@@ -315,11 +323,14 @@ impl FunctionValue {
         let serde_json::Value::Object(fields) = payload else {
             return Err(decode("the payload is not a record".to_owned()));
         };
-        let (Some(document), Some(serde_json::Value::String(entry)), 2) =
-            (fields.get("document"), fields.get("entry"), fields.len())
-        else {
+        let (Some(document), Some(serde_json::Value::String(entry)), Some(captions), 3) = (
+            fields.get("document"),
+            fields.get("entry"),
+            fields.get("captions"),
+            fields.len(),
+        ) else {
             return Err(decode(
-                "the payload is the record of `document` and `entry`".to_owned(),
+                "the payload is the record of `document`, `entry` and `captions`".to_owned(),
             ));
         };
         let document = Document::from_json_with_limits(&document.to_string(), data)
@@ -327,6 +338,8 @@ impl FunctionValue {
         Ok(Self {
             document,
             entry: Name::new(entry.as_str()),
+            captions: serde_json::from_value(captions.clone())
+                .map_err(|error| decode(error.to_string()))?,
         })
     }
 }

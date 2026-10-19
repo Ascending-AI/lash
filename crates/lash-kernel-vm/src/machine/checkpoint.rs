@@ -42,6 +42,7 @@ impl Machine for KernelMachine {
             observer.path = None;
         }
         self.save = options.cell_save;
+        self.captions = options.captions;
         self.limiters = Limiters {
             memory: options.memory_limiter,
             charge: options.charge_limiter,
@@ -399,6 +400,7 @@ impl KernelMachine {
             #[cfg(test)]
             boundaries: 0,
             save: None,
+            captions: Vec::new(),
             limiters: Limiters::default(),
         };
         machine.capacity_counted();

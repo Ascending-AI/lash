@@ -30,6 +30,7 @@ use super::reads::CodeReads;
 #[derive(Clone, Copy)]
 pub struct Crossing<'a> {
     pub document: &'a Document,
+    pub captions: &'a [crate::CaptionEntry],
     pub catalog: &'a dyn FunctionCatalog,
     pub limits: FunctionValueLimits,
     pub data: KernelDataLimits,
@@ -161,6 +162,9 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
         name
     };
     let mut units: BTreeMap<Name, Function> = BTreeMap::new();
+    // Each copied body keeps its original site and the number of statements
+    // prepended to it. Canonicalization only changes the unit names.
+    let mut origins = BTreeMap::new();
     let mut pending: Vec<Name> = Vec::new();
     let named;
     // The entry unit and the descriptor its host start uses.
@@ -187,6 +191,14 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
                 &|_| false,
             )?;
             pending.extend(gathered.references.iter().cloned());
+            origins.insert(
+                root_name.clone(),
+                (
+                    site.child(0),
+                    gathered.captures.len() + gathered.function.body.len()
+                        - gathered.root.body.len(),
+                ),
+            );
             units.insert(
                 root_name.clone(),
                 with_prelude(gathered.function, gathered.captures),
@@ -250,6 +262,13 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
             pending.extend(references);
             captures.insert(free.clone(), constant);
         }
+        origins.insert(
+            name.clone(),
+            (
+                crate::Site::new(Unit::Function(name.clone()), []),
+                captures.len(),
+            ),
+        );
         units.insert(name, with_prelude(code, captures));
     }
     let mut value = Document::new(document.manifest.numbers, Vec::new());
@@ -281,12 +300,40 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
     value.manifest.functions = library_closure(document, crossing.catalog, library)?;
     value.functions = units;
     let public = Name::new(crate::FUNCTION_VALUE_ENTRY);
-    super::canon::canonical(&mut value, &entry, &public);
+    let names = super::canon::canonical(&mut value, &entry, &public);
     let entry = public;
     value.entries.insert(entry.clone(), entry_definition);
+    let mut entries = Vec::new();
+    for (name, (body, prelude)) in origins {
+        let Some(name) = names.get(&name) else {
+            continue;
+        };
+        for caption in crossing.captions {
+            let Some(site) = caption.target.site() else {
+                continue;
+            };
+            if site.unit != body.unit {
+                continue;
+            }
+            let Some(relative) = site.path.strip_prefix(body.path.as_slice()) else {
+                continue;
+            };
+            let mut path = relative.to_vec();
+            if let Some(statement) = path.first_mut() {
+                *statement += prelude as u32;
+            }
+            entries.push(crate::CaptionEntry::site(
+                crate::Site::new(Unit::Function(name.clone()), path),
+                caption.caption.clone(),
+            ));
+        }
+    }
+    let captions =
+        crate::Captions::new(&value, entries).map_err(|error| unreadable(&error.to_string()))?;
     let value = FunctionValue {
         document: value,
         entry,
+        captions,
     };
     let bytes = value
         .counted_bytes()

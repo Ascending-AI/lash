@@ -53,6 +53,7 @@ impl Lowerer<'_> {
             text.push_str(self.text(returns.range()));
         }
         Written {
+            captions: Vec::new(),
             language: SourceLanguage::Python,
             signature: text,
             call: Some(call),

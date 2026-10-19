@@ -461,7 +461,15 @@ published before that, and a refused value publishes nothing. An exact
 retry under the key answers the same process, from any point a crash cut
 the first attempt at; other bytes, arguments or launch under it are a
 `StartKeyConflict`. To keep the function for later starts, publish
-`value.document` at `value.entry` instead.
+`value.document` at `value.entry` instead. Keep `value.captions` beside the
+published workflow: it contains the statement captions spelled in the cell's
+function, including when the function was saved in an earlier cell. Extraction
+re-keys those captions to the new document's sites, accounting for frozen
+captures and canonical function names. The transport payload has three fields:
+`document`, `entry` and `captions`; hosts that declare its schema must accept
+all three. Rust constructors without captions use
+`Captions::empty(document.identity())`. Captions remain outside the document's
+executable identity.
 
 A host-observed start exports disjoint `lash.process.start.<phase>_us`
 attributes on its `lash.process.start` producer. For a published definition:
@@ -751,8 +759,9 @@ with a `WorkflowView` by view location, as the `kernel-caption-view` schema.
 `workflow_document` is the `WorkflowDocument` the view was derived from: its
 entry's signature names and orders the parameters.
 
-- An action or control node shows its carrier statement's caption. A
-  statement with several actions shows it on the node of its first.
+- An action or control node shows its statement's caption. A statement
+  with several actions shows it on its first outermost action, the one it
+  performs or awaits. A helper nested in that action's arguments gets none.
 - A code node shows every caption among its `members` and their arms.
 - A control shows its `arms`' captions, by `ControlArm.block`.
 - A callable shows its function's caption, on `CallableView.block`.

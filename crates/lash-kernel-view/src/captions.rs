@@ -2,6 +2,8 @@
 //! location. The view itself stays a pure function of the document: a
 //! caption-only change keeps its identity, so captions never enter it.
 
+use std::collections::BTreeMap;
+
 use lash_kernel_check::WorkflowDocument;
 use lash_kernel_doc::{
     Caption, CaptionTarget, Captions, Document, DocumentId, FieldPath, Name, ParamTarget, Site,
@@ -18,10 +20,10 @@ use crate::{BindingKind, WorkflowNodeKind, WorkflowView};
 #[serde(deny_unknown_fields)]
 pub struct CaptionView {
     pub document: DocumentId,
-    /// By node, then site. An action or control node has its carrier
-    /// statement's caption; a statement with several actions gives it to
-    /// the node of its first. A code node has the caption of every member,
-    /// and of every clause arm of a member, that has one.
+    /// By node, then site. An action or control node has its statement's
+    /// caption; a statement with several actions gives it to the node of
+    /// its first outermost action. A code node has the caption of every
+    /// member, and of every clause arm of a member, that has one.
     pub nodes: Vec<NodeCaption>,
     /// By node, then arm: a control node's [`crate::ControlArm`] captions.
     pub arms: Vec<ArmCaption>,
@@ -142,11 +144,20 @@ impl WorkflowView {
         let caption = |site: &Site| captions.at(site).cloned();
         let mut nodes = Vec::new();
         let mut arms = Vec::new();
+        // Evaluation order visits argument helpers before the action that
+        // consumes them. A control keeps its own statement's caption.
+        let mut owners = BTreeMap::new();
+        for (index, node) in self.nodes.iter().enumerate() {
+            if node.kind == WorkflowNodeKind::Control
+                || (node.kind == WorkflowNodeKind::Action && node.within.is_none())
+            {
+                owners.entry(node.statement.clone()).or_insert(index);
+            }
+        }
         for (index, node) in self.nodes.iter().enumerate() {
             match node.kind {
                 WorkflowNodeKind::Action | WorkflowNodeKind::Control => {
-                    // Only a statement's carrier holds it among its members.
-                    if node.members.contains(&node.statement)
+                    if owners.get(&node.statement) == Some(&index)
                         && let Some(caption) = caption(&node.statement)
                     {
                         nodes.push(NodeCaption {

@@ -460,6 +460,60 @@
         }
       ]
     },
+    "Caption": {
+      "additionalProperties": false,
+      "description": "A step's title and optional description, in the one text domain every\ndialect can spell and read back exactly (`K-CAP-005`). A value exists only\nonce [`Caption::new`] accepted its text; decoding checks it the same way.",
+      "properties": {
+        "description": {
+          "description": "At most [`CAPTION_DESCRIPTION_BYTES`] of trimmed lines separated by\n`\\n`, with no blank first or last line and no two blank lines in a\nrow. Never empty: no description is `None`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "One non-empty, trimmed line of at most [`CAPTION_TITLE_BYTES`].",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "CaptionEntry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SiteEntry"
+        },
+        {
+          "$ref": "#/$defs/ParamEntry"
+        },
+        {
+          "$ref": "#/$defs/FieldEntry"
+        }
+      ],
+      "description": "One caption: its text and what it names, by exactly one of `site`,\n`param` and `field`."
+    },
+    "Captions": {
+      "additionalProperties": false,
+      "description": "The captions of one document, by target: strictly ascending and unique,\neach a target the document of identity `document` lets a caption name. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds workflow captions; extracted cell function\nvalues carry their statement captions.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its targets.",
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/CaptionEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "document"
+      ],
+      "type": "object"
+    },
     "CarryWire": {
       "additionalProperties": false,
       "description": "A carried session as it crosses (S8): its [`SessionRoot`] in the\nkernel's token encoding, and a link for each page it names, in its\norder (heap, bindings, functions). The receiver authorizes every page\nby its link; a root naming a page with none is refused.",
@@ -823,6 +877,10 @@
       ],
       "type": "object"
     },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "Entry": {
       "additionalProperties": false,
       "description": "A declared entry's host signature and synchronous calling convention.",
@@ -1115,6 +1173,86 @@
         }
       ]
     },
+    "FieldEntry": {
+      "additionalProperties": false,
+      "description": "A field's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldTarget"
+        }
+      },
+      "required": [
+        "field",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "FieldPath": {
+      "additionalProperties": false,
+      "description": "A walk from a parameter's or the result's type to a named record field.\nEach step names a field of a record. A list is walked to its element\ntype, and a union whose members other than null and absent are exactly\none is walked to that member, so `items.title` names the `title` of each\nrecord of a list `items`, and `reply.note` the `note` of an optional\n`reply`. A map, a set, a tuple, a record's rest and a union of two\nrecords are not walked.",
+      "properties": {
+        "fields": {
+          "description": "At least one field name.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "root": {
+          "$ref": "#/$defs/FieldRoot"
+        }
+      },
+      "required": [
+        "root",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "FieldRoot": {
+      "description": "Where a [`FieldPath`] starts.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The type of the entry's parameter of this name.",
+          "properties": {
+            "param": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "param"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "result",
+          "description": "The entry's result type.",
+          "type": "string"
+        }
+      ]
+    },
+    "FieldTarget": {
+      "additionalProperties": false,
+      "description": "A named field of a type an entry's signature states.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/Name",
+          "description": "The entry."
+        },
+        "path": {
+          "$ref": "#/$defs/FieldPath"
+        }
+      },
+      "required": [
+        "function",
+        "path"
+      ],
+      "type": "object"
+    },
     "Float": {
       "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
       "type": "string"
@@ -1198,6 +1336,10 @@
       "additionalProperties": false,
       "description": "A function as data: a self-contained document and the entry that starts\nit. The entry's signature is `document.entries[entry].signature`.",
       "properties": {
+        "captions": {
+          "$ref": "#/$defs/Captions",
+          "description": "Source captions, re-keyed to this value's document. They do not\nparticipate in the document's executable identity."
+        },
         "document": {
           "$ref": "#/$defs/Document"
         },
@@ -1207,7 +1349,8 @@
       },
       "required": [
         "document",
-        "entry"
+        "entry",
+        "captions"
       ],
       "type": "object"
     },
@@ -1633,6 +1776,40 @@
       ],
       "type": "object"
     },
+    "ParamEntry": {
+      "additionalProperties": false,
+      "description": "A parameter's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "param": {
+          "$ref": "#/$defs/ParamTarget"
+        }
+      },
+      "required": [
+        "param",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "ParamTarget": {
+      "additionalProperties": false,
+      "description": "A declared function's parameter, by name. An entry's parameters are\nits signature's, the names a host starts it with; another function's are\nits own.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/Name"
+        },
+        "param": {
+          "$ref": "#/$defs/Name"
+        }
+      },
+      "required": [
+        "function",
+        "param"
+      ],
+      "type": "object"
+    },
     "Place": {
       "description": "Where an assignment writes.",
       "oneOf": [
@@ -1834,6 +2011,44 @@
       },
       "required": [
         "result"
+      ],
+      "type": "object"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "SiteEntry": {
+      "additionalProperties": false,
+      "description": "A site's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "caption"
       ],
       "type": "object"
     },
@@ -2519,6 +2734,42 @@
           },
           "required": [
             "union"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
           ],
           "type": "object"
         }

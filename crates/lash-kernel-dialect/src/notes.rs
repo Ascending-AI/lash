@@ -30,7 +30,7 @@ pub struct Note {
     /// The caption its author construct wrote, on exactly one statement the
     /// construct emits: the one holding its first action, else the last
     /// (its binding); a control's own statement. Scaffolding, hoisted
-    /// temporaries and predeclarations carry none. A cell's carry none.
+    /// temporaries and predeclarations carry none.
     pub caption: Option<Caption>,
     /// The captions of the statement's clause arms, by the arm's index in
     /// [`Self::blocks`].
@@ -130,6 +130,19 @@ pub fn site_layers(
     );
     let source_map = SourceMap::new_identified(document, source, language, layers.sites)?;
     let captions = Captions::new_identified(document, layers.captions)?;
+    for (site, written) in &mut layers.written {
+        let body = site.child(0);
+        written.captions = captions
+            .entries()
+            .iter()
+            .filter_map(|entry| {
+                let site = entry.target.site()?;
+                (site.unit == body.unit).then_some(())?;
+                let path = site.path.strip_prefix(body.path.as_slice())?;
+                Some((path.to_vec(), entry.caption.clone()))
+            })
+            .collect();
+    }
     Ok(SiteLayers {
         source_map,
         written: layers.written,

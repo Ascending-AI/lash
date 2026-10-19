@@ -42,7 +42,7 @@ pub(crate) struct Program {
     /// Inside that function the name is the parameter, whatever `type` or
     /// `interface` shares it.
     pub(crate) type_parameters: BTreeSet<String>,
-    /// The captions a workflow module spells; a cell's spells none.
+    /// The captions the source spells.
     pub(crate) captions: Spelled,
     /// Each comment's bytes, ascending; a cell's are not collected.
     pub(crate) comments: Vec<std::ops::Range<usize>>,
@@ -467,7 +467,7 @@ fn parse_from_goal(
     limits: SourceLimits,
 ) -> Result<Program, Diagnostic> {
     let mut parsed =
-        goal::parse(source, first, workflow).map_err(|error| parser_diagnostic(error, source))?;
+        goal::parse(source, first, true).map_err(|error| parser_diagnostic(error, source))?;
     let adapter = Adapter {
         source: &parsed.text,
         comments: std::mem::take(&mut parsed.comments),

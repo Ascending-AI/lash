@@ -29,7 +29,7 @@
 //! type DefinitionId = { $lash_definition_id: string };
 //! type ProcessSignature = { signature: "unknown" } | { signature: "known"; encoding: unknown };
 //! type Definition = { id: DefinitionId; signature: ProcessSignature };
-//! type FunctionValue = { $lash_function: { document: unknown; entry: string } };
+//! type FunctionValue = { $lash_function: { document: unknown; entry: string; captions: unknown } };
 //! type Target = { definition: FunctionValue } | { definition_id: DefinitionId };
 //! processes.start(Target & { args?: Record<string, unknown>; label?: string }): Promise<ProcessHandle>;
 //! processes.get({ definition_id: DefinitionId }): Promise<Definition>;

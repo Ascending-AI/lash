@@ -695,16 +695,18 @@ impl TokenCodec for StartConvention {
 /// A function value: its document and its entry's name.
 impl TokenCodec for FunctionValue {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(3);
         self.document.encode(out);
         self.entry.encode(out);
+        self.captions.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(3)?;
         Ok(Self {
             document: Document::decode(input)?,
             entry: Name::decode(input)?,
+            captions: crate::Captions::decode(input)?,
         })
     }
 }

@@ -590,7 +590,7 @@ pub(crate) fn lower(
         );
     }
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    let layers = lash_kernel_dialect::site_layers(
+    let mut layers = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::TypeScript,
@@ -599,6 +599,19 @@ pub(crate) fn lower(
         &lowerer.declared_captions,
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
+    for function in cell.functions.values() {
+        if document.functions.contains_key(&function.name)
+            && let Some(written) = &function.written
+        {
+            layers.written.insert(
+                lash_kernel_doc::Site::new(
+                    lash_kernel_doc::Unit::Function(function.name.clone()),
+                    Vec::new(),
+                ),
+                written.clone(),
+            );
+        }
+    }
     Ok(Lowered {
         document,
         source_map: Some(layers.source_map),

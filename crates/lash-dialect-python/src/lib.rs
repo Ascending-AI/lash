@@ -144,18 +144,14 @@ fn lower_with_calls(
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
     })?;
-    // Captions are a workflow module's; a cell's `#:` lines are comments.
-    let spelled = match mode {
-        Mode::Module => captions::spelled(
-            source,
-            parsed
-                .tokens()
-                .iter()
-                .filter(|token| token.kind() == ruff_python_ast::token::TokenKind::Comment)
-                .map(|token| token.start().to_usize()..token.end().to_usize()),
-        ),
-        Mode::Cell(_) => captions::Spelled::default(),
-    };
+    let spelled = captions::spelled(
+        source,
+        parsed
+            .tokens()
+            .iter()
+            .filter(|token| token.kind() == ruff_python_ast::token::TokenKind::Comment)
+            .map(|token| token.start().to_usize()..token.end().to_usize()),
+    );
     lower::lower_with_calls(
         parsed.syntax(),
         source,

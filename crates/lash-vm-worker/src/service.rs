@@ -94,7 +94,7 @@ pub(crate) fn perform(
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
-                    // A cell has no captions.
+                    // Function captions travel in the written table.
                     captions: None,
                     function_values: embedding
                         .dialects

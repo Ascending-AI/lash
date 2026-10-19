@@ -271,6 +271,8 @@ pub struct MachineOptions {
     pub observation: crate::ObservationMode,
     pub trace_path: bool,
     pub cell_save: Option<Box<dyn CellSave>>,
+    /// Source captions available when a function crosses to a tool.
+    pub captions: Vec<lash_kernel_doc::CaptionEntry>,
     /// What decides at the memory bound; none refuses.
     pub memory_limiter: Option<Box<dyn MemoryLimiter>>,
     /// What decides at the charge bound; none refuses.

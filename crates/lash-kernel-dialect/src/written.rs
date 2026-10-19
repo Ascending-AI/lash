@@ -4,7 +4,8 @@
 //! that can outlive its statement: named functions, anonymous ones and
 //! lambdas alike. The record is typed and travels with the document that
 //! holds the site ([`crate::Lowered::written`]) and with every function a
-//! session saves from it ([`crate::SavedFunction::written`]). No source
+//! session saves from it ([`crate::SavedFunction::written`]). A saved
+//! declaration's row is keyed by its function body. No source
 //! map is needed to read it: a later cell of the same dialect calls it by
 //! [`Written::call`], with or without the source the cell came from. The
 //! executable document owns the function's start adapter and signature.
@@ -29,6 +30,10 @@ pub struct Written {
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<CallShape>,
+    /// Statement and arm captions, relative to this function's body.
+    /// Saving and crossing shift these paths alongside the code they copy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captions: Vec<(Vec<u32>, lash_kernel_doc::Caption)>,
 }
 
 /// The parameters a call places arguments by, and whether the call makes a
@@ -101,18 +106,20 @@ pub mod written_table {
 
 impl TokenCodec for Written {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(4);
         self.language.encode(out);
         out.text(&self.signature);
         self.call.encode(out);
+        self.captions.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(4)?;
         Ok(Self {
             language: SourceLanguage::decode(input)?,
             signature: String::decode(input)?,
             call: Option::decode(input)?,
+            captions: Vec::decode(input)?,
         })
     }
 }
@@ -161,4 +168,31 @@ pub fn closure_site(statement: &Stmt, site: &Site) -> Option<Site> {
         .find_map(|(child, index)| {
             matches!(child, Node::Expr(Expr::Closure(_))).then(|| site.child(index))
         })
+}
+
+/// Captions carried by the written table, at the running document's sites.
+/// A closure's body is its first block child; a saved declaration's row is
+/// keyed by its function block directly.
+#[must_use]
+pub fn function_captions(
+    document: &lash_kernel_doc::Document,
+    written: &BTreeMap<Site, Written>,
+) -> Vec<lash_kernel_doc::CaptionEntry> {
+    let mut captions = BTreeMap::new();
+    for (site, written) in written {
+        let body = match document.node(site) {
+            Some(Node::Expr(Expr::Closure(_))) => site.child(0),
+            Some(Node::Block(_)) => site.clone(),
+            _ => continue,
+        };
+        for (path, caption) in &written.captions {
+            let mut target = body.clone();
+            target.path.extend(path);
+            captions.insert(target, caption.clone());
+        }
+    }
+    captions
+        .into_iter()
+        .map(|(site, caption)| lash_kernel_doc::CaptionEntry::site(site, caption))
+        .collect()
 }

@@ -786,6 +786,7 @@ fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refu
             },
         );
         FunctionValue {
+            captions: lash_kernel_doc::Captions::empty(document.identity()),
             document,
             entry: run,
         }

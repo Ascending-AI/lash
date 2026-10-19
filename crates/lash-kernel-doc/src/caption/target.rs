@@ -392,3 +392,135 @@ impl<'de> Deserialize<'de> for CaptionEntry {
         })
     }
 }
+
+impl crate::graph_tokens::TokenCodec for CaptionEntry {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.target.encode(out);
+        self.caption.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            target: CaptionTarget::decode(input)?,
+            caption: Caption::decode(input)?,
+        })
+    }
+}
+
+// CaptionTarget: Site = 0, Param = 1, Field = 2. FieldRoot: Param = 0, Result = 1.
+impl crate::graph_tokens::TokenCodec for CaptionTarget {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        match self {
+            Self::Site(site) => {
+                out.sum(0, 1);
+                site.encode(out);
+            }
+            Self::Param(param) => {
+                out.sum(1, 1);
+                param.encode(out);
+            }
+            Self::Field(field) => {
+                out.sum(2, 1);
+                field.encode(out);
+            }
+        }
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        use crate::graph_tokens::{TokenError, TokenReader};
+        let (variant, fields) = input.sum()?;
+        TokenReader::expect_fields(fields, 1)?;
+        Ok(match variant {
+            0 => Self::Site(Site::decode(input)?),
+            1 => Self::Param(ParamTarget::decode(input)?),
+            2 => Self::Field(FieldTarget::decode(input)?),
+            _ => return Err(TokenError::UnsupportedVariant { variant }),
+        })
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for ParamTarget {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.function.encode(out);
+        self.param.encode(out);
+    }
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            function: Name::decode(input)?,
+            param: Name::decode(input)?,
+        })
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for FieldTarget {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.function.encode(out);
+        self.path.encode(out);
+    }
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            function: Name::decode(input)?,
+            path: FieldPath::decode(input)?,
+        })
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for FieldPath {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.root.encode(out);
+        self.fields.encode(out);
+    }
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            root: FieldRoot::decode(input)?,
+            fields: Vec::decode(input)?,
+        })
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for FieldRoot {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        match self {
+            Self::Param(name) => {
+                out.sum(0, 1);
+                name.encode(out);
+            }
+            Self::Result => out.sum(1, 0),
+        }
+    }
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        use crate::graph_tokens::{TokenError, TokenReader};
+        let (variant, fields) = input.sum()?;
+        Ok(match variant {
+            0 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Self::Param(Name::decode(input)?)
+            }
+            1 => {
+                TokenReader::expect_fields(fields, 0)?;
+                Self::Result
+            }
+            _ => return Err(TokenError::UnsupportedVariant { variant }),
+        })
+    }
+}

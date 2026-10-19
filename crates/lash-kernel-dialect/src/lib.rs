@@ -48,7 +48,7 @@ pub use saved::{
 #[doc(hidden)]
 pub use saved::{InstalledFunction, MemberBody, SavedFunction, Token};
 pub use source::{SourceError, define_functions};
-pub use written::{CallParam, CallShape, Written, closure_site, written_table};
+pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
 
 pub use imperative::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,

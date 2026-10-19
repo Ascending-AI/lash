@@ -104,6 +104,7 @@ impl SnapshotHeap for CrossingHeap<'_> {
 /// What a crossing reads of the run besides its heap.
 pub(crate) struct CrossingRun<'a> {
     pub document: &'a Document,
+    pub captions: &'a [lash_kernel_doc::CaptionEntry],
     pub catalog: &'a dyn FunctionCatalog,
     pub data: KernelDataLimits,
     /// The tag of the document's tokens, found when a function first
@@ -119,6 +120,7 @@ impl CrossingRun<'_> {
             .as_deref();
         Crossing {
             document: self.document,
+            captions: self.captions,
             catalog: self.catalog,
             limits: FunctionValueLimits::standard(),
             data: self.data,

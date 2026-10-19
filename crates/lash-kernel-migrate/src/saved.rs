@@ -29,7 +29,7 @@ pub fn saved_function(
     let document = rooted(migration, &function.document, &function.name, functions)?;
     Ok(SavedFunction {
         name: function.name.clone(),
-        document,
+        document: document.document,
         captures: function.captures.clone(),
         release: function.release,
         references: function.references.clone(),
@@ -54,7 +54,16 @@ pub fn function_value(
     value: &FunctionValue,
     functions: &dyn FunctionCatalog,
 ) -> Result<FunctionValue, DocumentRefusal> {
-    let document = rooted(migration, &value.document, &value.entry, functions)?;
+    let rewritten = rooted(migration, &value.document, &value.entry, functions)?;
+    let document = rewritten.document;
+    let captions = value
+        .captions
+        .rekey(&rewritten.correspondence, &document)
+        .ok_or_else(|| DocumentRefusal::FormNotCarried {
+            site: Site::new(Unit::Function(value.entry.clone()), []),
+            detail: "the rewrite's correspondence names another document".into(),
+        })?
+        .captions;
     let same_start = document
         .entries
         .get(&value.entry)
@@ -76,6 +85,7 @@ pub fn function_value(
     Ok(FunctionValue {
         document,
         entry: value.entry.clone(),
+        captions,
     })
 }
 
@@ -87,7 +97,7 @@ fn rooted(
     document: &Document,
     root: &Name,
     functions: &dyn FunctionCatalog,
-) -> Result<Document, DocumentRefusal> {
+) -> Result<crate::migration::Rewritten, DocumentRefusal> {
     let rewritten = (migration.document)(document, functions)?;
     if !rewritten.document.functions.contains_key(root) {
         return Err(DocumentRefusal::FormNotCarried {
@@ -97,5 +107,5 @@ fn rooted(
             ),
         });
     }
-    Ok(rewritten.document)
+    Ok(rewritten)
 }

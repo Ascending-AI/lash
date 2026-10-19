@@ -295,3 +295,57 @@ async fn a_call_that_shipped_a_function_reads_back_identically_after_a_restart()
     );
     function_value(&resumed.args["add"]);
 }
+
+/// FIG-6892 / K-CAP-003: captions travel with the function, including when
+/// it is saved and sent from a later cell. Captures prepend code and crossing
+/// canonicalizes names; the two titles must still name their own statements.
+async fn captioned_function(dialect: CellDialect, source: &str, send: &str) {
+    let received = kept(&dialect, &[source, send]).await;
+    for args in received {
+        let value = function_value(&args["run"]);
+        let captions = &value.captions;
+        let encoded = lash_kernel_doc::graph_tokens::encode_body(&value);
+        let decoded: FunctionValue =
+            lash_kernel_doc::graph_tokens::decode_body(&encoded).expect("stored function value");
+        assert_eq!(decoded, value, "captions survive the stored token boundary");
+        captions
+            .validate(&value.document)
+            .expect("new document sites");
+        let titles: Vec<_> = captions
+            .entries()
+            .iter()
+            .map(|entry| {
+                let site = entry.target.site().expect("statement caption");
+                let node = value.document.node(site).expect("captioned statement");
+                (entry.caption.title(), format!("{node:?}"))
+            })
+            .collect();
+        assert_eq!(titles.len(), 2, "only the extracted function's statements");
+        assert!(
+            titles
+                .iter()
+                .any(|(title, node)| *title == "Remember input" && node.contains("Let")),
+            "{titles:?}"
+        );
+        assert!(
+            titles
+                .iter()
+                .any(|(title, node)| *title == "Return result" && node.contains("Return")),
+            "{titles:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_typescript_cell_function_keeps_its_statement_captions_at_crossing() {
+    captioned_function(CellDialect::typescript(),
+        "const offset = 3;\nconst run = async (x: number) => {\n/** Remember input */\nconst result = x + offset;\n/** Return result */\nreturn result;\n};\nawait keep.run({ run });",
+        "await keep.run({ run });").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_python_cell_function_keeps_its_statement_captions_at_crossing() {
+    captioned_function(CellDialect::python(),
+        "offset = 3\nasync def run(x: int):\n    #: Remember input\n    result = x + offset\n    #: Return result\n    return result\nawait keep_run({'run': run})",
+        "await keep_run({'run': run})").await;
+}

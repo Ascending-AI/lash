@@ -36,8 +36,8 @@ pub(crate) fn function_value_schema() -> Value {
         "properties": {
             "$lash_function": {
                 "type": "object",
-                "properties": { "document": { "type": "object" }, "entry": { "type": "string" } },
-                "required": ["document", "entry"],
+                "properties": { "document": { "type": "object" }, "entry": { "type": "string" }, "captions": { "type": "object" } },
+                "required": ["document", "entry", "captions"],
                 "additionalProperties": false
             }
         },

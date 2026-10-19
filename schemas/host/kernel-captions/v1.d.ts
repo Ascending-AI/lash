@@ -5,7 +5,8 @@
  * The captions of one document, by target: strictly ascending and unique,
  * each a target the document of identity `document` lets a caption name. It is
  * separate from the [`crate::SourceMap`]: captions outlive the source bytes
- * a map is keyed to. A host holds it; lash stores none.
+ * a map is keyed to. A host holds workflow captions; extracted cell function
+ * values carry their statement captions.
  *
  * Decoding checks the order; validate a decoded value against its document
  * before using its targets.

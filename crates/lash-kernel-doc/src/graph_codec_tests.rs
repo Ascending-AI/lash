@@ -264,6 +264,7 @@ fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
             },
         );
         crate::FunctionValue {
+            captions: crate::Captions::empty(document.identity()),
             document,
             entry: run,
         }

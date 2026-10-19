@@ -35,8 +35,10 @@ const RUN: &str = "kernel 1\nnumbers float\nentry run(n: Any) -> Any\n\nfn run(n
 const OTHER: &str = "kernel 1\nnumbers float\nentry run(n: Any) -> Any\n\nfn run(n) {\n  return [n, \"other\"]\n}\n\nmain {\n  finish null\n}\n";
 
 fn function(text: &str) -> FunctionValue {
+    let document = parse_document(text).expect("the function's document parses");
     FunctionValue {
-        document: parse_document(text).expect("the function's document parses"),
+        captions: lash::workflow::document::Captions::empty(document.identity()),
+        document,
         entry: Name::new("run"),
     }
 }
@@ -1109,7 +1111,12 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
         .await
         .expect("publish the spawner's environment");
     let mut args = serde_json::Map::new();
-    let base = "y".repeat(usize::try_from(ceiling).unwrap() - 700);
+    // Keep this value below its own bound while its start declaration
+    // exceeds the batch bound. The new caption sidecar consumes part of
+    // the fixture's original margin, even when it has no entries.
+    let captions_bytes =
+        serde_json::to_vec(&function(RUN).captions).unwrap().len() + "\"captions\":".len() + 1; // the member separator
+    let base = "y".repeat(usize::try_from(ceiling).unwrap() - 700 - captions_bytes);
     args.insert("base".to_owned(), serde_json::json!(base));
     args.insert("marker".to_owned(), serde_json::json!("batch"));
     args.insert("cut".to_owned(), serde_json::json!("uncut"));

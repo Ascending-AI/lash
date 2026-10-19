@@ -199,8 +199,7 @@ pub(crate) struct Lowerer<'a> {
     /// The first module name an entry's body named, with where, which the
     /// entry is refused for.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
-    /// The captions the module spells, by where what each captions starts;
-    /// none for a cell.
+    /// The captions the source spells, by where what each captions starts.
     captions: BTreeMap<usize, lash_kernel_doc::Caption>,
     /// The captions of the module's entries, their parameters and their
     /// types' fields.
@@ -415,7 +414,7 @@ pub(crate) fn lower_with_calls(
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let lash_kernel_dialect::SiteLayers {
         source_map,
-        written,
+        mut written,
         captions,
     } = lash_kernel_dialect::site_layers(
         &document,
@@ -426,6 +425,19 @@ pub(crate) fn lower_with_calls(
         &lowerer.declared_captions,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
+    for function in cell.functions.values() {
+        if document.functions.contains_key(&function.name)
+            && let Some(metadata) = &function.written
+        {
+            written.insert(
+                lash_kernel_doc::Site::new(
+                    lash_kernel_doc::Unit::Function(function.name.clone()),
+                    Vec::new(),
+                ),
+                metadata.clone(),
+            );
+        }
+    }
     Ok(Lowered {
         document,
         source_map: Some(source_map),

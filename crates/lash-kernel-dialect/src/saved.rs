@@ -354,7 +354,19 @@ fn save_closure(
         release: left.release,
         helper_owners: owners,
         references: gathered.references,
-        written: left.written.get(&gathered.site).cloned(),
+        written: left
+            .written
+            .get(&gathered.site)
+            .cloned()
+            .map(|mut written| {
+                let prelude = gathered.function.body.len() - gathered.root.body.len();
+                for (path, _) in &mut written.captions {
+                    if let Some(statement) = path.first_mut() {
+                        *statement += prelude as u32;
+                    }
+                }
+                written
+            }),
         token: None,
     })
 }

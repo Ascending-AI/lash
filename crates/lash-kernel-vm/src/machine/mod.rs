@@ -407,6 +407,7 @@ pub struct KernelMachine {
     /// How the cell's end saves the functions its carry would drop; none
     /// drops them.
     save: Option<Box<dyn crate::interface::CellSave>>,
+    captions: Vec<lash_kernel_doc::CaptionEntry>,
     /// What decides at the run's bounds (FIG-6768); none refuses.
     limiters: Limiters,
     session_cell: bool,

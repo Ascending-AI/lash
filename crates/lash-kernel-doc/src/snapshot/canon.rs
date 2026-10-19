@@ -16,7 +16,11 @@ use super::reads::CodeReads;
 
 /// Renames `document`'s functions and variables canonically: `entry`
 /// becomes `entry_as` and keeps its parameters, which its signature names.
-pub(crate) fn canonical(document: &mut Document, entry: &Name, entry_as: &Name) {
+pub(crate) fn canonical(
+    document: &mut Document,
+    entry: &Name,
+    entry_as: &Name,
+) -> BTreeMap<Name, Name> {
     let order = reach_order(document, entry);
     let mut functions = BTreeMap::new();
     let mut names = BTreeMap::new();
@@ -39,6 +43,7 @@ pub(crate) fn canonical(document: &mut Document, entry: &Name, entry_as: &Name) 
         functions.insert(renamed, function);
     }
     document.functions = functions;
+    names
 }
 
 /// The declared functions in the order the entry's code first names them,

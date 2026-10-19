@@ -28,10 +28,10 @@ export type CaptionView = {
    */
   "fields": Array<FieldCaption>;
   /**
-   * By node, then site. An action or control node has its carrier
-   * statement's caption; a statement with several actions gives it to
-   * the node of its first. A code node has the caption of every member,
-   * and of every clause arm of a member, that has one.
+   * By node, then site. An action or control node has its statement's
+   * caption; a statement with several actions gives it to the node of
+   * its first outermost action. A code node has the caption of every
+   * member, and of every clause arm of a member, that has one.
    */
   "nodes": Array<NodeCaption>;
   /**

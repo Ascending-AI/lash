@@ -989,6 +989,7 @@ impl KernelMachine {
         };
         let mut run = crate::crossing::CrossingRun {
             document: &document,
+            captions: &self.captions,
             catalog: library.registry().as_ref(),
             data: self.limits,
             tag: None,

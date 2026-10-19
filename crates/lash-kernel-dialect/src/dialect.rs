@@ -65,8 +65,8 @@ impl CellEnvironment<'static> {
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
     /// A cell of a session: its top-level bindings are the session's, and
-    /// it continues the session in `CellEnvironment`. A cell has no
-    /// captions: a front end extracts none.
+    /// it continues the session in `CellEnvironment`. Captions within its
+    /// functions travel in their written metadata when saved or extracted.
     Cell(CellEnvironment<'a>),
     /// A workflow module: each top-level async function declaration is an
     /// entry of the document, assembled by [`crate::workflow::Module`] under
@@ -100,10 +100,10 @@ pub struct Lowered {
     /// needs is in it.
     pub source_map: Option<SourceMap>,
     /// What the source wrote of each function the cell's code makes, by
-    /// the site of its closure.
+    /// its closure site, and of each installed saved function, by its body.
     pub written: BTreeMap<Site, crate::Written>,
-    /// The captions the source wrote, in the dialect's spelling; empty for
-    /// a cell ([`Mode::Cell`]). Like the source map, they never change
+    /// The captions the source wrote, in the dialect's spelling.
+    /// Like the source map, they never change
     /// behaviour or the document's identity (`K-CAP-001`).
     pub captions: Captions,
 }

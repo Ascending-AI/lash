@@ -239,7 +239,7 @@
   "$id": "https://lash.dev/schemas/kernel-captions/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The captions of one document, by target: strictly ascending and unique,\neach a target the document of identity `document` lets a caption name. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds it; lash stores none.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its targets.",
+  "description": "The captions of one document, by target: strictly ascending and unique,\neach a target the document of identity `document` lets a caption name. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds workflow captions; extracted cell function\nvalues carry their statement captions.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its targets.",
   "properties": {
     "document": {
       "$ref": "#/$defs/DocumentId"

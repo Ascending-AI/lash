@@ -537,6 +537,10 @@ impl<'embedding> Server<'embedding> {
                 })
             })
             .transpose()?;
+        let captions = save
+            .as_ref()
+            .map(|save| lash_kernel_dialect::function_captions(&program.document, &save.written))
+            .unwrap_or_default();
         let mut machine = match start.from {
             StartFrom::Fresh(payload) => {
                 self.codec.check_payload(&payload.0)?;
@@ -639,6 +643,7 @@ impl<'embedding> Server<'embedding> {
                 lash_kernel_vm::ObservationMode::Off
             },
             trace_path: path.is_some(),
+            captions,
             cell_save: save.map(|save| Box::new(save) as Box<dyn lash_kernel_vm::CellSave>),
             memory_limiter: match start.memory_limiter {
                 true => Some(Box::new(WireLimiter {
