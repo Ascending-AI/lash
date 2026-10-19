@@ -25,8 +25,8 @@ keyed by `WaitKind` in a non-empty `ProcessWaits` collection): a deferred call
 (`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
 process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
 carries `since_ms` in signed store milliseconds, as is the sleep's `until_ms`,
-and, when the engine named one, the `site` that waits, a
-`WorkflowOccurrence`; the lash_vm engine names the site of a sleep and of an
+and, when the engine named one, the `site` that waits, the waiting
+occurrence's `EffectId`; the lash_vm engine names the site of a sleep and of an
 awaited process. A wait never carries a completion key or a wait id: those resolve the
 wait, and `Completions::parked` and `pinned_keys` hand them only to a host
 that asks for them. The process reads `running` again once its last wait
@@ -107,17 +107,13 @@ registered, a status line, a failure message and a key for a graph view are
 the host's to derive from these facts.
 
 `ProcessEffectOccurrence` records where a settled effect ran (`at`), its
-operation, outcome class and failure code when applicable. `at` is a
-`WorkflowOccurrence`, the one value every layer names an occurrence by: the
-`site` (`node_id` and `site_path`, the typed slot path to the expression that
-ran, in the statement the node stands for, with the role of a synthetic site
-such as a labeled step), the one-based `occurrence`, and the `loops` around
-it, outermost first: each loop's site, its activation (unique within the run;
-a loop entered again is a new one) and its position, `body` with the
-one-based iteration or `check` with the one-based evaluation of a `while`
-condition. An occurrence counts per site, so two calls in one statement each
-start at 1. A site at the node's own statement omits `site_path`, and an
-occurrence outside every loop omits `loops`.
+operation, outcome class and failure code when applicable. `at` is the
+occurrence's opaque `EffectId`, the one value every layer names an
+occurrence by. Its `position()` is the document site that ran
+(`PositionLabel::site()`), its `task()` the task that ran it, and its
+`visit()` which visit of that task to that position it was. Store and
+compare these handles; never parse their display or JSON tokens.
+[Showing a run](workflow-hosts.md#showing-a-run) owns their rules.
 For a tool effect, its typed `call_id` identifies the logical Lash call
 and joins the effect evidence to its `ToolCallRecord` and language node
 start and terminal traces that carry the same call. It is absent for an
@@ -152,9 +148,9 @@ Language execution records use `TraceLanguageExecutionPayload`: execution
 start and finish, and `Node { subject, at, fact }` for a fact about one occurrence,
 where `fact` (`TraceNodeFact`) is a start, waiting, resumption, completion,
 failure or cancellation, a branch selection or a child start. `at` is the
-same `WorkflowOccurrence` a durable effect occurrence carries; a
-continuation keeps its numbering and loops, so a run that parks and resumes
-numbers on. The enclosing `TraceRecord` supplies the timestamp;
+same `EffectId` a durable effect occurrence carries; a continuation keeps
+the identities of its occurrences, so a run that parks and resumes does
+not restart them. The enclosing `TraceRecord` supplies the timestamp;
 node and wait timings come from the observed records, not a durable path
 log. A child link names related execution; it does not imply that the host
 has received the child's records.
@@ -191,8 +187,9 @@ durable requests/results or the app's responses.
 
 Persist the complete trace envelope, including its execution identity,
 event identity, timestamp and payload. Keep records separated by process,
-execution attempt and source identity so a redrive or a different module
-cannot silently become part of an earlier path. Replay the recorded
+execution attempt and the identity's `document` (a `WorkflowDocumentRef`)
+so a redrive or a different document cannot silently become part of an
+earlier path. Replay the recorded
 observations to render the path; do not execute the process to reconstruct
 it. The host owns retention, storage failures and any indication that its
 recording is incomplete.
@@ -219,32 +216,31 @@ shutdown (`TraceSink::flush`); a flush cannot recover records never emitted.
 
 ## Joining observations to the static graph
 
-`WorkflowGraph` describes a module's static structure. Its `WorkflowNodeId`
-comes from the structural owner and AST path. Node ids are meaningful within
-one source identity, not as global identities across edits or modules.
-Read the graph of what a process runs from Lash
-(`core.processes().graph(&process_id)`, or
-`host_artifacts().execution_document(&reference)` for the document an
-execution names): it carries the artifact's `source_identity`, which
-language traces also carry in `TraceLanguageExecutionIdentity`.
+The static structure is the workflow document an execution names.
+Its graph is derived from it (`WorkflowDocument::graph`), and its sites
+belong to that one document
+([What is derived](workflow-hosts.md#what-is-derived)). Read the document
+of what a process runs from Lash (`core.processes().graph(&process_id)`,
+or `host_artifacts().execution_document(&reference)` for the document an
+execution names). A language trace names it in
+`TraceLanguageExecutionIdentity::document`, a `WorkflowDocumentRef`.
 
-Join a node trace to the graph using that source identity and the
-`at.site` of the fact. Join a durable effect occurrence the same way: its
-`at.site.node_id` names the node, and its `at.site.site_path` is the
-`site_path` of one of that node's `execution_sites` in the graph of the
-artifact its process executes. Use `at.occurrence` and `at.loops` to
-distinguish repeated visits to the same site. Its
-call identity links the effect evidence with the tool-call trace. Preserve
-the process-to-artifact association with a recording; the occurrence alone
-does not carry a source identity. A draft claims no runtime source identity
-and should not be used as an admitted execution overlay.
+Join a node trace or a durable effect occurrence to that document by the
+position of its `at`: `at.position()` names one of the graph's
+`execution_sites()`. Keep its `task()` apart, so concurrent tasks at one
+site stay separate, and tell repeated visits apart by `visit()`. An
+effect's call identity links its evidence with the tool-call trace.
+Preserve the process-to-document association with a recording; the
+occurrence alone does not name its document. A draft is not admitted
+and is never an execution overlay's document.
 
 ## Editing a workflow
 
-A host edits the typed document through `lash::workflow::WorkflowDraft` and
+A host edits the typed document through `lash::workflow::edit::Draft` and
 publishes the result as a new definition; no source language is involved.
-After an edit, a run reports against the new definition's own document and
-source identity. [Editing, publishing and showing workflows](workflow-hosts.md)
+A run started after the publication reports against the new definition's
+own document; a running process keeps the document it was admitted under.
+[Editing, publishing and showing workflows](workflow-hosts.md)
 covers the document, typed edits, node identity across edits, publication and
 TypeScript as an optional view.
 
@@ -309,17 +305,17 @@ event sequence, which is the revision of this contract (`ProcessSequence`).
 The snapshot names the workflow document, and never carries the graph.
 `RetainedProcessView::document` is a `ProcessDocumentIdentity`:
 
-- `Available(WorkflowDocumentRef)`: the document's `source_identity`, the
-  `module_ref` it is read from, the `entry` the process starts at
-  (`WorkflowDocumentEntry::Process { process_ref }`) and the `ir_version` it
-  is written under. The reference never changes for a process.
+- `Available(WorkflowDocumentRef)`: the content identity of the admitted
+  `document` (`DocumentId`) and the `entry` the process starts at
+  (`WorkflowDocumentEntry::Entry { function }`). The reference never changes
+  for a process.
 - `ArtifactUnavailable { artifact }`: nothing retains an artifact the
   definition reads. The process is still observed.
 - `Unsupported`: the process's engine has no workflow document.
 
-Read the graph with `processes().graph(&process_id)` and cache it under the
-reference. Join provisional node evidence to it only where the observation's
-`source_identity` is the reference's.
+Read the document with `processes().graph(&process_id)` and cache it under
+the reference. Join provisional node evidence to it only where the
+observation's `document` is the reference.
 
 The snapshot's cursor is the earliest position the replay store still retains
 for the process, so a feed from it replays the retained window: an observer
