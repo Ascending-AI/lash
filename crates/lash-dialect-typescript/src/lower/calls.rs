@@ -41,6 +41,16 @@ const INHERITED: &[&str] = &[
     "toLocaleString",
 ];
 
+/// A call's arguments when none is spread.
+fn plain_arguments(args: &[ast::CallArg]) -> Option<Vec<&ast::Expr>> {
+    args.iter()
+        .map(|arg| match arg {
+            ast::CallArg::Value(value) => Some(value),
+            ast::CallArg::Spread(_) => None,
+        })
+        .collect()
+}
+
 /// The built-in kind every value of `ty` is, with its native kind check.
 /// Arrays use the dialect predicate because they include branded records.
 fn declared_receiver(ty: &Ty) -> Option<(Receiver, Option<&'static str>)> {
@@ -940,6 +950,11 @@ impl Lowerer<'_> {
                 };
                 return self.invoke(function, &[receiver, arguments], Ty::Unknown);
             }
+            if let Some(positional) = self.table.positional.get(path.as_str()).copied()
+                && let Some(values) = plain_arguments(args)
+            {
+                return self.call_positional(positional, &values);
+            }
             if let Some(function) = self.table.functions.get(path.as_str()).copied() {
                 let args = self.arguments(args)?;
                 let receiver = if path.starts_with("String.prototype.") {
@@ -990,38 +1005,16 @@ impl Lowerer<'_> {
             }
         }
         if let ast::Expr::Ident(name, _) = callee
-            && args.iter().all(|arg| matches!(arg, ast::CallArg::Value(_)))
+            && let Some(values) = plain_arguments(args)
             && let Some(entry) = self
                 .binding_mut(name)
                 .and_then(|(_, binding)| binding.positional.clone())
         {
             let returned = self.lower_expr(callee)?.ty.returned();
-            let values: Vec<_> = args
-                .iter()
-                .map(|arg| match arg {
-                    ast::CallArg::Value(value) => value,
-                    ast::CallArg::Spread(_) => unreachable!("plain arguments were checked"),
-                })
+            let passed = self.positional_arguments(&values, entry.arity)?;
+            let passed = std::iter::once(Expr::Literal(Literal::Absent))
+                .chain(passed.iter().map(Operand::expr))
                 .collect();
-            let values = self.operands(&values)?;
-            let extra_statements = values
-                .iter()
-                .skip(entry.arity)
-                .any(|value| !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)));
-            let mut passed = vec![Expr::Literal(Literal::Absent)];
-            for (index, value) in values.into_iter().enumerate() {
-                // Extra arguments still evaluate before the call.
-                if index < entry.arity {
-                    let value = if extra_statements {
-                        self.pin(value)
-                    } else {
-                        value
-                    };
-                    passed.push(value.expr());
-                } else {
-                    self.discard(value);
-                }
-            }
             return Ok(self.action(
                 lash_kernel_doc::ActKind::Call(Callee::Value(entry.name)),
                 passed,
@@ -1087,6 +1080,58 @@ impl Lowerer<'_> {
     /// can change bindings or park. Other receivers read and pin their method
     /// before arguments, retaining own fields, failures and borrowed methods.
     /// These are new document forms, charged normally by the kernel.
+    /// The first `arity` of a call's arguments, evaluated in order with
+    /// the rest: extra arguments still evaluate before the call, after the
+    /// retained ones are held.
+    fn positional_arguments(
+        &mut self,
+        args: &[&ast::Expr],
+        arity: usize,
+    ) -> Lowering<Vec<Operand>> {
+        let values = self.operands(args)?;
+        let extra_statements = values
+            .iter()
+            .skip(arity)
+            .any(|value| !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)));
+        let mut passed = Vec::with_capacity(arity);
+        for (index, value) in values.into_iter().enumerate() {
+            if index < arity {
+                passed.push(if extra_statements {
+                    self.pin(value)
+                } else {
+                    value
+                });
+            } else {
+                self.discard(value);
+            }
+        }
+        Ok(passed)
+    }
+
+    /// A positional built-in called with plain arguments: its helper over
+    /// them, with no argument list (`builtins::Positional`).
+    fn call_positional(
+        &mut self,
+        positional: crate::builtins::Positional,
+        args: &[&ast::Expr],
+    ) -> Lowering<Operand> {
+        if args.is_empty()
+            && let Some(empty) = positional.empty
+        {
+            return Ok(match empty {
+                crate::builtins::Empty::Text => Operand::text(String::new()),
+                crate::builtins::Empty::Zero => Operand::number(0.0),
+            });
+        }
+        let mut passed = self.positional_arguments(args, positional.arity)?;
+        passed.resize_with(positional.arity, Operand::undefined);
+        let helper = match positional.float {
+            Some(float) if passed[0].ty == Ty::Float => float,
+            _ => positional.helper,
+        };
+        self.invoke(helper, &passed, Ty::Unknown)
+    }
+
     fn call_map(
         &mut self,
         object: &Operand,

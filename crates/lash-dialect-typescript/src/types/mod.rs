@@ -255,6 +255,11 @@ pub(crate) enum Direct {
     NumericEqual { negated: bool },
     /// `text.concat(left, right)` over two texts.
     Concat,
+    /// `text.concat` over a text and a float's text, the float on the left
+    /// when `float_left`. A primitive's ToPrimitive is itself and a float
+    /// has no `toString` of its own to run, so `+` is the float's spelling
+    /// (`ts.number.to_string`) concatenated with the text.
+    ConcatFloat { float_left: bool },
 }
 
 /// The kernel function `op` is when both operands' types are known, or
@@ -282,7 +287,15 @@ pub(crate) fn direct_binary(op: BinaryOp, left: &Ty, right: &Ty) -> Option<Direc
             _ => return None,
         });
     }
-    (op == BinaryOp::Add && *left == Ty::Text && *right == Ty::Text).then_some(Direct::Concat)
+    if op != BinaryOp::Add {
+        return None;
+    }
+    match (left, right) {
+        (Ty::Text, Ty::Text) => Some(Direct::Concat),
+        (Ty::Float, Ty::Text) => Some(Direct::ConcatFloat { float_left: true }),
+        (Ty::Text, Ty::Float) => Some(Direct::ConcatFloat { float_left: false }),
+        _ => None,
+    }
 }
 
 /// What a binary operator gives, whichever way it is lowered.

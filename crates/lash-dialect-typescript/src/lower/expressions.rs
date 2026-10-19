@@ -656,6 +656,14 @@ impl Lowerer<'_> {
                     }
                 }
                 Direct::Concat => self.native("text.concat", vec![left.expr(), right.expr()])?,
+                Direct::ConcatFloat { float_left } => {
+                    let (left, right) = if float_left {
+                        (self.float_text(left)?, right)
+                    } else {
+                        (left, self.float_text(right)?)
+                    };
+                    self.native("text.concat", vec![left.expr(), right.expr()])?
+                }
             };
             return Ok(self.inline(value, ty));
         }
@@ -721,6 +729,20 @@ impl Lowerer<'_> {
         })
     }
 
+    /// The text of a float, which has no `toString` of its own to run.
+    fn float_text(&mut self, value: Operand) -> Lowering<Operand> {
+        self.invoke("ts.number.to_string", &[value], Ty::Text)
+    }
+
+    /// ToString of a value: a float's is spelled directly.
+    fn text_of(&mut self, value: Operand) -> Lowering<Operand> {
+        if value.ty == Ty::Float {
+            self.float_text(value)
+        } else {
+            self.invoke("ts.to_string", &[value], Ty::Text)
+        }
+    }
+
     fn lower_template(
         &mut self,
         quasis: &[String],
@@ -740,19 +762,22 @@ impl Lowerer<'_> {
             let part = self.aside(|this| {
                 let value = this.lower_expr(expression)?;
                 // Each value is converted where the source evaluates it: a
-                // conversion may run the value's own `toString`. A float has
-                // no `toString` of its own to run, so it is spelled directly.
-                let spelled = match value.ty {
-                    Ty::Text => value,
-                    Ty::Float => this.invoke("ts.number.to_string", &[value], Ty::Text)?,
-                    _ => this.invoke("ts.to_string", &[value], Ty::Text)?,
-                };
-                Ok(spelled)
+                // conversion may run the value's own `toString`.
+                match value.ty {
+                    Ty::Text => Ok(value),
+                    _ => this.text_of(value),
+                }
             })?;
             parts.push(part);
         }
-        // One native join, charged by the bytes it writes.
         let parts = self.ordered(parts);
+        // Two parts are one concatenation, with no list to build. The
+        // native checks both are texts, as the join does.
+        if let [left, right] = parts.as_slice() {
+            let joined = self.native("text.concat", vec![left.expr(), right.expr()])?;
+            return Ok(self.inline(joined, Ty::Text));
+        }
+        // One native join, charged by the bytes it writes.
         let parts = self.inline(
             Expr::List(parts.iter().map(Operand::expr).collect()),
             Ty::Unknown,

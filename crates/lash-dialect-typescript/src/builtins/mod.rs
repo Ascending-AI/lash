@@ -203,12 +203,81 @@ const ALIASES: &[(&str, &str)] = &[
     ("Set.prototype.keys", "Set.prototype.values"),
 ];
 
+/// A built-in function a direct call reaches without its argument list:
+/// its row's helper reads a fixed number of arguments, `undefined` for
+/// each one missing, and answers what one helper answers over them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Positional {
+    /// The helper the row's helper answers with.
+    pub(crate) helper: &'static str,
+    /// How many arguments it reads.
+    pub(crate) arity: usize,
+    /// The helper a first argument proven a float takes instead.
+    pub(crate) float: Option<&'static str>,
+    /// What a call with no arguments gives, where that is not the helper's
+    /// answer for `undefined`.
+    pub(crate) empty: Option<Empty>,
+}
+
+/// What a positional built-in called with no arguments gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Empty {
+    /// `String()`.
+    Text,
+    /// `Number()`.
+    Zero,
+}
+
+/// Every positional built-in, by path. Each row's helper is the padded
+/// argument list passed to `helper` (`helpers/*.kernel`):
+/// `ts.boolean.convert`, `ts.math.pow`, `ts.number.convert` and
+/// `ts.string.create`.
+const POSITIONAL: &[(&str, Positional)] = &[
+    (
+        "Boolean",
+        Positional {
+            helper: "ts.to_boolean",
+            arity: 1,
+            float: None,
+            empty: None,
+        },
+    ),
+    (
+        "Math.pow",
+        Positional {
+            helper: "ts.pow",
+            arity: 2,
+            float: None,
+            empty: None,
+        },
+    ),
+    (
+        "Number",
+        Positional {
+            helper: "ts.to_number",
+            arity: 1,
+            float: None,
+            empty: Some(Empty::Zero),
+        },
+    ),
+    (
+        "String",
+        Positional {
+            helper: "ts.to_string",
+            arity: 1,
+            float: Some("ts.number.to_string"),
+            empty: Some(Empty::Text),
+        },
+    ),
+];
+
 /// The rows, indexed the ways the lowerer and the package builder ask.
 #[derive(Debug, Default)]
 pub(crate) struct Table {
     pub(crate) methods: BTreeMap<&'static str, Vec<(Receiver, &'static str)>>,
     pub(crate) properties: BTreeMap<&'static str, Vec<(Receiver, &'static str)>>,
     pub(crate) functions: BTreeMap<&'static str, &'static str>,
+    pub(crate) positional: BTreeMap<&'static str, Positional>,
     pub(crate) values: BTreeMap<&'static str, &'static str>,
     pub(crate) constructors: BTreeMap<&'static str, &'static str>,
     pub(crate) instance_tests: BTreeMap<&'static str, &'static str>,
@@ -264,6 +333,13 @@ impl Table {
                 !taken,
                 "two built-in rows answer the same question: {row:?}"
             );
+        }
+        for (path, positional) in POSITIONAL {
+            assert!(
+                table.functions.contains_key(path),
+                "positional built-in `{path}` has no function row"
+            );
+            table.positional.insert(path, *positional);
         }
         table.index_values();
         table

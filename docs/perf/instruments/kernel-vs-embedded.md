@@ -59,7 +59,7 @@ engine parses and prepares that source once per process; Lash shares one
 `PreparedLibrary` and document across all calls. N is 2 for sum1m, branch1m and
 fib25, and 100 for the shorter programs. Both counts have the same two reversed
 engine-order pairs, resource cap, load sampling, counter checks and result
-checks as cold runs. The complete warm receipt contains 264 processes. All
+checks as cold runs. The complete warm receipt contains 312 processes. All
 results must also agree across N and 2N; the committed comparison checks them
 against the original cold results.
 
@@ -123,7 +123,9 @@ window. That boundary's fixed cost remains in Lash's run and cold counts.
 | allocation_churn | 400 records with pair and label, keep every 40th, same shape as gate 6 |
 | large_data | 512 values into 16 buckets, even/odd lists and joined summary, gate 6 geometry |
 | string_build_join | 500 labels, repeated string concatenation and a materialized list join |
-| dict_record | 2,000 dynamic-key updates across 64 buckets |
+| dict_record | 2,000 dynamic-key updates across 64 buckets, keys built by `String(n % 64)` / `str` |
+| dict_record_plus | dict_record with keys built by `"key_" + (n % 64)` (TS) / `"key_" + str(n % 64)` |
+| dict_record_template | dict_record with keys built by a template / f-string |
 | list_map_filter | Materialize 800 inputs, 800 doubled values, then multiples of three |
 | workflow_iteration | `examples/workflows/iteration-untyped`, 128 strings through pure echo |
 | workflow_early_return | `examples/workflows/early-return`, 128 calls spanning both branches |
