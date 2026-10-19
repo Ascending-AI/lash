@@ -190,7 +190,7 @@ impl lash::tools::StaticToolExecute for ProbeBody {
             .tool_catalog()
             .map(|catalog| {
                 catalog
-                    .tools
+                    .entries()
                     .iter()
                     .map(|entry| entry.manifest.id.to_string())
                     .collect()

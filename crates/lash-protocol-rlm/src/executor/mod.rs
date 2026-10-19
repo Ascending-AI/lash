@@ -364,7 +364,7 @@ async fn link_cell(
     // read plan is drawn from.
     let mut read_tools = BTreeMap::new();
     let mut grant_calls = BTreeMap::new();
-    for tool in &ctx.tool_catalog().tools {
+    for tool in ctx.tool_catalog().entries() {
         let surface = |error: String| host_failure(format!("invalid host tool surface: {error}"));
         let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
             .map_err(|error| surface(error.to_string()))?;

@@ -1520,7 +1520,7 @@ mod named_component_laws {
         let catalog = world.core.host_artifacts().process_catalog(env).unwrap();
         assert_eq!(
             catalog
-                .tools
+                .entries()
                 .iter()
                 .map(|entry| entry.manifest.name.as_str())
                 .collect::<Vec<_>>(),

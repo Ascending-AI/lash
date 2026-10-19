@@ -410,7 +410,7 @@ impl OfferedTools {
     /// Discovery-hidden tools are absent from both views.
     pub fn manifests(&self) -> impl Iterator<Item = &crate::ToolManifest> {
         self.catalog
-            .tools
+            .entries()
             .iter()
             .map(|entry| &entry.manifest)
             .filter(|manifest| !self.discovery || manifest.inline)

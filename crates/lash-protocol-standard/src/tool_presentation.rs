@@ -24,7 +24,7 @@ impl StandardProtocolConfig {
     ) -> Result<PresentedToolSection, PresentationRefusal> {
         let config = self.tool_presenter.admit(&self.tool_presentation)?.config;
         let entries = catalog
-            .tools
+            .entries()
             .iter()
             .map(|tool| ToolPresentationEntry {
                 manifest: &tool.manifest,

@@ -764,7 +764,7 @@ pub(super) fn catalog_policies(context: &RuntimeExecutionContext<'_>) -> PolicyV
     PolicyView::new(
         context
             .tool_catalog()
-            .tools
+            .entries()
             .iter()
             .map(|tool| (tool.manifest.id.clone(), tool.manifest.execution_policy)),
     )
@@ -864,7 +864,7 @@ impl RoundTools for ProductionRoundTools {
         let manifest = self
             .context
             .tool_catalog()
-            .tools
+            .entries()
             .iter()
             .find(|tool| tool.manifest.name == call.tool_name)
             .map(|tool| tool.manifest.clone());

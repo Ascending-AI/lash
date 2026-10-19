@@ -1485,7 +1485,7 @@ impl MemberBodies for StepBodies {
                     .and_then(|built| {
                         built
                             .catalog
-                            .tools
+                            .entries()
                             .iter()
                             .find(|entry| entry.manifest.id == *tool)
                             .map(|entry| entry.manifest.name.clone())

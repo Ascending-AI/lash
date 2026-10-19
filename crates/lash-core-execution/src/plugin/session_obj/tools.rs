@@ -27,7 +27,7 @@ impl PluginSession {
     pub fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         let catalog = self.resolved_tool_catalog()?;
         Ok(crate::tool_registry::project_tool_catalog(
-            catalog.tools.iter().cloned(),
+            catalog.entries().iter().cloned(),
         ))
     }
 

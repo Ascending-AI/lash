@@ -120,7 +120,7 @@ impl<'a> AttemptAuthority<'a> {
             Some(grant) => Some(Self::Granted(grant)),
             None => context
                 .tool_catalog
-                .tools
+                .entries()
                 .iter()
                 .find(|tool| tool.manifest.id == *tool_id)
                 .map(|entry| Self::Catalog {

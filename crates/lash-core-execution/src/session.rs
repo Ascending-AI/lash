@@ -121,7 +121,7 @@ impl ToolCatalogHandle {
     fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
         Arc::clone(self.0.derived.catalog.get_or_init(|| {
             Arc::new(crate::tool_registry::project_tool_catalog(
-                self.0.tool_catalog.tools.iter().cloned(),
+                self.0.tool_catalog.entries().iter().cloned(),
             ))
         }))
     }

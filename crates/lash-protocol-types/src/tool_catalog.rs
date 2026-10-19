@@ -47,22 +47,23 @@ pub struct ToolCatalogEntry {
     pub contract: Arc<ToolContract>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ToolCatalog {
-    pub tools: Vec<ToolCatalogEntry>,
-    #[serde(skip)]
-    model_tool_specs: OnceLock<Arc<Vec<LlmToolSpec>>>,
-    #[serde(skip)]
-    tool_names: OnceLock<Arc<Vec<String>>>,
-    #[serde(skip)]
-    derived_documents: DerivedDocuments,
-}
+/// A catalog generation: its members and every view derived from them.
+/// Membership never changes after construction, so no derived view can
+/// disagree with it; other membership is another generation
+/// ([`Self::filtered`]). A clone shares the generation, and with it each
+/// view already derived.
+#[derive(Clone, Default)]
+pub struct ToolCatalog(Arc<CatalogGeneration>);
 
-/// Documents a downstream crate derives from exactly this membership, one per
-/// document type. Like the other memos, a clone carries the ones already
-/// derived, so every copy of one catalog generation derives each only once.
 #[derive(Default)]
-struct DerivedDocuments(Mutex<Vec<DerivedDocument>>);
+struct CatalogGeneration {
+    tools: Vec<ToolCatalogEntry>,
+    model_tool_specs: OnceLock<Arc<Vec<LlmToolSpec>>>,
+    tool_names: OnceLock<Arc<Vec<String>>>,
+    /// Documents a downstream crate derives from this membership, one per
+    /// document type.
+    derived_documents: Mutex<Vec<DerivedDocument>>,
+}
 
 type DerivedDocument = Arc<dyn Any + Send + Sync>;
 
@@ -72,55 +73,52 @@ fn find_derived<T: Any + Send + Sync>(documents: &[DerivedDocument]) -> Option<A
         .find_map(|document| Arc::clone(document).downcast::<T>().ok())
 }
 
-impl Clone for DerivedDocuments {
-    fn clone(&self) -> Self {
-        Self(Mutex::new(self.0.lock_recover().clone()))
+/// A catalog's wire shape is its members alone; views are derived again.
+impl serde::Serialize for ToolCatalog {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        struct Members<'a> {
+            tools: &'a [ToolCatalogEntry],
+        }
+        serde::Serialize::serialize(
+            &Members {
+                tools: self.entries(),
+            },
+            serializer,
+        )
     }
 }
 
-impl Clone for ToolCatalog {
-    fn clone(&self) -> Self {
-        let clone = Self {
-            tools: self.tools.clone(),
-            model_tool_specs: OnceLock::new(),
-            tool_names: OnceLock::new(),
-            derived_documents: self.derived_documents.clone(),
-        };
-        if let Some(value) = self.model_tool_specs.get() {
-            let _ = clone.model_tool_specs.set(Arc::clone(value));
+impl<'de> serde::Deserialize<'de> for ToolCatalog {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Members {
+            tools: Vec<ToolCatalogEntry>,
         }
-        if let Some(value) = self.tool_names.get() {
-            let _ = clone.tool_names.set(Arc::clone(value));
-        }
-        clone
+        let members = <Members as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self::from_entries(members.tools))
     }
 }
 
 impl std::fmt::Debug for ToolCatalog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolCatalog")
-            .field("tools", &self.tools)
+            .field("tools", &self.0.tools)
             .finish_non_exhaustive()
     }
 }
 
-impl Default for ToolCatalog {
-    fn default() -> Self {
-        Self {
-            tools: Vec::new(),
-            model_tool_specs: OnceLock::new(),
-            tool_names: OnceLock::new(),
-            derived_documents: DerivedDocuments::default(),
-        }
-    }
-}
-
 impl ToolCatalog {
+    /// The members, in admission order.
+    pub fn entries(&self) -> &[ToolCatalogEntry] {
+        &self.0.tools
+    }
+
     /// Module metadata from this catalog's recorded members, once per name.
     /// Filtering membership also filters modules; no live provider is read.
     pub fn modules(&self) -> impl Iterator<Item = &crate::ToolModule> {
         let mut names = std::collections::BTreeSet::new();
-        self.tools.iter().filter_map(move |entry| {
+        self.entries().iter().filter_map(move |entry| {
             let module = entry.manifest.module.as_deref()?;
             names.insert(module.name.as_str()).then_some(module)
         })
@@ -135,7 +133,7 @@ impl ToolCatalog {
     /// documents rather than inheriting this one's.
     pub fn filtered(&self, mut keep: impl FnMut(&ToolCatalogEntry) -> bool) -> Self {
         Self::from_entries(
-            self.tools
+            self.entries()
                 .iter()
                 .filter(|entry| keep(entry))
                 .cloned()
@@ -145,18 +143,14 @@ impl ToolCatalog {
 
     /// The document of type `T` derived from this catalog's membership,
     /// computed by `derive` on first request and shared by every clone after.
-    ///
-    /// The document is a function of `tools` alone, so a caller that edits
-    /// `tools` in place must start from a fresh catalog ([`Self::filtered`])
-    /// rather than a clone.
     pub fn derived<T: Any + Send + Sync>(&self, derive: impl FnOnce(&Self) -> T) -> Arc<T> {
-        if let Some(document) = find_derived(&self.derived_documents.0.lock_recover()) {
+        if let Some(document) = find_derived(&self.0.derived_documents.lock_recover()) {
             return document;
         }
         // Derived outside the lock; a racing derivation of the same document
         // yields to whichever landed first.
         let document = Arc::new(derive(self));
-        let mut documents = self.derived_documents.0.lock_recover();
+        let mut documents = self.0.derived_documents.lock_recover();
         if let Some(existing) = find_derived(&documents) {
             return existing;
         }
@@ -192,16 +186,14 @@ impl ToolCatalog {
     }
 
     fn from_entries(tools: Vec<ToolCatalogEntry>) -> Self {
-        Self {
+        Self(Arc::new(CatalogGeneration {
             tools,
-            model_tool_specs: OnceLock::new(),
-            tool_names: OnceLock::new(),
-            derived_documents: DerivedDocuments::default(),
-        }
+            ..CatalogGeneration::default()
+        }))
     }
 
     pub(crate) fn callable_tools_iter(&self) -> impl Iterator<Item = &ToolManifest> {
-        self.tools.iter().map(|tool| &tool.manifest)
+        self.entries().iter().map(|tool| &tool.manifest)
     }
 
     pub fn callable_tools(&self) -> Vec<ToolManifest> {
@@ -216,7 +208,7 @@ impl ToolCatalog {
     }
 
     pub fn tool_names(&self) -> Arc<Vec<String>> {
-        Arc::clone(self.tool_names.get_or_init(|| {
+        Arc::clone(self.0.tool_names.get_or_init(|| {
             Arc::new(
                 self.callable_tools_iter()
                     .map(|manifest| manifest.name.clone())
@@ -226,9 +218,9 @@ impl ToolCatalog {
     }
 
     pub fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
-        Arc::clone(self.model_tool_specs.get_or_init(|| {
+        Arc::clone(self.0.model_tool_specs.get_or_init(|| {
             Arc::new(
-                self.tools
+                self.entries()
                     .iter()
                     .map(|tool| tool.contract.model_tool(&tool.manifest))
                     .map(|model_tool| LlmToolSpec {
@@ -501,6 +493,39 @@ mod tests {
         assert_eq!(catalog.callable_tools().len(), 1);
     }
 
+    /// FIG-6873: every projection agrees with the membership it projects. A
+    /// catalog filtered from a warmed parent is a generation of its own: it
+    /// inherits none of the parent's views.
+    #[test]
+    fn projections_agree_with_membership() {
+        let parent =
+            ToolCatalog::from_tool_definitions(vec![tool("read_file"), tool("write_file")]);
+        let names = |catalog: &ToolCatalog| -> Vec<String> {
+            catalog
+                .entries()
+                .iter()
+                .map(|entry| entry.manifest.name.clone())
+                .collect()
+        };
+        let _ = (
+            parent.tool_names(),
+            parent.model_tool_specs(),
+            parent.derived(names),
+        );
+        let catalog = parent.filtered(|entry| entry.manifest.name == "read_file");
+        assert!(!catalog.has_callable_tool("write_file"));
+        assert_eq!(*catalog.tool_names(), ["read_file"]);
+        assert_eq!(
+            catalog
+                .model_tool_specs()
+                .iter()
+                .map(|spec| spec.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file"]
+        );
+        assert_eq!(*catalog.derived(names), ["read_file"]);
+    }
+
     #[test]
     fn missing_contract_is_refused_only_for_effective_members() {
         let missing = tool("missing").manifest();
@@ -511,7 +536,7 @@ mod tests {
             isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("suppressed manifests are not resident members");
-        assert!(hidden.tools.is_empty());
+        assert!(hidden.entries().is_empty());
 
         let error = build_tool_catalog(ToolCatalogBuildInput {
             tools: vec![missing.clone()],

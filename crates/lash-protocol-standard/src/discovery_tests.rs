@@ -145,7 +145,7 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         tool("hidden", false),
     ]);
     let manifests = catalog
-        .tools
+        .entries()
         .iter()
         .map(|entry| entry.manifest.clone())
         .collect::<Vec<_>>();

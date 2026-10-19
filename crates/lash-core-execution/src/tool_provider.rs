@@ -136,7 +136,7 @@ impl AttemptSessionReads {
             ))
         })?;
         Ok(Arc::new(crate::tool_registry::project_tool_catalog(
-            catalog.tools.iter().cloned(),
+            catalog.entries().iter().cloned(),
         )))
     }
 }
@@ -1511,7 +1511,7 @@ impl ToolPrepareContext {
             ))
         })?;
         Ok(Arc::new(crate::tool_registry::project_tool_catalog(
-            catalog.tools.iter().cloned(),
+            catalog.entries().iter().cloned(),
         )))
     }
 }

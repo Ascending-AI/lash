@@ -114,7 +114,7 @@ fn resolve_callable_definition<'a>(
 ) -> Option<&'a crate::ToolCatalogEntry> {
     context
         .tool_catalog
-        .tools
+        .entries()
         .iter()
         .find(|tool| tool.manifest.name == tool_name)
 }
@@ -375,7 +375,7 @@ pub fn resolve_callable_manifest_by_id(
 ) -> Option<ToolManifest> {
     context
         .tool_catalog
-        .tools
+        .entries()
         .iter()
         .find(|tool| tool.manifest.id == *tool_id)
         .map(|entry| entry.manifest.clone())
@@ -388,7 +388,7 @@ pub fn resolve_tool_argument_projection_policy(
 ) -> crate::ToolArgumentProjectionPolicy {
     context
         .tool_catalog
-        .tools
+        .entries()
         .iter()
         .find(|def| def.manifest.name == tool_name)
         .map(|def| def.manifest.argument_projection.clone())

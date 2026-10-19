@@ -65,7 +65,7 @@ impl ToolListing {
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<Self, PresentationRefusal> {
         let offered = tool_catalog
-            .tools
+            .entries()
             .iter()
             .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
             .map(|tool| {
@@ -485,9 +485,9 @@ mod tests {
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
             .offer_bound_tool(
-                &catalog.tools[0].manifest,
-                &catalog.tools[0].contract.input_schema.canonical,
-                &catalog.tools[0].contract.output_schema.canonical,
+                &catalog.entries()[0].manifest,
+                &catalog.entries()[0].contract.input_schema.canonical,
+                &catalog.entries()[0].contract.output_schema.canonical,
             )
             .expect("pinned contract binds as an effect");
         let signatures = boundary.signatures();
@@ -498,14 +498,14 @@ mod tests {
         );
         assert!(
             lash_protocol_types::validate_tool_input(
-                &catalog.tools[0].contract,
+                &catalog.entries()[0].contract,
                 &json!({ "pinned": "yes" })
             )
             .is_ok()
         );
         assert!(
             lash_protocol_types::validate_tool_input(
-                &catalog.tools[0].contract,
+                &catalog.entries()[0].contract,
                 &json!({ "drifted": 1 })
             )
             .is_err()
@@ -662,9 +662,9 @@ mod tests {
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
             .offer_bound_tool(
-                &catalog.tools[0].manifest,
-                &catalog.tools[0].contract.input_schema.canonical,
-                &catalog.tools[0].contract.output_schema.canonical,
+                &catalog.entries()[0].manifest,
+                &catalog.entries()[0].contract.input_schema.canonical,
+                &catalog.entries()[0].contract.output_schema.canonical,
             )
             .expect("explicit binding binds as an effect");
         assert!(
@@ -849,7 +849,7 @@ mod discovery_tests {
             tool("visible", true),
         ]);
         let manifests = catalog
-            .tools
+            .entries()
             .iter()
             .map(|entry| entry.manifest.clone())
             .collect::<Vec<_>>();

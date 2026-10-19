@@ -132,7 +132,7 @@ impl DurableProcessWorker {
         let tool = execution.draft().tool();
         let name = step
             .catalog
-            .tools
+            .entries()
             .iter()
             .find(|entry| entry.manifest.id == *tool)
             .map_or_else(|| effect.to_string(), |entry| entry.manifest.name.clone());

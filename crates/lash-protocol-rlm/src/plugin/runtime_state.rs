@@ -63,7 +63,7 @@ impl RlmRuntimeState {
                 names
             }
         };
-        for tool in &catalog.tools {
+        for tool in catalog.entries() {
             let binding =
                 lash_vm_runtime::required_tool_executable(&tool.manifest).map_err(|error| {
                     lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
@@ -135,7 +135,7 @@ impl RlmRuntimeState {
             return Ok(names);
         };
         let roots: Vec<String> = catalog
-            .tools
+            .entries()
             .iter()
             .map(|tool| {
                 lash_vm_runtime::required_tool_executable(&tool.manifest)

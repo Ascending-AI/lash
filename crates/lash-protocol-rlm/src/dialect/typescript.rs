@@ -89,7 +89,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
 /// dialect gates them, so their availability is read off the catalogue the
 /// host actually rendered rather than off an ability flag.
 pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalog) -> bool {
-    tool_catalog.tools.iter().any(|tool| {
+    tool_catalog.entries().iter().any(|tool| {
         lash_vm_runtime::required_tool_executable(&tool.manifest)
             .is_ok_and(|binding| binding.call_path().starts_with("processes."))
     })

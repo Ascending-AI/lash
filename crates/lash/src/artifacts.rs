@@ -320,7 +320,7 @@ impl HostArtifacts {
             }
         };
         let mut tool_roots = std::collections::BTreeSet::new();
-        for tool in &catalog.tools {
+        for tool in catalog.entries() {
             let binding = match lash_vm_runtime::required_tool_executable(&tool.manifest) {
                 Ok(binding) => binding,
                 Err(error) => {

@@ -270,7 +270,7 @@ impl RuntimeExecutionContext<'_> {
     pub fn callable_tool_id_by_name(&self, tool_name: &str) -> Option<crate::ToolId> {
         self.dispatch
             .tool_catalog
-            .tools
+            .entries()
             .iter()
             .find(|tool| tool.manifest.name == tool_name)
             .map(|tool| tool.manifest.id.clone())

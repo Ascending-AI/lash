@@ -166,14 +166,14 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     assert!(!restored.has_callable_tool(&search));
     let recorded_definition = lash_core::ToolDefinition {
         manifest: restored
-            .tools
+            .entries()
             .iter()
             .find(|entry| entry.manifest.name == lookup)
             .expect("the recorded surface names lookup")
             .manifest
             .clone(),
         contract: (*restored
-            .tools
+            .entries()
             .iter()
             .find(|entry| entry.manifest.name == lookup)
             .expect("the recorded surface names lookup")
@@ -181,7 +181,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             .clone(),
     };
     let served = live
-        .tools
+        .entries()
         .iter()
         .find(|entry| entry.manifest.id == recorded_definition.manifest.id)
         .map(|entry| lash_core::ToolDefinition {

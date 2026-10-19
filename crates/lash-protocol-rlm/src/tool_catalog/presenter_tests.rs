@@ -148,7 +148,7 @@ fn a_replaced_or_wrapped_presenter_changes_the_section_and_never_admission() {
         replaced,
         "### Tools\n\n`tools.lookup(query: number)` finds a record by number."
     );
-    let contract = &catalog.tools[0].contract;
+    let contract = &catalog.entries()[0].contract;
     assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": 7 })).is_err());
     assert!(lash_protocol_types::validate_tool_input(contract, &json!({})).is_err());
     assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": "a" })).is_ok());
@@ -194,7 +194,7 @@ fn referenced(name: &str, kind: &str) -> ToolDefinition {
 
 fn entries(catalog: &ToolCatalog) -> Vec<ToolPresentationEntry<'_>> {
     catalog
-        .tools
+        .entries()
         .iter()
         .map(|tool| ToolPresentationEntry {
             manifest: &tool.manifest,
@@ -388,7 +388,7 @@ fn a_public_helper_wrapper_filters_reheads_and_appends_budgeted_tools() {
         .expect("budgeted wrapper");
     assert!(listing.accounts_for(&request));
     assert_eq!(listing.listed.len(), 2);
-    assert_eq!(listing.omitted, [catalog.tools[1].manifest.id.clone()]);
+    assert_eq!(listing.omitted, [catalog.entries()[1].manifest.id.clone()]);
     assert!(listing.text.starts_with("Host tools\n\n"));
     assert!(listing.text.ends_with("\n\nHost note."));
     assert_eq!(listing.text.matches("Field = ").count(), 1);

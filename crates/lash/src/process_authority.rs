@@ -26,7 +26,7 @@ pub struct ExcessLink {
 /// are not authority, so neither makes a link excess.
 pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessLink> {
     let offered = offered
-        .tools
+        .entries()
         .iter()
         .map(|entry| lash_core::ProcessSurface::of_parts(&entry.manifest, &entry.contract))
         .collect::<Vec<_>>();

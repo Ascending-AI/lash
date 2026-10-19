@@ -250,7 +250,7 @@ impl crate::HostBoundary {
 
     fn of_catalog_tools(catalog: &lash_core::ToolCatalog) -> Result<Self, ToolBindingError> {
         let mut boundary = Self::new();
-        for entry in &catalog.tools {
+        for entry in catalog.entries() {
             if !entry.manifest.declaration().controls.is_empty() {
                 continue;
             }
