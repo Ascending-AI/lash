@@ -147,8 +147,12 @@ impl Worker {
     ) -> Result<(), PoolError> {
         let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
         let started = Instant::now();
-        write_frame(&mut self.pipe, bytes, started + timeout)
-            .map_err(|error| error.with_silence(started.elapsed()))?;
+        match write_frame(&mut self.pipe, bytes, started + timeout) {
+            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
+                return Err(self.crashed());
+            }
+            result => result.map_err(|error| error.with_silence(started.elapsed()))?,
+        }
         if let (Some(scope), Some(start)) = (&self.phases, observed) {
             scope.frame(
                 "send",
@@ -181,14 +185,7 @@ impl Worker {
             .read_frame(&mut self.pipe, &self.codec, deadline)
         {
             Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
-                if let Some(measurements) = &self.measurements {
-                    measurements
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .counters
-                        .crashes += 1;
-                }
-                return Err(self.lost().into());
+                return Err(self.crashed());
             }
             result => result.map_err(|error| error.with_silence(started.elapsed()))?,
         };
@@ -217,6 +214,20 @@ impl Worker {
             );
         }
         frame
+    }
+
+    /// The failure of an exchange that met the end of this worker's
+    /// stream, writing or reading: whichever it met first, the evidence
+    /// names how the worker ended (FIG-6823).
+    fn crashed(&mut self) -> PoolError {
+        if let Some(measurements) = &self.measurements {
+            measurements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .counters
+                .crashes += 1;
+        }
+        self.lost().into()
     }
 
     /// What the end of this worker's stream is to its run. The worker sets
@@ -800,5 +811,62 @@ mod traffic_tests {
         );
         assert!(after.ipc.difference(&before.ipc).is_none());
         assert_eq!(after.ipc.totals().bytes, after.ipc_received_bytes);
+    }
+}
+
+#[cfg(test)]
+mod loss_tests {
+    use super::*;
+    use lash_vm_protocol::{
+        ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch, ParentMessage, SupervisorEvidence,
+    };
+
+    /// FIG-6823: a worker killed from outside is named by its signal when
+    /// the parent meets its end writing to it, as when reading from it. A
+    /// write after the kill finds the stream closed before the worker's
+    /// exit is observed; the evidence still waits for that exit.
+    #[test]
+    fn a_worker_killed_from_outside_is_named_by_its_signal_on_a_write() {
+        // A stand-in worker that holds its end of the stream and waits.
+        let mut entry = crate::WorkerEntry::helper("/bin/sh");
+        entry.args = vec!["-c".to_owned(), "kill -STOP $$".to_owned(), "sh".to_owned()];
+        let mut worker = Worker::spawn(&PoolConfig::standard(entry)).expect("spawn the worker");
+        let pid = i32::try_from(worker.pid()).expect("a pid");
+        #[expect(unsafe_code, reason = "the law kills its own unreaped child")]
+        let killed = unsafe { libc::kill(pid, libc::SIGKILL) };
+        assert_eq!(killed, 0, "kill the worker from outside");
+        // Wait for the exit without reaping it, so the stream is closed.
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        #[expect(unsafe_code, reason = "waitid observes the unreaped child")]
+        let exited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                worker.pid(),
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(exited, 0, "the worker exited");
+        let mut fence = MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1));
+        let sent = worker.send(
+            &ParentFrame {
+                header: fence.next_header(),
+                message: ParentMessage::Cancel,
+            },
+            Duration::from_secs(5),
+        );
+        assert!(
+            matches!(
+                sent,
+                Err(PoolError::Infrastructure(
+                    InfrastructureOutcome::WorkerCrashed {
+                        evidence: SupervisorEvidence::Signalled {
+                            signal: libc::SIGKILL
+                        }
+                    }
+                ))
+            ),
+            "the write names the signal that ended the worker: {sent:?}"
+        );
     }
 }
