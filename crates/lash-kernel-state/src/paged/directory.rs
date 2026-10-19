@@ -440,11 +440,9 @@ pub mod execution {
     pub struct TaskRecord {
         pub identity: TaskIdentityRef,
         pub state: TaskStateRecord,
-        pub result_retained: bool,
         pub joiners: Tree<JoinerRecord>,
         pub observed: bool,
         pub passed: bool,
-        pub failed: bool,
         pub occurrences: Tree<u64>,
         pub frames: Tree<FrameRecord>,
     }
@@ -703,16 +701,29 @@ pub mod execution {
         pub fn is_outstanding(&self) -> bool {
             !self.identity.is_main()
                 && !self.passed
-                && (self.is_live() || self.failed && !self.observed)
+                && match &self.state {
+                    TaskStateRecord::Ended(ended) => ended.is_raised() && !self.observed,
+                    _ => true,
+                }
+        }
+        /// The value the record holds: an incoming one, or the result an
+        /// ended task retains.
+        fn held(&self) -> Option<&PageValue> {
+            match &self.state {
+                TaskStateRecord::Resuming {
+                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                    ..
+                } => Some(v),
+                TaskStateRecord::Ended(ended) => ended.retained(),
+                _ => None,
+            }
         }
     }
     impl Cell for TaskRecord {
         fn same_version(&self, other: &Self) -> bool {
             self.identity.root.map(|p| p.id) == other.identity.root.map(|p| p.id)
-                && self.result_retained == other.result_retained
                 && self.observed == other.observed
                 && self.passed == other.passed
-                && self.failed == other.failed
                 && lash_kernel_doc::graph_tokens::encode_body(&self.state)
                     == lash_kernel_doc::graph_tokens::encode_body(&other.state)
                 && self.frames.same_version(&other.frames)
@@ -723,33 +734,11 @@ pub mod execution {
             u64::from(self.is_outstanding())
         }
         fn task_edges(&self) -> u64 {
-            self.frames.task_edges()
-                + match &self.state {
-                    TaskStateRecord::Resuming {
-                        incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                        ..
-                    }
-                    | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                        v.task_edges()
-                    }
-                    _ => 0,
-                }
+            self.frames.task_edges() + self.held().map_or(0, |v| v.task_edges())
         }
 
         fn cost(&self) -> u64 {
-            self.frames.cost()
-                + match &self.state {
-                    TaskStateRecord::Resuming {
-                        incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                        ..
-                    } => value_cost(v),
-                    TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
-                        if self.result_retained =>
-                    {
-                        value_cost(v)
-                    }
-                    _ => 0,
-                }
+            self.frames.cost() + self.held().map_or(0, value_cost)
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.joiners.seal_nested(access, work)?
@@ -761,15 +750,8 @@ pub mod execution {
             self.joiners.children(out);
             self.occurrences.children(out);
             self.frames.children(out);
-            match &self.state {
-                TaskStateRecord::Resuming {
-                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                    ..
-                }
-                | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                    value_children(v, out)
-                }
-                _ => (),
+            if let Some(v) = self.held() {
+                value_children(v, out)
             }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
@@ -777,15 +759,16 @@ pub mod execution {
             self.joiners.grants(children)?;
             self.occurrences.grants(children)?;
             self.frames.grants(children)?;
-            match &mut self.state {
+            let held = match &mut self.state {
                 TaskStateRecord::Resuming {
                     incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
                     ..
-                }
-                | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                    value_grants(v, children)?
-                }
-                _ => (),
+                } => Some(v),
+                TaskStateRecord::Ended(ended) => ended.retained_mut(),
+                _ => None,
+            };
+            if let Some(v) = held {
+                value_grants(v, children)?
             }
             Ok(())
         }
@@ -819,27 +802,23 @@ pub mod execution {
 
     impl TokenCodec for TaskRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(9);
+            out.seq(7);
             self.identity.encode(out);
             self.state.encode(out);
-            self.result_retained.encode(out);
             self.joiners.encode(out);
             self.observed.encode(out);
             self.passed.encode(out);
-            self.failed.encode(out);
             self.occurrences.encode(out);
             self.frames.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(9)?;
+            input.expect_struct(7)?;
             Ok(Self {
                 identity: <TaskIdentityRef>::decode(input)?,
                 state: <TaskStateRecord>::decode(input)?,
-                result_retained: bool::decode(input)?,
                 joiners: <Tree<JoinerRecord>>::decode(input)?,
                 observed: <bool>::decode(input)?,
                 passed: <bool>::decode(input)?,
-                failed: <bool>::decode(input)?,
                 occurrences: <Tree<u64>>::decode(input)?,
                 frames: <Tree<FrameRecord>>::decode(input)?,
             })

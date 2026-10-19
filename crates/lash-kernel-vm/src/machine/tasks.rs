@@ -9,7 +9,7 @@ use lash_kernel_state::arena::Reached;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::resident::{frame_values, state_values};
 use lash_kernel_state::kernel_internals::tree::{Access, Tree, Version};
-use lash_kernel_state::paged::{EndedTask, IncomingRecord, TaskRecord, TaskStateRecord};
+use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -33,11 +33,9 @@ impl Task {
             record: TaskRecord {
                 identity,
                 state: TaskStateRecord::Ready,
-                result_retained: true,
                 joiners: Tree::new(true),
                 observed: false,
                 passed: false,
-                failed: false,
                 occurrences: Tree::new(false),
                 frames: Tree::new(true),
             },
@@ -200,10 +198,8 @@ impl Occurrences {
 pub(super) struct Publication {
     identity: Option<lash_kernel_doc::heap::PageId>,
     state: Vec<u8>,
-    result_retained: bool,
     observed: bool,
     passed: bool,
-    failed: bool,
     frames: Version<lash_kernel_state::paged::FrameRecord>,
     joiners: Version<lash_kernel_state::paged::JoinerRecord>,
     occurrences: Version<u64>,
@@ -213,10 +209,8 @@ impl Publication {
         Self {
             identity: record.identity.root.map(|p| p.id),
             state: lash_kernel_doc::graph_tokens::encode_body(&record.state),
-            result_retained: record.result_retained,
             observed: record.observed,
             passed: record.passed,
-            failed: record.failed,
             frames: frames.version(),
             joiners: record.joiners.version(),
             occurrences: record.occurrences.version(),
@@ -228,10 +222,8 @@ impl Publication {
         frames: &Tree<lash_kernel_state::paged::FrameRecord>,
     ) -> bool {
         self.identity == record.identity.root.map(|p| p.id)
-            && self.result_retained == record.result_retained
             && self.observed == record.observed
             && self.passed == record.passed
-            && self.failed == record.failed
             && self.frames.matches(frames)
             && self.joiners.matches(&record.joiners)
             && self.occurrences.matches(&record.occurrences)
@@ -469,9 +461,8 @@ impl Tasks {
             task.published = None;
             if matches!(task.record.state, TaskStateRecord::Ended(_))
                 && let Some(record) = rows.get(&ordinal_key(*index), &self.access)?
-                && !record.result_retained
+                && matches!(&record.state, TaskStateRecord::Ended(ended) if ended.retained().is_none())
             {
-                task.record.result_retained = false;
                 task.record.state = record.state;
             }
         }
@@ -618,11 +609,7 @@ impl Tasks {
             },
         };
         Ok(match &record.state {
-            TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value))
-                if record.result_retained =>
-            {
-                Some(value.clone())
-            }
+            TaskStateRecord::Ended(ended) => ended.retained().cloned(),
             _ => None,
         })
     }
@@ -645,11 +632,7 @@ impl Tasks {
                     .map_err(|_| HeapFault::Malformed("task key is not an ordinal".into()))?,
             );
             let record = self.cached_task(index).map_or(&row, |task| &task.record);
-            if record.result_retained
-                && matches!(
-                    record.state,
-                    TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_))
-                )
+            if matches!(&record.state, TaskStateRecord::Ended(ended) if ended.retained().is_some())
             {
                 tasks.push(TaskId(index));
             }
@@ -658,7 +641,7 @@ impl Tasks {
         Ok(tasks)
     }
     /// Retires the results of `tasks`, which nothing reaches: each keeps
-    /// how it ended, with a null.
+    /// how it ended.
     pub(super) fn retire(&mut self, tasks: &[TaskId]) -> Result<(), HeapFault> {
         for task in tasks {
             if let Some(cached) = self.cached_task_mut(task.0) {
@@ -712,20 +695,12 @@ impl Tasks {
 
 /// Retires the result an ended task's `record` retains, as a sweep does.
 fn retire(record: &mut TaskRecord) -> Result<(), HeapFault> {
-    record.state = match record.state {
-        TaskStateRecord::Ended(EndedTask::Returned(_)) => {
-            TaskStateRecord::Ended(EndedTask::Returned(PageValue::Null))
-        }
-        TaskStateRecord::Ended(EndedTask::Raised(_)) => {
-            TaskStateRecord::Ended(EndedTask::Raised(PageValue::Null))
-        }
-        _ => {
-            return Err(HeapFault::Malformed(
-                "a refinement retired a running task's result".into(),
-            ));
-        }
+    let TaskStateRecord::Ended(ended) = &mut record.state else {
+        return Err(HeapFault::Malformed(
+            "a refinement retired a running task's result".into(),
+        ));
     };
-    record.result_retained = false;
+    ended.retire();
     Ok(())
 }
 

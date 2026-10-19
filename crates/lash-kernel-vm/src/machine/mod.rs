@@ -1079,10 +1079,9 @@ impl KernelMachine {
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();
-        ended.failed = result.is_err();
         ended.state = TaskState::Ended(match result.clone() {
-            Ok(value) => EndedTask::Returned(value),
-            Err(value) => EndedTask::Raised(value),
+            Ok(value) => EndedTask::Returned(Some(value)),
+            Err(value) => EndedTask::Raised(Some(value)),
         });
         let joiners = std::mem::replace(&mut ended.joiners, Tree::new(true));
         let access = self.heap.pages().clone();
@@ -1151,8 +1150,8 @@ impl KernelMachine {
         let access = self.heap.pages().clone();
         self.task_table()?.visit(&mut |id, task| {
             if id != TaskId::MAIN && ender != Some(id) && !task.passed {
-                match task.state {
-                    TaskState::Ended(_) if task.failed && !task.observed => {
+                match &task.state {
+                    TaskState::Ended(ended) if ended.is_raised() && !task.observed => {
                         unobserved.push(task.identity)
                     }
                     TaskState::Ended(_) => (),

@@ -406,12 +406,44 @@ pub enum IncomingRecord {
     Outcome(crate::WaitId),
 }
 
-/// How a task ended. Its result counts toward memory only while a handle
-/// reaches the task (S7).
+/// How a task ended, with the result it retains. The result counts toward
+/// memory only while a handle reaches the task (S7); a sweep retires it to
+/// `None` once nothing does, and the task still says how it ended.
 #[derive(Clone, Debug)]
 pub enum EndedTask {
-    Returned(PageValue),
-    Raised(PageValue),
+    Returned(Option<PageValue>),
+    Raised(Option<PageValue>),
+}
+
+impl EndedTask {
+    pub fn is_raised(&self) -> bool {
+        matches!(self, Self::Raised(_))
+    }
+    /// The result the task retains: `None` once retired.
+    pub fn retained(&self) -> Option<&PageValue> {
+        match self {
+            Self::Returned(value) | Self::Raised(value) => value.as_ref(),
+        }
+    }
+    pub fn retained_mut(&mut self) -> Option<&mut PageValue> {
+        match self {
+            Self::Returned(value) | Self::Raised(value) => value.as_mut(),
+        }
+    }
+    /// The retained result as a join gives it: the value, or the error it
+    /// raises. `None` once retired.
+    pub fn result(&self) -> Option<Result<&PageValue, &PageValue>> {
+        match self {
+            Self::Returned(value) => value.as_ref().map(Ok),
+            Self::Raised(value) => value.as_ref().map(Err),
+        }
+    }
+    /// Retires the result, keeping how the task ended.
+    pub fn retire(&mut self) {
+        match self {
+            Self::Returned(value) | Self::Raised(value) => *value = None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

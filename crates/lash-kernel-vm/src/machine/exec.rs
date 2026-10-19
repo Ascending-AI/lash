@@ -1106,17 +1106,20 @@ impl KernelMachine {
     /// observed (`K-TASK-016`).
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
         let joined = self.task(joined)?;
-        match &joined.state {
-            TaskState::Ended(super::EndedTask::Returned(value)) => {
+        let TaskState::Ended(ended) = &joined.state else {
+            return Err(fault("a join resumed before its task ended").into());
+        };
+        match ended.result() {
+            Some(Ok(value)) => {
                 let value = value.clone();
                 Ok(self.admit_page(&value)?)
             }
-            TaskState::Ended(super::EndedTask::Raised(value)) => {
+            Some(Err(value)) => {
                 let value = value.clone();
                 joined.observed = true;
                 Err(Interrupt::raised(self.admit_page(&value)?))
             }
-            _ => Err(fault("a join resumed before its task ended").into()),
+            None => Err(fault("a join read a retired task result").into()),
         }
     }
 

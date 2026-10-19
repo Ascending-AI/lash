@@ -95,11 +95,10 @@ impl CensusGraph for PagedHeap {
             return Ok(());
         };
         match &task.state {
-            TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
-                if task.result_retained =>
-            {
-                self.stream_edges(v, out)
-            }
+            TaskStateRecord::Ended(ended) => match ended.retained() {
+                Some(v) => self.stream_edges(v, out),
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }
@@ -133,20 +132,12 @@ impl CensusGraph for PagedHeap {
         for task in &unreachable.ended_task_results {
             if let Some(mut row) = self.tasks.get(&task.0.to_be_bytes(), &self.access)? {
                 let old_edges = row.task_edges();
-                row.state = match row.state {
-                    TaskStateRecord::Ended(EndedTask::Returned(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Returned(PageValue::Null))
-                    }
-                    TaskStateRecord::Ended(EndedTask::Raised(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Raised(PageValue::Null))
-                    }
-                    _ => {
-                        return Err(HeapFault::Malformed(
-                            "sweep named a running task result".into(),
-                        ));
-                    }
+                let TaskStateRecord::Ended(ended) = &mut row.state else {
+                    return Err(HeapFault::Malformed(
+                        "sweep named a running task result".into(),
+                    ));
                 };
-                row.result_retained = false;
+                ended.retire();
                 self.population.task_edges = self
                     .population
                     .task_edges
@@ -247,8 +238,7 @@ impl CensusGraph for PagedHeap {
             let Some((next, row)) = self.tasks.after(key.as_deref(), &self.access)? else {
                 break;
             };
-            if !matches!(row.state, TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_)) if row.result_retained)
-            {
+            if !matches!(&row.state, TaskStateRecord::Ended(ended) if ended.retained().is_some()) {
                 key = Some(next);
                 continue;
             }

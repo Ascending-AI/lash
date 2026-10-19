@@ -146,30 +146,32 @@ pub fn checkpoint(
     let mut task_keys = task_keys.into_iter();
     reader.tree(&Tree::<TaskRecord>::of_keyed(&root.tasks), |r, task| {
         r.put(&task.identity.resolve(r.heap.pages())?);
-        r.put(&task.result_retained);
         r.put(&task.observed);
         r.put(&task.passed);
-        r.put(&task.failed);
-        // Retain the state tag and all scalar state, then visit its value edges.
+        // Retain the state tag and all scalar state, whether an ended result
+        // is retained among it, then visit its value edges.
         let mut state = task.state.clone();
-        match &mut state {
+        let held = match &mut state {
             TaskStateRecord::Resuming {
                 incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
                 ..
-            }
-            | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                *v = PageValue::Null
-            }
-            _ => (),
+            } => Some(v),
+            TaskStateRecord::Ended(ended) => ended.retained_mut(),
+            _ => None,
+        };
+        if let Some(v) = held {
+            *v = PageValue::Null
         }
         r.put(&state);
         match &task.state {
             TaskStateRecord::Resuming {
                 incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
                 ..
-            }
-            | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                r.value(v)?
+            } => r.value(v)?,
+            TaskStateRecord::Ended(ended) => {
+                if let Some(v) = ended.retained() {
+                    r.value(v)?
+                }
             }
             _ => (),
         }

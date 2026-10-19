@@ -1139,11 +1139,14 @@ impl KernelMachine {
 
     /// How `task` ended, if it has: its record's page form.
     fn ended_how(&mut self, task: TaskId) -> Result<Option<Result<PageValue, PageValue>>, Halt> {
-        Ok(match &self.task(task)?.state {
-            TaskState::Ended(super::EndedTask::Returned(value)) => Some(Ok(value.clone())),
-            TaskState::Ended(super::EndedTask::Raised(value)) => Some(Err(value.clone())),
-            _ => None,
-        })
+        let TaskState::Ended(ended) = &self.task(task)?.state else {
+            return Ok(None);
+        };
+        match ended.result() {
+            Some(Ok(value)) => Ok(Some(Ok(value.clone()))),
+            Some(Err(value)) => Ok(Some(Err(value.clone()))),
+            None => Err(fault("a join read a retired task result")),
+        }
     }
 
     /// A task's ended result, admitted to the arena.

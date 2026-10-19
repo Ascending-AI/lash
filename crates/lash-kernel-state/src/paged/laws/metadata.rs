@@ -96,11 +96,9 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
                 TaskRecord {
                     identity,
                     state: TaskStateRecord::Ready,
-                    result_retained: true,
                     joiners: Tree::new(true),
                     observed: false,
                     passed: false,
-                    failed: false,
                     occurrences: Tree::new(false),
                     frames: Tree::new(true),
                 },

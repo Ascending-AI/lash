@@ -413,11 +413,11 @@ impl TokenCodec for EndedTask {
         Ok(match tag {
             0 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Returned(<PageValue>::decode(input)?)
+                Self::Returned(<Option<PageValue>>::decode(input)?)
             }
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Raised(<PageValue>::decode(input)?)
+                Self::Raised(<Option<PageValue>>::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

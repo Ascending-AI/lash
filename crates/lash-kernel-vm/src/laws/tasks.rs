@@ -1119,3 +1119,76 @@ main {
     );
     assert_eq!(result(embedder.run_to_end(&[])), int(1));
 }
+
+/// `K-TASK-009`, `K-TASK-018`, S7: under memory pressure the run retires
+/// the ended results no handle reaches, and a retired task still ended the
+/// way it did. A dropped task that raised a list of a 512 KiB text leaves
+/// the run room only once its result is retired, and the run's end still
+/// names it as an unobserved failure; a reachable task's retained null
+/// joins as null before and after. Holding the raising task's handle
+/// instead keeps its result, and the same bound refuses the run.
+#[test]
+fn a_retired_task_result_keeps_how_the_task_ended() {
+    const GROW: &str = r#"
+fn grown() {
+  let t = "ab"
+  let i = 0
+  while num.lt(i, 18) {
+    set t = text.concat(t, t)
+    set i = num.add(i, 1)
+  }
+  return t
+}
+fn fails() { let t = call grown() throw [t] }
+fn quiet() { return null }
+"#;
+    let bounded = |main: &str| {
+        let setup = Setup {
+            bounds: crate::Bounds {
+                memory: 1 << 20,
+                ..Setup::default().bounds
+            },
+            ..Setup::default()
+        };
+        Embedder::with(&format!("{GROW}{main}"), setup)
+    };
+
+    let mut dropped = bounded(
+        r#"main {
+  do spawn call fails()
+  let q = spawn call quiet()
+  let first = join q
+  let t = call grown()
+  let again = join q
+  print (first, again, list.len([t]))
+  return 0
+}"#,
+    );
+    let (unfinished, errors) = outstanding(dropped.run_to_end(&[]));
+    assert_eq!(unfinished, []);
+    assert_eq!(errors, [spawned(TaskIdentity::Main, main_site([0, 0]), 0)]);
+    assert_eq!(
+        dropped.world.printed,
+        [Datum::Tuple(vec![Datum::Null, Datum::Null, int(1)])]
+    );
+
+    let mut held = bounded(
+        r#"main {
+  let f = spawn call fails()
+  let q = spawn call quiet()
+  let first = join q
+  let t = call grown()
+  try { do join f } catch e { return list.len([t, e]) }
+}"#,
+    );
+    assert!(
+        matches!(
+            held.run_to_end(&[]),
+            End::Error(RunError::Bound(crate::BoundExceeded {
+                bound: crate::Bound::Memory,
+                ..
+            }))
+        ),
+        "the raising task's reachable result fit beside the second text"
+    );
+}
