@@ -7,7 +7,7 @@ use crate::indexing;
 use crate::indexing::InputIndexer;
 #[cfg(feature = "utf16")]
 use crate::indexing::{Ucs2Input, Utf16Input};
-use crate::insn::CompiledRegex;
+use crate::insn::{CompiledRegex, NamedCapture};
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
@@ -17,8 +17,10 @@ use crate::pikevm;
 use crate::util::to_char_sat;
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
-use core::{fmt, iter::FusedIterator, str::FromStr};
+use alloc::{string::String, string::ToString, sync::Arc, vec::Vec};
+use core::{fmt, iter::FusedIterator, slice, str::FromStr};
+#[cfg(feature = "std")]
+use std::sync::Arc;
 
 pub use exec::{MatchError, MeteredMatches};
 pub use parse::Error;
@@ -144,11 +146,8 @@ pub struct Match {
     /// enclosed range.
     pub captures: Vec<Option<Range>>,
 
-    // A list of capture group names. This is either:
-    //   - Empty, if there were no named capture groups.
-    //   - A list of names with length `captures.len()`, corresponding to the
-    //     capture group names in order. Groups without names have an empty string.
-    pub(crate) group_names: Box<[Box<str>]>,
+    // Each distinct capture group name once, in pattern order.
+    pub(crate) named_captures: Arc<[NamedCapture]>,
 }
 
 impl Match {
@@ -169,12 +168,16 @@ impl Match {
     /// Access a named group by name.
     #[inline]
     pub fn named_group(&self, name: &str) -> Option<Range> {
-        // Empty strings are used as sentinels to indicate unnamed group.
-        if name.is_empty() {
-            return None;
-        }
-        let pos = self.group_names.iter().position(|s| s.as_ref() == name)?;
-        self.captures[pos].clone()
+        let named = self.named_captures.iter().find(|nc| *nc.name == *name)?;
+        self.resolve(named)
+    }
+
+    /// The range of the capture carrying `named` that took part in the match.
+    fn resolve(&self, named: &NamedCapture) -> Option<Range> {
+        named
+            .capture_indices
+            .iter()
+            .find_map(|&idx| self.captures[idx].clone())
     }
 
     #[inline]
@@ -284,10 +287,8 @@ impl<'m> FusedIterator for Groups<'m> {}
 pub struct NamedGroups<'m> {
     mat: &'m Match,
 
-    // The next group name index to return.
-    // Note unlike `Groups` this does NOT include the implicit total match.
-    // That is, group 0 is the first capture group, NOT the total match.
-    next_group_idx: usize,
+    // The names not yet returned.
+    remaining: slice::Iter<'m, NamedCapture>,
 }
 
 impl<'m> NamedGroups<'m> {
@@ -295,7 +296,7 @@ impl<'m> NamedGroups<'m> {
     fn new(mat: &'m Match) -> Self {
         Self {
             mat,
-            next_group_idx: 0,
+            remaining: mat.named_captures.iter(),
         }
     }
 }
@@ -305,58 +306,12 @@ impl<'m> Iterator for NamedGroups<'m> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // Increment next_group_idx until we find a non-empty name that we haven't seen yet.
-        debug_assert!(self.next_group_idx <= self.mat.group_names.len());
-        let end = self.mat.group_names.len();
-
-        loop {
-            let mut idx = self.next_group_idx;
-            // Skip empty names
-            while idx < end && self.mat.group_names[idx].is_empty() {
-                idx += 1;
-            }
-            if idx == end {
-                return None;
-            }
-
-            let name = self.mat.group_names[idx].as_ref();
-
-            // Check if we've already returned this name (by looking backwards)
-            let already_seen = self.mat.group_names[..idx]
-                .iter()
-                .any(|n| n.as_ref() == name);
-
-            if already_seen {
-                // Skip this duplicate and continue to next
-                self.next_group_idx = idx + 1;
-                continue;
-            }
-
-            // This is the first occurrence of this name.
-            // Prefer a Some value over None when there are duplicate names.
-            let mut best_range = self.mat.captures[idx].clone();
-            for check_idx in (idx + 1)..end {
-                if self.mat.group_names[check_idx].as_ref() == name {
-                    // Found a duplicate name. Prefer a Some value over None.
-                    if best_range.is_none() && self.mat.captures[check_idx].is_some() {
-                        best_range = self.mat.captures[check_idx].clone();
-                        break;
-                    }
-                }
-            }
-
-            self.next_group_idx = idx + 1;
-            return Some((name, best_range));
-        }
+        let named = self.remaining.next()?;
+        Some((&named.name, self.mat.resolve(named)))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self.mat.group_names[self.next_group_idx..]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .count();
-
-        (size, Some(size))
+        self.remaining.size_hint()
     }
 }
 

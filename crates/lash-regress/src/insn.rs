@@ -2,7 +2,9 @@
 //! Bytecode instructions for a compiled regex
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(feature = "std")]
+use std::sync::Arc;
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
@@ -208,12 +210,20 @@ pub struct CompiledRegex {
 
     pub groups: u32,
 
-    // A list of capture group names. This is either:
-    //   - Empty, if there were no named capture groups.
-    //   - A list of names with length `groups`, corresponding to the capture
-    //     group names in order. Groups without names have an empty string.
-    pub group_names: Box<[Box<str>]>,
+    // Each distinct capture group name once, in pattern order.
+    pub named_captures: Arc<[NamedCapture]>,
 
     // Flags controlling matching.
     pub flags: api::Flags,
+}
+
+/// One capture group name, with the capture groups that carry it.
+///
+/// A name appears in several groups only when they sit in different
+/// alternatives, so at most one of them takes part in a match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedCapture {
+    pub name: Box<str>,
+    /// Capture group indexes, ascending, as in `Match::captures`.
+    pub capture_indices: Box<[usize]>,
 }

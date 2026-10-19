@@ -1088,7 +1088,7 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
         Match {
             range: self.input.pos_to_offset(start)..self.input.pos_to_offset(end),
             captures,
-            group_names: self.matcher.re.group_names.clone(),
+            named_captures: self.matcher.re.named_captures.clone(),
         }
     }
 

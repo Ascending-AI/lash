@@ -90,6 +90,10 @@ fn test_replace_named_groups() {
     let re = Regex::new(r"(?<first>\w+)\s+(?<second>\w+)").unwrap();
     let result = re.replace("hello world", "${second} ${first}");
     assert_eq!(result, "world hello");
+
+    // A name duplicated across alternatives expands to whichever one matched.
+    let re = Regex::new(r"(?:(?<a>x)|(?<a>y))").unwrap();
+    assert_eq!(re.replace_all("x-y", "[${a}]"), "[x]-[y]");
 }
 
 #[test]

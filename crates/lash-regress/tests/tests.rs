@@ -2066,6 +2066,29 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
     tc.compile("(z|)*?x").match1f("z0x").test_eq("x,");
 }
 
+/// Named lookup, the named-group iterator and its exact length resolve every
+/// name through the same candidate captures, so they agree on each name.
+#[track_caller]
+fn assert_named_captures_agree(
+    m: &lash_regress::Match,
+    expected: &[(&str, Option<std::ops::Range<usize>>)],
+) {
+    for (name, range) in expected {
+        assert_eq!(m.named_group(name), *range, "named_group({name:?})");
+    }
+    let mut names = m.named_groups();
+    for (yielded, item) in expected.iter().enumerate() {
+        assert_eq!(
+            names.len(),
+            expected.len() - yielded,
+            "len after {yielded} names"
+        );
+        assert_eq!(names.next(), Some(item.clone()));
+    }
+    assert_eq!(names.len(), 0, "len after every name");
+    assert_eq!(names.next(), None);
+}
+
 // TC39 proposal: duplicate named capturing groups in different alternatives
 #[expect(
     clippy::unwrap_used,
@@ -2078,41 +2101,55 @@ fn test_duplicate_named_groups_tc(tc: TestConfig) {
         .unwrap();
     assert_eq!(m.group(0), Some(0..7));
     assert_eq!(m.group(1), Some(0..4));
-    let ng = m.named_groups();
-    assert!(ng.eq([("year", Some(0..4))]));
+    assert_named_captures_agree(&m, &[("year", Some(0..4))]);
 
     let m = tc
         .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
         .find("12-2025")
         .unwrap();
     assert_eq!(m.group(0), Some(0..7));
+    assert_eq!(m.group(1), None);
     assert_eq!(m.group(2), Some(3..7));
-    let ng = m.named_groups();
-    assert!(ng.eq([("year", Some(3..7))]));
+    assert_named_captures_agree(&m, &[("year", Some(3..7))]);
 
     // Duplicate names in nested alternatives
     let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("x").unwrap();
-    let ng = m.named_groups();
-    assert!(ng.eq([("a", Some(0..1))]));
+    assert_named_captures_agree(&m, &[("a", Some(0..1))]);
 
     let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("y").unwrap();
-    let ng = m.named_groups();
-    assert!(ng.eq([("a", Some(0..1))]));
+    assert_eq!(m.captures, [None, Some(0..1)]);
+    assert_named_captures_agree(&m, &[("a", Some(0..1))]);
 
     // Multiple duplicate names
     let m = tc
         .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
         .find("ab")
         .unwrap();
-    let ng = m.named_groups();
-    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+    assert_named_captures_agree(&m, &[("x", Some(0..1)), ("y", Some(1..2))]);
 
     let m = tc
         .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
         .find("cd")
         .unwrap();
-    let ng = m.named_groups();
-    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+    assert_named_captures_agree(&m, &[("x", Some(0..1)), ("y", Some(1..2))]);
+
+    // Unnamed groups interleave with the duplicates; names keep the order of
+    // their first occurrence, and a name no alternative matched resolves to None.
+    let re = tc.compile(r"(?:(u)(?<a>x)|(?<b>v)?(w)(?<a>y))");
+    let m = re.find("ux").unwrap();
+    assert_eq!(m.captures, [Some(0..1), Some(1..2), None, None, None]);
+    assert_named_captures_agree(&m, &[("a", Some(1..2)), ("b", None)]);
+    let m = re.find("wy").unwrap();
+    assert_eq!(m.captures, [None, None, None, Some(0..1), Some(1..2)]);
+    assert_named_captures_agree(&m, &[("a", Some(1..2)), ("b", None)]);
+    let m = re.find("vwy").unwrap();
+    assert_named_captures_agree(&m, &[("a", Some(2..3)), ("b", Some(0..1))]);
+
+    // A lookbehind matches its contents right to left; each name still
+    // resolves to its own capture, in pattern order.
+    let m = tc.compile(r"(?<=(?<a>x)(?<b>y))z").find("xyz").unwrap();
+    assert_eq!(m.captures, [Some(0..1), Some(1..2)]);
+    assert_named_captures_agree(&m, &[("a", Some(0..1)), ("b", Some(1..2))]);
 
     // Backreferences with duplicate names
     // TODO: Backreferences with duplicate named groups require additional work

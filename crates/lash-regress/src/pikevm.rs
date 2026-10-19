@@ -7,7 +7,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
+use crate::insn::{CompiledRegex, Insn, LoopFields, NamedCapture, StartPredicate};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -16,8 +16,10 @@ use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::Range;
+#[cfg(feature = "std")]
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 struct State<Position: PositionType> {
@@ -338,7 +340,7 @@ fn successful_match<Input: InputIndexer>(
     input: Input,
     start: Input::Position,
     state: &State<Input::Position>,
-    group_names: Box<[Box<str>]>,
+    named_captures: Arc<[NamedCapture]>,
 ) -> Match {
     let group_to_offset = |mr: &GroupData<Input::Position>| -> Option<Range<usize>> {
         mr.as_range().map(|r| Range {
@@ -350,7 +352,7 @@ fn successful_match<Input: InputIndexer>(
     Match {
         range: input.pos_to_offset(start)..input.pos_to_offset(state.pos),
         captures,
-        group_names,
+        named_captures,
     }
 }
 
@@ -465,7 +467,7 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
                     self.input,
                     pos,
                     &state,
-                    re.group_names.clone(),
+                    re.named_captures.clone(),
                 ));
             }
             // Anchored regex failed to match at this position
@@ -496,7 +498,7 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
                     self.input,
                     start,
                     &state,
-                    re.group_names.clone(),
+                    re.named_captures.clone(),
                 ));
             }
             match self.input.next_right_pos(start) {

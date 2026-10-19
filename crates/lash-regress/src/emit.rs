@@ -2,15 +2,19 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
-use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::{
+    CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH, NamedCapture,
+};
 use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
-use crate::types::{BracketContents, CaptureGroupID, LoopID};
+use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName, LoopID};
 use crate::unicode;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::convert::TryInto;
+#[cfg(feature = "std")]
+use std::sync::Arc;
 
 /// \return an anchor instruction for a given IR anchor.
 fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {
@@ -47,8 +51,9 @@ struct Emitter {
 
     next_loop_id: LoopID,
 
-    // List of group names, in order, with empties for unnamed groups.
-    group_names: Vec<Box<str>>,
+    // The named capture groups, in emission order. A lookbehind emits its
+    // contents right to left, so this is not capture group order.
+    named_groups: Vec<(CaptureGroupID, CaptureGroupName)>,
 
     in_lookbehind: bool,
 }
@@ -296,7 +301,9 @@ impl Emitter {
                     Node::CaptureGroup { id, contents, name } => {
                         let group = *id;
                         self.result.groups += 1;
-                        self.group_names.push(name.as_deref().unwrap_or("").into());
+                        if let Some(name) = name {
+                            self.named_groups.push((group, name.clone()));
+                        }
                         self.emit_insn(Insn::BeginCaptureGroup(group));
                         stack.push(Emitter::EndCaptureGroup { group });
                         stack.push(Emitter::Node(contents));
@@ -392,30 +399,42 @@ impl Emitter {
 pub fn emit(n: &ir::Regex) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
-        group_names: Vec::new(),
+        named_groups: Vec::new(),
         in_lookbehind: false,
         result: CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
             loops: 0,
             groups: 0,
-            group_names: Box::new([]),
+            named_captures: Arc::from([]),
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
         },
     };
     emitter.emit_node(&n.node);
     let mut result = emitter.result;
-    // Populate group names, unless all are empty.
-    debug_assert!(
-        result.group_names.is_empty(),
-        "Group names should not be set"
-    );
-    if emitter.group_names.iter().any(|s| !s.is_empty()) {
-        result.group_names = emitter.group_names.into_boxed_slice();
-    }
-    debug_assert!(
-        result.group_names.is_empty() || result.group_names.len() == result.groups as usize
-    );
+    result.named_captures = named_captures(emitter.named_groups);
     result
+}
+
+/// Each distinct name once, in the order of its first capture group, with the
+/// capture groups that carry it.
+fn named_captures(
+    mut named_groups: Vec<(CaptureGroupID, CaptureGroupName)>,
+) -> Arc<[NamedCapture]> {
+    named_groups.sort_unstable_by_key(|&(group, _)| group);
+    let mut named: Vec<(CaptureGroupName, Vec<usize>)> = Vec::new();
+    for (group, name) in named_groups {
+        match named.iter_mut().find(|(seen, _)| *seen == name) {
+            Some((_, groups)) => groups.push(group.into()),
+            None => named.push((name, vec![group.into()])),
+        }
+    }
+    named
+        .into_iter()
+        .map(|(name, groups)| NamedCapture {
+            name: name.into_boxed_str(),
+            capture_indices: groups.into_boxed_slice(),
+        })
+        .collect()
 }
