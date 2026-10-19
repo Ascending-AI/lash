@@ -48,7 +48,7 @@ impl Note {
                 let mut nested = Vec::new();
                 nested_blocks(
                     Node::Stmt(statement),
-                    &Site::new(Unit::Main, Vec::new()),
+                    &mut Site::new(Unit::Main, Vec::new()),
                     &mut nested,
                 );
                 Self {
@@ -161,14 +161,18 @@ impl Layers {
             }
             if let Some(span) = note.span {
                 self.locate(statement_site.clone(), span);
-                self.actions(Node::Stmt(statement), &statement_site, span);
+                self.actions(Node::Stmt(statement), &mut statement_site.clone(), span);
             }
             if let Some(caption) = &note.caption {
                 self.captions
                     .push(CaptionEntry::site(statement_site.clone(), caption.clone()));
             }
             let mut nested = Vec::new();
-            nested_blocks(Node::Stmt(statement), &statement_site, &mut nested);
+            nested_blocks(
+                Node::Stmt(statement),
+                &mut statement_site.clone(),
+                &mut nested,
+            );
             for (arm, ((inner, inner_site), inner_notes)) in
                 nested.into_iter().zip(&note.blocks).enumerate()
             {
@@ -183,19 +187,21 @@ impl Layers {
 
     /// A statement owns every nested action up to its inner blocks. Those
     /// blocks carry their own source notes, including inline closure bodies.
-    fn actions(&mut self, node: Node<'_>, site: &Site, span: Span) {
+    /// `site` is the node's own, extended and restored as the walk descends.
+    fn actions(&mut self, node: Node<'_>, site: &mut Site, span: Span) {
         for (index, child) in (0u32..).zip(node.children()) {
             if matches!(child, Node::Block(_)) {
                 continue;
             }
-            let site = site.child(index);
+            site.path.push(index);
             if matches!(
                 child,
                 Node::Action(_) | Node::Expr(lash_kernel_doc::Expr::Act(_))
             ) {
                 self.locate(site.clone(), span);
             }
-            self.actions(child, &site, span);
+            self.actions(child, site, span);
+            site.path.pop();
         }
     }
 
@@ -209,14 +215,15 @@ impl Layers {
 }
 
 /// The blocks directly under a node, in the order a walk of its children
-/// meets them, each with its site.
-fn nested_blocks<'a>(node: Node<'a>, site: &Site, out: &mut Vec<(&'a [Stmt], Site)>) {
+/// meets them, each with its site. `site` is the node's own, extended and
+/// restored as the walk descends.
+fn nested_blocks<'a>(node: Node<'a>, site: &mut Site, out: &mut Vec<(&'a [Stmt], Site)>) {
     for (index, child) in node.children().into_iter().enumerate() {
-        let index = u32::try_from(index).unwrap_or(u32::MAX);
-        let child_site = site.child(index);
+        site.path.push(u32::try_from(index).unwrap_or(u32::MAX));
         match child {
-            Node::Block(inner) => out.push((inner, child_site)),
-            other => nested_blocks(other, &child_site, out),
+            Node::Block(inner) => out.push((inner, site.clone())),
+            other => nested_blocks(other, site, out),
         }
+        site.path.pop();
     }
 }

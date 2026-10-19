@@ -678,7 +678,7 @@ impl Lowerer<'_> {
     /// properties. `None` when `subject` is not a built-in value.
     pub(super) fn reflection_on(&self, subject: &ast::Expr, what: &str) -> Option<Diagnostic> {
         let path = self.global_path(subject)?;
-        self.table.builtins.contains_key(path.as_str()).then(|| {
+        self.table.builtin(&path).is_some().then(|| {
             Diagnostic::with_repair(
                 DiagnosticCode::ReflectionUnsupported,
                 format!("Unsupported: {what} `{path}`, which is reflection on a built-in"),
@@ -747,7 +747,7 @@ impl Lowerer<'_> {
     /// the closure that calls it when it is a function.
     fn token(&mut self, path: &str) -> Option<Lowering<Operand>> {
         let path = crate::builtins::canonical(path);
-        let builtin = *self.table.builtins.get(path)?;
+        let builtin = self.table.builtin(path)?;
         Some(self.make_token(path, builtin))
     }
 
@@ -1000,12 +1000,12 @@ impl Lowerer<'_> {
             // A method every function or object inherits is called on the
             // built-in's token; any other name a built-in lacks is refused.
             let inherited = path.rsplit_once('.').is_some_and(|(base, method)| {
-                self.table.builtins.contains_key(base) && INHERITED.contains(&method)
+                self.table.builtin(base).is_some() && INHERITED.contains(&method)
             });
             // A namespace or a prototype called is the TypeError of calling
             // any object, raised when the call runs.
             let object = matches!(
-                self.table.builtins.get(path.as_str()),
+                self.table.builtin(&path),
                 Some(crate::builtins::Builtin::Object)
             );
             if !inherited

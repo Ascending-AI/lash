@@ -1278,7 +1278,11 @@ fn compile_document(
     }
     let declared = std::mem::take(&mut compiler.declared);
     let mut tables = compiler.finish();
-    let ordinals = document.site_ordinals();
+    let lash_kernel_doc::Ordinals {
+        sites: ordinals,
+        actions: action_ordinals,
+        conditions: condition_sites,
+    } = document.ordinals();
     let block_ordinals = tables
         .blocks
         .iter()
@@ -1290,8 +1294,6 @@ fn compile_document(
             ordinals[&block.site]
         })
         .collect();
-    let action_ordinals = document.action_ordinals();
-    let condition_sites = document.condition_ordinals();
     let condition_ordinals: BTreeMap<_, _> = condition_sites
         .iter()
         .map(|(site, count)| (ordinals[site], *count))

@@ -88,6 +88,18 @@ impl Manifest {
     }
 }
 
+/// The document's run-count ordinals by site: statement and block
+/// starts, then action issues, then while-condition tests.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ordinals {
+    /// [`Document::site_ordinals`].
+    pub sites: BTreeMap<Site, u32>,
+    /// [`Document::action_ordinals`].
+    pub actions: BTreeMap<Site, u32>,
+    /// [`Document::condition_ordinals`].
+    pub conditions: BTreeMap<Site, u32>,
+}
+
 impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
@@ -106,29 +118,7 @@ impl Document {
     /// sites alone. Expressions and actions are walked through but appear
     /// nowhere in it.
     pub fn ordinal_nodes(&self) -> Vec<(Site, Node<'_>)> {
-        let mut nodes = BTreeMap::new();
-        let mut pending = vec![(
-            Site::new(crate::Unit::Main, vec![]),
-            Node::Block(&self.main),
-        )];
-        pending.extend(self.functions.iter().map(|(name, function)| {
-            (
-                Site::new(crate::Unit::Function(name.clone()), vec![]),
-                Node::Block(&function.body),
-            )
-        }));
-        while let Some((site, node)) = pending.pop() {
-            if matches!(node, Node::Block(_) | Node::Stmt(_)) {
-                nodes.insert(site.clone(), node);
-            }
-            pending.extend(
-                node.children()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, child)| (site.child(index as u32), child)),
-            );
-        }
-        nodes.into_iter().collect()
+        self.walk_sites().0
     }
 
     /// Dense ordinals for every statement and block in this document's own
@@ -136,59 +126,91 @@ impl Document {
     /// closure bodies do. The rank depends only on the document, never on
     /// an executable's layout or the library it is compiled against.
     pub fn site_ordinals(&self) -> BTreeMap<Site, u32> {
-        self.ordinal_nodes()
-            .into_iter()
-            .enumerate()
-            .map(|(ordinal, (site, _))| (site, ordinal as u32))
-            .collect()
+        self.ordinals().sites
     }
 
     /// Action issue counters share the run-count channel with statement starts.
     /// They follow the statement/block ordinals, in Site order, so existing
     /// statement and replay coordinates keep their meaning.
     pub fn action_ordinals(&self) -> BTreeMap<Site, u32> {
-        let mut sites = std::collections::BTreeSet::new();
-        let mut pending = vec![(
-            Site::new(crate::Unit::Main, vec![]),
-            Node::Block(&self.main),
-        )];
-        pending.extend(self.functions.iter().map(|(name, function)| {
-            (
-                Site::new(crate::Unit::Function(name.clone()), vec![]),
-                Node::Block(&function.body),
-            )
-        }));
-        while let Some((site, node)) = pending.pop() {
-            if matches!(node, Node::Action(_) | Node::Expr(crate::Expr::Act(_))) {
-                sites.insert(site.clone());
-            }
-            pending.extend(
-                node.children()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, child)| (site.child(index as u32), child)),
-            );
-        }
-        let base = self.ordinal_nodes().len() as u32;
-        sites
-            .into_iter()
-            .enumerate()
-            .map(|(i, site)| (site, base + i as u32))
-            .collect()
+        self.ordinals().actions
     }
 
     /// While-condition evaluations, separate from statement starts and body
     /// entries. Each test is counted before evaluation, including the last false test.
     pub fn condition_ordinals(&self) -> BTreeMap<Site, u32> {
-        let base = self.ordinal_nodes().len() + self.action_ordinals().len();
-        self.ordinal_nodes()
-            .into_iter()
-            .filter_map(|(site, node)| {
-                matches!(node, Node::Stmt(crate::Stmt::While { .. })).then_some(site)
-            })
+        self.ordinals().conditions
+    }
+
+    /// [`site_ordinals`](Self::site_ordinals),
+    /// [`action_ordinals`](Self::action_ordinals) and
+    /// [`condition_ordinals`](Self::condition_ordinals) from one walk.
+    pub fn ordinals(&self) -> Ordinals {
+        let (nodes, actions) = self.walk_sites();
+        let action_base = nodes.len();
+        let condition_base = action_base + actions.len();
+        let conditions = nodes
+            .iter()
+            .filter(|(_, node)| matches!(node, Node::Stmt(crate::Stmt::While { .. })))
             .enumerate()
-            .map(|(i, site)| (site, (base + i) as u32))
-            .collect()
+            .map(|(i, (site, _))| (site.clone(), (condition_base + i) as u32))
+            .collect();
+        let actions = actions
+            .into_iter()
+            .enumerate()
+            .map(|(i, site)| (site, (action_base + i) as u32))
+            .collect();
+        let sites = nodes
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (site, _))| (site, ordinal as u32))
+            .collect();
+        Ordinals {
+            sites,
+            actions,
+            conditions,
+        }
+    }
+
+    /// One pre-order walk of the document's own units, which visits sites
+    /// in [`Site`] order: every statement and block with the node, and
+    /// every action's site.
+    fn walk_sites(&self) -> (Vec<(Site, Node<'_>)>, Vec<Site>) {
+        let mut nodes = Vec::new();
+        let mut actions = Vec::new();
+        let units = std::iter::once((crate::Unit::Main, &self.main)).chain(
+            self.functions
+                .iter()
+                .map(|(name, function)| (crate::Unit::Function(name.clone()), &function.body)),
+        );
+        let mut path = Vec::new();
+        let mut pending = Vec::new();
+        for (unit, body) in units {
+            // Each entry is a node, its depth and its index in its parent;
+            // `path` holds the walk's current site below the unit.
+            pending.push((Node::Block(body), 0usize, 0u32));
+            while let Some((node, depth, index)) = pending.pop() {
+                path.truncate(depth.saturating_sub(1));
+                if depth > 0 {
+                    path.push(index);
+                }
+                let site = || Site::new(unit.clone(), path.clone());
+                match node {
+                    Node::Block(_) | Node::Stmt(_) => nodes.push((site(), node)),
+                    Node::Action(_) | Node::Expr(crate::Expr::Act(_)) => actions.push(site()),
+                    _ => {}
+                }
+                let children = node.children();
+                pending.extend(
+                    children
+                        .into_iter()
+                        .enumerate()
+                        .rev()
+                        .map(|(index, child)| (child, depth + 1, index as u32)),
+                );
+            }
+        }
+        (nodes, actions)
     }
 
     /// The document's behavioural identity (`K-ID-001`): the digest of its

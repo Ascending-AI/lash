@@ -858,6 +858,48 @@ impl<T: Cell> Tree<T> {
         })
         .map(|_| ())
     }
+    /// A fresh tree holding `rows`, as writing each into an empty tree in
+    /// turn would: a later row replaces an earlier one with the same key.
+    /// Its leaves are cut by the canonical rule from the first row, and each
+    /// is tracked and may stage as it is made, so building it searches and
+    /// copies no path per row.
+    pub fn from_rows(
+        mut rows: Vec<(Vec<u8>, T)>,
+        sequence: bool,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        if !rows.is_sorted_by(|a, b| a.0 < b.0) {
+            // Stable, so the last of equal keys is the one a write keeps.
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut kept: Vec<(Vec<u8>, T)> = Vec::with_capacity(rows.len());
+            for row in rows {
+                match kept.last_mut() {
+                    Some(last) if last.0 == row.0 => *last = row,
+                    _ => kept.push(row),
+                }
+            }
+            rows = kept;
+        }
+        let mut first: Vec<(Key, T)> = rows
+            .into_iter()
+            .map(|(key, value)| (Key(key), value))
+            .collect();
+        if first.is_empty() {
+            return Ok(Self::new(sequence));
+        }
+        let rest = canonical::cut_leaf(&mut first, sequence, access);
+        let mut leaves = Vec::with_capacity(rest.len() + 1);
+        for rows in std::iter::once(first).chain(rest) {
+            leaves.push(dirty(Node::Leaf(rows), access, sequence)?);
+            access.stage_pressure()?;
+        }
+        let root = grow(leaves, access, sequence)?;
+        access.stage_pressure()?;
+        Ok(Self {
+            root: Some(root),
+            sequence,
+        })
+    }
     /// Edits an existing cell without retaining a cloned copy of its nested
     /// trees. `false` means the callback restored the identical cell version.
     /// Ancestor pages remain charged and protected while nested edits stage.
@@ -1136,7 +1178,7 @@ impl<T: Cell> Tree<T> {
             seq: bool,
             visitor: &mut dyn FnMut(&[u8], &T) -> bool,
         ) -> Result<bool, HeapFault> {
-            match &*Tree::load_shared(branch, access, seq)? {
+            match &*Tree::load_node(branch, access, seq)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
                     for (k, v) in rows {

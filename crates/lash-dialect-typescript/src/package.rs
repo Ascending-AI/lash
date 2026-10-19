@@ -158,7 +158,7 @@ fn row_names(table: &'static builtins::Table) -> Vec<(&'static str, String)> {
         table
             .member_names
             .iter()
-            .map(|name| (name.as_str(), format!("ts.member.{name}"))),
+            .map(|name| (*name, format!("ts.member.{name}"))),
     );
     let mut seen = std::collections::BTreeSet::new();
     rows.retain(|(name, _)| seen.insert(*name));

@@ -73,7 +73,7 @@ fn called(table: &Table, path: &str) -> Option<String> {
         return Some((*function).to_string());
     }
     let path = super::canonical(path);
-    match table.builtins.get(path) {
+    match table.builtin(path) {
         Some(super::Builtin::Function { call, .. }) => Some(call.callee(path).0.to_string()),
         _ => None,
     }
@@ -160,7 +160,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
     tokens.push_str(&special(table, name, &mut uses));
     for ancestor in ANCESTORS {
         let path = format!("{ancestor}.{name}");
-        if !table.builtins.contains_key(&path) {
+        if table.builtin(&path).is_none() {
             continue;
         }
         branches += 1;
@@ -184,11 +184,9 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         tokens.push_str(&format!("    if {heirs} {{\n      {child}\n    }}\n"));
     }
     if table
-        .builtins
-        .contains_key(&format!("Function.prototype.{name}"))
-        && !table
-            .builtins
-            .contains_key(&format!("Object.prototype.{name}"))
+        .builtin(&format!("Function.prototype.{name}"))
+        .is_some()
+        && table.builtin(&format!("Object.prototype.{name}")).is_none()
     {
         // A namespace or a prototype that is no function does not inherit
         // Function.prototype: `JSON.bind` is undefined.
@@ -197,7 +195,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
     let mut kinds = String::new();
     for (receiver, helper) in table.methods.get(name).into_iter().flatten() {
         branches += 1;
-        let child = answer(&table.method_paths[helper], &mut uses);
+        let child = answer(table.method_path(helper), &mut uses);
         kinds.push_str(&format!(
             "  if same(receiver, \"{}\") {{\n    {child}\n  }}\n",
             receiver.tag()
@@ -212,7 +210,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         kinds.push_str(&constructor(table, &mut uses));
     }
     let inherited = format!("Object.prototype.{name}");
-    if table.builtins.contains_key(&inherited) {
+    if table.builtin(&inherited).is_some() {
         // Every object inherits Object.prototype's methods.
         let child = answer(&inherited, &mut uses);
         kinds.push_str(&format!(
@@ -250,10 +248,10 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
 /// The built-ins with a member called `name` of their own.
 fn parents<'t>(table: &'t Table, name: &str) -> BTreeSet<&'t str> {
     table
-        .builtins
-        .keys()
-        .map(String::as_str)
-        .chain(table.values.keys().copied())
+        .builtin_paths()
+        .iter()
+        .map(|path| -> &'t str { path })
+        .chain(table.values.keys().map(|path| -> &'t str { path }))
         .filter_map(|path| path.rsplit_once('.'))
         .filter(|(_, member)| *member == name)
         .map(|(parent, _)| parent)
@@ -291,7 +289,7 @@ fn special(table: &Table, name: &str, uses: &mut Vec<String>) -> String {
             }
         }
         "constructor" => {
-            for path in table.builtins.keys() {
+            for path in table.builtin_paths() {
                 if let Some(class) = path.strip_suffix(".prototype") {
                     uses.extend(called(table, class));
                     text.push_str(&format!(
@@ -376,8 +374,8 @@ fn in_operator(table: &Table) -> String {
         ));
     }
     let mut common: Vec<String> = table
-        .builtins
-        .keys()
+        .builtin_paths()
+        .iter()
         .filter_map(|path| path.strip_prefix("Object.prototype."))
         .filter(|name| !name.contains('.'))
         .map(|name| format!("\"{name}\""))

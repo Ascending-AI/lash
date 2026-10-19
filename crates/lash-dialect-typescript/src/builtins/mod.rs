@@ -24,6 +24,7 @@
 //! builder generates after every row's helper, because a helper cannot call
 //! a function defined after it.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -42,12 +43,14 @@ mod object;
 mod promise;
 mod regexp;
 mod set;
+mod sorted;
 mod string;
 mod uri;
 mod url;
 mod url_search_params;
 mod values;
 
+use sorted::{SortedMap, SortedSet};
 pub(crate) use values::{member_reader, sources as value_sources};
 
 /// What a member's receiver is, as `ts.receiver` names it.
@@ -272,21 +275,26 @@ const POSITIONAL: &[(&str, Positional)] = &[
 ];
 
 /// The rows, indexed the ways the lowerer and the package builder ask.
+///
+/// Lowering builds this table in every process that lowers TypeScript, so
+/// building it indexes the rows and nothing more: what a built-in path is
+/// as a value is answered from the rows when asked
+/// ([`builtin`](Self::builtin)), and the indexes only the package builder
+/// walks are derived on its first use.
 #[derive(Debug, Default)]
 pub(crate) struct Table {
-    pub(crate) methods: BTreeMap<&'static str, Vec<(Receiver, &'static str)>>,
-    pub(crate) properties: BTreeMap<&'static str, Vec<(Receiver, &'static str)>>,
-    pub(crate) functions: BTreeMap<&'static str, &'static str>,
-    pub(crate) positional: BTreeMap<&'static str, Positional>,
-    pub(crate) values: BTreeMap<&'static str, &'static str>,
-    pub(crate) constructors: BTreeMap<&'static str, &'static str>,
-    pub(crate) instance_tests: BTreeMap<&'static str, &'static str>,
+    pub(crate) methods: SortedMap<Vec<(Receiver, &'static str)>>,
+    pub(crate) properties: SortedMap<Vec<(Receiver, &'static str)>>,
+    pub(crate) functions: SortedMap<&'static str>,
+    pub(crate) positional: SortedMap<Positional>,
+    pub(crate) values: SortedMap<&'static str>,
+    pub(crate) constructors: SortedMap<&'static str>,
+    pub(crate) instance_tests: SortedMap<&'static str>,
     /// The first segment of every global path and every class.
-    globals: BTreeSet<&'static str>,
-    /// Every path a built-in value names.
-    pub(crate) builtins: BTreeMap<String, Builtin>,
-    /// The path whose value a method row's helper is, for each helper.
-    pub(crate) method_paths: BTreeMap<&'static str, String>,
+    globals: SortedSet,
+    /// Every class: each constructor's and `instanceof` row's, and each
+    /// whose prototype a path runs through.
+    classes: SortedSet,
     /// Every name a built-in has a member by: each method row's name, the
     /// last segment of every path below a built-in, and the members no row
     /// gives (`constructor`, a prototype's `length`, `message`, `name` and
@@ -294,176 +302,213 @@ pub(crate) struct Table {
     /// read of one of these names has a reader of its own,
     /// `ts.member.<name>`, so a program reaches the helpers of the names it
     /// reads and no others.
-    pub(crate) member_names: BTreeSet<String>,
+    pub(crate) member_names: SortedSet,
+    /// Every path [`builtin`](Self::builtin) answers, derived on first use.
+    paths: OnceLock<BTreeSet<Cow<'static, str>>>,
+    /// The path whose value a method row's helper is, for each helper,
+    /// derived on first use.
+    method_paths: OnceLock<BTreeMap<&'static str, &'static str>>,
 }
 
 impl Table {
     fn build() -> Self {
-        let mut table = Self::default();
+        let (mut methods, mut properties) = (Vec::new(), Vec::new());
+        let (mut functions, mut values) = (Vec::new(), Vec::new());
+        let (mut constructors, mut instance_tests) = (Vec::new(), Vec::new());
+        let (mut globals, mut classes) = (Vec::new(), Vec::new());
         for row in objects().into_iter().flat_map(|object| object.rows) {
-            let taken = match row {
+            match row {
                 Row::Method {
                     receiver,
                     name,
                     function,
-                } => insert_member(&mut table.methods, receiver, name, function),
+                } => methods.push((name, (receiver, function))),
                 Row::Property {
                     receiver,
                     name,
                     function,
-                } => insert_member(&mut table.properties, receiver, name, function),
+                } => properties.push((name, (receiver, function))),
                 Row::Function { path, function } => {
-                    table.globals.insert(root(path));
-                    table.functions.insert(path, function).is_some()
+                    globals.push(root(path));
+                    functions.push((path, function));
                 }
                 Row::Value { path, function } => {
-                    table.globals.insert(root(path));
-                    table.values.insert(path, function).is_some()
+                    globals.push(root(path));
+                    values.push((path, function));
                 }
                 Row::Constructor { class, function } => {
-                    table.globals.insert(class);
-                    table.constructors.insert(class, function).is_some()
+                    globals.push(class);
+                    classes.push(class);
+                    constructors.push((class, function));
                 }
                 Row::InstanceOf { class, function } => {
-                    table.globals.insert(class);
-                    table.instance_tests.insert(class, function).is_some()
+                    globals.push(class);
+                    classes.push(class);
+                    instance_tests.push((class, function));
                 }
-            };
-            assert!(
-                !taken,
-                "two built-in rows answer the same question: {row:?}"
-            );
-        }
-        for (path, positional) in POSITIONAL {
-            assert!(
-                table.functions.contains_key(path),
-                "positional built-in `{path}` has no function row"
-            );
-            table.positional.insert(path, *positional);
-        }
-        table.index_values();
-        table
-    }
-
-    /// Indexes every path a built-in value names: each function row's path,
-    /// each class, and each object a path runs through.
-    fn index_values(&mut self) {
-        let lengths: BTreeMap<&str, u8> = lengths::LENGTHS.iter().copied().collect();
-        let length = |path: &str| {
-            *lengths
-                .get(path)
-                .unwrap_or_else(|| panic!("`{path}` has no length in builtins/lengths.rs"))
-        };
-        let mut classes: BTreeSet<&str> = self
-            .constructors
-            .keys()
-            .chain(self.instance_tests.keys())
-            .copied()
-            .collect();
-        let paths: Vec<&str> = self
-            .functions
-            .keys()
-            .chain(self.values.keys())
-            .copied()
-            .collect();
-        for path in &paths {
-            let segments: Vec<&str> = path.split('.').collect();
-            if segments.get(1) == Some(&"prototype") {
-                classes.insert(segments[0]);
             }
         }
-        for (path, helper) in &self.functions {
-            let builtin = Builtin::Function {
+        let functions = SortedMap::new(functions, "function");
+        let values = SortedMap::new(values, "value");
+        for (path, _) in POSITIONAL {
+            assert!(
+                functions.contains_key(path),
+                "positional built-in `{path}` has no function row"
+            );
+        }
+        let methods = members(methods, "method");
+        let mut member_names: Vec<&'static str> = methods.keys().copied().collect();
+        let mut prototype = false;
+        for path in functions.keys().chain(values.keys()) {
+            let mut segments = path.split('.');
+            let class = segments.next();
+            let mut segments = segments.peekable();
+            if let (Some(class), Some(&"prototype")) = (class, segments.peek()) {
+                classes.push(class);
+            }
+            // Each segment below the first is the last of the path itself
+            // or of an object the path runs through; `prototype` is named
+            // once below.
+            for segment in segments {
+                if segment == "prototype" {
+                    prototype = true;
+                } else {
+                    member_names.push(segment);
+                }
+            }
+        }
+        let classes = SortedSet::new(classes);
+        member_names.extend(classes.iter().filter_map(|class| last_segment(class)));
+        if prototype || !classes.is_empty() {
+            member_names.push("prototype");
+        }
+        member_names.extend(["constructor", "length", "message", "name", "size"]);
+        Self {
+            methods,
+            properties: members(properties, "property"),
+            functions,
+            positional: SortedMap::new(POSITIONAL.to_vec(), "positional"),
+            values,
+            constructors: SortedMap::new(constructors, "constructor"),
+            instance_tests: SortedMap::new(instance_tests, "instanceof"),
+            globals: SortedSet::new(globals),
+            classes,
+            member_names: SortedSet::new(member_names),
+            paths: OnceLock::new(),
+            method_paths: OnceLock::new(),
+        }
+    }
+
+    /// What `path` names as a value, when it is a built-in: a function
+    /// row's path, then a class, then a class's prototype, then an object
+    /// a function or value row's path runs through.
+    pub(crate) fn builtin(&self, path: &str) -> Option<Builtin> {
+        if let Some(helper) = self.functions.get(path) {
+            return Some(Builtin::Function {
                 call: Call::Helper(helper),
                 length: length(path),
-            };
-            self.builtins.insert((*path).to_string(), builtin);
+            });
         }
-        for class in &classes {
-            let call = match *class {
+        if self.classes.contains(path) {
+            let call = match path {
                 "Function" => Call::SourceText,
                 _ => Call::RequiresNew,
             };
-            self.builtins
-                .entry((*class).to_string())
-                .or_insert(Builtin::Function {
-                    call,
-                    length: length(class),
-                });
-            let prototype = format!("{class}.prototype");
-            let builtin = if *class == "Function" {
+            return Some(Builtin::Function {
+                call,
+                length: length(path),
+            });
+        }
+        if let Some(class) = path.strip_suffix(".prototype")
+            && self.classes.contains(class)
+        {
+            return Some(if class == "Function" {
                 Builtin::Function {
                     call: Call::Nothing,
                     length: 0,
                 }
             } else {
                 Builtin::Object
-            };
-            self.builtins.entry(prototype).or_insert(builtin);
+            });
         }
-        for path in &paths {
-            let segments: Vec<&str> = path.split('.').collect();
-            for end in 1..segments.len() {
-                self.builtins
-                    .entry(segments[..end].join("."))
-                    .or_insert(Builtin::Object);
-            }
-        }
-        let mut unnamed = Vec::new();
-        for (name, rows) in &self.methods {
-            for (receiver, helper) in rows {
-                match self.member_path(name, helper) {
-                    Some(path) => {
-                        self.method_paths.insert(helper, path);
-                    }
-                    None => unnamed.push(format!("{receiver:?} `{name}` ({helper})")),
-                }
-            }
-        }
-        assert!(
-            unnamed.is_empty(),
-            "these method rows have no `X.prototype.<name>` function row naming their helper: {unnamed:?}"
-        );
-        self.member_names = self
-            .methods
-            .keys()
-            .map(ToString::to_string)
-            .chain(
-                self.builtins
-                    .keys()
-                    .map(String::as_str)
-                    .chain(self.values.keys().copied())
-                    .filter_map(|path| path.rsplit_once('.'))
-                    .map(|(_, name)| name.to_string()),
-            )
-            .chain(["constructor", "length", "message", "name", "size"].map(ToString::to_string))
-            .collect();
+        let below = format!("{path}.");
+        let runs_through = |paths: &SortedMap<&'static str>| {
+            paths
+                .from(&below)
+                .next()
+                .is_some_and(|(found, _)| found.starts_with(&below))
+        };
+        (runs_through(&self.functions) || runs_through(&self.values)).then_some(Builtin::Object)
     }
 
-    /// The path of the function a method row answers with: the one path of
-    /// its helper, or the one that ends in `.prototype.<name>`.
-    fn member_path(&self, name: &str, helper: &str) -> Option<String> {
-        let paths: Vec<&str> = self
-            .functions
-            .iter()
-            .filter(|(_, function)| **function == helper)
-            .map(|(path, _)| *path)
-            .collect();
-        let suffix = format!(".prototype.{name}");
-        match paths.as_slice() {
-            [path] => Some((*path).to_string()),
-            _ => paths
-                .iter()
-                .find(|path| path.ends_with(&suffix))
-                .map(|path| (*path).to_string()),
-        }
+    /// Every path [`builtin`](Self::builtin) answers, in order: each
+    /// function row's path, each class and its prototype, and each object a
+    /// function or value row's path runs through.
+    pub(crate) fn builtin_paths(&self) -> &BTreeSet<Cow<'static, str>> {
+        self.paths.get_or_init(|| {
+            let mut paths: BTreeSet<Cow<'static, str>> = BTreeSet::new();
+            for class in &self.classes {
+                paths.insert(Cow::Borrowed(*class));
+                paths.insert(Cow::Owned(format!("{class}.prototype")));
+            }
+            for path in self.functions.keys().chain(self.values.keys()) {
+                for (end, _) in path.match_indices('.') {
+                    paths.insert(Cow::Borrowed(&path[..end]));
+                }
+            }
+            paths.extend(self.functions.keys().map(|path| Cow::Borrowed(*path)));
+            for path in &paths {
+                assert!(
+                    self.builtin(path).is_some(),
+                    "`{path}` is a built-in path that names no built-in"
+                );
+            }
+            paths
+        })
+    }
+
+    /// The path whose value the method row helper `helper` is: the one
+    /// path of its helper, or the one that ends in `.prototype.<name>`.
+    pub(crate) fn method_path(&self, helper: &str) -> &'static str {
+        let paths = self.method_paths.get_or_init(|| {
+            let mut helper_paths: BTreeMap<&'static str, Vec<&'static str>> = BTreeMap::new();
+            for (path, helper) in &self.functions {
+                helper_paths.entry(helper).or_default().push(path);
+            }
+            let mut found = BTreeMap::new();
+            let mut unnamed = Vec::new();
+            for (name, rows) in &self.methods {
+                for (receiver, helper) in rows {
+                    let paths = helper_paths.get(helper).map_or(&[][..], Vec::as_slice);
+                    let path = match paths {
+                        [path] => Some(*path),
+                        _ => paths.iter().copied().find(|path| {
+                            path.strip_suffix(name)
+                                .is_some_and(|parent| parent.ends_with(".prototype."))
+                        }),
+                    };
+                    match path {
+                        Some(path) => {
+                            found.insert(*helper, path);
+                        }
+                        None => unnamed.push(format!("{receiver:?} `{name}` ({helper})")),
+                    }
+                }
+            }
+            assert!(
+                unnamed.is_empty(),
+                "these method rows have no `X.prototype.<name>` function row naming their helper: {unnamed:?}"
+            );
+            found
+        });
+        paths[helper]
     }
 
     /// The value a path names, as kernel text: a token, or the value row's
     /// helper called with no arguments.
     pub(crate) fn token(&self, path: &str) -> Option<String> {
         let path = canonical(path);
-        match self.builtins.get(path)? {
+        match self.builtin(path)? {
             Builtin::Function { call, length } => {
                 let (helper, args) = call.callee(path);
                 Some(format!(
@@ -520,16 +565,40 @@ pub(crate) fn object_tag(path: &str) -> &'static str {
     }
 }
 
-fn insert_member(
-    members: &mut BTreeMap<&'static str, Vec<(Receiver, &'static str)>>,
-    receiver: Receiver,
-    name: &'static str,
-    function: &'static str,
-) -> bool {
-    let rows = members.entry(name).or_default();
-    let taken = rows.iter().any(|(existing, _)| *existing == receiver);
-    rows.push((receiver, function));
-    taken
+/// Member rows by name, each name's rows in the order they came: one
+/// row per receiver kind.
+fn members(
+    mut rows: Vec<(&'static str, (Receiver, &'static str))>,
+    what: &str,
+) -> SortedMap<Vec<(Receiver, &'static str)>> {
+    rows.sort_by(|a, b| a.0.cmp(b.0));
+    let mut grouped: Vec<(&'static str, Vec<(Receiver, &'static str)>)> = Vec::new();
+    for (name, (receiver, function)) in rows {
+        match grouped.last_mut() {
+            Some((last, group)) if *last == name => {
+                assert!(
+                    group.iter().all(|(existing, _)| *existing != receiver),
+                    "two built-in rows answer the same question: {what} `{name}` of {receiver:?}"
+                );
+                group.push((receiver, function));
+            }
+            _ => grouped.push((name, vec![(receiver, function)])),
+        }
+    }
+    SortedMap::sorted(grouped)
+}
+
+/// The JavaScript `length` of the built-in function at `path`.
+fn length(path: &str) -> u8 {
+    lengths::LENGTHS
+        .binary_search_by(|(row, _)| (*row).cmp(path))
+        .map(|found| lengths::LENGTHS[found].1)
+        .unwrap_or_else(|_| panic!("`{path}` has no length in builtins/lengths.rs"))
+}
+
+/// The last segment of a dotted path, when it has more than one.
+fn last_segment(path: &'static str) -> Option<&'static str> {
+    path.rsplit_once('.').map(|(_, name)| name)
 }
 
 fn root(path: &'static str) -> &'static str {
@@ -547,18 +616,16 @@ pub(crate) fn table() -> &'static Table {
 /// record's field by such a name is all that any reader of it gives, and
 /// writing one leaves the record plain.
 pub(crate) fn ordinary_prefix(prefix: &str) -> bool {
-    use std::ops::Bound;
     let table = table();
-    let after = (Bound::Included(prefix), Bound::Unbounded);
     !"__ts_brand".starts_with(prefix)
         && !table
             .properties
-            .range::<str, _>(after)
+            .from(prefix)
             .next()
             .is_some_and(|(name, _)| name.starts_with(prefix))
         && !table
             .member_names
-            .range::<str, _>(after)
+            .from(prefix)
             .next()
             .is_some_and(|name| name.starts_with(prefix))
 }

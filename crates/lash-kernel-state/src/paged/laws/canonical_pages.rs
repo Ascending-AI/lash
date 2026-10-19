@@ -108,6 +108,52 @@ fn trees_built_by_different_histories_seal_to_one_root() {
     }
 }
 
+/// Seam H invariant for a fresh object's tree (`Tree::from_rows`): built
+/// from all its rows at once, in or out of key order and with a repeated
+/// key, it holds and seals to what writing each row in turn does, the last
+/// write of a key winning, and later edits of it seal as edits of the
+/// written tree do.
+#[test]
+fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
+    const N: u64 = 6_000;
+    for sequence in [false, true] {
+        let (heap, _) = fresh();
+        let access = heap.pages();
+        let key = |i: u64| {
+            if sequence {
+                directory::ordinal_key(i)
+            } else {
+                i.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_be_bytes().to_vec()
+            }
+        };
+        // Every row once, a repeated key whose later value stands, and the
+        // keyed rows out of key order.
+        let mut rows: Vec<(Vec<u8>, PageValue)> = (0..N).map(|i| (key(i), int(i as i64))).collect();
+        rows.insert(17, (key(4_000), int(-1)));
+        let mut written = tree::Tree::<PageValue>::new(sequence);
+        for (key, value) in rows.clone() {
+            written.write(key, value, access).unwrap();
+        }
+        let mut built = tree::Tree::from_rows(rows, sequence, access).unwrap();
+        assert_eq!(built.len(), N, "{sequence}");
+        assert!(is_int(built.get(&key(4_000), access).unwrap(), 4_000), "{sequence}");
+        assert!(written.seal(access, &mut full_work()).unwrap());
+        assert!(built.seal(access, &mut full_work()).unwrap());
+        assert_eq!(built.page(), written.page(), "{sequence}");
+
+        for tree in [&mut written, &mut built] {
+            tree.write(key(N), int(-2), access).unwrap();
+            assert!(tree.remove(&key(9), access).unwrap().is_some());
+            seal_in_slices(tree, access);
+        }
+        assert_eq!(built.page(), written.page(), "{sequence}");
+
+        let empty = tree::Tree::<PageValue>::from_rows(Vec::new(), sequence, access).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.page(), None);
+    }
+}
+
 /// A named edit of a tree.
 type Edit<'a> = (&'static str, Box<dyn Fn(&mut tree::Tree<PageValue>) + 'a>);
 

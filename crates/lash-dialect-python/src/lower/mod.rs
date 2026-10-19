@@ -481,17 +481,21 @@ fn reachable(
     let mut listed = BTreeMap::new();
     let mut pending: Vec<(FunctionId, FunctionName)> = used.into_iter().collect();
     while let Some((function, name)) = pending.pop() {
-        if listed.insert(function, name).is_some() {
+        let std::collections::btree_map::Entry::Vacant(entry) = listed.entry(function) else {
             continue;
-        }
+        };
+        entry.insert(name);
         let catalog: &dyn FunctionCatalog = library;
         if let Some(body) = catalog
             .definition(&function)
             .and_then(|definition| definition.body())
         {
+            // An identity digests its function's name, so a function already
+            // listed is listed by the name any other body calls it by.
             pending.extend(
                 body.functions
                     .iter()
+                    .filter(|(function, _)| !listed.contains_key(*function))
                     .map(|(function, name)| (*function, name.clone())),
             );
         }
@@ -505,6 +509,27 @@ impl Lowerer<'_> {
     /// reads or captures it. Nested assignments cannot declare an outer slot.
     /// A cell's carried names are also used after its root block finishes.
     fn finish_declarations(&self, mut body: Buf, carried: Option<&BTreeSet<String>>) -> Buf {
+        /// Whether `action` reads `name`, as the expression it stands for
+        /// would: as its callee or as one of its arguments.
+        fn action_mentions(action: &lash_kernel_doc::Action, name: &Name) -> bool {
+            use lash_kernel_doc::{Action, Atom};
+            let (callee, atoms): (Option<&Callee>, &[Atom]) = match action {
+                Action::Call { callee, args } | Action::Spawn { callee, args } => {
+                    (Some(callee), args)
+                }
+                Action::Perform { args, .. } => (None, args),
+                Action::Sleep { duration: atom, .. }
+                | Action::Join { task: atom }
+                | Action::JoinMany { tasks: atom, .. }
+                | Action::Await { value: atom, .. }
+                | Action::Cancel { task: atom } => (None, std::slice::from_ref(atom)),
+                Action::Yield => (None, &[]),
+            };
+            matches!(callee, Some(Callee::Value(read)) if read == name)
+                || atoms
+                    .iter()
+                    .any(|atom| matches!(atom, Atom::Variable(read) if read == name))
+        }
         fn mentions(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
             match node {
                 lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => true,
@@ -515,10 +540,7 @@ impl Lowerer<'_> {
                     place: Place::Variable(write),
                     ..
                 }) if write == name => true,
-                lash_kernel_doc::Node::Action(action) => {
-                    let expr: Expr = action.clone().into();
-                    mentions(lash_kernel_doc::Node::Expr(&expr), name)
-                }
+                lash_kernel_doc::Node::Action(action) => action_mentions(action, name),
                 _ => node
                     .children()
                     .into_iter()
@@ -543,13 +565,11 @@ impl Lowerer<'_> {
                 } = &body.stmts[next]
                     && write == &name
                 {
-                    if !mentions(
-                        lash_kernel_doc::Node::Expr(&match value {
-                            Rhs::Expr(value) => value.clone(),
-                            Rhs::Action(action) => action.clone().into(),
-                        }),
-                        &name,
-                    ) {
+                    let mentioned = match value {
+                        Rhs::Expr(value) => mentions(lash_kernel_doc::Node::Expr(value), &name),
+                        Rhs::Action(action) => action_mentions(action, &name),
+                    };
+                    if !mentioned {
                         body.stmts[next] = Stmt::Let {
                             name: name.clone(),
                             value: value.clone(),

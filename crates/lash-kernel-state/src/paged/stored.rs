@@ -396,12 +396,13 @@ impl PagedHeap {
     ) -> Result<ObjectHead, HeapWriteError> {
         let body = match object {
             StoredObject::List(values) => {
-                let mut rows = Tree::new(true);
                 let next = values.len() as u64;
-                for (at, value) in values.into_iter().enumerate() {
-                    let value = self.canonical(value)?;
-                    rows.write(ordinal_key(at as u64), value, self.pages())?;
-                }
+                let rows = values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(at, value)| Ok((ordinal_key(at as u64), self.canonical(value)?)))
+                    .collect::<Result<Vec<_>, HeapWriteError>>()?;
+                let rows = Tree::from_rows(rows, true, self.pages())?;
                 Body::List { rows, next }
             }
             StoredObject::Table {
@@ -409,17 +410,19 @@ impl PagedHeap {
                 entries,
                 next,
             } => {
-                let mut lookup: Tree<Ordinal> = Tree::new(false);
-                let mut rows = Tree::new(true);
+                let mut lookup = Vec::with_capacity(entries.len());
+                let mut rows = Vec::with_capacity(entries.len());
                 for (seq, key, value) in entries {
                     let key = self.canonical(key)?;
                     let value = self.canonical(value)?;
                     let normal = self
                         .normal_key(&key)?
                         .ok_or_else(|| malformed("a stored entry's key is not a legal key"))?;
-                    lookup.write(normal_bytes(normal), Ordinal(seq), self.pages())?;
-                    rows.write(ordinal_key(seq), Entry { key, value }, self.pages())?;
+                    lookup.push((normal_bytes(normal), Ordinal(seq)));
+                    rows.push((ordinal_key(seq), Entry { key, value }));
                 }
+                let lookup: Tree<Ordinal> = Tree::from_rows(lookup, false, self.pages())?;
+                let rows = Tree::from_rows(rows, true, self.pages())?;
                 Body::Table {
                     kind,
                     lookup,

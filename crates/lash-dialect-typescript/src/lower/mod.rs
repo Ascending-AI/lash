@@ -531,17 +531,21 @@ fn reachable(
     let mut listed = BTreeMap::new();
     let mut pending: Vec<(FunctionId, FunctionName)> = used.into_iter().collect();
     while let Some((function, name)) = pending.pop() {
-        if listed.insert(function, name).is_some() {
+        let std::collections::btree_map::Entry::Vacant(entry) = listed.entry(function) else {
             continue;
-        }
+        };
+        entry.insert(name);
         let catalog: &dyn FunctionCatalog = library;
         if let Some(body) = catalog
             .definition(&function)
             .and_then(|definition| definition.body())
         {
+            // An identity digests its function's name, so a function already
+            // listed is listed by the name any other body calls it by.
             pending.extend(
                 body.functions
                     .iter()
+                    .filter(|(function, _)| !listed.contains_key(*function))
                     .map(|(function, name)| (*function, name.clone())),
             );
         }
