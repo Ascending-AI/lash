@@ -266,54 +266,104 @@ impl SegmentCache {
         };
         let SegmentKey { hasher, messages } = key;
         let digest: [u8; 32] = hasher.finalize().into();
-        {
-            let mut entries = shared.lock();
-            entries.clock += 1;
-            let clock = entries.clock;
-            if let Some(entry) = entries.map.get_mut(&digest)
-                && entry.sources.len() == messages.len()
-                && entry
-                    .sources
-                    .iter()
-                    .zip(&messages)
-                    .all(|(held, message)| Arc::ptr_eq(held, message))
-                && let Ok(value) = Arc::clone(&entry.value).downcast::<T>()
-            {
-                entry.used = clock;
-                shared.hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(value);
-            }
-        }
-        shared.misses.fetch_add(1, Ordering::Relaxed);
-        let value = Arc::new(lower()?);
-        let bytes = value.retained_bytes().max(1);
-        if bytes > shared.budget {
+        if let Some(value) = shared.get(&digest, &messages) {
             return Ok(value);
         }
-        let mut entries = shared.lock();
-        entries.clock += 1;
-        let used = entries.clock;
-        let replaced = entries.map.insert(
-            digest,
-            Entry {
-                sources: messages.into_iter().cloned().collect(),
-                value: Arc::clone(&value) as Arc<dyn Any + Send + Sync>,
-                bytes,
-                used,
-            },
-        );
-        entries.bytes = entries.bytes.saturating_add(bytes);
-        if let Some(replaced) = replaced {
-            entries.bytes = entries.bytes.saturating_sub(replaced.bytes);
-        }
-        if entries.bytes > shared.budget {
-            entries.evict(shared.budget / 4 * 3);
+        let value = Arc::new(lower()?);
+        shared.insert(digest, messages, &value);
+        Ok(value)
+    }
+
+    /// Carry a lowering across calls under one retained source identity.
+    /// Updating works on an immutable snapshot outside the cache lock. A
+    /// concurrent call may publish another branch; the next update checks
+    /// its sources again, so publication order cannot supply stale content.
+    pub(super) fn carried<T: LoweredUnit, E>(
+        &self,
+        key: SegmentKey<'_>,
+        update: impl FnOnce(Option<Arc<T>>) -> Result<Arc<T>, E>,
+    ) -> Result<Arc<T>, E> {
+        let Some(shared) = &self.0 else {
+            return update(None);
+        };
+        let SegmentKey { hasher, messages } = key;
+        let digest = hasher.finalize().into();
+        let prior = shared.get(&digest, &messages);
+        let value = update(prior.clone())?;
+        if !prior
+            .as_ref()
+            .is_some_and(|prior| Arc::ptr_eq(prior, &value))
+        {
+            shared.insert(digest, messages, &value);
         }
         Ok(value)
     }
 }
 
 impl Shared {
+    fn get<T: LoweredUnit>(
+        &self,
+        digest: &[u8; 32],
+        messages: &[&Arc<Vec<LlmContentBlock>>],
+    ) -> Option<Arc<T>> {
+        let mut entries = self.lock();
+        entries.clock += 1;
+        let clock = entries.clock;
+        if let Some(entry) = entries.map.get_mut(digest)
+            && entry.sources.len() == messages.len()
+            && entry
+                .sources
+                .iter()
+                .zip(messages)
+                .all(|(held, message)| Arc::ptr_eq(held, message))
+            && let Ok(value) = Arc::clone(&entry.value).downcast::<T>()
+        {
+            entry.used = clock;
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            return Some(value);
+        }
+        self.misses.fetch_add(1, Ordering::Relaxed);
+        None
+    }
+
+    fn insert<T: LoweredUnit>(
+        &self,
+        digest: [u8; 32],
+        messages: Vec<&Arc<Vec<LlmContentBlock>>>,
+        value: &Arc<T>,
+    ) {
+        let bytes = value.retained_bytes().max(1);
+        if bytes > self.budget {
+            return;
+        }
+        let mut entries = self.lock();
+        entries.clock += 1;
+        let used = entries.clock;
+        let replaced = entries.map.insert(
+            digest,
+            Entry {
+                sources: messages.into_iter().cloned().collect(),
+                value: Arc::clone(value) as Arc<dyn Any + Send + Sync>,
+                bytes,
+                used,
+            },
+        );
+        entries.bytes = entries.bytes.saturating_add(bytes);
+        if let Some(replaced) = &replaced {
+            entries.bytes = entries.bytes.saturating_sub(replaced.bytes);
+        }
+        let evicted = if entries.bytes > self.budget {
+            entries.evict(self.budget / 4 * 3)
+        } else {
+            Vec::new()
+        };
+        drop(entries);
+        // A carried history can release many source and segment Arcs.
+        // Release them after relinquishing the cache's synchronization owner.
+        drop(replaced);
+        drop(evicted);
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Entries> {
         self.entries
             .lock()
@@ -324,7 +374,8 @@ impl Shared {
 impl Entries {
     /// Drop the least recently used entries until at most `target` bytes
     /// remain.
-    fn evict(&mut self, target: usize) {
+    fn evict(&mut self, target: usize) -> Vec<Entry> {
+        let mut evicted = Vec::new();
         let mut order: Vec<([u8; 32], u64)> = self
             .map
             .iter()
@@ -337,8 +388,10 @@ impl Entries {
             }
             if let Some(entry) = self.map.remove(&digest) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                evicted.push(entry);
             }
         }
+        evicted
     }
 }
 
@@ -348,5 +401,54 @@ impl std::fmt::Debug for SegmentCache {
             .field("enabled", &self.0.is_some())
             .field("stats", &self.stats())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    #[test]
+    fn racing_carried_lowerings_keep_each_call_and_prior_snapshot_immutable() {
+        let cache = SegmentCache::new();
+        let context = SegmentContext::new("carried-race").finish();
+        let source = LlmMessage::text(LlmRole::User, "shared source");
+        let key = || SegmentKey::new(&context).message(&source);
+        let unit = |text: &str| {
+            Arc::new(vec![
+                RequestSegment::item_json(&serde_json::json!(text)).unwrap(),
+            ])
+        };
+        let original = unit("original");
+        cache
+            .carried(key(), |_| Ok::<_, ()>(Arc::clone(&original)))
+            .unwrap();
+        let barrier = Barrier::new(2);
+        let update = |text| {
+            let own = unit(text);
+            let returned = cache
+                .carried(key(), |prior| {
+                    assert!(Arc::ptr_eq(&prior.unwrap(), &original));
+                    // Both calls captured the same prior before either publishes.
+                    barrier.wait();
+                    Ok::<_, ()>(Arc::clone(&own))
+                })
+                .unwrap();
+            assert!(Arc::ptr_eq(&returned, &own));
+            own
+        };
+        let (left, right) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| update("left branch"));
+            let right = scope.spawn(|| update("right branch"));
+            (left.join().unwrap(), right.join().unwrap())
+        });
+        let current = cache
+            .carried(key(), |prior| Ok::<_, ()>(prior.unwrap()))
+            .unwrap();
+        assert!(Arc::ptr_eq(&current, &left) || Arc::ptr_eq(&current, &right));
+        assert_eq!(original[0].text_lossy(), "\"original\"");
+        assert_eq!(left[0].text_lossy(), "\"left branch\"");
+        assert_eq!(right[0].text_lossy(), "\"right branch\"");
     }
 }

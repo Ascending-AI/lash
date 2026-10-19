@@ -127,6 +127,14 @@ any caller that wants the plain body) writes the same units with
 `UnitWriter::Plain`, so both paths run the same code.
 
 - Canonical (`RecordedRequestTemplate::of_request`): one item per message.
+  The cache carries the lowered history under the first message's retained
+  identity and the lowering context. Each call compares message identities
+  (blocks, role and user-segment marker), keeps the matching prefix's items
+  and lowers only the changed suffix. Replacing the immutable history also
+  updates its cache byte charge; an oversized history is not retained.
+  Cache loss rebuilds from the request before admission. Recorded bodies
+  own their segments independently, so later branches cannot change an
+  admitted request and a resend needs no cache.
 - Anthropic Messages: one item per wire message, the run of same-role
   source messages it merges. Its key holds each member's native-feedback
   form (decided with look-ahead), the role, the cache-control target after

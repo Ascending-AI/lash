@@ -228,3 +228,134 @@ fn a_custom_plugin_sends_the_request_it_means() {
         "a segment the mapper kept stays shared"
     );
 }
+/// Lowering work follows the changed suffix, while every retained segment
+/// and every admitted body's bytes survive growth, branching and cache loss.
+#[test]
+fn incremental_canonical_lowering_keeps_only_the_changed_suffix_work() {
+    use lash_protocol_types::llm::types::RequestSegment;
+    use lash_protocol_types::llm::wire_corpus::growing_history;
+
+    let route = canonical_route();
+    let history = growing_history(&route);
+    let (_, mut request) = variants(history.clone()).remove(1);
+    let cache = SegmentCache::new();
+    let mut histories: Vec<_> = (1..=history.len())
+        .map(|len| history[..len].to_vec())
+        .collect();
+    let mut branch = history[..5].to_vec();
+    branch.push(LlmMessage::text(LlmRole::User, "A different branch."));
+    histories.push(branch.clone());
+    branch.push(LlmMessage::text(LlmRole::Assistant, "The branch's answer."));
+    histories.push(branch);
+    histories.push(history.clone());
+    // These edits keep the blocks' allocation and change only another
+    // part of the message's identity.
+    let mut role = history.clone();
+    role[2].role = LlmRole::Assistant;
+    histories.push(role);
+    let mut marker = history.clone();
+    marker[2].starts_user_segment = !marker[2].starts_user_segment;
+    histories.push(marker);
+    histories.push(history[..3].to_vec());
+    histories.push(history);
+
+    let mut admitted = Vec::new();
+    let mut previous: Option<(Vec<LlmMessage>, RecordedRequestTemplate)> = None;
+    for (step, messages) in histories.into_iter().enumerate() {
+        request.messages = messages;
+        let before = cache.stats();
+        let warm = RecordedRequestTemplate::of_request(route.clone(), &request, &cache).unwrap();
+        let after = cache.stats();
+        let cold =
+            RecordedRequestTemplate::of_request(route.clone(), &request, &SegmentCache::disabled())
+                .unwrap();
+        let bytes = serde_json::to_vec(&warm).unwrap();
+        assert!(
+            bytes == serde_json::to_vec(&cold).unwrap(),
+            "incremental lowering differs from full lowering at step {step}"
+        );
+        if let Some((messages, template)) = &previous {
+            let shared = messages
+                .iter()
+                .zip(&request.messages)
+                .take_while(|(a, b)| {
+                    a.role == b.role
+                        && a.starts_user_segment == b.starts_user_segment
+                        && Arc::ptr_eq(&a.blocks, &b.blocks)
+                })
+                .count();
+            for (a, b) in template
+                .segments()
+                .iter()
+                .filter(|s| s.is_item())
+                .zip(warm.segments().iter().filter(|s| s.is_item()))
+                .take(shared)
+            {
+                assert!(
+                    RequestSegment::same(a, b),
+                    "the prefix retains its identity"
+                );
+            }
+        }
+        assert!(
+            after.hits + after.misses - before.hits - before.misses <= 1,
+            "one carried history lookup, independent of depth: {before:?} -> {after:?}"
+        );
+        // Admission owns an immutable body. Later lowering cannot rewrite
+        // it, and reopening it needs neither this cache nor its source Arcs.
+        admitted.push((warm.clone(), bytes));
+        for (template, bytes) in &admitted {
+            assert_eq!(&serde_json::to_vec(template).unwrap(), bytes);
+            let reopened: RecordedRequestTemplate = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(&serde_json::to_vec(&reopened).unwrap(), bytes);
+            assert_eq!(
+                serde_json::to_value(reopened.canonical_request().unwrap()).unwrap(),
+                serde_json::to_value(template.canonical_request().unwrap()).unwrap(),
+            );
+        }
+        previous = Some((request.messages.clone(), warm));
+    }
+}
+/// Growing a carried history cannot retain its oversized suffix outside
+/// the byte budget. An admitted template still owns its literal segments.
+#[test]
+fn a_growing_canonical_history_respects_the_cache_byte_budget() {
+    let route = canonical_route();
+    let mut request = empty_request();
+    request.messages = vec![
+        LlmMessage::text(LlmRole::User, "first"),
+        LlmMessage::text(LlmRole::Assistant, "second"),
+    ];
+    let cold =
+        RecordedRequestTemplate::of_request(route.clone(), &request, &SegmentCache::disabled())
+            .unwrap();
+    let budget = cold
+        .segments()
+        .iter()
+        .filter(|s| s.is_item())
+        .map(|s| s.literal_len())
+        .sum();
+    let cache = SegmentCache::with_budget(budget);
+    let retained = Arc::downgrade(&request.messages[1].blocks);
+    RecordedRequestTemplate::of_request(route.clone(), &request, &cache).unwrap();
+    request
+        .messages
+        .push(LlmMessage::text(LlmRole::User, "x".repeat(budget + 1)));
+    let oversized = Arc::downgrade(&request.messages[2].blocks);
+    let admitted = RecordedRequestTemplate::of_request(route, &request, &cache).unwrap();
+    request.messages.clear();
+    assert!(
+        retained.upgrade().is_some(),
+        "the bounded earlier prefix stays reusable"
+    );
+    assert!(
+        oversized.upgrade().is_none(),
+        "the oversized suffix is not retained"
+    );
+    assert_eq!(admitted.canonical_request().unwrap().messages.len(), 3);
+    drop(cache);
+    assert!(
+        retained.upgrade().is_none(),
+        "the cache owns and releases the source identities"
+    );
+}

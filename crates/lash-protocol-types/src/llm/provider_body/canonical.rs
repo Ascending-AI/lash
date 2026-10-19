@@ -1,12 +1,14 @@
 //! The canonical body: a request's own JSON, one item per message.
 
-use super::segment::{Lexer, LoweredItem};
+use super::segment::Lexer;
 use super::{
-    AttachmentSlot, CANONICAL_CODEC, RecordedRequestTemplate, RequestSegment, SegmentCache,
-    SegmentContext, SegmentKey, SegmentKind, SegmentPart, SlotCodec, TemplateError, TemplateJson,
+    AttachmentSlot, CANONICAL_CODEC, LoweredUnit, RecordedRequestTemplate, RequestSegment,
+    SegmentCache, SegmentContext, SegmentKey, SegmentKind, SegmentPart, SlotCodec, TemplateError,
+    TemplateJson,
 };
 use crate::llm::attachment_delivery::{AttachmentPosition, ProviderAccepts};
 use crate::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, ProviderRouteIdentity};
+use std::sync::Arc;
 
 /// The request without its messages: what the canonical envelope writes.
 /// A struct literal, so a new request field cannot be left out.
@@ -96,10 +98,69 @@ fn message_item(
     RequestSegment::item(&tree, slot)
 }
 
+/// An immutable lowered history. The source Arcs keep identities alive and
+/// the matching prefix's segments keep all their derived admission facts.
+/// Only this call's changed suffix is lowered. The whole value is replaced
+/// in the bounded cache, so growth and branches stay inside its budget.
+#[derive(Default)]
+struct LoweredHistory {
+    sources: Vec<LlmMessage>,
+    items: Vec<RequestSegment>,
+}
+
+impl LoweredUnit for LoweredHistory {
+    fn retained_bytes(&self) -> usize {
+        self.items.iter().map(RequestSegment::literal_len).sum()
+    }
+}
+
+impl LoweredHistory {
+    fn extend(
+        prior: Option<Arc<Self>>,
+        messages: &[LlmMessage],
+        slot: &mut impl FnMut(
+            &crate::AttachmentRef,
+            AttachmentPosition,
+        ) -> Result<AttachmentSlot, TemplateError>,
+    ) -> Result<Arc<Self>, TemplateError> {
+        let shared = prior.as_ref().map_or(0, |prior| {
+            prior
+                .sources
+                .iter()
+                .zip(messages)
+                .take_while(|(held, message)| {
+                    held.role == message.role
+                        && held.starts_user_segment == message.starts_user_segment
+                        && Arc::ptr_eq(&held.blocks, &message.blocks)
+                })
+                .count()
+        });
+        if let Some(prior) = &prior
+            && shared == messages.len()
+            && shared == prior.sources.len()
+        {
+            return Ok(Arc::clone(prior));
+        }
+        let mut items = Vec::with_capacity(messages.len());
+        if let Some(prior) = prior {
+            items.extend(prior.items[..shared].iter().cloned());
+        }
+        for message in &messages[shared..] {
+            items.push(message_item(message, slot)?);
+        }
+        Ok(Arc::new(Self {
+            sources: messages.to_vec(),
+            items,
+        }))
+    }
+}
+
 impl RecordedRequestTemplate {
     /// The canonical template of `request`: its own JSON, each message one
     /// item, each attachment a slot with the request's effective
-    /// acceptance. A message `cache` lowered before is reused.
+    /// acceptance. The matching history prefix is carried in `cache` by
+    /// identity; only the changed suffix lowers again. Cache loss simply
+    /// rebuilds it from the request and never changes an admitted body.
     ///
     /// # Errors
     ///
@@ -139,23 +200,42 @@ impl RecordedRequestTemplate {
             .str(&provider)
             .json(request.attachment_acceptance.as_ref())
             .finish();
-        let mut items = Vec::with_capacity(request.messages.len());
-        for message in &request.messages {
-            let lowered = cache.segments(SegmentKey::new(&context).message(message), || {
-                message_item(message, &mut slot).map(|item| vec![item])
-            })?;
-            for item in lowered.iter() {
-                items.push(TemplateJson::Lowered(LoweredItem::new(item.clone())?));
-            }
-        }
+        let history = match request.messages.first() {
+            Some(first) => cache.carried(
+                SegmentKey::new(&context).str("history").message(first),
+                |prior| LoweredHistory::extend(prior, &request.messages, &mut slot),
+            )?,
+            None => Arc::new(LoweredHistory::default()),
+        };
         let value = serde_json::to_value(envelope(request))
             .map_err(|error| not_canonical(error.to_string()))?;
-        let mut tree = TemplateJson::from(value);
-        if !tree.set("messages", TemplateJson::Array(items)) {
+        let serde_json::Value::Object(fields) = value else {
             return Err(not_canonical("the request's JSON is not an object"));
-        }
+        };
+        // TemplateJson's object writer orders keys even when a consumer
+        // enables serde_json's preserve_order feature.
+        let fields: std::collections::BTreeMap<_, _> = fields.into_iter().collect();
         let mut builder = Self::builder(route, request.stream_events.is_some(), None);
-        builder.json(&tree, &mut slot)?;
+        builder.literal("{");
+        for (index, (key, value)) in fields.iter().enumerate() {
+            if index != 0 {
+                builder.literal(",");
+            }
+            builder.literal(
+                serde_json::to_string(key).map_err(|error| not_canonical(error.to_string()))?,
+            );
+            builder.literal(":");
+            if key == "messages" {
+                builder.literal("[");
+                for item in &history.items {
+                    builder.segment(item);
+                }
+                builder.literal("]");
+            } else {
+                builder.literal(value.to_string());
+            }
+        }
+        builder.literal("}");
         builder.finish()
     }
 
