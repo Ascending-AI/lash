@@ -20,7 +20,7 @@ impl Lowerer<'_> {
 
     /// Ordered bindings, including actions, nest without evaluating a branch early.
     pub(super) fn branch_expression(&self, buf: &Buf, mut body: Expr) -> Option<Expr> {
-        for stmt in buf.stmts.iter().rev() {
+        for stmt in buf.stmts().rev() {
             let Stmt::Let { name, value } = stmt else {
                 return None;
             };
@@ -52,7 +52,7 @@ impl Lowerer<'_> {
     ) -> Vec<(Vec<u32>, lash_kernel_dialect::Written)> {
         let mut out = Vec::new();
         let mut prefix = prefix.to_vec();
-        for note in &buf.notes {
+        for note in buf.notes() {
             if let Some(written) = &note.written {
                 let mut path = prefix.clone();
                 path.push(0);
@@ -92,16 +92,15 @@ impl Lowerer<'_> {
                 r#else: Box::new(otherwise),
             };
             let blocks: Vec<_> = then_buf
-                .notes
-                .into_iter()
-                .chain(else_buf.notes)
+                .into_notes()
+                .chain(else_buf.into_notes())
                 .flat_map(|note| note.blocks)
                 .collect();
             if blocks.is_empty() && nested_written.is_empty() {
                 return self.inline(value, ty);
             }
             let result = self.let_expr(value, ty);
-            if let Some(note) = self.buf.notes.last_mut() {
+            if let Some(note) = self.buf.last_note_mut() {
                 note.blocks = blocks;
                 note.nested_written = nested_written;
             }
@@ -138,12 +137,12 @@ impl Lowerer<'_> {
         let (buf, value) = self.value_block(lower)?;
         if let Some(expr) = self.branch_expression(&buf, value.expr()) {
             let nested_written = Self::branch_written(&buf, &[0]);
-            let blocks: Vec<_> = buf.notes.into_iter().flat_map(|note| note.blocks).collect();
+            let blocks: Vec<_> = buf.into_notes().flat_map(|note| note.blocks).collect();
             if blocks.is_empty() && nested_written.is_empty() {
                 return Ok(self.inline(expr, value.ty));
             }
             let result = self.let_expr(expr, value.ty);
-            if let Some(note) = self.buf.notes.last_mut() {
+            if let Some(note) = self.buf.last_note_mut() {
                 note.blocks = blocks;
                 note.nested_written = nested_written;
             }

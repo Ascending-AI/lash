@@ -100,9 +100,10 @@ impl Lowerer<'_> {
         self.declared_captions
             .extend(function.captions.entries(&entry, &names));
         let (params, body, packed) = self.lift(function)?;
+        let (body, notes) = body.into_parts();
         let function = lash_kernel_doc::Function {
             params,
-            body: body.stmts,
+            body,
             start: None,
         };
         let convention = self.entry_convention(packed)?;
@@ -115,7 +116,7 @@ impl Lowerer<'_> {
                     function,
                     signature,
                     convention,
-                    notes: body.notes,
+                    notes,
                 })
                 .map_err(Diagnostic::module)?;
         }

@@ -32,13 +32,13 @@ impl Lowerer<'_> {
     /// A block of the one statement `stmt`, scaffolding of the statement
     /// being lowered: it is located there.
     fn one(&self, stmt: Stmt) -> Buf {
-        Buf {
-            stmts: vec![stmt],
-            notes: vec![Note {
+        Buf::one(
+            stmt,
+            Note {
                 span: self.span,
                 ..Note::default()
-            }],
-        }
+            },
+        )
     }
 
     /// Declares what a block's own statements declare lexically: `let`,
@@ -109,7 +109,7 @@ impl Lowerer<'_> {
         }
         for statement in statements {
             if let ast::Stmt::Function { name, function } = statement.unspanned() {
-                let before = self.buf.stmts.len();
+                let before = self.buf.len();
                 let entry = self
                     .binding_mut(name)
                     .and_then(|(_, binding)| binding.positional.clone());
@@ -176,7 +176,7 @@ impl Lowerer<'_> {
             ast::Stmt::Spanned(span, inner) => {
                 let outer = self.span.replace(*span);
                 let entry = self.declared_entry(inner);
-                let before = self.buf.stmts.len();
+                let before = self.buf.len();
                 let result = self.lower_statement(inner);
                 if result.is_ok() {
                     self.own_captions(span.start, inner, before, entry);
@@ -266,14 +266,11 @@ impl Lowerer<'_> {
                 })?;
                 if let Some(condition) = self.branch_expression(&test_buf, condition.clone()) {
                     let nested_written = Self::branch_written(&test_buf, &[0]);
-                    let mut blocks: Vec<_> = test_buf
-                        .notes
-                        .into_iter()
-                        .flat_map(|note| note.blocks)
-                        .collect();
+                    let mut blocks: Vec<_> =
+                        test_buf.into_notes().flat_map(|note| note.blocks).collect();
                     let body = self.loop_block(Vec::new(), |this| this.lower_statement(body))?;
                     self.emit_while(condition, body);
-                    if let Some(note) = self.buf.notes.last_mut() {
+                    if let Some(note) = self.buf.last_note_mut() {
                         blocks.append(&mut note.blocks);
                         note.blocks = blocks;
                         note.nested_written = nested_written;

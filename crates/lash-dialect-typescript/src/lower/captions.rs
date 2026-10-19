@@ -104,24 +104,22 @@ impl Lowerer<'_> {
         if caption.is_none() && arms.is_empty() {
             return;
         }
-        let emitted = &self.buf.stmts[before.min(self.buf.stmts.len())..];
-        let owner = match control(statement.unspanned()) {
-            Some(control) => emitted.iter().rposition(control),
-            None => emitted
-                .iter()
-                .position(|stmt| acts(Node::Stmt(stmt)))
-                .or_else(|| emitted.len().checked_sub(1)),
+        let owner = {
+            let mut emitted = self.buf.stmts().skip(before);
+            match control(statement.unspanned()) {
+                Some(control) => emitted.rposition(control),
+                None => emitted
+                    .position(|stmt| acts(Node::Stmt(stmt)))
+                    .or_else(|| self.buf.len().saturating_sub(before).checked_sub(1)),
+            }
         };
-        let Some(owner) = owner.map(|index| before + index) else {
+        let Some((owned, note)) = owner.and_then(|index| self.buf.get_mut(before + index)) else {
             return;
         };
         let indices: Vec<_> = arms
             .into_iter()
-            .filter_map(|(arm, caption)| {
-                Some((arm_index(&self.buf.stmts[owner], arm)?, caption.clone()))
-            })
+            .filter_map(|(arm, caption)| Some((arm_index(owned, arm)?, caption.clone())))
             .collect();
-        let note = &mut self.buf.notes[owner];
         if let Some(caption) = caption {
             note.caption.get_or_insert_with(|| caption.clone());
         }

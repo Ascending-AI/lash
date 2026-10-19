@@ -88,7 +88,7 @@ impl Lowerer<'_> {
         ]);
         if let Some(note) = note {
             let value = self.let_expr(token, closure.ty);
-            if let Some(last) = self.buf.notes.last_mut() {
+            if let Some(last) = self.buf.last_note_mut() {
                 last.blocks = note.blocks;
                 last.nested_written = note.nested_written;
                 if let Some(written) = note.written {
@@ -185,8 +185,7 @@ impl Lowerer<'_> {
                     this.bind(arguments.clone(), object);
                     Ok(())
                 })?;
-                lowerer.buf.stmts.splice(0..0, prefix.stmts);
-                lowerer.buf.notes.splice(0..0, prefix.notes);
+                lowerer.buf.splice(0, prefix);
             }
             Ok(())
         });
@@ -250,8 +249,7 @@ impl Lowerer<'_> {
                     }
                     Ok(())
                 })?;
-                lowerer.buf.stmts.splice(0..0, prefix.stmts);
-                lowerer.buf.notes.splice(0..0, prefix.notes);
+                lowerer.buf.splice(0, prefix);
                 params = vec![this, args];
             }
             Ok(())
@@ -287,7 +285,7 @@ impl Lowerer<'_> {
             note.as_ref()
                 .map_or_else(Vec::new, |note| note.blocks.clone()),
         );
-        if let (Some(note), Some(last)) = (note, self.buf.notes.last_mut()) {
+        if let (Some(note), Some(last)) = (note, self.buf.last_note_mut()) {
             last.nested_written = note.nested_written;
             last.written = note.written;
         }
@@ -308,7 +306,7 @@ impl Lowerer<'_> {
             }
         }
         if !matches!(
-            self.buf.stmts.last(),
+            self.buf.last_stmt(),
             Some(Stmt::Return { .. } | Stmt::ReturnVia { .. })
         ) {
             self.source_return(Operand::undefined())?;

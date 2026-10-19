@@ -88,7 +88,7 @@ impl Lowerer<'_> {
         &mut self,
         lower: impl FnOnce(&mut Self) -> Lowering<T>,
     ) -> Lowering<T> {
-        let start = self.buf.stmts.len();
+        let start = self.buf.len();
         let mut paths = LoopPaths {
             function: self.functions.len(),
             ..LoopPaths::default()
@@ -109,12 +109,7 @@ impl Lowerer<'_> {
         let Some(paths) = self.paths.pop() else {
             unreachable!("the loop's path context remains on the stack while it lowers");
         };
-        self.buf
-            .stmts
-            .splice(start..start, paths.declarations.stmts);
-        self.buf
-            .notes
-            .splice(start..start, paths.declarations.notes);
+        self.buf.splice(start, paths.declarations);
         result
     }
 
@@ -186,14 +181,16 @@ impl Lowerer<'_> {
                     (value.clone(), Literal::Absent),
                     (ready.clone(), Literal::Bool(false)),
                 ] {
-                    paths.declarations.stmts.push(Stmt::Let {
-                        name,
-                        value: Rhs::Expr(Expr::Literal(literal)),
-                    });
-                    paths.declarations.notes.push(super::Note {
-                        span,
-                        ..super::Note::default()
-                    });
+                    paths.declarations.push(
+                        Stmt::Let {
+                            name,
+                            value: Rhs::Expr(Expr::Literal(literal)),
+                        },
+                        super::Note {
+                            span,
+                            ..super::Note::default()
+                        },
+                    );
                 }
                 (value, ready, Ty::Unknown)
             }
@@ -823,7 +820,7 @@ impl Lowerer<'_> {
                         let key = self.reference_key(&object, key)?;
                         let current = self.get_member(&object, &key)?;
                         let (buf, value) = self.aside(|this| this.lower_expr(value))?;
-                        let current = if buf.stmts.is_empty() {
+                        let current = if buf.is_empty() {
                             current
                         } else {
                             self.pin(current)
@@ -877,7 +874,7 @@ impl Lowerer<'_> {
             AssignOp::Binary(op) => {
                 let current = self.read(name, None)?;
                 let (buf, value) = self.aside(|this| this.lower_expr(value))?;
-                let current = if buf.stmts.is_empty() {
+                let current = if buf.is_empty() {
                     current
                 } else {
                     self.pin(current)

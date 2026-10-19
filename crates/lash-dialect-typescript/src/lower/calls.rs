@@ -808,7 +808,7 @@ impl Lowerer<'_> {
         }
         let object = self.lower_expr(object)?;
         let (buf, key) = self.aside(|this| this.lower_key(property))?;
-        let object = if buf.stmts.is_empty() {
+        let object = if buf.is_empty() {
             object
         } else {
             self.pin(object)

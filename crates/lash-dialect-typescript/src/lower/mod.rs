@@ -226,11 +226,96 @@ struct Positional {
 
 pub(crate) use lash_kernel_dialect::Note;
 
-/// A kernel block under construction.
+/// A kernel block under construction: each statement with the note of
+/// its source layers, so a move, removal or fold carries both.
 #[derive(Debug, Default)]
 pub(crate) struct Buf {
-    pub(crate) stmts: Block,
-    pub(crate) notes: Vec<Note>,
+    emitted: Vec<Emitted>,
+}
+
+#[derive(Debug)]
+struct Emitted {
+    stmt: Stmt,
+    note: Note,
+}
+
+impl Buf {
+    /// The block of the one statement `stmt`.
+    fn one(stmt: Stmt, note: Note) -> Self {
+        Self {
+            emitted: vec![Emitted { stmt, note }],
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.emitted.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.emitted.is_empty()
+    }
+
+    fn stmts(&self) -> impl DoubleEndedIterator<Item = &Stmt> + ExactSizeIterator {
+        self.emitted.iter().map(|emitted| &emitted.stmt)
+    }
+
+    fn notes(&self) -> impl Iterator<Item = &Note> {
+        self.emitted.iter().map(|emitted| &emitted.note)
+    }
+
+    fn last_stmt(&self) -> Option<&Stmt> {
+        self.emitted.last().map(|emitted| &emitted.stmt)
+    }
+
+    fn last_stmt_mut(&mut self) -> Option<&mut Stmt> {
+        self.emitted.last_mut().map(|emitted| &mut emitted.stmt)
+    }
+
+    fn last_note_mut(&mut self) -> Option<&mut Note> {
+        self.emitted.last_mut().map(|emitted| &mut emitted.note)
+    }
+
+    /// The statement at `index` and its note, to change.
+    fn get_mut(&mut self, index: usize) -> Option<(&Stmt, &mut Note)> {
+        self.emitted
+            .get_mut(index)
+            .map(|emitted| (&emitted.stmt, &mut emitted.note))
+    }
+
+    fn push(&mut self, stmt: Stmt, note: Note) {
+        self.emitted.push(Emitted { stmt, note });
+    }
+
+    fn insert(&mut self, index: usize, stmt: Stmt, note: Note) {
+        self.emitted.insert(index, Emitted { stmt, note });
+    }
+
+    fn pop(&mut self) -> Option<(Stmt, Note)> {
+        self.emitted
+            .pop()
+            .map(|emitted| (emitted.stmt, emitted.note))
+    }
+
+    /// Puts `buf`'s statements before the one at `index`.
+    fn splice(&mut self, index: usize, buf: Buf) {
+        self.emitted.splice(index..index, buf.emitted);
+    }
+
+    fn extend(&mut self, buf: Buf) {
+        self.emitted.extend(buf.emitted);
+    }
+
+    /// The finished block, and the notes of its statements in order.
+    fn into_parts(self) -> (Block, Vec<Note>) {
+        self.emitted
+            .into_iter()
+            .map(|emitted| (emitted.stmt, emitted.note))
+            .unzip()
+    }
+
+    fn into_notes(self) -> impl Iterator<Item = Note> {
+        self.emitted.into_iter().map(|emitted| emitted.note)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -465,11 +550,11 @@ pub(crate) fn lower(
     )?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
-    let main = std::mem::take(&mut lowerer.buf);
+    let (main, main_notes) = std::mem::take(&mut lowerer.buf).into_parts();
     // Saved function values are already bound by S8 adoption. Their token
     // and frozen captures stay in heap pages; lowering never reconstructs
     // those payloads as source expressions.
-    let mut document = Document::new(NumberPolicy::Float, main.stmts);
+    let mut document = Document::new(NumberPolicy::Float, main);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
     if let Some(module) = lowerer.module.take() {
@@ -509,7 +594,7 @@ pub(crate) fn lower(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::TypeScript,
-        &main.notes,
+        &main_notes,
         &lowerer.declared_notes,
         &lowerer.declared_captions,
     )
@@ -579,7 +664,7 @@ impl Lowerer<'_> {
 
     fn push_scope(&mut self) {
         self.scopes.push(Scope {
-            start: self.buf.stmts.len(),
+            start: self.buf.len(),
             kernel_depth: self.kernel_depth,
             ..Scope::default()
         });
@@ -599,15 +684,12 @@ impl Lowerer<'_> {
             if !session_scope {
                 self.note_private(&name);
             }
-            self.buf.stmts.insert(
+            self.buf.insert(
                 scope.start + offset,
                 Stmt::Let {
                     name,
                     value: Rhs::Expr(value),
                 },
-            );
-            self.buf.notes.insert(
-                scope.start + offset,
                 Note {
                     span,
                     ..Note::default()
@@ -870,12 +952,14 @@ impl Lowerer<'_> {
             let name = name.clone();
             self.note_private(&name);
         }
-        self.buf.stmts.push(stmt);
-        self.buf.notes.push(Note {
-            span: self.span,
-            blocks,
-            ..Note::default()
-        });
+        self.buf.push(
+            stmt,
+            Note {
+                span: self.span,
+                blocks,
+                ..Note::default()
+            },
+        );
     }
 
     pub(crate) fn emit(&mut self, stmt: Stmt) {
@@ -903,35 +987,37 @@ impl Lowerer<'_> {
     }
 
     fn append(&mut self, buf: Buf) {
-        for statement in &buf.stmts {
+        for statement in buf.stmts() {
             if let Stmt::Let { name, .. } = statement {
                 self.note_private(name);
             }
         }
-        self.buf.stmts.extend(buf.stmts);
-        self.buf.notes.extend(buf.notes);
+        self.buf.extend(buf);
     }
 
     fn emit_if(&mut self, condition: Expr, then_block: Buf, else_block: Buf) {
+        let (then_block, then_notes) = then_block.into_parts();
+        let (else_block, else_notes) = else_block.into_parts();
         self.push(
             Stmt::If {
                 condition,
-                then_block: then_block.stmts,
-                else_block: else_block.stmts,
+                then_block,
+                else_block,
             },
-            vec![then_block.notes, else_block.notes],
+            vec![then_notes, else_notes],
         );
     }
 
     fn emit_while(&mut self, condition: Expr, body: Buf) {
+        let (body, notes) = body.into_parts();
         self.push(
             Stmt::While {
                 metered: 0,
                 condition,
-                body: body.stmts,
+                body,
                 else_block: Vec::new(),
             },
-            vec![body.notes],
+            vec![notes],
         );
     }
 
@@ -942,35 +1028,36 @@ impl Lowerer<'_> {
         via: Option<lash_kernel_doc::Protocol>,
         body: Buf,
     ) {
+        let (body, notes) = body.into_parts();
         self.push(
             Stmt::For {
                 metered: 0,
                 binding,
                 iterable,
                 via,
-                body: body.stmts,
+                body,
                 else_block: Vec::new(),
             },
-            vec![body.notes],
+            vec![notes],
         );
     }
 
     fn emit_try(&mut self, body: Buf, catch: Option<(Name, Buf)>, finally: Option<Buf>) {
-        let mut blocks = vec![body.notes];
+        let (body, notes) = body.into_parts();
+        let mut blocks = vec![notes];
         let catch = catch.map(|(binding, buf)| {
-            blocks.push(buf.notes);
-            Catch {
-                binding,
-                body: buf.stmts,
-            }
+            let (body, notes) = buf.into_parts();
+            blocks.push(notes);
+            Catch { binding, body }
         });
         let finally = finally.map(|buf| {
-            blocks.push(buf.notes);
-            buf.stmts
+            let (body, notes) = buf.into_parts();
+            blocks.push(notes);
+            body
         });
         self.push(
             Stmt::Try(TryStmt {
-                body: body.stmts,
+                body,
                 catch,
                 finally,
             }),
@@ -986,16 +1073,17 @@ impl Lowerer<'_> {
         start: Option<lash_kernel_doc::StartAdapter>,
     ) -> Operand {
         let name = self.temp();
+        let (body, notes) = body.into_parts();
         self.push(
             Stmt::Let {
                 name: name.clone(),
                 value: Rhs::Expr(Expr::Closure(Box::new(Closure {
                     params,
-                    body: body.stmts,
+                    body,
                     start,
                 }))),
             },
-            vec![body.notes],
+            vec![notes],
         );
         self.note_written();
         Operand::temp(name, Ty::Unknown)
@@ -1020,7 +1108,7 @@ impl Lowerer<'_> {
         let Some(Stmt::Let {
             value: Rhs::Expr(Expr::Closure(closure)),
             ..
-        }) = self.buf.stmts.last()
+        }) = self.buf.last_stmt()
         else {
             return Ok(());
         };
@@ -1031,7 +1119,7 @@ impl Lowerer<'_> {
         if let Some(Stmt::Let {
             value: Rhs::Expr(Expr::Closure(closure)),
             ..
-        }) = self.buf.stmts.last_mut()
+        }) = self.buf.last_stmt_mut()
             && let Some(start) = &mut closure.start
         {
             start.convention = convention;
@@ -1041,7 +1129,7 @@ impl Lowerer<'_> {
 
     /// Hands the last statement what is known of the function it binds.
     fn note_written(&mut self) {
-        if let (Some(written), Some(note)) = (self.written.take(), self.buf.notes.last_mut()) {
+        if let (Some(written), Some(note)) = (self.written.take(), self.buf.last_note_mut()) {
             note.written = Some(written);
         }
     }
@@ -1187,16 +1275,13 @@ impl Lowerer<'_> {
         if !operand.stable || !self.temporaries.contains(name) {
             return None;
         }
-        match self.buf.stmts.last() {
+        match self.buf.last_stmt() {
             Some(Stmt::Let { name: bound, .. }) if bound == name => {}
             _ => return None,
         }
         self.private.remove(name);
-        let Some(Stmt::Let { value, .. }) = self.buf.stmts.pop() else {
+        let Some((Stmt::Let { value, .. }, note)) = self.buf.pop() else {
             unreachable!("the last statement binds the temporary");
-        };
-        let Some(note) = self.buf.notes.pop() else {
-            unreachable!("each statement has a note");
         };
         Some((value, note))
     }
@@ -1220,7 +1305,7 @@ impl Lowerer<'_> {
         } = note;
         self.push(Stmt::Let { name, value: rhs }, blocks);
         self.note_written();
-        if let Some(note) = self.buf.notes.last_mut() {
+        if let Some(note) = self.buf.last_note_mut() {
             note.nested_written = nested_written;
             note.caption = caption;
             note.arm_captions = arm_captions;
@@ -1257,7 +1342,7 @@ impl Lowerer<'_> {
             blocks,
         );
         self.note_written();
-        if let Some(note) = self.buf.notes.last_mut() {
+        if let Some(note) = self.buf.last_note_mut() {
             note.caption = caption;
             note.arm_captions = arm_captions;
             note.nested_written = nested_written
@@ -1292,7 +1377,7 @@ impl Lowerer<'_> {
                 ),
                 Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, blocks),
             }
-            if let Some(note) = self.buf.notes.last_mut() {
+            if let Some(note) = self.buf.last_note_mut() {
                 note.nested_written = nested_written;
                 note.caption = caption;
                 note.arm_captions = arm_captions;
@@ -1337,7 +1422,7 @@ impl Lowerer<'_> {
         let mut later = false;
         for (index, (buf, operand)) in parts.iter().enumerate().rev() {
             pins[index] = later && !operand.stable;
-            later |= !buf.stmts.is_empty();
+            later |= !buf.is_empty();
         }
         parts
             .into_iter()

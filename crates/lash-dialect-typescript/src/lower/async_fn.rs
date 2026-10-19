@@ -88,7 +88,7 @@ impl Lowerer<'_> {
         if let Some(Stmt::Let {
             value: Rhs::Expr(Expr::Closure(closure)),
             ..
-        }) = self.buf.stmts.last_mut()
+        }) = self.buf.last_stmt_mut()
             && let Some(start) = &mut closure.start
             && let Some(convention) = convention
         {
@@ -170,7 +170,7 @@ impl Lowerer<'_> {
             Ty::Unknown,
         )?;
         let promise = self.let_expr(promise.expr(), Ty::Unknown);
-        if let Some(last) = self.buf.notes.last_mut() {
+        if let Some(last) = self.buf.last_note_mut() {
             last.blocks = note.blocks;
         }
         Ok(promise)
