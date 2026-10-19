@@ -18,13 +18,17 @@ mod imperative;
 mod library;
 mod metadata;
 mod name_plan;
+mod names;
 mod notes;
 pub mod readability;
 mod saved;
 mod source;
+mod spelling;
 pub mod workflow;
 mod written;
 
+#[cfg(test)]
+mod names_laws;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +41,10 @@ pub use lash_kernel_state::WaitId;
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
+pub use names::{
+    EmptyPath, InvalidOperation, InvalidSegment, MemberPath, PackagePath, QualifiedOperation,
+    Segment, Vec1,
+};
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
@@ -48,6 +56,7 @@ pub use saved::{
 #[doc(hidden)]
 pub use saved::{InstalledFunction, MemberBody, SavedFunction, Token};
 pub use source::{SourceError, define_functions};
+pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
 
 pub use imperative::{
