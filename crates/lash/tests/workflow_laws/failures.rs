@@ -19,7 +19,7 @@ const TYPESCRIPT: &str = "export async function pick(event: any) {\n  const labe
 const PYTHON: &str = "async def pick(event):\n    label = \"routine\"\n    if event[\"urgent\"]:\n        return \"urgent\"\n    return label\n\n\nasync def send(note: str):\n    sent = await tools.echo(note)\n    return sent\n\n\nasync def triage(event):\n    echoed = await tools.echo({\"value\": \"seen\"})\n    if event[\"urgent\"]:\n        return echoed\n    return \"routine\"\n";
 
 /// One dialect's module, imported and published, entry by entry.
-struct Module {
+pub(super) struct Module {
     language: SourceLanguage,
     source: &'static str,
     map: lash::workflow::document::SourceMap,
@@ -29,7 +29,11 @@ struct Module {
 }
 
 impl Module {
-    async fn import(core: &lash::LashCore, language: SourceLanguage, source: &'static str) -> Self {
+    pub(super) async fn import(
+        core: &lash::LashCore,
+        language: SourceLanguage,
+        source: &'static str,
+    ) -> Self {
         let artifacts = core.host_artifacts();
         let environment = environment(false);
         let (document, source_map) = match artifacts
@@ -56,7 +60,7 @@ impl Module {
 
     /// Starts `entry` with `args`, linking exactly `effects` and its
     /// statements counted, and answers its publication and the process.
-    async fn start(
+    pub(super) async fn start(
         &self,
         core: &lash::LashCore,
         entry: &str,

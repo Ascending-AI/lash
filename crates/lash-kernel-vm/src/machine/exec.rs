@@ -488,39 +488,31 @@ impl KernelMachine {
             })?;
             self.charge_call(exe, call.lib, units)?;
         }
-        let result = if task == TaskId::MAIN && self.task(task)?.frames.is_empty() {
-            match &exe.code(frame.code).site.unit {
-                lash_kernel_doc::Unit::Function(name)
-                    if self
-                        .program
-                        .document
-                        .entries
-                        .get(name)
-                        .is_some_and(|entry| {
-                            matches!(
-                                entry.convention,
-                                lash_kernel_doc::StartConvention::TsArgsList { .. }
-                                    | lash_kernel_doc::StartConvention::TsDirect { .. }
-                            )
-                        }) =>
-                {
-                    result.map(|value| {
-                        if matches!(value, Value::Absent) {
-                            Value::Null
-                        } else {
-                            value
-                        }
-                    })
-                }
-                _ => result,
-            }
-        } else {
-            result
-        };
+        // A TypeScript entry's result is what `JSON.stringify` carries.
+        let spelled_as_json = task == TaskId::MAIN
+            && self.task(task)?.frames.is_empty()
+            && match &exe.code(frame.code).site.unit {
+                lash_kernel_doc::Unit::Function(name) => self
+                    .program
+                    .document
+                    .entries
+                    .get(name)
+                    .is_some_and(|entry| {
+                        matches!(
+                            entry.convention,
+                            lash_kernel_doc::StartConvention::TsArgsList { .. }
+                                | lash_kernel_doc::StartConvention::TsDirect { .. }
+                        )
+                    }),
+                _ => false,
+            };
         self.observe(Event::Pop { task });
         self.recycle(frame);
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
+            if spelled_as_json && let Some(super::End::Finished(finished)) = &mut self.end {
+                undefined_as_json(&mut finished.result);
+            }
             return Ok(None);
         }
         // The run-root cleanup has returned or raised: the body's departure,
@@ -1326,5 +1318,29 @@ fn crossed_bytes(datum: &lash_kernel_doc::Datum) -> u64 {
         Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
         Datum::Error(error) => crossed_bytes(&error.data),
         _ => 0,
+    }
+}
+
+/// `value` with each `undefined` spelled as `JSON.stringify` spells it: a
+/// record or map member that holds it is left out, and anywhere else,
+/// the value itself or a list or tuple element, it is `null`.
+fn undefined_as_json(value: &mut lash_kernel_doc::Datum) {
+    use lash_kernel_doc::Datum;
+    match value {
+        Datum::Absent => *value = Datum::Null,
+        Datum::List(items) | Datum::Tuple(items) => items.iter_mut().for_each(undefined_as_json),
+        Datum::Record(fields) => {
+            fields.retain(|(_, field)| !matches!(field, Datum::Absent));
+            for (_, field) in fields {
+                undefined_as_json(field);
+            }
+        }
+        Datum::Map(entries) => {
+            entries.retain(|(_, entry)| !matches!(entry, Datum::Absent));
+            for (_, entry) in entries {
+                undefined_as_json(entry);
+            }
+        }
+        _ => {}
     }
 }

@@ -672,6 +672,20 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             vec![],
             Datum::Null,
         ),
+        // FIG-6822: JSON.stringify leaves out a member that is undefined
+        // and spells an undefined element null.
+        (
+            "async function f(x) { return [x, { a: x, b: 1, c: [x] }]; }",
+            false,
+            vec![],
+            Datum::List(vec![
+                Datum::Null,
+                Datum::Record(vec![
+                    ("b".into(), Datum::Float(lash_kernel_doc::Float::new(1.0))),
+                    ("c".into(), Datum::List(vec![Datum::Null])),
+                ]),
+            ]),
+        ),
         (
             "async function f(x) { return [this === undefined, arguments.length, arguments[1], x]; }",
             true,

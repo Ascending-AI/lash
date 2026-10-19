@@ -1952,3 +1952,7 @@ mod view_links;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/failures.rs"]
 mod failures;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/returned_lists.rs"]
+mod returned_lists;
