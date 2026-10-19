@@ -4,9 +4,11 @@
 ADR 0106 section 2's rollback-safety rule is that a durable writer emits the
 version the fleet can read, not the newest its own build knows. FIG-3796 makes
 the fleet-format row `F` the source of that prescription: for every
-``upgrade = "migrate"`` surface in ``scripts/versioned-surfaces.toml`` the
-writer stamps ``FleetFormat::writer_version(surface_format!(CONSTANT))``,
-never the bare build constant.
+constant declared ``/// version_surface = "migrate"`` in source (the inventory
+``discover_version_surfaces.py`` enforces) the writer stamps
+``FleetFormat::writer_version(surface_format!(CONSTANT))``, never the bare
+build constant. A tree with no such surface, or whose discovery fails, fails
+the check: it would otherwise pass having checked nothing.
 
 The regression shape this check refuses is the constant in an initialiser
 position — ``version: CONSTANT``, ``schema_version: CONSTANT``,
@@ -28,15 +30,13 @@ import argparse
 from pathlib import Path
 import re
 import sys
-import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import check_format_registry  # noqa: E402
-
-DEFAULT_REGISTRY = Path(__file__).with_name("versioned-surfaces.toml")
-SWEPT_ROOTS = check_format_registry.SWEPT_ROOTS
+from discover_version_surfaces import (  # noqa: E402
+    RUST_SOURCE_PATTERNS, SourceError, WorktreeSources, _is_test_source, discover,
+)
 
 # A migrate surface whose stamp cannot consult `F`, with the reason.
 EXEMPT_CONSTANTS = {
@@ -142,65 +142,73 @@ def exempt(path: str, constant: str) -> str | None:
     return None
 
 
-def check(repo: Path, constants: list[str]) -> list[str]:
+def check(sources: WorktreeSources, constants: list[str]) -> list[str]:
     patterns = {constant: stamp_pattern(constant) for constant in constants}
     failures: list[str] = []
-    for root in SWEPT_ROOTS:
-        base = repo / root
-        if not base.is_dir():
+    for relative in sources.matching_paths(RUST_SOURCE_PATTERNS):
+        text = sources.content(relative)
+        if text is None or _is_test_source(relative):
             continue
-        for path in sorted(base.rglob("*.rs")):
-            relative = path.relative_to(repo).as_posix()
-            if "/target/" in f"/{relative}" or check_format_registry.is_test_path(relative):
-                continue
-            text = path.read_text(encoding="utf-8", errors="surrogateescape")
-            skipped = test_item_ranges(text)
-            if relative == "crates/lash-core-store/src/store/fleet_format.rs":
-                skipped.extend(fleet_policy_ranges(text))
-            for constant, pattern in patterns.items():
-                for match in pattern.finditer(text):
-                    if any(start <= match.start() < end for start, end in skipped):
-                        continue
-                    reason = exempt(relative, constant)
-                    if reason is not None:
-                        continue
-                    line = text.count("\n", 0, match.start()) + 1
-                    failures.append(
-                        f"{relative}:{line}: `{constant}` used directly in a "
-                        f"write-stamp position; stamp "
-                        f"FleetFormat::writer_version(surface_format!({constant})) "
-                        f"instead"
-                    )
+        skipped = test_item_ranges(text)
+        if relative == "crates/lash-core-store/src/store/fleet_format.rs":
+            skipped.extend(fleet_policy_ranges(text))
+        for constant, pattern in patterns.items():
+            for match in pattern.finditer(text):
+                if any(start <= match.start() < end for start, end in skipped):
+                    continue
+                reason = exempt(relative, constant)
+                if reason is not None:
+                    continue
+                line = text.count("\n", 0, match.start()) + 1
+                failures.append(
+                    f"{relative}:{line}: `{constant}` used directly in a "
+                    f"write-stamp position; stamp "
+                    f"FleetFormat::writer_version(surface_format!({constant})) "
+                    f"instead"
+                )
     return failures
 
 
-def load_migrate_constants(path: Path) -> list[str]:
-    document = tomllib.loads(path.read_text(encoding="utf-8"))
-    constants = []
-    for surface in document.get("surface", []):
-        constant = surface.get("constant")
-        if surface.get("upgrade") == "migrate" and constant not in EXEMPT_CONSTANTS:
-            constants.append(constant)
-    return sorted(constants)
+def migrate_constants(sources: WorktreeSources) -> list[str]:
+    """Source-declared migrate surfaces, one per constant name.
+
+    Raises SourceError when discovery cannot establish the inventory.
+    """
+    surfaces, _ = discover(sources)
+    return sorted({
+        surface["constant"] for surface in surfaces
+        if surface["upgrade"] == "migrate" and surface["constant"] not in EXEMPT_CONSTANTS
+    })
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=ROOT, help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--registry", type=Path, default=DEFAULT_REGISTRY, help=argparse.SUPPRESS
-    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(list(argv) if argv is not None else sys.argv[1:])
-    failures = check(args.repo, load_migrate_constants(args.registry))
+    sources = WorktreeSources(args.repo)
+    try:
+        constants = migrate_constants(sources)
+    except SourceError as error:
+        print(f"fleet-format writer-stamp check cannot discover surfaces:\n{error}", file=sys.stderr)
+        return 1
+    if not constants:
+        print(
+            "fleet-format writer-stamp check found no source-declared migrate surface "
+            "to check; refusing to pass vacuously",
+            file=sys.stderr,
+        )
+        return 1
+    failures = check(sources, constants)
     if failures:
         print("fleet-format writer-stamp violations:", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
+    print(f"fleet-format writer stamps checked for {len(constants)} migrate surfaces")
     return 0
 
 
