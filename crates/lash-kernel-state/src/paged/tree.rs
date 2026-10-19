@@ -1316,10 +1316,13 @@ fn grow<T: Cell>(
 ) -> Result<Branch<T>, HeapFault> {
     while level.len() > 1 {
         let mut next = Vec::new();
-        while !level.is_empty() {
-            let rest = level.split_off(level.len().min(canonical::index_cap(seq)));
-            next.push(dirty(Node::Index(level), access, seq)?);
-            level = rest;
+        let mut children = level.into_iter();
+        while !children.as_slice().is_empty() {
+            // Each index owns only its chunk's capacity. Splitting a whole
+            // level retains the suffix's capacity in every preceding node,
+            // exhausting residency with index pages that cannot spill.
+            let chunk = children.by_ref().take(canonical::index_cap(seq)).collect();
+            next.push(dirty(Node::Index(chunk), access, seq)?);
         }
         level = next;
     }
