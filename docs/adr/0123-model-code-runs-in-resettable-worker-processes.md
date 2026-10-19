@@ -360,10 +360,26 @@ A worker that died after it began computing the run (`RunCrashedWorker`),
 such as an allocation abort at the address-space ceiling, is no capacity
 verdict. A process body's attempt fails retryably and spends one of its
 attempts, so a body that keeps killing its worker ends once they are spent.
-A code mode cell records the death as its failure (`CELL_WORKER_DIED`),
-which the model reads: as a host verdict its turn ran it again pass after
-pass until the session parked. A worker lost before it computed the run stays a host verdict that
-spends nothing (FIG-6786).
+A code mode cell reads the supervisor's evidence (FIG-6806). A limit lash
+sets on the worker, an allocation abort at its address-space ceiling
+(`SIGABRT`) or its confinement's kill for a forbidden system call, ends the
+cell at once: it records `CELL_WORKER_DIED` as its Policy failure, whose
+advice names the cell as the cause, and the model reads it (FIG-6786).
+Anything else, such as a `SIGKILL` with no cgroup out-of-memory kill
+behind it from an operator, a node drain or a neighbour's out-of-memory
+kill, is a loss from outside the cell. It spends one of the cell's
+`Deadlines::max_attempts` runs, counted per execution on the node that
+serves it, and fails the attempt as a host verdict while one is left. The
+next pass runs the cell again on a fresh worker from its last park, whose
+journal replays the calls that ran, so no completed call runs again and the
+model never reads the loss. A cell whose worker is lost on every run
+records `CELL_WORKER_DIED` once they are spent, as a Host failure. Its
+advice does not blame the cell; it says whether running the cell again is
+safe, naming the tool calls of it that completed and took effect. The
+count is in memory: an owner that takes the session over counts the cell's
+runs from zero, and the activation-loop budget still parks a session whose
+passes keep failing. A worker lost before it computed the run stays a host
+verdict that spends nothing (FIG-6786).
 A `RunRefused` is not retryable: the cell records its Host failure, since a
 retry would meet the same refusal (FIG-4645).
 

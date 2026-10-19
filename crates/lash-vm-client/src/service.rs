@@ -314,7 +314,15 @@ pub struct Service {
     pages: lash_vm_broker::kernel::pages::cache::PageCache,
     /// What each session's last activation touched (FIG-6321).
     hints: lash_vm_broker::kernel::pages::cache::HintBook,
+    /// The runs each execution lost on this node to a worker killed from
+    /// outside it, until it answers (FIG-6806).
+    lost: Arc<Mutex<BTreeMap<lash_vm_broker::ExecKey, u32>>>,
 }
+
+/// How many executions' lost runs a service keeps: one that holds as many
+/// forgets the first, whose next loss counts from one again.
+const LOST_EXECUTIONS: usize = 1024;
+
 impl Service {
     /// Select the helper executable explicitly, using the code mode/process bounds.
     pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
@@ -335,6 +343,7 @@ impl Service {
             retained: None,
             pages: lash_vm_broker::kernel::pages::cache::PageCache::default(),
             hints: lash_vm_broker::kernel::pages::cache::HintBook::default(),
+            lost: Arc::default(),
         }
     }
 
@@ -561,6 +570,14 @@ pub mod runtime_ops {
 
         /// The committed pages this process read.
         fn page_cache(&self) -> lash_vm_broker::kernel::pages::cache::PageCache;
+
+        /// Counts a run of `exec` lost to a worker killed from outside it,
+        /// and answers how many of its runs this node has lost so, this
+        /// one included (FIG-6806).
+        fn lost_run(&self, exec: &lash_vm_broker::ExecKey) -> u32;
+
+        /// Forgets `exec`'s lost runs: it answered.
+        fn forget_lost_runs(&self, exec: &lash_vm_broker::ExecKey);
     }
 
     #[doc(hidden)]
@@ -575,6 +592,26 @@ pub mod runtime_ops {
 
         fn execution_budget(&self) -> Option<&ExecutionBudget> {
             self.budget.as_ref()
+        }
+
+        fn lost_run(&self, exec: &lash_vm_broker::ExecKey) -> u32 {
+            let mut lost = self
+                .lost
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !lost.contains_key(exec) && lost.len() >= LOST_EXECUTIONS {
+                lost.pop_first();
+            }
+            let runs = lost.entry(exec.clone()).or_default();
+            *runs = runs.saturating_add(1);
+            *runs
+        }
+
+        fn forget_lost_runs(&self, exec: &lash_vm_broker::ExecKey) {
+            self.lost
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(exec);
         }
 
         fn begin_execution(&self, held: std::time::Duration) -> Service {

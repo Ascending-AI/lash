@@ -8,6 +8,9 @@
 
 use lash_core::RuntimeExecutionContext;
 use lash_vm_broker::CodeCallIdentities;
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+
+use crate::feedback::WorkerDeath;
 
 /// Why a cell has no logical opener to mint identities under.
 ///
@@ -122,4 +125,40 @@ pub(super) fn cell_exec(
         run,
         lash_vm_broker::CellId::new(execution),
     ))
+}
+
+/// The cell a worker died running, after the run began computing it: the
+/// service that counts its lost runs, and the execution they count under.
+pub(super) struct DiedRunning<'a> {
+    pub workers: &'a lash_vm_client::service::Service,
+    pub exec: &'a lash_vm_broker::ExecKey,
+}
+
+impl DiedRunning<'_> {
+    /// What the cell answers for its worker's death (FIG-6806). A limit
+    /// lash sets on the worker ends the cell at once: the same cell meets
+    /// it again. A worker lost from outside the cell spends one of its
+    /// `Deadlines::max_attempts` runs on this node, and `None` while one is
+    /// left: the turn's attempt fails as the host's verdict, and its next
+    /// pass runs the cell again on a fresh worker, from its last park,
+    /// whose journal replays the calls that ran. A cell whose worker is
+    /// lost on every run is refused once its runs are spent.
+    pub(super) fn answer(
+        &self,
+        evidence: lash_vm_protocol::SupervisorEvidence,
+        completed: &[lash_core::ExecutedCall],
+    ) -> Option<lash_core::CellFailure> {
+        let failure = match WorkerDeath::of(evidence) {
+            WorkerDeath::OwnLimit => crate::feedback::worker_died_failure(evidence),
+            WorkerDeath::Lost => {
+                let runs = self.workers.lost_run(self.exec);
+                if runs < self.workers.config().deadlines.max_attempts {
+                    return None;
+                }
+                crate::feedback::worker_lost_failure(evidence, runs, completed)
+            }
+        };
+        self.workers.forget_lost_runs(self.exec);
+        Some(failure)
+    }
 }

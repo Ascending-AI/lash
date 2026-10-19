@@ -85,7 +85,9 @@ pub const CELL_TASKS_OUTSTANDING: &str = "CELL_TASKS_OUTSTANDING";
 pub const CELL_DEADLOCK: &str = "CELL_DEADLOCK";
 /// The stable code of a cell that passed an execution bound.
 pub const CELL_BOUND_EXCEEDED: &str = "CELL_BOUND_EXCEEDED";
-/// The stable code of a cell whose worker died while it ran (FIG-6786).
+/// The stable code of a cell whose worker died while it ran: ended by a
+/// limit lash sets on the worker, or lost from outside it on every run the
+/// cell had (FIG-6786, FIG-6806).
 pub const CELL_WORKER_DIED: &str = "CELL_WORKER_DIED";
 
 /// The failure of a cell whose run met a limit of its own at the worker
@@ -134,14 +136,38 @@ pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFa
     .with_worker_limit(limit)
 }
 
-/// The failure of a cell whose worker died after it began computing the
-/// cell: most often an allocation past the worker's address-space ceiling
-/// or a kill for memory. Read as its host's verdict, the turn ran the cell
-/// again pass after pass until the session parked, and the model never saw
-/// it: the death is the cell's end instead, recorded once, and the model
-/// repairs from it (FIG-6786).
-pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence) -> CellFailure {
-    let how = match evidence {
+/// How a worker that died running a cell ended, as its supervisor saw it
+/// (FIG-6806).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkerDeath {
+    /// A limit lash sets on the worker ended it: an allocation abort at its
+    /// address-space ceiling (`SIGABRT`), or its confinement's kill for a
+    /// forbidden system call. The same cell meets it again.
+    OwnLimit,
+    /// No limit lash saw: a `SIGKILL` with no out-of-memory kill of the
+    /// worker's cgroup behind it, another signal, an exit or a closed
+    /// connection. An operator, a node drain or a neighbour's
+    /// out-of-memory kill ends a worker so, whatever its cell runs.
+    Lost,
+}
+
+/// The signal an allocation abort raises.
+const SIGABRT: i32 = 6;
+
+impl WorkerDeath {
+    pub(crate) fn of(evidence: lash_vm_protocol::SupervisorEvidence) -> Self {
+        match evidence {
+            lash_vm_protocol::SupervisorEvidence::Signalled { signal: SIGABRT }
+            | lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall => Self::OwnLimit,
+            lash_vm_protocol::SupervisorEvidence::Signalled { .. }
+            | lash_vm_protocol::SupervisorEvidence::Exited { .. }
+            | lash_vm_protocol::SupervisorEvidence::EndOfStream => Self::Lost,
+        }
+    }
+}
+
+fn death(evidence: lash_vm_protocol::SupervisorEvidence) -> String {
+    match evidence {
         lash_vm_protocol::SupervisorEvidence::Signalled { signal } => {
             format!("killed by signal {signal}")
         }
@@ -150,11 +176,62 @@ pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence
             "killed for a forbidden system call".to_owned()
         }
         lash_vm_protocol::SupervisorEvidence::EndOfStream => "closed its connection".to_owned(),
+    }
+}
+
+/// The failure of a cell whose worker a limit of lash's ended after it
+/// began computing the cell ([`WorkerDeath::OwnLimit`]): the same cell
+/// meets it again, so the death is the cell's end, recorded once, and the
+/// model repairs the cell from it (FIG-6786, FIG-6806).
+pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence) -> CellFailure {
+    let repair = if evidence == lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall {
+        "The cell's run made a system call its worker's confinement forbids, and running it again meets it again. Do the step another way."
+    } else {
+        "The cell's run passed a limit of its worker, such as its memory ceiling, and running it again meets it again. Hold less data at once, or split the work across smaller cells."
     };
     CellFailure::new(
         CellFailureKind::Policy,
         format!(
-            "{CELL_WORKER_DIED}: the worker running the cell died ({how})\nHold less data at once, or split the work across smaller cells."
+            "{CELL_WORKER_DIED}: the worker running the cell died ({})\n{repair}",
+            death(evidence)
+        ),
+    )
+}
+
+/// The failure of a cell whose worker was lost from outside it
+/// ([`WorkerDeath::Lost`]) on every one of its `runs`. Nothing names the
+/// cell as the cause: the model reads that the worker was lost, and
+/// whether running the cell again is safe, given the tool calls of it that
+/// completed and took effect (FIG-6806).
+pub(crate) fn worker_lost_failure(
+    evidence: lash_vm_protocol::SupervisorEvidence,
+    runs: u32,
+    completed: &[lash_core::ExecutedCall],
+) -> CellFailure {
+    let ran = if runs == 1 {
+        "lash ran the cell once and lost its worker".to_owned()
+    } else {
+        format!("lash ran the cell {runs} times, on a fresh worker each time, and lost each one")
+    };
+    let mut operations: Vec<&str> = Vec::new();
+    for call in completed {
+        if !operations.contains(&call.operation.as_str()) {
+            operations.push(&call.operation);
+        }
+    }
+    let rerun = if operations.is_empty() {
+        "No tool call of the cell completed, so running the cell again is safe.".to_owned()
+    } else {
+        format!(
+            "These tool calls of the cell completed and took effect, which nothing undoes: {}. Running the cell again runs them again; run again only what did not complete.",
+            operations.join(", ")
+        )
+    };
+    CellFailure::new(
+        CellFailureKind::Host,
+        format!(
+            "{CELL_WORKER_DIED}: the worker running the cell was lost from outside the cell ({}); {ran}\nNo limit lash sets on a cell stopped it, so the cell's code is not the cause. {rerun}",
+            death(evidence)
         ),
     )
 }

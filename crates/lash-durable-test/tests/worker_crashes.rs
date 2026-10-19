@@ -22,6 +22,13 @@
 //! does: before, the turn ran the cell again pass after pass until the
 //! session parked, and the model never saw it (FIG-6786).
 //!
+//! A worker killed from outside its cell after the cell began computing,
+//! with no limit of lash's in sight, is no end of the cell's own: the turn
+//! runs the cell again from its journal on a fresh worker, whose calls
+//! replay rather than run again. Only a cell whose worker is lost on every
+//! one of its attempts is refused, and its refusal does not blame the cell
+//! (FIG-6806).
+//!
 //! A worker names a page it sealed earlier in its activation under the
 //! grant the parent gave it, without sealing it again. What a later park
 //! of the activation commits stays stored while the activation can still
@@ -58,6 +65,13 @@ impl StaticToolExecute for Count {
 }
 
 fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
+    count_call(Count {
+        runs: Arc::clone(runs),
+    })
+}
+
+/// `count_call`, run by `body`.
+fn count_call(body: impl StaticToolExecute + 'static) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
         TOOL,
@@ -69,12 +83,7 @@ fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
-    Arc::new(StaticToolProvider::new(
-        vec![definition],
-        Count {
-            runs: Arc::clone(runs),
-        },
-    ))
+    Arc::new(StaticToolProvider::new(vec![definition], body))
 }
 
 /// The pool's one worker, killed once before a chosen checkout of the
@@ -410,6 +419,18 @@ impl Limit {
             Self::Died => "CELL_WORKER_DIED: the worker running the cell died (killed by signal 6)",
         }
     }
+
+    /// What the model is told to change, when the refusal names the cell
+    /// as the cause of its worker's death: only a limit lash saw does
+    /// (FIG-6806).
+    fn advice(self) -> Option<&'static str> {
+        match self {
+            Self::Died => Some(
+                "The cell's run passed a limit of its worker, such as its memory ceiling, and running it again meets it again. Hold less data at once, or split the work across smaller cells.",
+            ),
+            Self::Cpu | Self::Deadline | Self::Wall => None,
+        }
+    }
 }
 
 /// [`served::rlm`] with no instruction bound, so only a worker limit ends
@@ -513,6 +534,13 @@ async fn worker_limit_case(tier: Tier, limit: Limit) {
         "the next model step reads the refusal: {}",
         asked[1]
     );
+    if let Some(advice) = limit.advice() {
+        assert!(
+            asked[1].contains(advice),
+            "the refusal names the cell as the cause: {}",
+            asked[1]
+        );
+    }
     assert_eq!(output.assistant_message(), Some("done"));
     let transcript = session.transcript().await.expect("the transcript decodes");
     let failures: Vec<_> = transcript
@@ -551,6 +579,209 @@ async fn a_cell_past_its_worker_wall_time_is_refused_once_and_the_model_reads_it
 
 async fn a_cell_that_kills_its_worker_is_refused_once_and_the_model_reads_it(tier: Tier) {
     worker_limit_case(tier, Limit::Died).await;
+}
+
+/// Kills worker `pid` from outside its cell, as an operator, a node drain
+/// or a neighbour's out-of-memory kill does: no limit of lash's is in
+/// sight. A worker already gone is no failure.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law kills a real worker process from outside, as an operator would"
+)]
+fn kill_from_outside(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .status()
+        .expect("signal the worker");
+}
+
+/// `count_call`'s body whose first run kills every worker the service
+/// checked out, the one the cell holds across the call among them, and
+/// then answers: the call ran, and its worker is gone.
+struct KillHeld {
+    runs: Arc<AtomicUsize>,
+    workers: lash::vm::WorkerService,
+    killed: Arc<Mutex<Vec<u32>>>,
+}
+
+#[async_trait::async_trait]
+impl StaticToolExecute for KillHeld {
+    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            let mut killed = self.killed.lock().unwrap();
+            for receipt in self.workers.worker_receipts() {
+                if !killed.contains(&receipt.pid) {
+                    kill_from_outside(receipt.pid);
+                    killed.push(receipt.pid);
+                }
+            }
+        }
+        ToolOutcome::ok(serde_json::json!({ "result": "counted" })).into()
+    }
+}
+
+/// A model that writes `cell`, then answers `done`, recording each request
+/// it is asked.
+fn cell_then_done(
+    cell: &'static str,
+    requests: &Arc<Mutex<Vec<String>>>,
+) -> lash_core::facade_support::ProviderHandle {
+    let requests = Arc::clone(requests);
+    lash_core::testing::TestProvider::builder()
+        .kind("worker-lost")
+        .complete(move |request: LlmRequest| {
+            let mut asked = requests.lock().unwrap();
+            asked.push(serde_json::to_string(&request.messages).expect("a request encodes"));
+            let response = if asked.len() == 1 {
+                served::cell(cell)
+            } else {
+                served::text(&request, "done")
+            };
+            async move { Ok(response) }
+        })
+        .build()
+        .into_handle()
+}
+
+/// FIG-6806: a worker killed from outside while its cell holds it across a
+/// tool call is no end of the cell's own. The turn runs the cell again from
+/// its journal on a fresh worker: the call's outcome is replayed, never run
+/// again, the cell finishes with it, and the model never reads the loss.
+/// Since FIG-6786 the first such loss ended the cell with
+/// `CELL_WORKER_DIED`, which the model read.
+async fn a_worker_killed_from_outside_across_a_held_tool_call_reruns_the_cell_on_a_fresh_worker(
+    tier: Tier,
+) {
+    let workers = lash::vm::WorkerService::default().with_worker_receipts();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let killed = Arc::new(Mutex::new(Vec::new()));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let Some(world) = World::with_model(
+        tier,
+        Vec::new(),
+        cell_then_done(CELL, &requests),
+        |backend| {
+            lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers.clone()))
+                .tools(
+                    lash::tool_provider_key!("tools"),
+                    count_call(KillHeld {
+                        runs: Arc::clone(&runs),
+                        workers: workers.clone(),
+                        killed: Arc::clone(&killed),
+                    }),
+                )
+        },
+    )
+    .await
+    else {
+        return;
+    };
+    let input = "worker-lost-across-a-held-call";
+    let session = world.session(input, served::spec(8)).await;
+    let output = settled_or_parked(&world, &session, input)
+        .await
+        .unwrap_or_else(|park| panic!("the turn parked instead of answering: {park}"));
+    let killed = killed.lock().unwrap().clone();
+    assert!(!killed.is_empty(), "the call killed the cell's worker");
+    let receipts = workers.worker_receipts();
+    assert!(
+        receipts.iter().any(
+            |receipt| format!("{:?}", receipt.path) == "Cell" && !killed.contains(&receipt.pid)
+        ),
+        "the cell ran again on a fresh worker: {receipts:?}"
+    );
+    let asked = requests.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "the model never reads the loss: {asked:?}");
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        1,
+        "the held call's effect is not repeated"
+    );
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!({ "first": { "result": "counted" } }))
+    );
+    world.shutdown().await;
+}
+
+/// FIG-6806: a cell whose worker is killed from outside on every run, after
+/// the run began computing, runs on a fresh worker until its attempts are
+/// spent, and then is refused once with `CELL_WORKER_DIED`. The refusal
+/// says the worker was lost from outside and that running the cell again
+/// is safe, since no call of it ran; it never tells the model to change
+/// the cell.
+async fn a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_without_blaming_the_cell(
+    tier: Tier,
+) {
+    let config = lash::vm::WorkerService::default().config().clone();
+    let attempts = usize::try_from(config.deadlines.max_attempts).expect("a small count");
+    let receipts = lash::vm::WorkerService::new(config).with_worker_receipts();
+    // The worker of the run checked out last, and the calls made on it. A
+    // run's first call sends its start with its first slice; its second
+    // finds the run computing and its worker killed.
+    let seen = Mutex::new((0_u32, 0_usize));
+    let workers = receipts.clone().with_call_hold(Arc::new(move || {
+        if let Some(last) = receipts.worker_receipts().last()
+            && format!("{:?}", last.path) == "Cell"
+        {
+            let mut seen = seen.lock().unwrap();
+            if seen.0 != last.pid {
+                *seen = (last.pid, 0);
+            }
+            seen.1 += 1;
+            if seen.1 == 2 {
+                kill_from_outside(last.pid);
+            }
+        }
+        Box::new(())
+    }));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let Some(world) = World::with_model(
+        tier,
+        Vec::new(),
+        cell_then_done(HEAVY, &requests),
+        |backend| lash::LashCore::rlm_builder(backend.clone(), unbounded_rlm(workers.clone())),
+    )
+    .await
+    else {
+        return;
+    };
+    let input = "worker-lost-on-every-run";
+    let session = world.session(input, served::spec(8)).await;
+    let settled = settled_or_parked(&world, &session, input).await;
+    let runs = workers
+        .worker_receipts()
+        .iter()
+        .filter(|receipt| format!("{:?}", receipt.path) == "Cell")
+        .count();
+    let output = settled.unwrap_or_else(|park| {
+        panic!("the turn parked after {runs} runs of the cell instead of answering: {park}")
+    });
+    assert_eq!(
+        runs, attempts,
+        "each of the cell's attempts ran on a fresh worker"
+    );
+    let asked = requests.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "the model is asked once after the cell");
+    assert!(
+        asked[1].contains(
+            "CELL_WORKER_DIED: the worker running the cell was lost from outside the cell (killed by signal 9)"
+        ),
+        "the next model step reads the loss: {}",
+        asked[1]
+    );
+    assert!(
+        asked[1].contains("running the cell again is safe"),
+        "the refusal says whether running the cell again is safe: {}",
+        asked[1]
+    );
+    assert!(
+        !asked[1].contains("Hold less data"),
+        "the refusal does not blame the cell: {}",
+        asked[1]
+    );
+    assert_eq!(output.assistant_message(), Some("done"));
+    world.shutdown().await;
 }
 
 async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
@@ -691,4 +922,6 @@ tiered_laws!(
     a_cell_past_its_worker_compute_deadline_is_refused_once_and_the_model_reads_it,
     a_cell_past_its_worker_wall_time_is_refused_once_and_the_model_reads_it,
     a_cell_that_kills_its_worker_is_refused_once_and_the_model_reads_it,
+    a_worker_killed_from_outside_across_a_held_tool_call_reruns_the_cell_on_a_fresh_worker,
+    a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_without_blaming_the_cell,
 );

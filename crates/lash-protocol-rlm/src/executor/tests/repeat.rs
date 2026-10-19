@@ -146,6 +146,11 @@ async fn an_unanswerable_wait_ends_the_turn_with_a_typed_terminal_failure() {
         Flaky::failing_first_with(lash_core::ToolFailureClass::Io),
     );
     let call = lash_core::ToolCallId::fixture("unanswered");
+    let exec = lash_vm_broker::ExecKey::Cell(
+        lash_core::SessionId::from(SESSION),
+        lash_core::TurnId::try_from(TURN.to_owned()).expect("a turn id"),
+        lash_vm_broker::CellId::new("exec-code:0"),
+    );
     let response = super::super::broker_failure(
         &mut typescript_state(),
         &ctx,
@@ -156,6 +161,10 @@ async fn an_unanswerable_wait_ends_the_turn_with_a_typed_terminal_failure() {
         ),
         false,
         &super::super::host::CellHostLedgers::default(),
+        &super::super::cell_run::DiedRunning {
+            workers: &typescript_services().workers,
+            exec: &exec,
+        },
     );
     assert!(response.error().is_some(), "the cell answers no value");
     let error = ctx

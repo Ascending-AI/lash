@@ -164,6 +164,10 @@ pub(crate) async fn execute_cell(
     if response.suspended {
         return response;
     }
+    // A cell that answers has no runs left to lose (FIG-6806).
+    if !seal_ctx.has_nested_effect_error() {
+        services.workers.forget_lost_runs(&exec);
+    }
     if let Ok(cell) = &opened
         && !seal_ctx.is_cancelled()
         && !seal_ctx.has_nested_effect_error()
@@ -1066,6 +1070,10 @@ async fn run_linked_cell(
         Ok(KernelEnd::Ended { end, owed: None, .. }) if !matches!(end, End::Cancelled)
     );
     let document_id = document_identity;
+    let died = cell_run::DiedRunning {
+        workers: &services.workers,
+        exec: snapshots.exec(),
+    };
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
     let answer = || -> ExecResponse {
@@ -1088,7 +1096,7 @@ async fn run_linked_cell(
                 };
             }
             Err(failure) => {
-                return broker_failure(state, &ctx, failure, runs_on, &collected);
+                return broker_failure(state, &ctx, failure, runs_on, &collected, &died);
             }
         };
         // A cancelled tool call ends the cell, whatever its program made of the
@@ -1205,7 +1213,7 @@ async fn run_linked_cell(
         Ok(Some(ended)) => ctx.cell_ended(ended),
         Ok(None) => {}
         Err(failure) => {
-            response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers());
+            response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers(), &died);
         }
     }
     if let Some(pages) = activation
@@ -1331,6 +1339,7 @@ fn broker_failure(
     failure: KernelFailure,
     runs_on: bool,
     collected: &CellHostLedgers,
+    died: &cell_run::DiedRunning<'_>,
 ) -> ExecResponse {
     let message = failure.to_string();
     let host = |message: String| {
@@ -1353,15 +1362,13 @@ fn broker_failure(
                     lash_core::CellOutcome::Failed(crate::feedback::worker_limit_failure(*limit)),
                 );
             }
-            // A worker that died running the cell ends it, once: as a host
-            // verdict its turn ran it again until the session parked
-            // (FIG-6786).
+            // A worker that died running the cell ends it once its death is
+            // the cell's to read; until then the pass fails as the host's
+            // verdict below, and the next runs the cell again (FIG-6806).
             if let lash_vm_protocol::InfrastructureOutcome::RunCrashedWorker { evidence } = &outcome
+                && let Some(failure) = died.answer(*evidence, &collected.executed_calls())
             {
-                return exec_response_from(
-                    collected,
-                    lash_core::CellOutcome::Failed(crate::feedback::worker_died_failure(*evidence)),
-                );
+                return exec_response_from(collected, lash_core::CellOutcome::Failed(failure));
             }
             // The state a resumed cell runs on from is refused: another
             // build wrote it. That is no failure the model sees: the cell
