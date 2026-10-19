@@ -669,8 +669,7 @@ fn rlm_trajectory_entries(state: &SessionSnapshot) -> Vec<CellRecord> {
                     Some(CellRecord::clone(entry))
                 }
                 Ok(Some(
-                    RlmProtocolEvent::RlmAssistantContent(_)
-                    | RlmProtocolEvent::RlmDiagnostic(_)
+                    RlmProtocolEvent::RlmDiagnostic(_)
                     | RlmProtocolEvent::RlmGlobalsPatch(_)
                     | RlmProtocolEvent::RlmSeed(_),
                 ))

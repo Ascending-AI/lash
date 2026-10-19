@@ -114,18 +114,9 @@ pub(super) fn render_history_messages(
                 else {
                     return;
                 };
-                let step = match event.as_ref() {
-                    lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content) => {
-                        flush_pending_prose(&mut messages, &mut pending);
-                        pending = Some(PendingProse {
-                            text: content.prose.clone(),
-                            reasoning_blocks: Vec::new(),
-                            image_blocks: Vec::new(),
-                        });
-                        return;
-                    }
-                    lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) => step,
-                    _ => return,
+                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) = event.as_ref()
+                else {
+                    return;
                 };
                 flush_pending_prose(&mut messages, &mut pending);
                 let observation = crate::driver::history::step_output_text(
@@ -247,26 +238,20 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                match dialect
+                if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = dialect
                     .decode_history_event(event)
                     .expect("history projection validated every RLM event")
                     .as_deref()
                 {
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(_)) => {
-                        prose_entries.push(entry.index);
+                    if step.result.is_failed() {
+                        pending_failure_entries.append(&mut prose_entries);
+                        pending_failure_entries.push(entry.index);
+                        any_failure_pending = true;
+                    } else {
+                        prose_entries.clear();
+                        superseded.extend(pending_failure_entries.drain(..));
+                        any_failure_pending = false;
                     }
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.result.is_failed() {
-                            pending_failure_entries.append(&mut prose_entries);
-                            pending_failure_entries.push(entry.index);
-                            any_failure_pending = true;
-                        } else {
-                            prose_entries.clear();
-                            superseded.extend(pending_failure_entries.drain(..));
-                            any_failure_pending = false;
-                        }
-                    }
-                    _ => {}
                 }
             }
         }

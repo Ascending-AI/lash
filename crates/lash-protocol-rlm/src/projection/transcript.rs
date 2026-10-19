@@ -84,19 +84,13 @@ impl TranscriptDecoderPlugin for RlmTranscriptDecoder {
         }
         Ok(Some(
             match super::context::decode_rlm_protocol_event(event)?.as_deref() {
-                Some(RlmProtocolEvent::RlmAssistantContent(content))
-                    if !content.reasoning.trim().is_empty() =>
-                {
-                    reasoning_item(vec![content.reasoning.clone()])
-                }
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(cell))
                     if !cell.code.trim().is_empty() =>
                 {
                     TranscriptItem::Cell(std::sync::Arc::clone(cell))
                 }
                 Some(
-                    RlmProtocolEvent::RlmAssistantContent(_)
-                    | RlmProtocolEvent::RlmTrajectoryEntry(_)
+                    RlmProtocolEvent::RlmTrajectoryEntry(_)
                     | RlmProtocolEvent::RlmGlobalsPatch(_)
                     | RlmProtocolEvent::RlmSeed(_)
                     | RlmProtocolEvent::RlmDiagnostic(_),

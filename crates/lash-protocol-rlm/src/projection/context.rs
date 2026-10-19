@@ -135,14 +135,6 @@ impl RlmHistoryProjection {
                 ChronologicalPayload::Message(message) => history_item_from_message(message),
                 ChronologicalPayload::ProtocolEvent(event) => {
                     match decoder.decode(event)?.as_deref() {
-                        Some(RlmProtocolEvent::RlmAssistantContent(content)) => {
-                            Some(RlmHistoryItem::Message {
-                                id: content.id.clone(),
-                                role: RlmHistoryRole::Assistant,
-                                content: content.prose.clone(),
-                                attachments: Vec::new(),
-                            })
-                        }
                         Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
                             Some(history_item_from_lash_vm_step(step))
                         }
@@ -388,6 +380,18 @@ mod tests {
         }
     }
 
+    /// Assistant prose the RLM driver commits beside a cell.
+    fn cell_prose(id: &str, text: &str) -> lash_core::SessionHistoryRecord {
+        let mut prose = message(id, MessageRole::Assistant, text);
+        prose.origin = Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        });
+        lash_core::SessionHistoryRecord::Conversation(
+            lash_core::facade_support::ConversationRecord::from_message(prose),
+        )
+    }
+
     #[test]
     fn completed_turn_projection_keeps_only_transcript_and_compacts_indices() {
         let terminal = CellRecord {
@@ -426,16 +430,7 @@ mod tests {
                     "first",
                 )),
             ),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmAssistantContent(lash_rlm_types::RlmAssistantContent {
-                    id: "terminal-content".to_string(),
-                    reasoning: String::new(),
-                    prose: "terminal prose".to_string(),
-                }),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
+            cell_prose("terminal-content", "terminal prose"),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
@@ -525,16 +520,7 @@ mod tests {
                     "start",
                 )),
             ),
-            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmAssistantContent(lash_rlm_types::RlmAssistantContent {
-                    id: "intermediate-content".to_string(),
-                    reasoning: String::new(),
-                    prose: "surviving prose".to_string(),
-                }),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            )),
+            cell_prose("intermediate-content", "surviving prose"),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
                 RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(intermediate)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(

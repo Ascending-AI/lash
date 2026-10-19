@@ -72,17 +72,18 @@ fn terminal_step_event(
     ))
 }
 
-fn assistant_content_event(id: &str, prose: &str) -> SessionHistoryRecord {
-    SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmAssistantContent(lash_rlm_types::RlmAssistantContent {
-            id: id.to_string(),
-            reasoning: String::new(),
-            prose: prose.to_string(),
+/// Assistant prose the RLM driver commits beside a cell.
+fn cell_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
+    SessionHistoryRecord::Conversation(ConversationRecord {
+        id: id.to_string(),
+        role: MessageRole::Assistant,
+        parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
+        origin: Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
         }),
-        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ))
+        reply_marker: None,
+    })
 }
 
 fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
@@ -376,7 +377,7 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     let events = [
         user_event("u1", "compute it"),
         step_event(0, "print \"observed mid-turn\"", "observed mid-turn"),
-        assistant_content_event("terminal-prose", "Internal terminal commentary."),
+        cell_prose_event("terminal-prose", "Internal terminal commentary."),
         terminal_step_event(
             1,
             "print image\nfinish { answer: 42 }",

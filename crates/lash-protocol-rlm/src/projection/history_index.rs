@@ -123,34 +123,29 @@ impl HistoryIndex {
                     }
                 }
                 BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                    match decoder.decode(event)?.as_deref() {
-                        Some(RlmProtocolEvent::RlmAssistantContent(_)) => {
-                            prose.push(entry.index);
-                            items.push((entry.index, false));
+                    if let Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) =
+                        decoder.decode(event)?.as_deref()
+                    {
+                        terminal = step
+                            .result
+                            .finish()
+                            .filter(|value| {
+                                value.retained().is_none() && step.prints_retained.is_none()
+                            })
+                            .map(|_| entry.index);
+                        items.push((entry.index, true));
+                        for name in step
+                            .bindings
+                            .added
+                            .iter()
+                            .chain(&step.bindings.changed)
+                            .chain(&step.bindings.not_carried)
+                        {
+                            index.provenance.insert(name.clone(), step.id.clone());
                         }
-                        Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                            terminal = step
-                                .result
-                                .finish()
-                                .filter(|value| {
-                                    value.retained().is_none() && step.prints_retained.is_none()
-                                })
-                                .map(|_| entry.index);
-                            items.push((entry.index, true));
-                            for name in step
-                                .bindings
-                                .added
-                                .iter()
-                                .chain(&step.bindings.changed)
-                                .chain(&step.bindings.not_carried)
-                            {
-                                index.provenance.insert(name.clone(), step.id.clone());
-                            }
-                            for name in &step.bindings.removed {
-                                index.provenance.remove(name);
-                            }
+                        for name in &step.bindings.removed {
+                            index.provenance.remove(name);
                         }
-                        _ => {}
                     }
                 }
             }

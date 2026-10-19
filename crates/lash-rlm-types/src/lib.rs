@@ -5,21 +5,6 @@ use lash_protocol_types::{
 use lash_sansio::TurnProtocol;
 use lash_tool_shape::SchemaDocument;
 
-/// Read-only legacy protocol-owned assistant context paired with a code mode
-/// trajectory entry.
-///
-/// New sessions persist this context as ordinary durable assistant messages so
-/// provider reasoning replay metadata survives. This event must keep decoding
-/// for old session histories, but producers must not write new instances.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct RlmAssistantContent {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub reasoning: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub prose: String,
-}
-
 /// One executed call as a cell's `history` shows it: the operation and how
 /// it settled, with no arguments and no host identity. A view derived from
 /// the cell entry's [`ExecutedCall`], never a stored shape.
@@ -628,7 +613,6 @@ impl RlmGlobalsPatchPluginBody {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum RlmProtocolEvent {
-    RlmAssistantContent(RlmAssistantContent),
     /// One executed cell: the record the transcript returns, shared with it.
     RlmTrajectoryEntry(std::sync::Arc<CellRecord>),
     RlmGlobalsPatch(RlmGlobalsPatchPluginBody),

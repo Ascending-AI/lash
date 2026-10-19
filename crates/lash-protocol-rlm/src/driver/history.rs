@@ -16,7 +16,7 @@
 //!   flushed as a standalone assistant message (a prose-only finish).
 //! - **Completed-turn precedence.** When a successful terminal step is
 //!   followed by a committed assistant transcript message in the same turn,
-//!   the transcript is canonical for assistant prose. Assistant-content events,
+//!   the transcript is canonical for assistant prose. The cell's own prose,
 //!   the terminal emission cell, and its never-observed output echo are
 //!   omitted unless it holds a print archive or a retained final value; those
 //!   values remain addressable.
@@ -164,18 +164,9 @@ pub(super) fn render_history_messages(
                 else {
                     return;
                 };
-                let step = match event.as_ref() {
-                    lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content) => {
-                        flush_pending_prose(&mut messages, &mut pending);
-                        pending = Some(PendingProse {
-                            text: content.prose.clone(),
-                            reasoning_blocks: Vec::new(),
-                            image_blocks: Vec::new(),
-                        });
-                        return;
-                    }
-                    lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) => step,
-                    _ => return,
+                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) = event.as_ref()
+                else {
+                    return;
                 };
                 // Fold buffered prose into one assistant message: prose + cell,
                 // byte-identical to the model's own emission.
@@ -257,13 +248,12 @@ pub(super) fn render_history_messages(
 /// event message opens new work, so a success after it repairs nothing that
 /// came before — those failures stay, because the model may still need them.
 ///
-/// The scrub covers four entry kinds because a cell is stored as several
+/// The scrub covers three entry kinds because a cell is stored as several
 /// entries: the trajectory entry itself, the assistant prose folded into it,
-/// the assistant-content event carrying that prose, and the protocol feedback
-/// message written after it. Dropping only the trajectory entry would leave its
-/// prose to fold into the *next* cell and its repair instruction pointing at
-/// Every one of those four is identified by *provenance*, never by role or
-/// position. Only this plugin's own output is the plugin's to delete.
+/// and the protocol feedback message written after it. Dropping only the
+/// trajectory entry would leave its prose to fold into the *next* cell and its
+/// repair instruction pointing at nothing. Feedback is identified by
+/// *provenance*, never by role or position. Only this plugin's own output is the plugin's to delete.
 #[expect(
     clippy::expect_used,
     reason = "the caller validated every event with the fallible history projection"
@@ -307,26 +297,20 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                match dialect
+                if let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = dialect
                     .decode_history_event(event)
                     .expect("history projection validated every RLM event")
                     .as_deref()
                 {
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(_)) => {
-                        prose_entries.push(entry.index);
+                    if step.result.is_failed() {
+                        pending_failure_entries.append(&mut prose_entries);
+                        pending_failure_entries.push(entry.index);
+                        any_failure_pending = true;
+                    } else {
+                        prose_entries.clear();
+                        superseded.extend(pending_failure_entries.drain(..));
+                        any_failure_pending = false;
                     }
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.result.is_failed() {
-                            pending_failure_entries.append(&mut prose_entries);
-                            pending_failure_entries.push(entry.index);
-                            any_failure_pending = true;
-                        } else {
-                            prose_entries.clear();
-                            superseded.extend(pending_failure_entries.drain(..));
-                            any_failure_pending = false;
-                        }
-                    }
-                    _ => {}
                 }
             }
         }

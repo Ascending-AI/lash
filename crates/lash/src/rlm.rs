@@ -152,12 +152,11 @@ pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
     CodeModeProjectedSeedEntry, CodeModeProjectedSeedSnapshot, RlmSeedPluginBody,
 };
+pub use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTurnOptions};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
 pub use lash_rlm_types::{
-    RlmAssistantContent, RlmDiagnosticEvent, RlmDiagnosticPhase, RlmGlobalsPatchPluginBody,
-    RlmProtocolEvent,
+    RlmDiagnosticEvent, RlmDiagnosticPhase, RlmGlobalsPatchPluginBody, RlmProtocolEvent,
 };
-pub use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTurnOptions};
 
 pub use lash_protocol_rlm::recorded_extraction_decisions;

@@ -457,9 +457,7 @@ impl RlmRuntimeState {
                         .await?;
                 }
             }
-            RlmProtocolEvent::RlmAssistantContent(_)
-            | RlmProtocolEvent::RlmTrajectoryEntry(_)
-            | RlmProtocolEvent::RlmDiagnostic(_) => {}
+            RlmProtocolEvent::RlmTrajectoryEntry(_) | RlmProtocolEvent::RlmDiagnostic(_) => {}
         }
         Ok(())
     }

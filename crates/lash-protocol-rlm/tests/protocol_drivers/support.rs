@@ -286,7 +286,7 @@ pub(crate) fn assistant_messages(machine: &TurnMachine) -> Vec<Message> {
 }
 
 pub(crate) fn assistant_reasoning_texts(machine: &TurnMachine) -> Vec<String> {
-    let mut texts = assistant_messages(machine)
+    assistant_messages(machine)
         .into_iter()
         .flat_map(|message| {
             message
@@ -296,25 +296,11 @@ pub(crate) fn assistant_reasoning_texts(machine: &TurnMachine) -> Vec<String> {
                 .map(|part| part.content().to_string())
                 .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
-    texts.extend(machine.events().iter().filter_map(|event| {
-        let lash_core::SessionHistoryRecord::Protocol(event) = event else {
-            return None;
-        };
-        match recorded_rlm_event(event) {
-            Some(RlmProtocolEvent::RlmAssistantContent(content))
-                if !content.reasoning.is_empty() =>
-            {
-                Some(content.reasoning)
-            }
-            _ => None,
-        }
-    }));
-    texts
+        .collect()
 }
 
 pub(crate) fn assistant_visible_texts(machine: &TurnMachine) -> Vec<String> {
-    let mut texts = assistant_messages(machine)
+    assistant_messages(machine)
         .into_iter()
         .flat_map(|message| {
             message
@@ -324,19 +310,7 @@ pub(crate) fn assistant_visible_texts(machine: &TurnMachine) -> Vec<String> {
                 .map(|part| part.content().to_string())
                 .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
-    texts.extend(machine.events().iter().filter_map(|event| {
-        let lash_core::SessionHistoryRecord::Protocol(event) = event else {
-            return None;
-        };
-        match recorded_rlm_event(event) {
-            Some(RlmProtocolEvent::RlmAssistantContent(content)) if !content.prose.is_empty() => {
-                Some(content.prose)
-            }
-            _ => None,
-        }
-    }));
-    texts
+        .collect()
 }
 
 pub(crate) fn text_part(text: &str) -> LlmOutputPart {
