@@ -153,6 +153,11 @@ impl NodeSlot {
                 Ok(stopped) => tracing::warn!(?stopped, "the core's node stopped on its own"),
                 Err(error) => tracing::error!(%error, "the core's node stopped"),
             }
+            // Restart retains these activations between boots. Release their
+            // core clones before shutdown can observe the node as stopped.
+            drop(sessions);
+            drop(processes);
+            drop(backend);
             served.send_replace(Some(outcome));
         });
     }
