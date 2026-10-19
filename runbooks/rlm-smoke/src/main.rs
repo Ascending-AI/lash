@@ -528,9 +528,7 @@ async fn main() -> Result<()> {
             lash::SessionSpec::new(
                 args.model.as_str(),
                 lash::TurnBudget::bounded(12),
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(4))
+                lash::MaxToolCalls::new(1024), lash::NoProgressBudget::bounded(4))
             .generation(lash::direct::GenerationOptions {
                 output_token_cap: std::env::var("LASH_E2E_OUTPUT_TOKEN_CAP")
                     .ok()

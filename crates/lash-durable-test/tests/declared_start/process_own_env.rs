@@ -503,14 +503,12 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let (backend, first) = worker(&stores, &seen, true, "first");
     let session = first
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                SESSION_MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            SESSION_MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(64),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("the session is created");
     let run = lash::RunSpec {

@@ -10,13 +10,13 @@ error[E0599]: no method named `session_spec` found for struct `SessionBuilder` i
   |
 
 error[E0599]: no method named `parent` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/session_open_takes_no_config.rs:18:101
+  --> tests/ui/session_open_takes_no_config.rs:17:101
    |
-18 |     let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).parent("parent").open();
+17 |     let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).parent("parent").open();
    |                                                                                                     ^^^^^^ method not found in `SessionBuilder`
 
 error[E0599]: no method named `plugin_options` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/session_open_takes_no_config.rs:22:101
+  --> tests/ui/session_open_takes_no_config.rs:21:101
    |
-22 |     let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).plugin_options(options).open();
+21 |     let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).plugin_options(options).open();
    |                                                                                                     ^^^^^^^^^^^^^^ method not found in `SessionBuilder`

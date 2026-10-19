@@ -1322,10 +1322,10 @@ mod tests {
             THINKER,
             crate::TurnBudget::bounded(4),
             crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
         )
-        .no_progress_budget(crate::NoProgressBudget::bounded(12))
         .reasoning(crate::ReasoningSelection::Effort("high".to_string()));
-        let request = root_request().with_spec(&spec).expect("a root spec");
+        let request = root_request().with_spec(&spec);
         assert_eq!(request.unstated_root_config(), None);
 
         let facts = child_facts(&request).expect("the stated spec resolves");

@@ -264,14 +264,12 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                key,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            key,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("create the session");
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
@@ -708,14 +706,12 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
 
     let created = core
         .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                unregistered,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            unregistered,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await;
     assert!(
         matches!(&created, Err(lash::EmbedError::LlmProfileUnknown(error)) if error.key.as_str() == unregistered),
@@ -845,8 +841,8 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
                 GLM,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .reasoning(high.clone()),
         ))
         .await;
@@ -877,8 +873,8 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
                 THINKER,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .reasoning(high.clone()),
         ))
         .await

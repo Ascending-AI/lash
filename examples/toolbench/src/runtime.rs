@@ -420,9 +420,13 @@ fn build_turn_core(
         .context("build Lash core")?;
     // The run's session spec: the bench's one model under the task's turn
     // budget and the run's reasoning effort.
-    let session_spec = lash::SessionSpec::new(model, budget, lash::MaxToolCalls::new(1024))
-        .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .reasoning(reasoning(effort));
+    let session_spec = lash::SessionSpec::new(
+        model,
+        budget,
+        lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::Unbounded,
+    )
+    .reasoning(reasoning(effort));
     Ok((core, session_spec))
 }
 

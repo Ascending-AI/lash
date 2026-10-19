@@ -17,8 +17,7 @@ pub(super) fn session_turn_start(
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
-        .with_spec(spec)
-        .expect("a root spec states its model and turn budget"),
+        .with_spec(spec),
     )
 }
 
@@ -93,8 +92,8 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         GLM,
         lash::TurnBudget::bounded(6),
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .generation(lash::direct::GenerationOptions {
         seed: Some(11),
         ..Default::default()
@@ -232,8 +231,8 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         KIMI,
         lash::TurnBudget::bounded(2),
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .generation(lash::direct::GenerationOptions {
         seed: Some(99),
         ..Default::default()

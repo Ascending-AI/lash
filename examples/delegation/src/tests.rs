@@ -84,8 +84,12 @@ impl SessionStateService for NoSnapshots {
 }
 
 fn child_spec() -> SessionSpec {
-    SessionSpec::new("child-model", TurnBudget::bounded(3), MaxToolCalls::new(16))
-        .no_progress_budget(lash::NoProgressBudget::bounded(12))
+    SessionSpec::new(
+        "child-model",
+        TurnBudget::bounded(3),
+        MaxToolCalls::new(16),
+        lash::NoProgressBudget::bounded(12),
+    )
 }
 
 fn spawner() -> SpawnAgent {
@@ -228,8 +232,7 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
 
     let expected =
         lash::SessionCreateRequest::root(lash::SessionStartPoint::Empty, PluginOptions::default())
-            .with_spec(&child_spec())
-            .expect("the child spec states a session");
+            .with_spec(&child_spec());
     assert_eq!(request.session_id, None);
     assert_eq!(request.policy, expected.policy);
     assert_eq!(request.model, expected.model);

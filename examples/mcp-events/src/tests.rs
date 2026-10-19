@@ -56,14 +56,12 @@ async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
 
     let session = SessionId::try_from("triage".to_owned()).expect("a session id");
     core.session(session.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::bounded(4),
-                lash::MaxToolCalls::new(8),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::bounded(4),
+            lash::MaxToolCalls::new(8),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("the session is created");
 

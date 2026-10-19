@@ -1,7 +1,7 @@
 // FIG-4594: a root creation states its whole spec. `SessionSpec::new` takes
-// the model key, the turn budget and the tool-call limit, so a spec that
-// leaves one out does not compile, and neither a spec nor a creation has a
-// default to fall back on.
+// the model key, the turn budget, the tool-call limit and the stall bound, so
+// a spec that leaves one out does not compile, and neither a spec nor a
+// creation has a default to fall back on.
 
 fn a_spec_names_its_required_parts() {
     let _ = lash::SessionSpec::new();
@@ -13,6 +13,14 @@ fn a_spec_names_its_turn_budget(model: lash::LlmProfileKey) {
 
 fn a_spec_names_its_tool_call_limit(model: lash::LlmProfileKey) {
     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded);
+}
+
+fn a_spec_names_its_stall_bound(model: lash::LlmProfileKey) {
+    let _ = lash::SessionSpec::new(
+        model,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(8),
+    );
 }
 
 fn a_spec_has_no_default() {

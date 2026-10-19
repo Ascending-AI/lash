@@ -580,14 +580,12 @@ pub(crate) async fn create_lane_session(
     let durable = topology
         .core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                latency_llm_profile_spec()?.wire_model,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            latency_llm_profile_spec()?.wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .map_err(anyhow::Error::from)?;
     Ok(match kind {
@@ -1399,14 +1397,12 @@ mod tests {
         .unwrap();
         let session = core
             .session(SessionId::fixture("grace-binding-floor"))
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    latency_llm_profile_spec().unwrap().wire_model,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                latency_llm_profile_spec().unwrap().wire_model,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .unwrap();
         let handle = session

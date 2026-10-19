@@ -196,20 +196,12 @@ impl SessionCreateRequest {
     /// options. The key is carried unminted, so the request states nothing
     /// a catalog derives; the runtime that creates the session mints it. A
     /// host session-turn start states its session this way.
-    ///
-    /// # Errors
-    ///
-    /// A spec that states no model or no turn budget
-    /// (an incomplete spec).
-    pub fn with_spec(mut self, spec: &crate::SessionSpec) -> Result<Self, crate::SpecResolveError> {
-        let Some(model) = spec.model.clone() else {
-            return Err(crate::SpecResolveError::RootWithoutLlmProfile);
-        };
-        self.policy = Some(spec.stated_root_policy()?);
-        self.model = Some(model);
+    pub fn with_spec(mut self, spec: &crate::SessionSpec) -> Self {
+        self.policy = Some(spec.stated_root_policy());
+        self.model = Some(spec.model.clone());
         self.reasoning = spec.reasoning.clone();
         self.plugin_options = spec.plugin_options.clone();
-        Ok(self)
+        self
     }
 
     /// What a host start's request leaves unstated, if anything: a start no

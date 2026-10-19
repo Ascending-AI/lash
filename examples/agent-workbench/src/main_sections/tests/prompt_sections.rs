@@ -235,8 +235,8 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         "agent_workbench",
         workbench_session_prompt(

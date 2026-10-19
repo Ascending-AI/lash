@@ -1076,14 +1076,12 @@ mod named_component_laws {
             let session = self
                 .core
                 .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
-                .create(lash::SessionCreation::root(
-                    lash::SessionSpec::new(
-                        MODEL,
-                        lash::TurnBudget::Unbounded,
-                        lash::MaxToolCalls::new(64),
-                    )
-                    .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-                ))
+                .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(64),
+                    lash::NoProgressBudget::bounded(12),
+                )))
                 .await
                 .expect("the session is created");
             let output = tokio::time::timeout(

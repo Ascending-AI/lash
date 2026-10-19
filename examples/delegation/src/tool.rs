@@ -284,8 +284,7 @@ impl SpawnAgent {
             SessionStartPoint::Empty,
             Default::default(),
         )
-        .with_spec(&self.child.spec)
-        .map_err(|error| invalid(format!("the host's child spec does not resolve: {error}")))?;
+        .with_spec(&self.child.spec);
         request.plugin_options = options.over(request.plugin_options);
         // The child session is the process's own, derived from the id its
         // start mints (ADR 0107), so the request names none.

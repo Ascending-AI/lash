@@ -57,8 +57,8 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         "transcript-projection-model",
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
         lash::rlm::RlmCreateExtras::default(),

@@ -233,14 +233,12 @@ impl CheckpointBindingFixture {
             Arc::clone(&factory),
         )?;
         let session_id = SessionId::fixture(format!("checkpoint-worker-{}", uuid::Uuid::new_v4()));
-        let creation = lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "mock-model",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        );
+        let creation = lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+        ));
         core.session(session_id.clone()).create(creation).await?;
         core.shutdown().await?;
         Ok(Self {

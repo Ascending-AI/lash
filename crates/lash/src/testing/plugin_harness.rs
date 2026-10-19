@@ -263,8 +263,8 @@ impl PluginHarness {
                     "plugin-script",
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(64),
+                    crate::NoProgressBudget::bounded(8),
                 )
-                .no_progress_budget(crate::NoProgressBudget::bounded(8))
                 .plugin_options(options),
             ))
             .await?;

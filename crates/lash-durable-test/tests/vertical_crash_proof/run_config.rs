@@ -556,8 +556,8 @@ fn root_spec() -> lash::SessionSpec {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
+        lash_core::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 /// One law's store, clock and backend: a deployment creates the session and

@@ -23,10 +23,6 @@ fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 fn drain_area_witnesses() {
     // W0001: lash::AwaitEventWaitIdentity [enum]
     type_witness::<lash::AwaitEventWaitIdentity>();
-    // W0008: lash::EmbedError::MissingTurnBudget [variant]
-    variant_witness(|value: &lash::EmbedError| {
-        matches!(value, lash::EmbedError::MissingTurnBudget)
-    });
     // W0009: lash::TurnExecutionMetrics [struct]
     type_witness::<lash::TurnExecutionMetrics>();
     // W0010: lash::TurnExecutionMetrics::duration_ms [field]

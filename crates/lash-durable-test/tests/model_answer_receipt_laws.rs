@@ -772,14 +772,12 @@ impl Deployment {
         });
         let durable = core
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    MODEL,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(8),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .expect("the session is created");
         Self {

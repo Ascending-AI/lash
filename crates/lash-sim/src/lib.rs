@@ -86,8 +86,8 @@ pub(crate) async fn open_created_session(
             model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
-        )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
         core,
         session_id,
     )
@@ -110,8 +110,8 @@ pub(crate) async fn open_created_finish_required_session(
             model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
         .plugin(
             lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
             lash::rlm::RlmCreateExtras {

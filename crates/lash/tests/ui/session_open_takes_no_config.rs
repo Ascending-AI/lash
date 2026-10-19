@@ -9,8 +9,7 @@ fn open_takes_no_llm_profile(core: lash::LashCore, model: lash::LlmProfileKey) {
         .session_spec(lash::SessionSpec::new(
             model,
             lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        ).no_progress_budget(lash::NoProgressBudget::bounded(12)))
+            lash::MaxToolCalls::new(1024), lash::NoProgressBudget::bounded(12)))
         .open();
 }
 

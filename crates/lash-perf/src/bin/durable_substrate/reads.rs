@@ -485,14 +485,12 @@ async fn measure_with_stores(
         *answers.calls.lock_recover() = 0;
         answers.writes.lock_recover().clear();
         let session_id = lash::SessionId::try_from(format!("{id}-{sample}"))?;
-        let creation = lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        );
+        let creation = lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(64),
+            lash_core::NoProgressBudget::bounded(12),
+        ));
         core.session(session_id.clone()).create(creation).await?;
         let session = core.session(session_id.clone()).open().await?;
         cleanup.settle().await?;

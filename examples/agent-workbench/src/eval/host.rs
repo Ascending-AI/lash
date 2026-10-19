@@ -132,14 +132,12 @@ pub(super) async fn worker(job_path: &Path, phase: &str, fixture: bool) -> Resul
     let id = lash::SessionId::parse("workbench-eval")?;
     let session = if phase == "initial" {
         core.session(id)
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    job.model.model.clone(),
-                    lash::TurnBudget::bounded(8),
-                    lash::MaxToolCalls::new(1),
-                )
-                .no_progress_budget(lash::NoProgressBudget::bounded(2)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                job.model.model.clone(),
+                lash::TurnBudget::bounded(8),
+                lash::MaxToolCalls::new(1),
+                lash::NoProgressBudget::bounded(2),
+            )))
             .await?
     } else {
         core.session(id).durable().await?

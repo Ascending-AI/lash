@@ -270,14 +270,12 @@ pub fn core(
 /// The facade refused.
 pub async fn admit(core: &lash::LashCore) -> Result<(), String> {
     core.session(session())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(8),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .map_err(|error| format!("create the session: {error}"))?
         .send(lash::TurnInput::text(

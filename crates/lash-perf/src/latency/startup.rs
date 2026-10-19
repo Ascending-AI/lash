@@ -159,14 +159,12 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
     .context("startup node registration timed out")?;
     let session = core
         .session(lash::SessionId::try_from("startup-session".to_owned())?)
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                super::runner::latency_llm_profile_spec()?.wire_model,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            super::runner::latency_llm_profile_spec()?.wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await?;
     startup::record(Phase::SessionOpened);
     // The VM helper is a real bounded worker. Spawn/ready are observed by this

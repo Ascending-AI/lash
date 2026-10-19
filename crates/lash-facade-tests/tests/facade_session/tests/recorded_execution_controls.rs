@@ -255,35 +255,4 @@ async fn a_recorded_budget_bounds_every_run_after_an_engine_restart_on_postgres(
     after_a_restart_over(stores).await
 }
 
-/// A creation whose spec states no `max_tool_calls` is refused, typed, and
-/// nothing is created (FIG-4546, FIG-4594): the limit has no default, no
-/// built-in ceiling and no core setting to fall back to.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
-    const ID: &str = "creation-without-max-tool-calls";
-    let core = core_over(sqlite_memory_store_backend().await, mock_provider())?;
-    let mut unstated = mock_session_spec();
-    unstated.max_tool_calls = None;
-    let error = core
-        .session(lash::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(unstated))
-        .await
-        .err()
-        .expect("a creation without max_tool_calls must be refused");
-    assert!(
-        matches!(error, lash::EmbedError::MissingMaxToolCalls),
-        "{error:?}"
-    );
-    assert!(error.is_terminal() && !error.is_retryable(), "{error}");
-    assert!(
-        matches!(
-            core.session(lash::SessionId::parse(ID).expect("nonblank host identity"))
-                .open()
-                .await,
-            Err(lash::EmbedError::UnknownSession { .. })
-        ),
-        "the refused creation wrote no session"
-    );
-    Ok(())
-}
 const RUNAWAY_CALLS: usize = 100;

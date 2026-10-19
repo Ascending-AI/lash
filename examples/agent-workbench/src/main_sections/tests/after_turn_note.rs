@@ -69,8 +69,8 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
     .plugin(
         "agent_workbench",
         workbench_session_prompt(

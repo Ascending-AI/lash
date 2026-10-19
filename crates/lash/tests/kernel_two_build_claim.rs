@@ -507,14 +507,12 @@ async fn session(core: &lash::LashCore, id: &str) -> lash::LashSession {
     let id = lash::SessionId::parse(id).expect("a session id");
     match core
         .session(id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

@@ -779,14 +779,12 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "artifact-referrers",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "artifact-referrers",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
     {
         Ok(_)

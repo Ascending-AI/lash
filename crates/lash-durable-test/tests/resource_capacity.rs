@@ -113,14 +113,12 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
 
     let session = core
         .session(lash_core::SessionId::fixture(format!("capacity-{run}")))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(16),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("the session is created");
     let answered = tokio::time::timeout(

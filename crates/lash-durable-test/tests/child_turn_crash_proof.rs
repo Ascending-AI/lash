@@ -109,8 +109,8 @@ fn spec() -> lash::SessionSpec {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
+        lash_core::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 struct ChildTurn {
@@ -170,8 +170,7 @@ impl ChildTurn {
     async fn register(&self) -> Result<ProcessId, String> {
         let request = SessionCreateRequest::root(SessionStartPoint::Empty, Default::default())
             .with_session_id(child())
-            .with_spec(&spec())
-            .map_err(|error| format!("state the child's spec: {error}"))?;
+            .with_spec(&spec());
         let registration = ProcessRegistration::new(
             ProcessInput::SessionTurn {
                 definition_key: "child-turn".to_owned(),

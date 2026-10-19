@@ -315,14 +315,12 @@ mod tests {
             ))?;
         let id = lash::SessionId::parse("s30").expect("nonblank host identity");
         core.session(id.clone())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    "consumer",
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(8),
-                )
-                .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                "consumer",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+                lash::NoProgressBudget::bounded(12),
+            )))
             .await?;
         let session = core.session(id).open().await?;
         for (ordinal, key) in ["first", "second"].into_iter().enumerate() {

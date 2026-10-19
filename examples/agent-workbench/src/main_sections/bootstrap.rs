@@ -363,11 +363,9 @@ pub(crate) fn workbench_session_defaults(
         selection.key(),
         lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS),
     )
     .reasoning(selection.reasoning())
-    .no_progress_budget(lash::NoProgressBudget::bounded(
-        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-    ))
     .generation(lash::direct::GenerationOptions {
         output_token_cap,
         ..Default::default()

@@ -338,14 +338,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let id = lash::SessionId::try_from(format!("replay-{}-{index}", workload.name))
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         core.session(id.clone())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    provider::MODEL,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1_000_000),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                provider::MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1_000_000),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .map_err(|error| anyhow::anyhow!("create {id}: {error}"))?;
         let session = core

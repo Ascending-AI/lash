@@ -370,8 +370,8 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
                 "mock-model",
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12))
             .plugin_options(plugin_options),
         ))
         .await

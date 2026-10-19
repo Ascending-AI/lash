@@ -15,18 +15,9 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
         "test-model",
         lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
         lash::MaxToolCalls::new(1024),
-    )
-    .no_progress_budget(lash::NoProgressBudget::bounded(
-        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-    ));
-    let expected_workbench_bound = Some(lash::NoProgressBudget::bounded(
-        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-    ));
-    assert_eq!(spec.no_progress_budget, expected_workbench_bound);
-
-    let policy = spec
-        .stated_root_policy()
-        .expect("a root spec states its policy without a catalog");
+        lash::NoProgressBudget::bounded(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS),
+    );
+    let policy = spec.stated_root_policy();
     assert_eq!(policy.turn_budget.max_turns(), Some(WORKBENCH_MAX_TURNS));
     let resolved_attempts = policy.no_progress_budget.max_attempts();
     assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));

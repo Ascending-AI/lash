@@ -32,8 +32,8 @@ pub fn session_spec_for(metadata: &lash_core::LlmProfileMetadata) -> lash::Sessi
         metadata.wire_model.clone(),
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12))
 }
 
 /// `metadata` as [`test_catalog`] records it, run with the provider's default

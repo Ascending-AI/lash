@@ -498,8 +498,8 @@ mod tests {
                 model.wire_model.clone(),
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
             .generation(GenerationOptions {
                 stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()

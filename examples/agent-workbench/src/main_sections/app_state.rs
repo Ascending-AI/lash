@@ -1116,7 +1116,7 @@ mod app_error_tests {
             "test",
             || {
                 attempts += 1;
-                std::future::ready(Err::<(), _>(lash::EmbedError::MissingLlmProfile))
+                std::future::ready(Err::<(), _>(lash::EmbedError::MissingProtocolPlugin))
             },
             |_, _| {},
         )

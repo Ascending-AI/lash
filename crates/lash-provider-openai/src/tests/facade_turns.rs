@@ -66,14 +66,12 @@ pub(super) async fn session(
     session_id: &str,
 ) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                model,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("the session is created")
 }
@@ -401,8 +399,8 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
                     "mixed-recovery",
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
                 )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
                 .charge_safety(
                     lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
                         max_unsafe_retries: 1,

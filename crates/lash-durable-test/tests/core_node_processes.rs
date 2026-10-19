@@ -201,8 +201,8 @@ fn spec() -> lash::SessionSpec {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(16),
+        lash_core::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 /// A text answer, streamed as one delta.

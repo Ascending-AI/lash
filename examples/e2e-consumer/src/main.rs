@@ -61,8 +61,8 @@ async fn submit(
         "consumer",
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(8),
-    )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12));
+        lash::NoProgressBudget::bounded(12),
+    );
     match host
         .core
         .session(session_id.clone())

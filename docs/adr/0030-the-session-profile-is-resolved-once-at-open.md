@@ -39,10 +39,9 @@ controls and tool access; each plugin's commands cover its own namespace.
 The execution controls are the turn budget, the no-progress budget
 and charge safety. They are session configuration like the model. The creator
 states them in `SessionCreation::spec`. A core keeps no session defaults
-(FIG-4594): `SessionSpec::new(model, turn_budget, max_tool_calls)` takes the
-three initial parts of the spec; the host also states a no-progress bound
-with `no_progress_budget`, and a host that wants a default keeps its own `SessionSpec` value
-and passes it.
+(FIG-4594): `SessionSpec::new(model, turn_budget, max_tool_calls,
+no_progress_budget)` takes the four required parts of the spec, and a host
+that wants a default keeps its own `SessionSpec` value and passes it.
 Every root creation takes an explicit spec, a host-started session-turn
 process start included; one that states none is refused typed
 (`SessionTurnStartUnspecified`). Everything else lash creates derives from a

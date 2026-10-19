@@ -97,14 +97,12 @@ async fn session_capture_world(cut: Option<(CommitLabel, usize)>) -> (V0, Vec<Ob
 
     let core = scenario.core();
     core.session(session())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(64),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(64),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("create the session");
     let live = core

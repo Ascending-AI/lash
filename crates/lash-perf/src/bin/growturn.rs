@@ -289,14 +289,12 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
                 let id = lash::SessionId::try_from(format!("growturn-session-{ordinal}"))?;
                 let session = core
                     .session(id.clone())
-                    .create(lash::SessionCreation::root(
-                        lash::SessionSpec::new(
-                            MODEL,
-                            lash::TurnBudget::Unbounded,
-                            lash::MaxToolCalls::new(args.rounds * 2 + 10),
-                        )
-                        .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-                    ))
+                    .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                        MODEL,
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(args.rounds * 2 + 10),
+                        lash::NoProgressBudget::bounded(12),
+                    )))
                     .await?;
                 meter.sample(&format!("opened-{ordinal}"), 0)?;
                 let handle = session
@@ -349,14 +347,12 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
         Phase::Start => {
             let session = core
                 .session(session_id()?)
-                .create(lash::SessionCreation::root(
-                    lash::SessionSpec::new(
-                        MODEL,
-                        lash::TurnBudget::Unbounded,
-                        lash::MaxToolCalls::new(args.rounds * 2 + 10),
-                    )
-                    .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-                ))
+                .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(args.rounds * 2 + 10),
+                    lash::NoProgressBudget::bounded(12),
+                )))
                 .await?;
             let handle = session
                 .send(lash::TurnInput::text("measure one growing turn"))

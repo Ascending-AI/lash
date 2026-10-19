@@ -48,11 +48,6 @@ pub enum EmbedError {
     /// it names another plugin than its factory, or cannot write the format
     /// it reads natively (FIG-4744). Nothing is built.
     PluginDeclaration(#[from] lash_execution_contracts::declaration_error::PluginDeclarationError),
-    #[error("a model key is required; a root session's spec must name a registered model")]
-    /// Returned when a creation's spec states no model: an overlay
-    /// passed where a
-    /// root session is created. Nothing is created.
-    MissingLlmProfile,
     #[error(transparent)]
     /// Returned when a creation's model key has no binding in the host's
     /// models. Nothing is created.
@@ -61,22 +56,6 @@ pub enum EmbedError {
     /// Returned when a creation spec records reasoning its model's recorded
     /// capability refuses. Nothing is created.
     ReasoningRefused(lash_core::ReasoningRefused),
-    #[error(
-        "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
-    )]
-    /// Returned when a creation's spec states no turn budget: an overlay
-    /// passed where a
-    /// root session is created. Nothing is created.
-    MissingTurnBudget,
-    #[error(
-        "max_tool_calls is required; SessionSpec must carry a MaxToolCalls: the total tool calls one cell may make, and the number a process may hold at once"
-    )]
-    /// Returned when the session has no explicit tool-call limit. There is
-    /// no default and no built-in ceiling.
-    MissingMaxToolCalls,
-    /// The creator must choose a bound on consecutive unproductive attempts.
-    #[error("no_progress_budget is required; choose a bound or explicit unbounded execution")]
-    MissingNoProgressBudget,
     #[error(transparent)]
     /// Returned when run options a send states for a config owner do not
     /// serialize (FIG-6021). Nothing is accepted.
@@ -571,12 +550,8 @@ impl EmbedError {
             | Self::PluginDeclaration(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
-            | Self::MissingLlmProfile
             | Self::LlmProfileUnknown(_)
             | Self::ReasoningRefused(_)
-            | Self::MissingTurnBudget
-            | Self::MissingMaxToolCalls
-            | Self::MissingNoProgressBudget
             | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
@@ -606,7 +581,7 @@ impl EmbedError {
     /// The terminal set includes:
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
-    ///   default model key or an unknown one, turn budget, commit budget, queued-work composition,
+    ///   an unknown model key, commit budget, queued-work composition,
     ///   handler context, and an obligation kind no relay can deliver) — the
     ///   same call fails
     ///   identically until the host changes its wiring;
@@ -640,12 +615,8 @@ impl EmbedError {
             | Self::WorkflowObservation(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
-            | Self::MissingLlmProfile
             | Self::LlmProfileUnknown(_)
             | Self::ReasoningRefused(_)
-            | Self::MissingTurnBudget
-            | Self::MissingMaxToolCalls
-            | Self::MissingNoProgressBudget
             | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
@@ -1050,8 +1021,6 @@ mod tests {
                 plugin_backend: "other".to_string(),
                 backend: "backend".to_string(),
             },
-            EmbedError::MissingTurnBudget,
-            EmbedError::MissingMaxToolCalls,
             EmbedError::SessionTurnStartUnspecified {
                 unstated: lash_execution_contracts::session_types::UnstatedSessionConfig::Policy,
             },

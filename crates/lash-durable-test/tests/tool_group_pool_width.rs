@@ -358,14 +358,12 @@ impl Scenario for Wide {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    MODEL,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(WIDTH),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(WIDTH),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

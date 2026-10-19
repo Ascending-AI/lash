@@ -114,14 +114,12 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
 /// The facade refused.
 pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> Result<(), String> {
     core.session(session.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(8),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .map_err(|error| format!("create the prompt session: {error}"))?
         .send(lash::TurnInput::text("remember"))

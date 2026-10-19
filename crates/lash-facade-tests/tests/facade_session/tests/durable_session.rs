@@ -1832,8 +1832,8 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
         mock_llm_profile_spec().wire_model,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1),
-    )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12));
+        lash::NoProgressBudget::bounded(12),
+    );
     core.session(id("finish-at-the-limit"))
         .create(lash::SessionCreation::root(spec))
         .await?;

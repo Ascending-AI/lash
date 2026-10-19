@@ -14,8 +14,7 @@ fn a_spec_selects_a_key_not_metadata(model: lash::LlmProfileMetadata) {
     let _ = lash::SessionSpec::new(
         model,
         lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    ).no_progress_budget(lash::NoProgressBudget::bounded(12));
+        lash::MaxToolCalls::new(1024), lash::NoProgressBudget::bounded(12));
 }
 
 fn a_session_takes_no_transport(core: lash::LashCore, provider: lash::provider::ProviderHandle) {

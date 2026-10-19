@@ -137,14 +137,12 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .expect("build the config-change core");
     let session_id = lash::SessionId::from("workbench-config-change-session");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "workbench-model-before",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(8),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "workbench-model-before",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("create the config-change session");
     let session = core

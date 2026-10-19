@@ -442,14 +442,12 @@ async fn sample_with_stores(
     ))?;
     let session = core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "heap-meter",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(16),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(4)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "heap-meter",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash::NoProgressBudget::bounded(4),
+        )))
         .await?;
     let handle = session
         .send(lash::TurnInput::text("measure retained state"))

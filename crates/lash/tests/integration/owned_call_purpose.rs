@@ -271,8 +271,8 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
                 MODEL,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+                lash::NoProgressBudget::bounded(12),
+            ),
             prompt_plan: Some(PromptPlan {
                 placements: vec![PromptSectionPlacement {
                     section: PromptSectionId::new(

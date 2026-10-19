@@ -139,8 +139,8 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             model.wire_model.clone(),
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
-        )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
         &core,
         "history-request-snapshot",
     )

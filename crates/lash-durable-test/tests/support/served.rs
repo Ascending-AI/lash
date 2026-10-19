@@ -158,8 +158,8 @@ pub fn spec(max_tool_calls: usize) -> lash::SessionSpec {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(max_tool_calls),
+        lash_core::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
 }
 
 /// Every scenario's script and the requests the model was asked in it,

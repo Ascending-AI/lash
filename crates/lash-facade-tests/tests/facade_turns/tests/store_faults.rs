@@ -917,7 +917,6 @@ mod sweep {
                         lash_core::PluginOptions::default(),
                     )
                     .with_spec(&mock_session_spec())
-                    .expect("a root spec")
                     .with_session_id(ID),
                     TurnInput::text("first"),
                     lash_execution_contracts::process::SessionTurnOutcome::FinalValue {
@@ -1588,7 +1587,6 @@ mod sweep {
                         lash_core::PluginOptions::default(),
                     )
                     .with_spec(&mock_session_spec())
-                    .expect("a root spec")
                     .with_session_id(CHILD),
                     TurnInput::text("run the committed child"),
                     lash_execution_contracts::process::SessionTurnOutcome::Turn,

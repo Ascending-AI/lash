@@ -124,8 +124,8 @@ async fn probe_session(
                 model.wire_model,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
+                lash_core::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
             .charge_safety(charge_safety),
         ))
         .await
@@ -390,8 +390,8 @@ mod tests {
                 "usage-model",
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(8),
+                lash::NoProgressBudget::bounded(12),
             )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12))
         };
         let parent_id = lash::SessionId::fixture("usage-parent");
         let parent = core

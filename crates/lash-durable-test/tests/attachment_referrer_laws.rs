@@ -194,8 +194,7 @@ impl BlobTools {
                 lash_core::SessionStartPoint::Empty,
                 lash_core::PluginOptions::default(),
             )
-            .with_spec(&served::spec(1024))
-            .map_err(|error| error.to_string())?;
+            .with_spec(&served::spec(1024));
         // The child runs in the session its process id derives.
         create_request.session_id = None;
         let declaration = lash_execution_contracts::process::ProcessStartDeclaration::session_turn(
@@ -1254,8 +1253,7 @@ fn host_start(
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
-        .with_spec(&served::spec(1024))
-        .expect("a root spec states its model and turn budget"),
+        .with_spec(&served::spec(1024)),
         lash::TurnInput::text("read the host upload").with_attachment(input),
         lash_execution_contracts::process::SessionTurnOutcome::Turn,
         lash_execution_contracts::process::ProcessOriginator::host(),

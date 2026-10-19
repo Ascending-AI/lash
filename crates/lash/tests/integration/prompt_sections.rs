@@ -752,14 +752,12 @@ async fn diagnostics_executes_no_plugin() {
     .unwrap();
     let session_id = lash::SessionId::from("diagnostics-observer");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .unwrap();
     let session = core.session(session_id.clone()).open().await.unwrap();

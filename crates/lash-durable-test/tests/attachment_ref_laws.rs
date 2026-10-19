@@ -337,8 +337,8 @@ async fn send(url: bool, tools: bool) -> Sent {
         MODEL,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(4),
+        lash_core::NoProgressBudget::bounded(12),
     )
-    .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     .attachment_acceptance(Arc::new(catalogue()));
     core.session(id.clone())
         .create(lash::SessionCreation::root(spec))
@@ -595,14 +595,12 @@ async fn tool_put_receipts_match_session_delivery_advice() {
         .unwrap();
     let id = lash::SessionId::from("put-receipt-law");
     core.session(id.clone())
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(4),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(4),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
         .await
         .unwrap();
     let session = core.session(id).open().await.unwrap();

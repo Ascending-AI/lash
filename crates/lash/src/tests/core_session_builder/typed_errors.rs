@@ -410,24 +410,6 @@ async fn a_created_session_records_the_revision_retention_its_host_states() {
     }
 }
 
-/// FIG-5431: a creator must choose the session's stall bound.
-#[tokio::test]
-async fn a_session_without_a_stall_bound_is_refused() {
-    let core = standard_core_over(sqlite_memory_store_backend().await);
-    let spec = crate::SessionSpec::new(
-        mock_llm_profile_spec().wire_model,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    );
-    assert!(matches!(
-        core.session(crate::SessionId::from("no-stall-choice"))
-            .create(crate::SessionCreation::root(spec))
-            .await,
-        Err(EmbedError::MissingNoProgressBudget)
-    ));
-    core.shutdown().await.expect("shutdown");
-}
-
 /// FIG-5431: a retry after a lost acknowledgement reattaches to one mutation.
 #[tokio::test]
 async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {

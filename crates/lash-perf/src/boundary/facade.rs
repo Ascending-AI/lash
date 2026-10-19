@@ -18,8 +18,8 @@ pub(super) fn spec() -> Result<lash::SessionSpec> {
         metadata()?.wire_model,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
-    )
-    .no_progress_budget(lash::NoProgressBudget::bounded(12)))
+        lash::NoProgressBudget::bounded(12),
+    ))
 }
 pub(super) fn backend(
     stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,

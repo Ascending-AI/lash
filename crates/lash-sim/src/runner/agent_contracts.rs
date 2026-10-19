@@ -357,8 +357,8 @@ await task.fail({ reason: "parent observed child failure" });
             "lash_runtime agent failed child graph",
             lash::TurnBudget::bounded(1),
             lash::MaxToolCalls::new(1024),
-        )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
         &core,
         "sim-agent-failed-child-contract",
     )
@@ -643,8 +643,8 @@ async fn facade_agent_process_execution_with_options(
             provider_kind,
             max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded),
             lash::MaxToolCalls::new(1024),
-        )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            lash_core::NoProgressBudget::bounded(12),
+        ),
         &core,
         session_id,
     )
@@ -937,8 +937,8 @@ fn agent_contract_delegation_plugin(
                 provider_kind,
                 lash::TurnBudget::bounded(1),
                 lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
             lash_execution_contracts::process::lifetime::starter,
         )
         .with_rlm_children()

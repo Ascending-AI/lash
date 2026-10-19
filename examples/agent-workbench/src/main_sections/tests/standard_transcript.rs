@@ -113,14 +113,12 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
         .expect("core");
     let session = core
         .session(lash::SessionId::from(MODEL))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(8),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await
         .expect("session");
     let turn_id = TurnId::from("standard-transcript-turn");

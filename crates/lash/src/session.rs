@@ -40,7 +40,8 @@ pub struct SessionBuilder {
 #[derive(Clone, Debug)]
 pub struct SessionCreation {
     /// The session's execution config, stated by its creator (FIG-4594): the
-    /// model key, turn budget and tool-call limit [`SessionSpec::new`] takes, and reasoning,
+    /// model key, turn budget, tool-call limit and stall bound
+    /// [`SessionSpec::new`] takes, and reasoning,
     /// attachment acceptance, generation, the other execution controls and
     /// plugin creation options as its setters state them. Nothing of the
     /// core stands beneath it; a field left unstated takes the neutral value
@@ -196,11 +197,7 @@ impl SessionBuilder {
     ///
     /// The creation spec's model key is minted into a recorded binding here,
     /// through the core's models; a key they do not register is refused with
-    /// [`EmbedError::LlmProfileUnknown`] and nothing is created. A spec that
-    /// omits its model, turn budget, tool-call limit or stall bound is refused with
-    /// [`EmbedError::MissingLlmProfile`], [`EmbedError::MissingTurnBudget`],
-    /// [`EmbedError::MissingMaxToolCalls`] or [`EmbedError::MissingNoProgressBudget`]:
-    /// a creation has no base to take them from.
+    /// [`EmbedError::LlmProfileUnknown`] and nothing is created.
     ///
     /// An id the catalog already holds is refused with
     /// [`EmbedError::SessionAlreadyExists`], always — even when a retry states
@@ -371,19 +368,6 @@ impl SessionBuilder {
             .map_err(|error| match error {
                 lash_execution_contracts::session_spec::SpecResolveError::Model(error) => {
                     EmbedError::LlmProfileUnknown(error)
-                }
-                lash_execution_contracts::session_spec::SpecResolveError::ReasoningWithoutLlmProfile
-                | lash_execution_contracts::session_spec::SpecResolveError::RootWithoutLlmProfile => {
-                    EmbedError::MissingLlmProfile
-                }
-                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutTurnBudget => {
-                    EmbedError::MissingTurnBudget
-                }
-                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutMaxToolCalls => {
-                    EmbedError::MissingMaxToolCalls
-                }
-                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutNoProgressBudget => {
-                    EmbedError::MissingNoProgressBudget
                 }
                 lash_execution_contracts::session_spec::SpecResolveError::Reasoning(error) => {
                     EmbedError::ReasoningRefused(error)

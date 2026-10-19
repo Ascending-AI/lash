@@ -42,14 +42,12 @@ fn provider() -> lash::provider::ProviderHandle {
 async fn send(core: &lash::LashCore, id: &str) -> Result<()> {
     let session = core
         .session(lash::SessionId::fixture(id))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "socket",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(16),
-            )
-            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
-        ))
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "socket",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(16),
+            lash::NoProgressBudget::bounded(12),
+        )))
         .await?;
     let handle = session
         .send(lash::TurnInput::text("export this answer"))

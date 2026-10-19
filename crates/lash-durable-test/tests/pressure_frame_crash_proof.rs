@@ -426,14 +426,12 @@ impl PressureFrame {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    MODEL,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(64),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(64),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         for (input, run) in [(ASK, FIRST_RUN), (NEXT, SECOND_RUN)] {
@@ -1160,14 +1158,12 @@ impl Scenario for PromptUsage {
         let session = self
             .core()
             .session(usage_session())
-            .create(lash::SessionCreation::root(
-                lash::SessionSpec::new(
-                    MODEL,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(64),
-                )
-                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            ))
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(64),
+                lash_core::NoProgressBudget::bounded(12),
+            )))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session

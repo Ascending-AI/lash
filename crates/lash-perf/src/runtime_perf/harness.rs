@@ -105,8 +105,8 @@ impl BenchmarkCore {
             benchmark_llm_profile_spec().wire_model,
             turn_budget,
             lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
         )
-        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     }
 
     /// Create a benchmark's fresh session with `creation`, then open it.
@@ -854,8 +854,8 @@ fn benchmark_plugin_factories(
                 benchmark_llm_profile_spec().wire_model,
                 turn_budget,
                 lash::MaxToolCalls::new(1024),
-            )
-            .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+                lash_core::NoProgressBudget::bounded(12),
+            ),
             lash_execution_contracts::process::lifetime::starter,
         );
         let delegation = if scenario.execution_mode().is_rlm() {
