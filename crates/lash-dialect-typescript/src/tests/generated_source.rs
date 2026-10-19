@@ -380,8 +380,8 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
             "not a kernel source statement",
         ),
         (
-            HAND_WRITTEN.replace("function worker()", "function worker(): any"),
-            "annotat",
+            HAND_WRITTEN.replace("let kernel_name_1 =", "let kernel_name_1: any ="),
+            "kernel bindings have no type or optional marker",
         ),
         (
             HAND_WRITTEN.replace("return 7;", "return helper_unknown(7);"),
@@ -402,6 +402,12 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
         );
         assert!(error.message.contains(expected), "{source}: {error}");
     }
+    // Declared function annotations may carry field captions (FIG-6824).
+    // The base still supplies the entry signature; body binding annotations
+    // above remain outside the generated-source subset.
+    let annotated = HAND_WRITTEN.replace("function worker()", "function worker(): any");
+    let (read, _) = crate::read(&annotated, &base, Default::default()).unwrap();
+    assert_eq!(read.canonical_bytes(), base.canonical_bytes());
     let mut extra_entry = base.clone();
     extra_entry.functions.insert(
         "helper".into(),
