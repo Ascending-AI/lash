@@ -14,7 +14,7 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     Args, Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, Integer,
     KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
-    RegistryError, Signature, TextView, Type, Value,
+    PreparedNative, RegistryError, Signature, TextView, Type, Value,
 };
 
 pub use json::{decode_number, parse_json, stringify_json};
@@ -25,6 +25,9 @@ struct Native {
     function: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
     /// From the required parameters to all of them (`K-FN-004`).
     arity: std::ops::RangeInclusive<usize>,
+    /// Its entry over immediates, which answers what the general call
+    /// answers where it needs no arena.
+    prepared: Option<PreparedNative>,
 }
 
 impl NativeFunction for Native {
@@ -33,6 +36,10 @@ impl NativeFunction for Native {
             return Err(raise("arity", "wrong argument count"));
         }
         (self.function)(call)
+    }
+
+    fn prepare(&self) -> Option<PreparedNative> {
+        self.prepared
     }
 }
 
@@ -70,6 +77,19 @@ fn definition(
     result: Type,
     errors: &[&str],
     native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
+) -> Function {
+    prepared_definition(name, params, result, errors, native, None)
+}
+
+/// [`definition`], its native answering first by `prepared` where that
+/// entry's guard holds.
+fn prepared_definition(
+    name: &str,
+    params: &[(&str, Type)],
+    result: Type,
+    errors: &[&str],
+    native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
+    prepared: Option<PreparedNative>,
 ) -> Function {
     // All names are literals supplied by this module, or literals followed by
     // decimal Unicode-version components; none comes from guest input.
@@ -110,6 +130,7 @@ fn definition(
         Arc::new(Native {
             function: native,
             arity,
+            prepared,
         }),
     )
 }

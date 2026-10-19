@@ -4,7 +4,8 @@
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
 
-use crate::data::{holds_nothing, size_one};
+use super::regions::Fresh;
+use crate::data::{empty_measure, holds_nothing, immediate_measure, size_one};
 
 /// What a formula's operand measures: an argument by its position, the
 /// result, or a parameter the function does not have, which measures 0.
@@ -488,6 +489,35 @@ impl Fast {
     /// The scalar charge table, when the formula has one.
     pub(crate) fn scalar(&self) -> Option<&ScalarTable> {
         self.scalar.as_ref()
+    }
+
+    /// What the formula charges a call with `args` that returned `result`
+    /// when it is a sum of measurements and every value it measures
+    /// carries its measurements: one the arena holds nothing of
+    /// ([`immediate_measure`]), or an argument `fresh` names, a
+    /// construction of no members ([`empty_measure`]). Neither holds
+    /// another value, so the shallow formula computes for them what the
+    /// formula does. `None` for another formula, or where a measured
+    /// value is one the arena measures.
+    #[inline(always)]
+    pub(crate) fn immediate(&self, args: &[Value], fresh: Fresh, result: &Value) -> Option<u64> {
+        let Some(Linear::Sum(constant)) = self.shallow.linear else {
+            return None;
+        };
+        let mut sum = constant;
+        for (source, measure) in &self.shallow.measurements {
+            let units = match *source {
+                Source::Arg(index) if fresh.empty(index) => empty_measure(*measure),
+                Source::Arg(index) => match args.get(index) {
+                    Some(value) => immediate_measure(value, *measure)?,
+                    None => 0,
+                },
+                Source::Result => immediate_measure(result, *measure)?,
+                Source::Nothing => 0,
+            };
+            sum = sum.saturating_add(units);
+        }
+        Some(sum)
     }
 
     /// How to charge a call with `args` that returned `result`: what

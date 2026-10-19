@@ -14,7 +14,7 @@ use lash_kernel_vm::{
     Bounds, End, Host, Machine, Meters, PreparedLibrary, Program, Step, register_machine_functions,
 };
 
-use crate::{register_collections, register_numbers};
+use crate::{register_collections, register_numbers, register_text_json};
 
 const BOUNDS: Bounds = Bounds {
     memory_meter: lash_kernel_vm::MemoryMeter::On,
@@ -61,6 +61,7 @@ impl Libraries {
         register_machine_functions(&mut registry).unwrap();
         register_numbers(&mut registry).unwrap();
         register_collections(&mut registry).unwrap();
+        register_text_json(&mut registry).unwrap();
         let registry = Arc::new(registry);
         Self {
             fast: PreparedLibrary::new(Arc::clone(&registry)),
@@ -153,6 +154,27 @@ fn charge_invariance() {
         let corpus = if arity > 2 { &corpus[..5] } else { &corpus[..] };
         libraries.agree_on_all(name, arity, corpus);
     }
+}
+
+/// K-LIB-006: `text.concat`'s prepared entry answers two short texts whose
+/// concatenation a short text holds, with the text the general call
+/// answers: the prepared and general runs give the same result, error,
+/// charge and memory up to the short text's bound, across it and past it,
+/// with multi-byte scalars and with an operand that is no text.
+#[test]
+fn short_concatenation_is_the_general_calls() {
+    let libraries = Libraries::new();
+    let corpus = [
+        "\"\"",
+        "\"key_\"",
+        "\"63\"",
+        "\"\u{1F600}x\"",
+        "\"seven 7\"",
+        "\"fourteen bytes\"",
+        "\"fifteen bytes!!\"",
+        "7",
+    ];
+    libraries.agree_on_all("text.concat", 2, &corpus);
 }
 
 /// K-LIB-006: a word's digits that a short text holds are answered by the

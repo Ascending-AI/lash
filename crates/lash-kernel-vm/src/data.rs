@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{Chunk, HeapFault, IntRef, PageReader, PageValue, TextRef};
-use lash_kernel_doc::{Datum, EntityId, ErrorDatum, Integer, NativeError, Value};
+use lash_kernel_doc::{Datum, EntityId, ErrorDatum, Integer, Measure, NativeError, Value};
 use lash_kernel_state::arena::Arena;
 use num_traits::ToPrimitive;
 use std::ops::ControlFlow;
@@ -42,9 +42,10 @@ fn integer_of(arena: &Arena, value: &Value) -> Result<Option<Integer>, NativeErr
 
 /// A value's size (`K-CHG-004`), from what the arena knows of it.
 pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    if let Some(size) = immediate_size(value) {
+        return Ok(size);
+    }
     let extent = match value {
-        // A word's magnitude takes at most one word; zero takes none.
-        Value::Int(word) => u64::from(*word != 0),
         Value::BigInt(_) => {
             integer_of(arena, value)?.map_or(0, |integer| integer.bits().div_ceil(64))
         }
@@ -70,6 +71,45 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
         _ => 0,
     };
     Ok(extent.saturating_add(1))
+}
+
+/// The size of a value the arena holds nothing of (`K-CHG-004`): a word,
+/// a short text or a value of size 1; `None` for one the arena measures.
+#[inline(always)]
+pub(crate) fn immediate_size(value: &Value) -> Option<u64> {
+    let extent = match value {
+        // A word's magnitude takes at most one word; zero takes none.
+        Value::Int(word) => u64::from(*word != 0),
+        Value::Text(short) => short.as_bytes().len() as u64,
+        value if size_one(value) => 0,
+        _ => return None,
+    };
+    Some(extent + 1)
+}
+
+/// `measure` of a value the arena holds nothing of, as [`size`],
+/// [`deep_size`], [`nested_size`] and [`magnitude`] measure it: such a
+/// value holds no other, so its deep size is its size and its nested size
+/// 0 (`K-CHG-005`, `K-CHG-006`). `None` for a value the arena measures.
+#[inline(always)]
+pub(crate) fn immediate_measure(value: &Value, measure: Measure) -> Option<u64> {
+    let size = immediate_size(value)?;
+    Some(match measure {
+        Measure::Size | Measure::DeepSize => size,
+        Measure::NestedSize => 0,
+        Measure::Magnitude => word_magnitude(value),
+    })
+}
+
+/// `measure` of a construction of no members, of any kind: what
+/// [`size`], [`deep_size`], [`nested_size`] and [`magnitude`] measure of
+/// an empty tuple, list, set, map or record, which holds no other value.
+#[inline(always)]
+pub(crate) fn empty_measure(measure: Measure) -> u64 {
+    match measure {
+        Measure::Size | Measure::DeepSize => 1,
+        Measure::NestedSize | Measure::Magnitude => 0,
+    }
 }
 
 fn text_len(arena: &Arena, text: &Value) -> Result<u64, NativeError> {
@@ -241,11 +281,20 @@ pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeErr
 
 pub(crate) fn magnitude(arena: &Arena, value: &Value) -> u64 {
     match value {
-        Value::Int(word) => u64::try_from(*word).unwrap_or(0),
         Value::BigInt(_) => match integer_of(arena, value) {
             Ok(Some(integer)) if !integer.is_negative() => integer.to_u64().unwrap_or(u64::MAX),
             _ => 0,
         },
+        value => word_magnitude(value),
+    }
+}
+
+/// The magnitude of a value that is no big integer: a word's or a
+/// finite non-negative float's, truncated; 0 for any other.
+#[inline(always)]
+fn word_magnitude(value: &Value) -> u64 {
+    match value {
+        Value::Int(word) => u64::try_from(*word).unwrap_or(0),
         Value::Float(f) if f.get().is_finite() && f.get() >= 0.0 => f.get() as u64,
         _ => 0,
     }
@@ -554,4 +603,88 @@ fn copy_page(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_kernel_doc::{Datum, Float, Integer, Measure, Value};
+    use lash_kernel_state::arena::Bench;
+
+    use super::{deep_size, empty_measure, immediate_measure, magnitude, nested_size, size};
+
+    const MEASURES: [Measure; 4] = [
+        Measure::Size,
+        Measure::DeepSize,
+        Measure::NestedSize,
+        Measure::Magnitude,
+    ];
+
+    /// K-CHG-004 to K-CHG-006: what a value carries of its measurements is
+    /// what the arena measures of it. A construction of no members, of
+    /// every kind, measures as [`empty_measure`] says; a value the arena
+    /// holds nothing of measures as [`immediate_measure`] says, and every
+    /// other value is the arena's to measure.
+    #[test]
+    fn carried_measurements_are_the_arenas() {
+        let mut bench = Bench::new();
+        let measured = |bench: &Bench, value: &Value, measure: Measure| {
+            let arena = bench.arena();
+            match measure {
+                Measure::Size => size(arena, value),
+                Measure::DeepSize => deep_size(arena, value),
+                Measure::NestedSize => nested_size(arena, value),
+                Measure::Magnitude => Ok(magnitude(arena, value)),
+            }
+            .unwrap()
+        };
+        for empty in [
+            Datum::Tuple(Vec::new()),
+            Datum::List(Vec::new()),
+            Datum::Set(Vec::new()),
+            Datum::Map(Vec::new()),
+            Datum::Record(Vec::new()),
+        ] {
+            let value = bench.build(&empty).unwrap();
+            for measure in MEASURES {
+                assert_eq!(
+                    empty_measure(measure),
+                    measured(&bench, &value, measure),
+                    "{empty:?} {measure:?}"
+                );
+            }
+        }
+        for datum in [
+            Datum::Null,
+            Datum::Absent,
+            Datum::Bool(true),
+            Datum::Int(Integer::from(0)),
+            Datum::Int(Integer::from(-7)),
+            Datum::Int(Integer::from(i64::MAX)),
+            Datum::Int(Integer::try_from(String::from("9223372036854775808")).unwrap()),
+            Datum::Float(Float::new(2.75)),
+            Datum::Float(Float::new(-1.5)),
+            Datum::Float(Float::new(f64::INFINITY)),
+            Datum::Text(String::new()),
+            Datum::Text("fourteen bytes".into()),
+            Datum::Text("fifteen bytes!!".into()),
+            Datum::Tuple(vec![Datum::Int(Integer::from(1))]),
+            Datum::List(vec![Datum::Text("a".into())]),
+        ] {
+            let value = bench.build(&datum).unwrap();
+            for measure in MEASURES {
+                if let Some(carried) = immediate_measure(&value, measure) {
+                    assert_eq!(
+                        carried,
+                        measured(&bench, &value, measure),
+                        "{datum:?} {measure:?}"
+                    );
+                } else {
+                    assert!(
+                        value.handle().is_some(),
+                        "{datum:?} {measure:?}: only an arena object is the arena's to measure"
+                    );
+                }
+            }
+        }
+    }
 }

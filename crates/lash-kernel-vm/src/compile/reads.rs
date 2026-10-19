@@ -3,6 +3,8 @@
 //! guard. A changed object or shape verifies the entry's complete key before
 //! reusing its position. Caches are process-local and empty on restore.
 
+use std::borrow::Cow;
+
 use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
@@ -59,13 +61,14 @@ pub(crate) struct PropertySlot {
 
 /// Reads through a proved position without normalizing or hashing a key.
 /// On a changed object/shape the full entry key must match; otherwise the
-/// canonical index supplies the fallback. Long keys use that index always.
-pub(crate) fn find(
+/// canonical index supplies the fallback, by the key `key` gives: one the
+/// caller holds is lent, not copied. Long keys use that index always.
+pub(crate) fn find<'k>(
     arena: &Arena,
     record: ArenaHandle,
     slot: Option<PropertySlot>,
     name: &[u8],
-    key: impl FnOnce() -> Result<NormalKey, NativeError>,
+    key: impl FnOnce() -> Result<Cow<'k, NormalKey>, NativeError>,
 ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
     let version = arena.table_version(record)?;
     if let Some(slot) = slot
@@ -78,7 +81,7 @@ pub(crate) fn find(
             version.map(|version| PropertySlot { version, ..slot }),
         ));
     }
-    let found = arena.table_find(record, &key()?)?;
+    let found = arena.table_find(record, &*key()?)?;
     Ok((
         found.map(|(_, value)| value),
         found.and_then(|(place, _)| {
@@ -125,7 +128,7 @@ mod tests {
             panic!("record")
         };
         let arena = bench.arena_mut();
-        let (_, slot) = find(arena, record, None, b"a", || Ok(text_key("a"))).unwrap();
+        let (_, slot) = find(arena, record, None, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
         let (hot, same) = find(arena, record, slot, b"a", || {
             panic!("a proved key is already normalized")
         })
@@ -138,7 +141,8 @@ mod tests {
         assert_ne!(arena.table_version(record).unwrap(), version);
         let a = arena.text("a");
         arena.table_delete(record, &a).unwrap();
-        let (removed, _) = find(arena, record, slot, b"a", || Ok(text_key("a"))).unwrap();
+        let (removed, _) =
+            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
         assert!(removed.is_none(), "the old position now holds b");
         arena.table_write(record, a, Value::Int(4)).unwrap();
         assert_eq!(
@@ -148,7 +152,8 @@ mod tests {
                 .map(|(seq, _)| seq),
             Some(3)
         );
-        let (inserted, slot) = find(arena, record, slot, b"a", || Ok(text_key("a"))).unwrap();
+        let (inserted, slot) =
+            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
         assert!(matches!(inserted, Some(Value::Int(4))));
         let version = arena.table_version(record).unwrap();
         let (body, _) = arena.parts_mut(record).unwrap();
@@ -157,7 +162,8 @@ mod tests {
         };
         *body = Body::Map(table);
         assert_ne!(arena.table_version(record).unwrap(), version);
-        let (changed_kind, slot) = find(arena, record, slot, b"a", || Ok(text_key("a"))).unwrap();
+        let (changed_kind, slot) =
+            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
         assert!(matches!(changed_kind, Some(Value::Int(4))));
 
         // A decoded replacement bypasses parts_mut and can move a position.
@@ -176,7 +182,8 @@ mod tests {
                 ])),
             )
             .unwrap();
-        let (replaced, _) = find(arena, record, slot, b"a", || Ok(text_key("a"))).unwrap();
+        let (replaced, _) =
+            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
         assert!(
             matches!(replaced, Some(Value::Int(7))),
             "a decoded body revokes its old position proof"

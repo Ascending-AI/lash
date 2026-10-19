@@ -1,13 +1,15 @@
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, TextView, Type,
-    Value,
+    Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
+    TextView, Type, Value,
 };
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
 
 use super::{
-    Function, arg, count_arg, definition, int, integer_value, materialized_text, ordering, raise,
-    reserve_list, sequence, sequence_type, text_arg, text_buffer, text_view,
+    Function, arg, count_arg, definition, int, integer_value, materialized_text, ordering,
+    prepared_definition, raise, reserve_list, sequence, sequence_type, text_arg, text_buffer,
+    text_view,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -81,23 +83,34 @@ pub(super) fn functions() -> Vec<Function> {
             native,
         ));
     }
-    for (name, result, native) in [
+    for (name, result, native, prepared) in [
         (
             "text.compare",
             Type::Int,
             compare as fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
+            None,
         ),
-        ("text.utf16_compare", Type::Int, utf16_compare),
-        ("text.concat", Type::Text, concat),
-        ("text.starts_with", Type::Bool, starts_with),
-        ("text.ends_with", Type::Bool, ends_with),
+        ("text.utf16_compare", Type::Int, utf16_compare, None),
+        (
+            "text.concat",
+            Type::Text,
+            concat,
+            Some(PreparedNative {
+                entry: short_concat,
+                charged_entry: None,
+                operation: "text.concat(text: Text, other: Text) -> Text",
+            }),
+        ),
+        ("text.starts_with", Type::Bool, starts_with, None),
+        ("text.ends_with", Type::Bool, ends_with, None),
     ] {
-        functions.push(definition(
+        functions.push(prepared_definition(
             name,
             &[("text", Type::Text), ("other", Type::Text)],
             result,
             &[],
             native,
+            prepared,
         ));
     }
     functions.push(definition(
@@ -648,6 +661,22 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     out.push_str(&other);
     Ok(call.new.text(&out))
 }
+/// [`concat`] of two short texts whose concatenation is short: the same
+/// text, which is inline, so the call builds and holds nothing of the
+/// arena's; `None` for any other operands.
+fn short_concat(args: &[Value]) -> Option<Value> {
+    let [Value::Text(text), Value::Text(other)] = args else {
+        return None;
+    };
+    let (text, other) = (text.as_bytes(), other.as_bytes());
+    let mut bytes = [0; ShortText::MAX];
+    let out = bytes.get_mut(..text.len() + other.len())?;
+    let (head, tail) = out.split_at_mut(text.len());
+    head.copy_from_slice(text);
+    tail.copy_from_slice(other);
+    ShortText::new(std::str::from_utf8(out).ok()?).map(Value::Text)
+}
+
 fn starts_with(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = materialized_text(&call.args, call.new, 0)?;
     let affix = materialized_text(&call.args, call.new, 1)?;

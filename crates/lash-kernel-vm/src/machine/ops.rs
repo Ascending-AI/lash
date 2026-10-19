@@ -317,7 +317,7 @@ impl KernelMachine {
                         record,
                         slot,
                         field.name.as_bytes(),
-                        || Ok(field.key.clone()),
+                        || Ok(std::borrow::Cow::Borrowed(&field.key)),
                     )
                 })?;
                 if let Some(site) = field.site
@@ -389,7 +389,9 @@ impl KernelMachine {
                         Value::Text(short) => short.as_bytes(),
                         _ => arena.semantics().text(&index)?.as_bytes(),
                     };
-                    crate::compile::find_property(arena, record, slot, name, || arena.key(&index))
+                    crate::compile::find_property(arena, record, slot, name, || {
+                        arena.key(&index).map(std::borrow::Cow::Owned)
+                    })
                 })?;
                 if at != slot {
                     self.sites.keep(site, at);

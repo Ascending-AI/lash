@@ -16,6 +16,7 @@
 //! object was built leaves it garbage, held as the reference holds what it
 //! builds, and released by count as the reference's garbage is.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
@@ -313,8 +314,10 @@ pub(super) fn compile(
             let value = *value;
             Box::new(move |_, _| Some(value))
         }
-        Kind::Operator { lib, args, .. } => operator(libs, *lib, nodes(args, &mut node)?)?,
-        Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?)?,
+        Kind::Operator { lib, args, .. } => {
+            operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?
+        }
+        Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
         Kind::Call { callee, args, .. } => {
             let read = match callee {
                 Callee::Read(read) => Some(match read.kind {
@@ -417,7 +420,7 @@ fn conditional(condition: Node, then: (Node, u64), otherwise: (Node, u64)) -> No
 /// The compiled statement-root invoke of operator `id` on `args`, each a
 /// frame variable or a resident literal.
 pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) -> Option<Node> {
-    operator(libs, id, atoms(libs, args)?)
+    operator(libs, id, atoms(libs, args)?, Fresh::default())
 }
 
 /// The compiled statement-root guest call `call` of `callee` on `args`,
@@ -583,15 +586,10 @@ impl Answer {
 }
 
 /// The compiled operator `id` over `operands`.
-fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
+fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option<Node> {
     if libs.general {
         libs.exe.lib(id).prepared.as_ref()?;
-        return Some(Box::new(move |slots, cx| {
-            arguments(&operands, operands.len(), slots, cx, |cx, args| {
-                let exe = cx.exe;
-                cx.operate(exe.lib(id), args)
-            })
-        }));
+        return Some(direct::<true>(id, operands.len(), operands, fresh));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
     if libs.charging {
@@ -626,18 +624,104 @@ fn scalar_operator<const CHARGING: bool>(answer: Answer, operands: Vec<Node>) ->
 
 /// The compiled general call of native `id` over `operands`, the
 /// parameters they leave out absent.
-fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
+fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option<Node> {
     let function = libs.exe.lib(id);
     if !libs.general || operands.len() > function.arity {
         return None;
     }
-    let arity = function.arity;
-    Some(Box::new(move |slots, cx| {
-        arguments(&operands, arity, slots, cx, |cx, args| {
-            let exe = cx.exe;
-            cx.native(exe.lib(id), args)
-        })
-    }))
+    Some(direct::<false>(id, function.arity, operands, fresh))
+}
+
+/// Which of a call's operands are constructions of no members, by
+/// position: a node's result whose measurements its kind proves
+/// ([`crate::data::empty_measure`]), which the call's charge takes from it
+/// rather than from the arena ([`Cx::operate_on`]).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Fresh(u16);
+
+impl Fresh {
+    /// Whether the operand at `at` is a construction of no members.
+    #[inline(always)]
+    pub(crate) fn empty(self, at: usize) -> bool {
+        at < 16 && self.0 & (1 << at) != 0
+    }
+}
+
+/// The constructions of no members among `args`.
+fn fresh(args: &[Expr]) -> Fresh {
+    let empty = |expr: &Expr| match &expr.kind {
+        Kind::Make { items, .. } => items.is_empty(),
+        Kind::Record { values, .. } => values.is_empty(),
+        _ => false,
+    };
+    Fresh(
+        args.iter()
+            .take(16)
+            .enumerate()
+            .filter(|(_, arg)| empty(arg))
+            .fold(0, |fresh, (at, _)| fresh | 1 << at),
+    )
+}
+
+/// The most parameters an operator's or a native's call evaluates in
+/// place: as many as a template's heap paths take.
+const DIRECT: usize = 8;
+
+/// The call of library function `id`, an operator's when `OPERATOR` and
+/// otherwise a native's, of `arity` parameters over `operands`, the
+/// parameters they leave out absent. Its operands are evaluated in order
+/// in place, where its prepared entry answers them directly
+/// ([`Cx::operate_on`], [`Cx::native_on`]); a call of more parameters
+/// evaluates them into an operand window.
+fn direct<const OPERATOR: bool>(
+    id: LibId,
+    arity: usize,
+    operands: Vec<Node>,
+    fresh: Fresh,
+) -> Node {
+    let operands = operands.into_boxed_slice();
+    match arity {
+        0 => in_place::<OPERATOR, 0>(id, operands, fresh),
+        1 => in_place::<OPERATOR, 1>(id, operands, fresh),
+        2 => in_place::<OPERATOR, 2>(id, operands, fresh),
+        3 => in_place::<OPERATOR, 3>(id, operands, fresh),
+        4 => in_place::<OPERATOR, 4>(id, operands, fresh),
+        5 => in_place::<OPERATOR, 5>(id, operands, fresh),
+        6 => in_place::<OPERATOR, 6>(id, operands, fresh),
+        7 => in_place::<OPERATOR, 7>(id, operands, fresh),
+        DIRECT => in_place::<OPERATOR, DIRECT>(id, operands, fresh),
+        _ => Box::new(move |slots, cx| {
+            arguments(&operands, arity, slots, cx, |cx, args| {
+                let function = cx.exe.lib(id);
+                if OPERATOR {
+                    cx.operate(function, args)
+                } else {
+                    cx.native(function, args)
+                }
+            })
+        }),
+    }
+}
+
+/// [`direct`]'s call of `N` parameters, its operands' values held in
+/// place.
+fn in_place<const OPERATOR: bool, const N: usize>(
+    id: LibId,
+    operands: Box<[Node]>,
+    fresh: Fresh,
+) -> Node {
+    Box::new(move |slots, cx| {
+        let mut values = [Value::Absent; N];
+        for (value, operand) in values.iter_mut().zip(&operands) {
+            *value = operand(slots, cx)?;
+        }
+        let function = cx.exe.lib(id);
+        if OPERATOR {
+            cx.operate_on(function, &values, fresh)
+        } else {
+            cx.native_on(function, &values, fresh)
+        }
+    })
 }
 
 /// The compiled tuple of `items`, refused where the reference raises
@@ -710,8 +794,10 @@ fn field(field: &super::super::Field, target: Node) -> Node {
                 return None;
             }
             let slot = site.and_then(|site| cx.sites.slot(site));
-            let (value, found) =
-                find_property(cx.arena, record, slot, name.as_bytes(), || Ok(key.clone())).ok()?;
+            let (value, found) = find_property(cx.arena, record, slot, name.as_bytes(), || {
+                Ok(Cow::Borrowed(&key))
+            })
+            .ok()?;
             if let Some(site) = site
                 && found != slot
             {
@@ -792,8 +878,10 @@ pub(super) fn read_index(
                 Value::Text(short) => short.as_bytes(),
                 _ => arena.semantics().text(&index).ok()?.as_bytes(),
             };
-            let (found, at) =
-                find_property(arena, record, slot, name, || arena.key(&index)).ok()?;
+            let (found, at) = find_property(arena, record, slot, name, || {
+                arena.key(&index).map(Cow::Owned)
+            })
+            .ok()?;
             if at != slot {
                 cx.sites.keep(site, at);
             }
@@ -822,13 +910,8 @@ pub(super) fn hook(libs: &Libs<'_>, id: LibId) -> Option<Hook> {
     if libs.general {
         libs.exe.lib(id).prepared.as_ref()?;
         return Some(Box::new(move |walked, raw, cx| {
-            let window = cx.argument_window(2)?;
-            cx.args.put(window.start, walked);
-            cx.args.put(window.start + 1, raw);
-            let exe = cx.exe;
-            let answer = cx.operate(exe.lib(id), window.clone());
-            cx.args.release(window.start);
-            answer
+            let function = cx.exe.lib(id);
+            cx.operate_on(function, &[walked, raw], Fresh::default())
         }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
@@ -887,14 +970,8 @@ pub(super) fn check(libs: &Libs<'_>, id: LibId) -> Option<Check> {
     }
     libs.exe.lib(id).prepared.as_ref()?;
     Some(Box::new(move |args, cx| {
-        let window = cx.argument_window(args.len())?;
-        for (at, value) in args.iter().enumerate() {
-            cx.args.put(window.start + at, *value);
-        }
-        let exe = cx.exe;
-        let answer = cx.operate(exe.lib(id), window.clone());
-        cx.args.release(window.start);
-        answer
+        let function = cx.exe.lib(id);
+        cx.operate_on(function, &args, Fresh::default())
     }))
 }
 

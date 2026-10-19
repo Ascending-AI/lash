@@ -11,15 +11,19 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::plan::TemplateHeap;
 use lash_kernel_doc::{
-    Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, Value, ValueKind, WorkCounter,
+    Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, PreparedAnswer, Value,
+    ValueKind, WorkCounter,
 };
 use lash_kernel_state::arena::Arena;
 
 use super::super::{
-    Charge, Executable, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
+    Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
 };
 use super::GuestCall;
-use super::nodes::{Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index};
+use super::nodes::{
+    Fresh, Held, Meter, Place, SessionSlot, apply, error_field, prepare, read_index,
+};
+use crate::data::immediate_measure;
 use crate::machine::Occurrences;
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
@@ -265,10 +269,73 @@ impl Cx<'_> {
         measured_formula(self.arena, plan, args, result)
     }
 
+    /// The call of native `function` on `args`, one per parameter, as the
+    /// reference's call answers it: by its prepared entry where its guard
+    /// holds, and otherwise by its general call.
+    pub(super) fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
+        if let Some((entry, fast)) = &function.prepared
+            && entry.depth() == 0
+            && let Some(answer) = entry.answer(&self.args[args.clone()], self.charging)
+        {
+            return self.charged_at(function, fast, args, answer);
+        }
+        self.general(function, args)
+    }
+
+    /// [`Self::native`] on `values`, one per parameter, which the node
+    /// evaluated in place: its prepared entry answers them directly, and
+    /// only its general call takes an operand window.
+    pub(super) fn native_on(
+        &mut self,
+        function: &Lib,
+        values: &[Value],
+        fresh: Fresh,
+    ) -> Option<Value> {
+        if let Some((entry, fast)) = &function.prepared
+            && entry.depth() == 0
+            && let Some(answer) = entry.answer(values, self.charging)
+        {
+            return self.charged(function, fast, values, fresh, answer);
+        }
+        self.windowed(values, |cx, args| cx.general(function, args))
+    }
+
+    /// [`Self::operate`] on `values`, one per parameter, which the node
+    /// evaluated in place, `fresh` those of them that are constructions of
+    /// no members: its prepared entry answers them directly, and only a
+    /// general call after a decline takes an operand window.
+    pub(super) fn operate_on(
+        &mut self,
+        function: &Lib,
+        values: &[Value],
+        fresh: Fresh,
+    ) -> Option<Value> {
+        let (entry, fast) = function.prepared.as_ref()?;
+        match entry.answer(values, self.charging) {
+            Some(answer) => self.charged(function, fast, values, fresh, answer),
+            None => self.declined(function, entry, fast, values, fresh),
+        }
+    }
+
+    /// `call` on a window holding `values`, released after it.
+    fn windowed(
+        &mut self,
+        values: &[Value],
+        call: impl FnOnce(&mut Self, Range<usize>) -> Option<Value>,
+    ) -> Option<Value> {
+        let window = self.argument_window(values.len())?;
+        for (at, value) in values.iter().enumerate() {
+            self.args.put(window.start + at, *value);
+        }
+        let answer = call(self, window.clone());
+        self.args.release(window.start);
+        answer
+    }
+
     /// The general call of native `function` on `args`, one per
     /// parameter, as the reference's call answers it: charged its formula
     /// when it answers, a miss when it raises, declines or asks again.
-    pub(super) fn native(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
+    fn general(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let value = self.answered(function, args.clone())?;
         if self.charging {
             let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
@@ -419,49 +486,110 @@ impl Cx<'_> {
     /// its native's general call, or the heap paths of a template whose
     /// body runs.
     pub(super) fn operate(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
-        let (entry, fast) = function.prepared.as_ref()?;
-        let answer = match entry.answer(&self.args[args.clone()], self.charging) {
-            Some(answer) => answer,
-            // An installed native answers first, as the reference's call.
-            None if matches!(function.run, LibRun::Native { .. }) => {
-                return self.native(function, args);
-            }
-            None => match entry.heap(&|function| self.exe.library_lib(function)) {
-                // A heap path that declines has written nothing; what it
-                // built is a miss's garbage, so the statement misses. One
-                // that built nothing leaves its kind to the reference.
-                Some((heap, callees, natives)) => {
-                    // The paths hold the context, so they read a copy of
-                    // the operands.
-                    let mut operands = [Value::Absent; HEAP_ARITY];
-                    let operands = operands.get_mut(..args.len())?;
-                    operands.copy_from_slice(&self.args[args.clone()]);
-                    let mut paths = HeapCx::new(self, callees, 0);
-                    let value = (heap.entry)(&mut paths, operands, natives);
-                    if paths.spoiled || value.is_none() {
-                        let declined = !paths.built;
-                        paths.release();
-                        self.declined = declined;
-                        return None;
-                    }
-                    value?.into()
-                }
-                None => return self.native(function, args),
-            },
-        };
-        let value = answer.value;
-        if !self.charging {
-            return Some(value);
+        let values = self.args[args].to_vec();
+        self.operate_on(function, &values, Fresh::default())
+    }
+
+    /// Operator `function`'s call on `values` where its prepared `entry`
+    /// declined: its native's general call, or the heap paths of a
+    /// template whose body runs.
+    fn declined(
+        &mut self,
+        function: &Lib,
+        entry: &Entry,
+        fast: &Fast,
+        values: &[Value],
+        fresh: Fresh,
+    ) -> Option<Value> {
+        // An installed native answers first, as the reference's call.
+        if matches!(function.run, LibRun::Native { .. }) {
+            return self.windowed(values, |cx, args| cx.general(function, args));
         }
-        let units = match answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
-            Some(units) => units,
-            None => match fast.charge(&function.charge, &self.args[args.clone()], &value) {
-                Charge::Units(units) => units,
-                Charge::Plan(plan) => self.formula(plan, &self.args[args], Some(&value))?,
-            },
+        let Some((heap, callees, natives)) = entry.heap(&|function| self.exe.library_lib(function))
+        else {
+            return self.windowed(values, |cx, args| cx.general(function, args));
         };
-        self.meter.measured(units);
-        Some(value)
+        // A heap path that declines has written nothing; what it built is
+        // a miss's garbage, so the statement misses. One that built nothing
+        // leaves its kind to the reference. The paths hold the context, so
+        // they read a copy of the operands.
+        let mut operands = [Value::Absent; HEAP_ARITY];
+        let operands = operands.get_mut(..values.len())?;
+        operands.copy_from_slice(values);
+        let mut paths = HeapCx::new(self, callees, 0);
+        let value = (heap.entry)(&mut paths, operands, natives);
+        if paths.spoiled || value.is_none() {
+            let declined = !paths.built;
+            paths.release();
+            self.declined = declined;
+            return None;
+        }
+        self.charged(function, fast, values, fresh, value?.into())
+    }
+
+    /// `function`'s prepared `answer` on `args`, charged as the
+    /// reference's prepared answer is ([`Self::units`]).
+    #[inline(always)]
+    fn charged(
+        &mut self,
+        function: &Lib,
+        fast: &Fast,
+        args: &[Value],
+        fresh: Fresh,
+        answer: PreparedAnswer,
+    ) -> Option<Value> {
+        if self.charging {
+            let units = self.units(function, fast, args, fresh, &answer)?;
+            self.meter.measured(units);
+        }
+        Some(answer.value)
+    }
+
+    /// [`Self::charged`] of the answer on the operands at `args`.
+    #[inline(always)]
+    fn charged_at(
+        &mut self,
+        function: &Lib,
+        fast: &Fast,
+        args: Range<usize>,
+        answer: PreparedAnswer,
+    ) -> Option<Value> {
+        if self.charging {
+            let units = self.units(function, fast, &self.args[args], Fresh::default(), &answer)?;
+            self.meter.measured(units);
+        }
+        Some(answer.value)
+    }
+
+    /// What `function`'s prepared `answer` on `args` charges: the units of
+    /// the scalar sizes its guard certified, or its formula over the
+    /// values, taken from the values themselves where each carries its
+    /// measurements, those `fresh` names included while no write is held
+    /// that may change them.
+    #[inline(always)]
+    fn units(
+        &self,
+        function: &Lib,
+        fast: &Fast,
+        args: &[Value],
+        fresh: Fresh,
+        answer: &PreparedAnswer,
+    ) -> Option<u64> {
+        if let Some(units) = answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask)) {
+            return Some(units);
+        }
+        let fresh = if self.held.is_some() {
+            Fresh::default()
+        } else {
+            fresh
+        };
+        if let Some(units) = fast.immediate(args, fresh, &answer.value) {
+            return Some(units);
+        }
+        match fast.charge(&function.charge, args, &answer.value) {
+            Charge::Units(units) => Some(units),
+            Charge::Plan(plan) => self.formula(plan, args, Some(&answer.value)),
+        }
     }
 }
 
@@ -484,12 +612,18 @@ pub(crate) fn measured_formula(
             Source::Result => result,
             Source::Nothing => None,
         };
-        let measured = match (value, measure) {
-            (None, _) => Ok(0),
-            (Some(value), Measure::Size) => crate::data::size(arena, value),
-            (Some(value), Measure::DeepSize) => crate::data::deep_size(arena, value),
-            (Some(value), Measure::NestedSize) => crate::data::nested_size(arena, value),
-            (Some(value), Measure::Magnitude) => Ok(crate::data::magnitude(arena, value)),
+        let Some(value) = value else {
+            return 0;
+        };
+        // A value the arena holds nothing of carries its measurements.
+        if let Some(units) = immediate_measure(value, measure) {
+            return units;
+        }
+        let measured = match measure {
+            Measure::Size => crate::data::size(arena, value),
+            Measure::DeepSize => crate::data::deep_size(arena, value),
+            Measure::NestedSize => crate::data::nested_size(arena, value),
+            Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
         };
         measured.unwrap_or_else(|_| {
             failed = true;

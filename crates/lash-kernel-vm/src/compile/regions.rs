@@ -58,8 +58,8 @@ mod verify;
 
 pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Hook, Meter, Node, Place, Role,
-    SessionSlot, Taken, position, scalar, store,
+    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter, Node,
+    Place, Role, SessionSlot, Taken, position, scalar, store,
 };
 
 use super::expr::{self, Expr, Kind};
