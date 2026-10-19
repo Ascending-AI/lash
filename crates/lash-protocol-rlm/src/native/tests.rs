@@ -160,6 +160,18 @@ pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     }
     effects
 }
+
+// Finished machines release their records. Retain the history delivered to
+// the consumer at progress and completion boundaries, including across restore.
+fn delivered_events(effects: &[Effect]) -> impl Iterator<Item = &lash_core::SessionHistoryRecord> {
+    effects.iter().flat_map(|effect| match effect {
+        Effect::Progress { event_delta, .. } | Effect::Done { event_delta, .. } => {
+            event_delta.as_slice()
+        }
+        _ => &[],
+    })
+}
+
 fn reply(machine: &mut TurnMachine, effects: &[Effect], parts: Vec<LlmOutputPart>) -> Vec<Effect> {
     reply_with_reason(machine, effects, parts, Default::default())
 }
@@ -219,6 +231,7 @@ fn run(
         )],
     };
     let mut effects = reply(&mut machine, &initial, parts);
+    let mut events = delivered_events(&effects).cloned().collect::<Vec<_>>();
     if let Some(result) = exec {
         let id = effects
             .iter()
@@ -236,6 +249,7 @@ fn run(
         drain(&mut machine);
         machine.handle_response(Response::ExecResult { id, result });
         effects = drain(&mut machine);
+        events.extend(delivered_events(&effects).cloned());
     }
     let mut checkpoints = Vec::new();
     // The continuation/terminal checkpoint and terminal stream outcome are
@@ -260,9 +274,9 @@ fn run(
             delivery: lash_sansio::CheckpointDelivery::default(),
         });
         effects = drain(&mut machine);
+        events.extend(delivered_events(&effects).cloned());
     }
-    let trajectory: Vec<lash_core::CellRecord> = machine
-        .events()
+    let trajectory: Vec<lash_core::CellRecord> = events
         .iter()
         .filter_map(|record| {
             let lash_core::SessionHistoryRecord::Protocol(event) = record else {
@@ -821,6 +835,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
         0,
     );
     let mut effects = drain(&mut machine);
+    let mut events = Vec::new();
     for attempt in 1..=3 {
         let parts = vec![
             call(
@@ -835,6 +850,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
             ),
         ];
         effects = reply(&mut machine, &effects, parts);
+        events.extend(delivered_events(&effects).cloned());
         assert!(
             !effects
                 .iter()
@@ -853,6 +869,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
                 delivery: lash_sansio::CheckpointDelivery::default(),
             });
             effects = drain(&mut machine);
+            events.extend(delivered_events(&effects).cloned());
         } else {
             assert!(
                 effects
@@ -863,7 +880,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
     }
     let mut pairs = Vec::new();
     let mut refused_call = None;
-    for event in machine.events().iter() {
+    for event in &events {
         let lash_core::SessionHistoryRecord::Conversation(record) = event else {
             continue;
         };
@@ -984,6 +1001,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
             0,
         );
         let mut effects = drain(&mut machine);
+        let mut events = Vec::new();
         for attempt in 1..=3 {
             effects = reply_with_reason(
                 &mut machine,
@@ -991,6 +1009,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 vec![call("truncated", "execute_code", arguments)],
                 lash_core::LlmTerminalReason::OutputLimit,
             );
+            events.extend(delivered_events(&effects).cloned());
             assert!(
                 !effects
                     .iter()
@@ -1027,6 +1046,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 delivery: Default::default(),
             });
             effects = drain(&mut machine);
+            events.extend(delivered_events(&effects).cloned());
             let request = effects
                 .iter()
                 .find_map(|effect| match effect {
@@ -1042,8 +1062,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
             assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolCall { call_id, input_json, .. } if call_id == "truncated" && input_json == arguments)));
             assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolResult { call_id, content, .. } if call_id == "truncated" && lash_llm_transport::tool_result_text(content).contains("output limit"))));
         }
-        let decisions = machine
-            .events()
+        let decisions = events
             .iter()
             .filter_map(|record| match record {
                 lash_core::SessionHistoryRecord::Protocol(event) => {
@@ -1090,6 +1109,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         0,
     );
     let mut effects = drain(&mut machine);
+    let mut events = Vec::new();
     let request = effects
         .iter()
         .find_map(|effect| match effect {
@@ -1105,6 +1125,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
     // Attempts 1 and 2 repair; attempt 3 exhausts the stall budget.
     for attempt in 1..=3 {
         effects = reply(&mut machine, &effects, stray_tool_call());
+        events.extend(delivered_events(&effects).cloned());
         assert!(
             !effects
                 .iter()
@@ -1162,6 +1183,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
             delivery: Default::default(),
         });
         effects = drain(&mut machine);
+        events.extend(delivered_events(&effects).cloned());
         let request = effects
             .iter()
             .find_map(|effect| match effect {
@@ -1189,8 +1211,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         );
     }
 
-    let decisions = machine
-        .events()
+    let decisions = events
         .iter()
         .filter_map(|record| match record {
             lash_core::SessionHistoryRecord::Protocol(event) => {
