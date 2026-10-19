@@ -714,7 +714,7 @@ fn cards(
         body @ (Body::Map(table) | Body::Set(table) | Body::Record(table)) => {
             let index = facts
                 .index
-                .as_deref()
+                .as_ref()
                 .ok_or_else(|| malformed("a table has no index"))?;
             let mut cards = Vec::with_capacity(facts.cards.len());
             for card in &facts.cards {
@@ -728,9 +728,14 @@ fn cards(
                     let Chunk::Resident(pairs) = chunk else {
                         return Err(malformed("a table's dirty card is not resident"));
                     };
-                    for (pair, seq) in pairs.as_chunks::<2>().0.iter().zip(index.sequences(at)) {
-                        if span.contains(seq) {
-                            entries.push((*seq, pair[0], pair[1]));
+                    for (pair, seq) in pairs
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .zip(index.sequences(at).iter())
+                    {
+                        if span.contains(&seq) {
+                            entries.push((seq, pair[0], pair[1]));
                         }
                     }
                 }
@@ -804,13 +809,13 @@ fn stored(
                 .facts(handle)
                 .map_err(arena_fault)?
                 .index
-                .as_deref()
+                .as_ref()
                 .ok_or_else(|| malformed("a resident table has no index"))?;
             Held::Table(
                 kind,
                 resident(&table.chunks)?,
                 (0..table.chunks.count())
-                    .flat_map(|chunk| index.sequences(chunk).iter().copied())
+                    .flat_map(|chunk| index.sequences(chunk).iter())
                     .collect(),
                 index.next(),
             )

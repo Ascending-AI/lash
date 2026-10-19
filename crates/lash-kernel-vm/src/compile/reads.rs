@@ -1,15 +1,15 @@
-//! Property sites cache a short key and its full chunk position behind the
-//! arena object's identity and body revision. Every body edit invalidates the
-//! guard. A changed object or shape verifies the entry's complete key before
-//! reusing its position. Caches are process-local and empty on restore.
+//! Property sites cache a short key and its full chunk position, or its
+//! absence, behind the arena object's identity and layout revision. An
+//! edit that adds, removes or moves an entry invalidates the guard; a value
+//! written over an entry keeps it. A changed object or shape verifies the
+//! entry's complete key before reusing its position. Caches are
+//! process-local and empty on restore.
 
-use std::borrow::Cow;
-
-use lash_kernel_doc::arena::{ArenaHandle, ShortText};
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
 use lash_kernel_exec::SiteIx;
-use lash_kernel_state::arena::{Arena, Place, text_key};
+use lash_kernel_state::arena::{Arena, Key, Place, text_key};
 
 use super::Layout;
 
@@ -34,8 +34,10 @@ impl ReadSite {
 /// A field name a read, a write or a removal names.
 pub(crate) struct Field {
     pub(crate) name: String,
-    /// The name's normal form, which the record's index keys it by.
-    pub(crate) key: NormalKey,
+    /// The name's key, which the record's index keys it by.
+    pub(crate) key: Key,
+    /// The name's normal form, which the heap's key index keys it by.
+    pub(crate) normal: NormalKey,
     /// The read's site, when it is one that caches.
     pub(crate) site: Option<ReadSite>,
 }
@@ -44,66 +46,72 @@ impl Field {
     pub(super) fn new(name: &str, site: u32, layout: Layout) -> Self {
         Self {
             name: name.to_owned(),
-            key: text_key(name),
+            key: Key::of_text(name),
+            normal: text_key(name),
             site: ReadSite::new(site, layout),
         }
     }
 }
 
-/// A proved short key and physical position in one version of an object.
+/// A proved short key and its physical position in one version of an
+/// object, or its absence from that version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PropertySlot {
     version: (u64, u64),
-    place: Place,
-    key: [u8; ShortText::MAX],
-    len: u8,
+    place: Option<Place>,
+    /// The key's [`lash_kernel_doc::arena::ShortText::word`].
+    key: u128,
 }
 
-/// Reads through a proved position without normalizing or hashing a key.
-/// On a changed object/shape the full entry key must match; otherwise the
-/// canonical index supplies the fallback, by the key `key` gives: one the
-/// caller holds is lent, not copied. Long keys use that index always.
-pub(crate) fn find<'k>(
+/// Reads `key` through a proved position, or a proved absence, without
+/// hashing it. On a changed object/shape the full entry key must match;
+/// otherwise the record's index supplies the fallback. Long keys use that
+/// index always.
+#[inline]
+pub(crate) fn find(
     arena: &Arena,
     record: ArenaHandle,
     slot: Option<PropertySlot>,
-    name: &[u8],
-    key: impl FnOnce() -> Result<Cow<'k, NormalKey>, NativeError>,
+    key: &Key,
 ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
     let version = arena.table_version(record)?;
-    if let Some(slot) = slot
-        && &slot.key[..usize::from(slot.len)] == name
-        && let Some(pair) = arena.table_at(record, slot.place)?
-        && (Some(slot.version) == version || keyed(&pair[0], name))
+    let short = match key {
+        Key::Text(low, high) => Some(u128::from(*high) << 64 | u128::from(*low)),
+        _ => None,
+    };
+    if let (Some(slot), Some(word)) = (slot, short)
+        && slot.key == word
     {
-        return Ok((
-            Some(pair[1]),
-            version.map(|version| PropertySlot { version, ..slot }),
-        ));
-    }
-    let found = arena.table_find(record, &*key()?)?;
-    Ok((
-        found.map(|(_, value)| value),
-        found.and_then(|(place, _)| {
-            if name.len() > ShortText::MAX {
-                return None;
+        match slot.place {
+            None if Some(slot.version) == version => return Ok((None, Some(slot))),
+            None => {}
+            Some(place) => {
+                if let Some(pair) = arena.table_at(record, place)?
+                    && (Some(slot.version) == version || keyed(&pair[0], word))
+                {
+                    return Ok((
+                        Some(pair[1]),
+                        version.map(|version| PropertySlot { version, ..slot }),
+                    ));
+                }
             }
-            let mut key = [0; ShortText::MAX];
-            key[..name.len()].copy_from_slice(name);
-            Some(PropertySlot {
-                version: version?,
-                place,
-                key,
-                len: name.len() as u8,
-            })
-        }),
-    ))
+        }
+    }
+    let found = arena.table_find(record, key)?;
+    let slot = short.and_then(|word| {
+        Some(PropertySlot {
+            version: version?,
+            place: found.map(|(place, _)| place),
+            key: word,
+        })
+    });
+    Ok((found.map(|(_, value)| value), slot))
 }
 
-/// Short text is already validated UTF-8; equality needs only its bytes.
+/// Whether entry key `key` is the short text whose word is `word`.
 #[inline]
-fn keyed(key: &Value, name: &[u8]) -> bool {
-    matches!(key, Value::Text(short) if short.as_bytes() == name)
+fn keyed(key: &Value, word: u128) -> bool {
+    matches!(key, Value::Text(short) if short.word() == word)
 }
 
 #[cfg(test)]
@@ -113,8 +121,9 @@ mod tests {
     use lash_kernel_doc::arena::{Body, Table};
     use lash_kernel_state::arena::Bench;
 
-    /// PLAN-INDEP: a proved position skips normalization only for its object,
-    /// key and body revision. Insert, delete and kind changes revoke the proof.
+    /// PLAN-INDEP: a proved position or absence skips normalization only
+    /// for its object, key and layout revision. Insert, delete and kind
+    /// changes revoke the proof; a value written over an entry keeps it.
     #[test]
     fn property_position_proofs_expire_on_body_edits() {
         let mut bench = Bench::new();
@@ -128,21 +137,32 @@ mod tests {
             panic!("record")
         };
         let arena = bench.arena_mut();
-        let (_, slot) = find(arena, record, None, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
-        let (hot, same) = find(arena, record, slot, b"a", || {
-            panic!("a proved key is already normalized")
-        })
-        .unwrap();
+        let (_, slot) = find(arena, record, None, &Key::of_text("a")).unwrap();
+        let (hot, same) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(matches!(hot, Some(Value::Int(1))));
         assert_eq!(same, slot);
         let version = arena.table_version(record).unwrap();
+        let a = arena.text("a");
+        arena.table_write(record, a, Value::Int(5)).unwrap();
+        assert_eq!(arena.table_version(record).unwrap(), version);
+        let (written, same) = find(arena, record, slot, &Key::of_text("a")).unwrap();
+        assert!(matches!(written, Some(Value::Int(5))));
+        assert_eq!(same, slot);
+        let (absent, missing) = find(arena, record, None, &Key::of_text("c")).unwrap();
+        assert!(absent.is_none() && missing.is_some());
+        let (absent, same) = find(arena, record, missing, &Key::of_text("c")).unwrap();
+        assert!(absent.is_none());
+        assert_eq!(same, missing);
         let c = arena.text("c");
         arena.table_write(record, c, Value::Int(3)).unwrap();
         assert_ne!(arena.table_version(record).unwrap(), version);
-        let a = arena.text("a");
+        let (inserted, _) = find(arena, record, missing, &Key::of_text("c")).unwrap();
+        assert!(
+            matches!(inserted, Some(Value::Int(3))),
+            "an insert revokes a proved absence"
+        );
         arena.table_delete(record, &a).unwrap();
-        let (removed, _) =
-            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
+        let (removed, _) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(removed.is_none(), "the old position now holds b");
         arena.table_write(record, a, Value::Int(4)).unwrap();
         assert_eq!(
@@ -152,8 +172,7 @@ mod tests {
                 .map(|(seq, _)| seq),
             Some(3)
         );
-        let (inserted, slot) =
-            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
+        let (inserted, slot) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(matches!(inserted, Some(Value::Int(4))));
         let version = arena.table_version(record).unwrap();
         let (body, _) = arena.parts_mut(record).unwrap();
@@ -162,8 +181,7 @@ mod tests {
         };
         *body = Body::Map(table);
         assert_ne!(arena.table_version(record).unwrap(), version);
-        let (changed_kind, slot) =
-            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
+        let (changed_kind, slot) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(matches!(changed_kind, Some(Value::Int(4))));
 
         // A decoded replacement bypasses parts_mut and can move a position.
@@ -182,8 +200,7 @@ mod tests {
                 ])),
             )
             .unwrap();
-        let (replaced, _) =
-            find(arena, record, slot, b"a", || Ok(Cow::Owned(text_key("a")))).unwrap();
+        let (replaced, _) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(
             matches!(replaced, Some(Value::Int(7))),
             "a decoded body revokes its old position proof"

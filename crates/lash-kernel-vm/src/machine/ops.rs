@@ -30,7 +30,7 @@ use lash_kernel_doc::heap::{LogicalBytes, NormalKey};
 use lash_kernel_doc::{
     Args, NativeCall, NativeError, NewObject, Nursery, Retry, TaskId, Value, WorkCounter,
 };
-use lash_kernel_state::arena::Arena;
+use lash_kernel_state::arena::{Arena, Key};
 
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
@@ -162,20 +162,25 @@ impl KernelMachine {
     /// its entry (seam D).
     pub(super) fn resolve(&mut self, table: ArenaHandle, key: &Value) -> Eval<()> {
         if let Some(normal) = self.in_arena(|arena| arena.unresolved(table, key))? {
-            self.resolve_with(table, normal)?;
+            let resident = self.in_arena(|arena| arena.key(key))?;
+            self.resolve_with(table, resident, normal)?;
         }
         Ok(())
     }
 
-    /// [`Self::resolve`] for a key's normal form.
-    pub(super) fn resolve_normal(&mut self, table: ArenaHandle, normal: &NormalKey) -> Eval<()> {
-        if self.in_arena(|arena| arena.unresolved_normal(table, normal))? {
-            self.resolve_with(table, normal.clone())?;
+    /// [`Self::resolve`] for a field name.
+    pub(super) fn resolve_field(
+        &mut self,
+        table: ArenaHandle,
+        field: &crate::compile::Field,
+    ) -> Eval<()> {
+        if self.in_arena(|arena| arena.unresolved_key(table, &field.key))? {
+            self.resolve_with(table, field.key.clone(), field.normal.clone())?;
         }
         Ok(())
     }
 
-    fn resolve_with(&mut self, table: ArenaHandle, normal: NormalKey) -> Eval<()> {
+    fn resolve_with(&mut self, table: ArenaHandle, key: Key, normal: NormalKey) -> Eval<()> {
         let entity = self
             .arena
             .borrow()
@@ -192,7 +197,7 @@ impl KernelMachine {
             .map_err(Halt::from)?;
         self.arena
             .borrow_mut()
-            .resolved(table, normal, seq)
+            .resolved(table, key, seq)
             .map_err(Interrupt::from)
     }
 
@@ -309,16 +314,10 @@ impl KernelMachine {
     ) -> Eval<()> {
         let value = match self.regs[target] {
             Value::Record(record) => {
-                self.resolve_normal(record, &field.key)?;
+                self.resolve_field(record, field)?;
                 let slot = field.site.and_then(|site| self.sites.slot(site));
                 let (value, found) = self.in_arena(|arena| {
-                    crate::compile::find_property(
-                        arena,
-                        record,
-                        slot,
-                        field.name.as_bytes(),
-                        || Ok(std::borrow::Cow::Borrowed(&field.key)),
-                    )
+                    crate::compile::find_property(arena, record, slot, &field.key)
                 })?;
                 if let Some(site) = field.site
                     && found != slot
@@ -385,13 +384,7 @@ impl KernelMachine {
                 };
                 let slot = self.sites.slot(site);
                 let (found, at) = self.in_arena(|arena| {
-                    let name = match &index {
-                        Value::Text(short) => short.as_bytes(),
-                        _ => arena.semantics().text(&index)?.as_bytes(),
-                    };
-                    crate::compile::find_property(arena, record, slot, name, || {
-                        arena.key(&index).map(std::borrow::Cow::Owned)
-                    })
+                    crate::compile::find_property(arena, record, slot, &arena.key(&index)?)
                 })?;
                 if at != slot {
                     self.sites.keep(site, at);

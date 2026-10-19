@@ -16,7 +16,6 @@
 //! object was built leaves it garbage, held as the reference holds what it
 //! builds, and released by count as the reference's garbage is.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
@@ -790,14 +789,11 @@ fn field(field: &super::super::Field, target: Node) -> Node {
     let (name, key, site) = (field.name.clone(), field.key.clone(), field.site);
     Box::new(move |slots, cx| match target(slots, cx)? {
         Value::Record(record) => {
-            if cx.arena.unresolved_normal(record, &key).ok()? {
+            if cx.arena.unresolved_key(record, &key).ok()? {
                 return None;
             }
             let slot = site.and_then(|site| cx.sites.slot(site));
-            let (value, found) = find_property(cx.arena, record, slot, name.as_bytes(), || {
-                Ok(Cow::Borrowed(&key))
-            })
-            .ok()?;
+            let (value, found) = find_property(cx.arena, record, slot, &key).ok()?;
             if let Some(site) = site
                 && found != slot
             {
@@ -874,14 +870,8 @@ pub(super) fn read_index(
                 );
             };
             let slot = cx.sites.slot(site);
-            let name = match &index {
-                Value::Text(short) => short.as_bytes(),
-                _ => arena.semantics().text(&index).ok()?.as_bytes(),
-            };
-            let (found, at) = find_property(arena, record, slot, name, || {
-                arena.key(&index).map(Cow::Owned)
-            })
-            .ok()?;
+            let key = arena.key(&index).ok()?;
+            let (found, at) = find_property(arena, record, slot, &key).ok()?;
             if at != slot {
                 cx.sites.keep(site, at);
             }

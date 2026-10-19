@@ -13,52 +13,114 @@
 //! chunks, and the keys the machine looked up in the heap's key index:
 //! present ones with their sequence, absent ones as absent. A key it does
 //! not know is answered by decoding the table's cold chunks.
+//!
+//! A table the run built is on a shared layout ([`super::layouts`]) while
+//! it can be: its index is the layout, its entries take sequences from
+//! zero, and an entry's sequence is its position. Any other table, and one
+//! that leaves its layout, has an index of its own.
+
+use std::rc::Rc;
 
 use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Objects, Table};
-use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Value};
 
 use super::Facts;
-use super::keys::normal_key;
+use super::keys::{Key, key_of};
+use super::layouts::{Layout, Layouts, Step};
 
-/// A table's key index and its entries' insertion sequences.
+/// A table's key index and its entries' insertion sequences: a shared
+/// layout's, or its own.
+#[derive(Debug)]
+pub struct Index(Repr);
+
+#[derive(Debug)]
+enum Repr {
+    /// Entry `i` holds the layout's key `i` and takes sequence `i`.
+    Shared(Rc<Layout>),
+    Own(Box<Own>),
+}
+
+/// A table's own key index and its entries' insertion sequences.
 #[derive(Debug, Default)]
-pub struct Index {
-    /// Each known key's normal form, to its entry's sequence. Never
-    /// iterated: only looked up.
-    keys: HashMap<NormalKey, u64>,
+struct Own {
+    /// Each known key, to its entry's sequence. Never iterated: only
+    /// looked up.
+    keys: HashMap<Key, u64>,
     /// Keys the heap's key index holds no entry for, while a chunk is
     /// cold.
-    absent: HashSet<NormalKey>,
+    absent: HashSet<Key>,
     /// The sequences each chunk spans while the table is chunked; 0 while
     /// it is one chunk.
     width: u64,
     /// Each chunk's resident entries' sequences, ascending. Empty while the
-    /// table is one chunk whose entries take sequences `0..next`, at most
-    /// [`DENSE`]'s, as a table the run built does until it removes one.
+    /// table is dense: one chunk whose entries take sequences `0..next`,
+    /// as a table the run built does until it removes one, so an entry's
+    /// sequence is its position and a lookup goes straight to it.
     seqs: Vec<Vec<u64>>,
     /// The sequence the next new entry takes.
     next: u64,
 }
-
-/// The sequences of a dense index's entries.
-static DENSE: [u64; 64] = {
-    let mut seqs = [0; 64];
-    let mut seq = 0;
-    while seq < seqs.len() {
-        seqs[seq] = seq as u64;
-        seq += 1;
-    }
-    seqs
-};
 
 /// Where an entry sits: its chunk and its position in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Place {
     pub chunk: usize,
     pub at: usize,
+}
+
+/// The resident entries' sequences of one chunk, ascending.
+#[derive(Clone, Copy, Debug)]
+pub enum Sequences<'a> {
+    /// A dense index's: `0..n`.
+    Dense(u64),
+    Held(&'a [u64]),
+}
+
+impl<'a> Sequences<'a> {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Dense(len) => *len as usize,
+            Self::Held(seqs) => seqs.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The sequence at position `at`.
+    pub fn get(&self, at: usize) -> Option<u64> {
+        match self {
+            Self::Dense(len) => ((at as u64) < *len).then_some(at as u64),
+            Self::Held(seqs) => seqs.get(at).copied(),
+        }
+    }
+
+    /// How many sequences come before the first for which `pred` fails.
+    pub fn partition_point(&self, pred: impl Fn(u64) -> bool) -> usize {
+        match self {
+            Self::Dense(len) => {
+                // `pred` holds on a prefix of `0..len`: search it.
+                let (mut low, mut high) = (0u64, *len);
+                while low < high {
+                    let mid = low + (high - low) / 2;
+                    if pred(mid) {
+                        low = mid + 1;
+                    } else {
+                        high = mid;
+                    }
+                }
+                low as usize
+            }
+            Self::Held(seqs) => seqs.partition_point(|seq| pred(*seq)),
+        }
+    }
+
+    pub fn iter(self) -> impl Iterator<Item = u64> + 'a {
+        (0..self.len()).filter_map(move |at| self.get(at))
+    }
 }
 
 /// What an index knows of a key.
@@ -71,8 +133,9 @@ enum Known {
     Unknown,
 }
 
-impl Index {
+impl Own {
     /// The chunk that holds sequence `seq`.
+    #[inline]
     fn chunk_of(&self, seq: u64) -> usize {
         match self.width {
             0 => 0,
@@ -80,53 +143,46 @@ impl Index {
         }
     }
 
-    /// The sequence the next new entry takes.
-    pub fn next(&self) -> u64 {
-        self.next
-    }
-
     /// The resident entries' sequences of chunk `chunk`, ascending.
-    pub fn sequences(&self, chunk: usize) -> &[u64] {
+    fn sequences(&self, chunk: usize) -> Sequences<'_> {
         match self.seqs.get(chunk) {
-            Some(seqs) => seqs,
-            None if self.is_dense() && chunk == 0 => &DENSE[..self.next as usize],
-            None => &[],
+            Some(seqs) => Sequences::Held(seqs),
+            None if self.is_dense() && chunk == 0 => Sequences::Dense(self.next),
+            None => Sequences::Held(&[]),
         }
     }
 
     /// Whether the index is one chunk whose entries take sequences
     /// `0..next`, which it keeps in no vector.
+    #[inline]
     fn is_dense(&self) -> bool {
         self.seqs.is_empty() && self.width == 0
     }
 
     /// The index of a one-chunk table whose `len` entries take sequences
     /// from zero.
-    fn dense(keys: HashMap<NormalKey, u64>, len: u64) -> Self {
+    fn dense(keys: HashMap<Key, u64>, len: u64) -> Self {
         Self {
             keys,
             absent: HashSet::new(),
             width: 0,
-            seqs: if len as usize <= DENSE.len() {
-                Vec::new()
-            } else {
-                vec![(0..len).collect()]
-            },
+            seqs: Vec::new(),
             next: len,
         }
     }
 
-    /// The sequences of chunk `chunk`, to edit.
+    /// The sequences of chunk `chunk`, to edit: a dense index holds them
+    /// from then on.
     fn sequences_mut(&mut self, chunk: usize) -> Option<&mut Vec<u64>> {
         if self.is_dense() {
-            self.seqs = vec![DENSE[..self.next as usize].to_vec()];
+            self.seqs = vec![(0..self.next).collect()];
         }
         self.seqs.get_mut(chunk)
     }
 
     /// Appends entry `seq`, the index's next, to chunk `chunk`.
     fn push(&mut self, chunk: usize, seq: u64) -> Result<(), NativeError> {
-        if !(self.is_dense() && chunk == 0 && seq == self.next && seq < DENSE.len() as u64) {
+        if !(self.is_dense() && chunk == 0 && seq == self.next) {
             self.sequences_mut(chunk)
                 .ok_or(NativeError::Malformed("a table's index names no chunk"))?
                 .push(seq);
@@ -136,14 +192,15 @@ impl Index {
 
     /// The sequences chunk `chunk` spans: everything while the table is one
     /// chunk.
-    pub fn span(&self, chunk: usize) -> std::ops::Range<u64> {
+    fn span(&self, chunk: usize) -> std::ops::Range<u64> {
         match self.width {
             0 => 0..u64::MAX,
             width => chunk as u64 * width..(chunk as u64 + 1) * width,
         }
     }
 
-    fn known(&self, key: &NormalKey, cold: bool) -> Known {
+    #[inline]
+    fn known(&self, key: &Key, cold: bool) -> Known {
         match self.keys.get(key) {
             Some(seq) => Known::Seq(*seq),
             None if !cold || self.absent.contains(key) => Known::Absent,
@@ -151,14 +208,8 @@ impl Index {
         }
     }
 
-    /// Whether the index must ask the heap's key index for `key`: the
-    /// table has a cold chunk and the index does not know the key.
-    pub fn unknown(&self, key: &NormalKey, cold: bool) -> bool {
-        cold && matches!(self.known(key, true), Known::Unknown)
-    }
-
     /// Records what the heap's key index holds for `key`.
-    pub(super) fn resolved(&mut self, key: NormalKey, seq: Option<u64>) {
+    fn resolved(&mut self, key: Key, seq: Option<u64>) {
         match seq {
             Some(seq) => {
                 self.keys.insert(key, seq);
@@ -169,7 +220,7 @@ impl Index {
         }
     }
 
-    pub(super) fn resequence(&mut self, seqs: Vec<u64>, next: u64) -> Result<(), NativeError> {
+    fn resequence(&mut self, seqs: Vec<u64>, next: u64) -> Result<(), NativeError> {
         let held = self.sequences(0).len();
         if self.width != 0
             || self.seqs.len() > 1
@@ -181,8 +232,9 @@ impl Index {
                 "a table's sequences are not ascending below its next",
             ));
         }
+        let current: Vec<u64> = self.sequences(0).iter().collect();
         for seq in self.keys.values_mut() {
-            *seq = seqs[*seq as usize];
+            *seq = seqs[current.partition_point(|held| held < seq)];
         }
         self.seqs = vec![seqs];
         self.next = next;
@@ -190,7 +242,7 @@ impl Index {
     }
 
     /// Chunk `chunk` decoded: the sequences of its entries, ascending.
-    pub(super) fn decoded(&mut self, chunk: usize, seqs: Vec<u64>) -> Result<(), NativeError> {
+    fn decoded(&mut self, chunk: usize, seqs: Vec<u64>) -> Result<(), NativeError> {
         let span = self.span(chunk);
         if seqs.windows(2).any(|pair| pair[0] >= pair[1])
             || seqs.iter().any(|seq| !span.contains(seq))
@@ -208,7 +260,7 @@ impl Index {
     }
 
     /// The table's chunks were joined into one: its index knows every key.
-    pub(super) fn join(&mut self) {
+    fn join(&mut self) {
         let all: Vec<u64> = std::mem::take(&mut self.seqs)
             .into_iter()
             .flatten()
@@ -217,17 +269,95 @@ impl Index {
         self.width = 0;
         self.absent.clear();
     }
+}
 
+impl Index {
     /// The index of a large table opened from the heap: `chunks` cold
     /// chunks of `width` sequences each, below `next`.
     pub(super) fn chunked(width: u64, chunks: usize, next: u64) -> Self {
-        Self {
+        Self(Repr::Own(Box::new(Own {
             keys: HashMap::new(),
             absent: HashSet::new(),
             width,
             seqs: vec![Vec::new(); chunks],
             next,
+        })))
+    }
+
+    /// The table's own index, for an edit a layout does not make: a table
+    /// on a layout leaves it for good, its sequences dense.
+    fn own_mut(&mut self) -> &mut Own {
+        if let Repr::Shared(layout) = &self.0 {
+            self.0 = Repr::Own(Box::new(Own::dense(layout.own(), u64::from(layout.len()))));
         }
+        match &mut self.0 {
+            Repr::Own(own) => own,
+            Repr::Shared(_) => unreachable!("a shared index was just made the table's own"),
+        }
+    }
+
+    /// The sequence the next new entry takes.
+    pub fn next(&self) -> u64 {
+        match &self.0 {
+            Repr::Shared(layout) => u64::from(layout.len()),
+            Repr::Own(own) => own.next,
+        }
+    }
+
+    /// The resident entries' sequences of chunk `chunk`, ascending.
+    pub fn sequences(&self, chunk: usize) -> Sequences<'_> {
+        match &self.0 {
+            Repr::Shared(layout) if chunk == 0 => Sequences::Dense(u64::from(layout.len())),
+            Repr::Shared(_) => Sequences::Held(&[]),
+            Repr::Own(own) => own.sequences(chunk),
+        }
+    }
+
+    /// The sequences chunk `chunk` spans: everything while the table is one
+    /// chunk.
+    pub fn span(&self, chunk: usize) -> std::ops::Range<u64> {
+        match &self.0 {
+            Repr::Shared(_) => 0..u64::MAX,
+            Repr::Own(own) => own.span(chunk),
+        }
+    }
+
+    /// The chunk that holds sequence `seq`.
+    #[inline]
+    fn chunk_of(&self, seq: u64) -> usize {
+        match &self.0 {
+            Repr::Shared(_) => 0,
+            Repr::Own(own) => own.chunk_of(seq),
+        }
+    }
+
+    /// Whether the index must ask the heap's key index for `key`: the
+    /// table has a cold chunk and the index does not know the key.
+    pub fn unknown(&self, key: &Key, cold: bool) -> bool {
+        match &self.0 {
+            Repr::Shared(_) => false,
+            Repr::Own(own) => cold && matches!(own.known(key, true), Known::Unknown),
+        }
+    }
+
+    /// Records what the heap's key index holds for `key`.
+    pub(super) fn resolved(&mut self, key: Key, seq: Option<u64>) {
+        self.own_mut().resolved(key, seq);
+    }
+
+    /// Sets the insertion sequences a table's page form keeps.
+    pub(super) fn resequence(&mut self, seqs: Vec<u64>, next: u64) -> Result<(), NativeError> {
+        self.own_mut().resequence(seqs, next)
+    }
+
+    /// Chunk `chunk` decoded: the sequences of its entries, ascending.
+    pub(super) fn decoded(&mut self, chunk: usize, seqs: Vec<u64>) -> Result<(), NativeError> {
+        self.own_mut().decoded(chunk, seqs)
+    }
+
+    /// The table's chunks were joined into one: its index knows every key.
+    pub(super) fn join(&mut self) {
+        self.own_mut().join();
     }
 }
 
@@ -263,55 +393,96 @@ fn invalid_key() -> NativeError {
     NativeError::Malformed("an entry's key is not a legal key")
 }
 
-/// A table of `entries` in order. A key met again keeps its first position
-/// and spelling and takes the later value (`K-KEY-003`).
+/// A table of `entries` in order, on the layout their keys lead to. A key
+/// met again keeps its first position and spelling and takes the later
+/// value (`K-KEY-003`).
 pub(super) fn build(
     objects: &Objects,
     facts: &[Facts],
-    entries: impl ExactSizeIterator<Item = (Value, Value)>,
+    layouts: &Layouts,
+    mut entries: impl ExactSizeIterator<Item = (Value, Value)>,
 ) -> Result<(Table, Index), NativeError> {
-    // The deduplication map is the table's final index. Its capacity stays
-    // with its owner, rather than being discarded and rebuilt from tokens.
-    let mut keys = HashMap::with_capacity(entries.len());
     let mut values = Vec::with_capacity(entries.len() * 2);
-    for (key, value) in entries {
-        let normal = normal_key(objects, facts, &key)?.ok_or_else(invalid_key)?;
-        match keys.entry(normal) {
-            std::collections::hash_map::Entry::Occupied(entry) => {
-                values[*entry.get() as usize * 2 + 1] = value;
-            }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert((values.len() / 2) as u64);
+    let mut layout = layouts.empty();
+    while let Some((key, value)) = entries.next() {
+        let resident = key_of(objects, facts, &key)?.ok_or_else(invalid_key)?;
+        match layout.step(&resident) {
+            Step::Next(next) => {
+                layout = next;
                 values.push(key);
                 values.push(value);
             }
+            Step::Held(at) => values[at as usize * 2 + 1] = value,
+            Step::Full => {
+                // The rest of the table is keyed by its own index, which
+                // starts from the layout's keys.
+                let mut keys = layout.own();
+                keys.reserve(entries.len() + 1);
+                let mut add = |resident: Key, key: Value, value: Value| match keys.entry(resident) {
+                    std::collections::hash_map::Entry::Occupied(entry) => {
+                        values[*entry.get() as usize * 2 + 1] = value;
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert((values.len() / 2) as u64);
+                        values.push(key);
+                        values.push(value);
+                    }
+                };
+                add(resident, key, value);
+                for (key, value) in entries.by_ref() {
+                    add(
+                        key_of(objects, facts, &key)?.ok_or_else(invalid_key)?,
+                        key,
+                        value,
+                    );
+                }
+                // Duplicate inputs must not leave a larger retained key
+                // buffer than the final unique rows need.
+                keys.shrink_to_fit();
+                let table = Table::whole(values);
+                let index = Index(Repr::Own(Box::new(Own::dense(keys, table.len))));
+                return Ok((table, index));
+            }
         }
     }
-    // Duplicate inputs must not leave a larger retained key buffer than
-    // constructing the index from the final unique rows would have used.
-    keys.shrink_to_fit();
     let table = Table::whole(values);
-    let index = Index::dense(keys, table.len);
-    Ok((table, index))
+    Ok((table, Index(Repr::Shared(layout.taken()))))
 }
 
 /// The index of a resident one-chunk table whose entries take sequences
-/// from zero.
+/// from zero: the layout its keys lead to, or its own.
 pub(super) fn index_of(
     objects: &Objects,
     facts: &[Facts],
+    layouts: &Layouts,
     object: ArenaHandle,
     table: &Table,
 ) -> Result<Index, NativeError> {
     let values = pairs(object, table)?;
-    let mut keys = HashMap::with_capacity(values.len() / 2);
-    for (at, key) in values.iter().step_by(2).enumerate() {
-        let normal = normal_key(objects, facts, key)?.ok_or_else(invalid_key)?;
-        keys.insert(normal, at as u64);
+    let mut layout = Some(layouts.empty());
+    let mut resident = Vec::with_capacity(values.len() / 2);
+    for key in values.iter().step_by(2) {
+        let key = key_of(objects, facts, key)?.ok_or_else(invalid_key)?;
+        layout = layout.and_then(|layout| match layout.step(&key) {
+            Step::Next(next) => Some(next),
+            Step::Held(_) | Step::Full => None,
+        });
+        resident.push(key);
     }
-    Ok(Index::dense(keys, (values.len() / 2) as u64))
+    if let Some(layout) = layout {
+        return Ok(Index(Repr::Shared(layout.taken())));
+    }
+    let mut keys = HashMap::with_capacity(resident.len());
+    for (at, key) in resident.into_iter().enumerate() {
+        keys.insert(key, at as u64);
+    }
+    Ok(Index(Repr::Own(Box::new(Own::dense(
+        keys,
+        (values.len() / 2) as u64,
+    )))))
 }
 
+#[inline]
 fn table_of(body: &Body) -> Result<&Table, NativeError> {
     match body {
         Body::Map(table) | Body::Set(table) | Body::Record(table) => Ok(table),
@@ -359,24 +530,42 @@ fn resident_mut(
     }
 }
 
-/// The entry under `normal` of a table, by its index: where it sits, or
-/// `None`. A key held by a cold chunk, or that only a cold chunk may hold,
-/// answers [`Retry::Cold`].
+/// The entry under `key` of a table, by its index: where it sits, or
+/// `None`. On a layout, or on a dense index of its own, an entry's
+/// sequence is its position. A key held by a cold chunk, or that only a
+/// cold chunk may hold, answers [`Retry::Cold`].
+#[inline]
 pub(crate) fn find(
     object: ArenaHandle,
     table: &Table,
     index: &Index,
-    normal: &NormalKey,
+    key: &Key,
 ) -> Result<Option<Place>, NativeError> {
+    let own = match &index.0 {
+        Repr::Shared(layout) => {
+            return Ok(layout.position(key).map(|at| Place {
+                chunk: 0,
+                at: at as usize,
+            }));
+        }
+        Repr::Own(own) => own,
+    };
+    if own.is_dense() {
+        return Ok(own.keys.get(key).map(|seq| Place {
+            chunk: 0,
+            at: *seq as usize,
+        }));
+    }
     let cold = table.chunks.first_cold();
-    match index.known(normal, cold.is_some()) {
+    match own.known(key, cold.is_some()) {
         Known::Seq(seq) => {
-            let chunk = index.chunk_of(seq);
+            let chunk = own.chunk_of(seq);
             resident(object, table, chunk)?;
-            let at = index
-                .sequences(chunk)
-                .binary_search(&seq)
-                .map_err(|_| NativeError::Malformed("a table's index names no entry"))?;
+            let seqs = own.sequences(chunk);
+            let at = seqs.partition_point(|held| held < seq);
+            if seqs.get(at) != Some(seq) {
+                return Err(NativeError::Malformed("a table's index names no entry"));
+            }
             Ok(Some(Place { chunk, at }))
         }
         Known::Absent => Ok(None),
@@ -389,6 +578,7 @@ pub(crate) fn find(
 }
 
 /// The pair at `place` of a table.
+#[inline]
 pub(crate) fn pair(table: &Table, place: Place) -> Result<&[Value], NativeError> {
     match table.chunks.get(place.chunk) {
         Some(Chunk::Resident(values)) => values
@@ -399,6 +589,9 @@ pub(crate) fn pair(table: &Table, place: Place) -> Result<&[Value], NativeError>
 }
 
 impl super::Arena {
+    /// The body and index of `handle`, for a structural edit: one that
+    /// adds, removes or moves an entry, which revokes every position proof
+    /// of the table ([`Self::table_version`]).
     fn table_parts(
         &mut self,
         handle: ArenaHandle,
@@ -407,35 +600,65 @@ impl super::Arena {
         let (body, facts) = self.parts_mut(handle)?;
         let index = facts
             .index
-            .as_deref_mut()
+            .as_mut()
             .ok_or(NativeError::Malformed("a resident table has no index"))?;
         Ok((table_mut(body)?, index))
     }
 
-    pub(super) fn table_view(&self, handle: ArenaHandle) -> Result<(&Table, &Index), NativeError> {
-        self.warm(handle)?;
-        let index = self
-            .facts(handle)?
+    /// The body and index of the resident table `handle`, and its facts.
+    #[inline]
+    fn table_facts(&self, handle: ArenaHandle) -> Result<(&Table, &Index, &Facts), NativeError> {
+        let (Some(body), Some(facts)) = (
+            self.objects.get(handle),
+            self.facts.get(handle.index() as usize),
+        ) else {
+            return Err(NativeError::Malformed("a stale handle reached the machine"));
+        };
+        if facts.cold {
+            return Err(Retry::Cold {
+                object: handle,
+                chunk: 0,
+            }
+            .into());
+        }
+        let index = facts
             .index
-            .as_deref()
+            .as_ref()
             .ok_or(NativeError::Malformed("a resident table has no index"))?;
-        Ok((table_of(self.body(handle)?)?, index))
+        Ok((table_of(body)?, index, facts))
+    }
+
+    #[inline]
+    pub(super) fn table_view(&self, handle: ArenaHandle) -> Result<(&Table, &Index), NativeError> {
+        let (table, index, _) = self.table_facts(handle)?;
+        Ok((table, index))
     }
 
     /// Writes `value` over the entry at `place`, where [`Self::table_find`]
     /// found its key: the key keeps its first spelling and position
-    /// (`K-KEY-003`). Gives the entry's sequence.
+    /// (`K-KEY-003`). A value write moves no entry, so the table's
+    /// position proofs stand. Gives the entry's sequence.
     pub fn table_replace(
         &mut self,
         handle: ArenaHandle,
         place: Place,
         value: Value,
     ) -> Result<u64, NativeError> {
-        let (table, index) = self.table_parts(handle)?;
-        let seq = *index
+        self.warm(handle)?;
+        let index = handle.index() as usize;
+        let seq = self
+            .facts
+            .get(index)
+            .and_then(|facts| facts.index.as_ref())
+            .ok_or(NativeError::Malformed("a resident table has no index"))?
             .sequences(place.chunk)
             .get(place.at)
             .ok_or(NativeError::Malformed("a table's index names no entry"))?;
+        let table = table_mut(
+            self.objects
+                .get_mut(handle)
+                .ok_or(NativeError::Malformed("a stale handle reached the machine"))?,
+        )?;
         let values = match table.chunks.get_mut(place.chunk) {
             Some(Chunk::Resident(values)) => values,
             Some(Chunk::Cold { .. }) => {
@@ -447,34 +670,57 @@ impl super::Arena {
             }
             None => return Err(NativeError::Malformed("a table's index names no chunk")),
         };
-        let old = std::mem::replace(&mut values[place.at * 2 + 1], value);
+        let held = values
+            .get_mut(place.at * 2 + 1)
+            .ok_or(NativeError::Malformed("a table's index names no entry"))?;
+        let old = std::mem::replace(held, value);
         self.hold(&value);
         self.unhold(&old);
         Ok(seq)
     }
 
-    /// Writes `value` under `key`, whose normal form is `normal` and which
-    /// the table does not hold, as its last entry. Gives the entry's
-    /// sequence.
+    /// Writes `value` under `key`, whose resident key is `resident` and
+    /// which the table does not hold, as its last entry: a table on a
+    /// layout moves to the layout `resident` leads to, when a table built
+    /// one. Gives the entry's sequence.
     pub fn table_append(
         &mut self,
         handle: ArenaHandle,
-        normal: NormalKey,
+        resident: Key,
         key: Value,
         value: Value,
     ) -> Result<u64, NativeError> {
         let (table, index) = self.table_parts(handle)?;
-        let seq = index.next;
+        let seq = index.next();
         let chunk = index.chunk_of(seq);
-        if let Chunks::Split(chunks) = &mut table.chunks
-            && chunk >= chunks.len()
-        {
-            chunks.resize_with(chunk + 1, || Chunk::Resident(Vec::new()));
-            index.seqs.resize_with(chunk + 1, Vec::new);
+        let joined = match &index.0 {
+            Repr::Shared(layout) => layout.next(&resident),
+            Repr::Own(_) => None,
+        };
+        let own = match joined {
+            Some(next) => {
+                index.0 = Repr::Shared(next);
+                None
+            }
+            None => Some(index.own_mut()),
+        };
+        if let Some(own) = own {
+            if let Chunks::Split(chunks) = &mut table.chunks
+                && chunk >= chunks.len()
+            {
+                chunks.resize_with(chunk + 1, || Chunk::Resident(Vec::new()));
+                own.seqs.resize_with(chunk + 1, Vec::new);
+            }
+            let next = seq
+                .checked_add(1)
+                .ok_or(NativeError::Malformed("a table's sequence overflows"))?;
+            own.push(chunk, seq)?;
+            own.next = next;
+            if own.width != 0 {
+                own.absent.remove(&resident);
+            }
+            own.keys.insert(resident, seq);
         }
-        let next = seq
-            .checked_add(1)
-            .ok_or(NativeError::Malformed("a table's sequence overflows"))?;
         if !table.chunks.push_inline(key) {
             let values = resident_mut(handle, table, chunk)?;
             values.push(key);
@@ -482,64 +728,63 @@ impl super::Arena {
         } else if !table.chunks.push_inline(value) {
             resident_mut(handle, table, chunk)?.push(value);
         }
-        index.push(chunk, seq)?;
-        index.next = next;
-        index.absent.remove(&normal);
-        index.keys.insert(normal, seq);
         table.len += 1;
         self.hold(&key);
         self.hold(&value);
         Ok(seq)
     }
 
-    /// Removes the entry under `normal`, if any, and gives its sequence and
-    /// value.
+    /// Removes the entry under `key`, if any, and gives its sequence and
+    /// value. A table on a layout leaves it.
     pub fn table_remove(
         &mut self,
         handle: ArenaHandle,
-        normal: &NormalKey,
+        key: &Key,
     ) -> Result<Option<(u64, Value)>, NativeError> {
         let (table, index) = self.table_parts(handle)?;
-        let Some(place) = find(handle, table, index, normal)? else {
+        let Some(place) = find(handle, table, index, key)? else {
             return Ok(None);
         };
+        let own = index.own_mut();
         let values = resident_mut(handle, table, place.chunk)?;
         let value = values.remove(place.at * 2 + 1);
-        let key = values.remove(place.at * 2);
-        let seq = index
+        let removed = values.remove(place.at * 2);
+        let seq = own
             .sequences_mut(place.chunk)
             .ok_or(NativeError::Malformed("a table's index names no chunk"))?
             .remove(place.at);
-        index.keys.remove(normal);
-        if index.width != 0 {
-            index.absent.insert(normal.clone());
+        own.keys.remove(key);
+        if own.width != 0 {
+            own.absent.insert(key.clone());
         }
         table.len -= 1;
-        self.unhold(&key);
+        self.unhold(&removed);
         self.unhold(&value);
         Ok(Some((seq, value)))
     }
 
-    /// The entry under `normal`: where it sits and its value.
+    /// The entry under `key`: where it sits and its value.
+    #[inline]
     pub fn table_find(
         &self,
         handle: ArenaHandle,
-        normal: &NormalKey,
+        key: &Key,
     ) -> Result<Option<(Place, Value)>, NativeError> {
         let (table, index) = self.table_view(handle)?;
-        let Some(place) = find(handle, table, index, normal)? else {
+        let Some(place) = find(handle, table, index, key)? else {
             return Ok(None);
         };
         Ok(Some((place, pair(table, place)?[1])))
     }
 
-    /// A process-local object identity and body revision. Every mutable body
-    /// borrow invalidates it, including changes of kind, chunk layout and key
-    /// positions. Saturation disables caching rather than reusing a revision.
+    /// A process-local object identity and layout revision: what a position
+    /// proof is guarded by. Every structural edit of the body revokes it,
+    /// including changes of kind, chunk layout and key positions; a value
+    /// written over an entry keeps it. Saturation disables caching rather
+    /// than reusing a revision.
     #[inline]
     pub fn table_version(&self, handle: ArenaHandle) -> Result<Option<(u64, u64)>, NativeError> {
-        self.table_view(handle)?;
-        let facts = self.facts(handle)?;
+        let (_, _, facts) = self.table_facts(handle)?;
         Ok((facts.revision != u64::MAX).then_some((facts.token, facts.revision)))
     }
 
@@ -569,9 +814,9 @@ impl super::Arena {
         let mut chunk = index.chunk_of(start);
         while let Some(values) = resident(handle, table, chunk)? {
             let seqs = index.sequences(chunk);
-            let at = seqs.partition_point(|seq| *seq < start);
+            let at = seqs.partition_point(|seq| seq < start);
             if let Some(seq) = seqs.get(at) {
-                return Ok(Some((*seq, values[at * 2])));
+                return Ok(Some((seq, values[at * 2])));
             }
             chunk += 1;
         }
@@ -592,11 +837,111 @@ impl super::Arena {
             }
             let seqs = index.sequences(chunk);
             passed += if chunk == end {
-                seqs.partition_point(|seq| *seq <= last)
+                seqs.partition_point(|seq| seq <= last)
             } else {
                 seqs.len()
             } as u64;
         }
         Ok(passed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_kernel_doc::{Float, NewObject, Value};
+
+    use super::super::Arena;
+    use super::*;
+
+    fn map(arena: &mut Arena, entries: Vec<(Value, Value)>) -> ArenaHandle {
+        match arena.create(NewObject::Map(entries)).unwrap() {
+            Value::Map(handle) => handle,
+            _ => panic!("a map"),
+        }
+    }
+
+    fn layout(arena: &Arena, handle: ArenaHandle) -> Option<*const Layout> {
+        match &arena.facts(handle).unwrap().index.as_ref().unwrap().0 {
+            Repr::Shared(layout) => Some(Rc::as_ptr(layout)),
+            Repr::Own(_) => None,
+        }
+    }
+
+    fn keys(arena: &Arena, handle: ArenaHandle) -> Vec<String> {
+        let mut keys = Vec::new();
+        let mut after = None;
+        while let Some((seq, key)) = arena.table_after(handle, after).unwrap() {
+            keys.push(match key {
+                Value::Int(word) => format!("{seq}:{word}"),
+                Value::Float(float) => format!("{seq}:{:.1}", float.get()),
+                other => format!("{seq}:{other:?}"),
+            });
+            after = Some(seq);
+        }
+        keys
+    }
+
+    /// K-KEY-003, K-ITER-003: tables on one layout keep their own first
+    /// spellings and later values; one that removes an entry leaves the
+    /// layout with its cursors' sequences, and a key written again takes
+    /// the next sequence. An append joins the layout a built table made,
+    /// and a value write keeps the layout.
+    #[test]
+    fn tables_on_a_layout_keep_spellings_values_and_cursors() {
+        let mut arena = Arena::new();
+        let float = |float: f64| Value::Float(Float::new(float));
+        let words = map(
+            &mut arena,
+            vec![
+                (Value::Int(1), Value::Int(10)),
+                (Value::Int(2), Value::Int(20)),
+            ],
+        );
+        let floats = map(
+            &mut arena,
+            vec![
+                (float(1.0), Value::Int(11)),
+                (float(2.0), Value::Int(21)),
+                (Value::Int(1), Value::Int(12)),
+            ],
+        );
+        assert!(layout(&arena, words).is_some());
+        assert_eq!(layout(&arena, words), layout(&arena, floats));
+        assert_eq!(keys(&arena, floats), ["0:1.0", "1:2.0"]);
+        assert!(matches!(
+            arena.table_get(floats, &Value::Int(1)).unwrap(),
+            Some(Value::Int(12))
+        ));
+        arena
+            .table_write(words, float(2.0), Value::Int(22))
+            .unwrap();
+        assert_eq!(layout(&arena, words), layout(&arena, floats));
+        assert_eq!(keys(&arena, words), ["0:1", "1:2"]);
+        assert!(matches!(
+            arena.table_get(words, &Value::Int(2)).unwrap(),
+            Some(Value::Int(22))
+        ));
+
+        arena.table_delete(words, &Value::Int(1)).unwrap();
+        assert_eq!(layout(&arena, words), None);
+        assert_eq!(keys(&arena, words), ["1:2"]);
+        arena
+            .table_write(words, Value::Int(1), Value::Int(13))
+            .unwrap();
+        assert_eq!(keys(&arena, words), ["1:2", "2:1"]);
+        assert!(matches!(
+            arena.table_get(floats, &float(2.0)).unwrap(),
+            Some(Value::Int(21))
+        ));
+
+        let one = map(&mut arena, vec![(Value::Int(1), Value::Null)]);
+        arena.table_write(one, Value::Int(2), Value::Null).unwrap();
+        assert_eq!(layout(&arena, one), layout(&arena, floats));
+        let other = map(&mut arena, vec![(Value::Int(1), Value::Null)]);
+        arena
+            .table_write(other, Value::Int(3), Value::Null)
+            .unwrap();
+        assert_eq!(layout(&arena, other), None, "an append makes no layout");
+        assert_eq!(keys(&arena, other), ["0:1", "1:3"]);
     }
 }

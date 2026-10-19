@@ -7,10 +7,9 @@
 //! the resident count the capacity meter reads (FIG-6791).
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence};
-use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
-use super::{Arena, CARD, Facts, Summary, malformed, value_summary};
+use super::{Arena, CARD, Facts, Key, Summary, malformed, value_summary};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
 pub fn invalid_key() -> NativeError {
@@ -243,12 +242,14 @@ impl Arena {
         Ok(())
     }
 
-    /// The normal form of a key, refusing a value that is no legal key.
-    pub fn key(&self, key: &Value) -> Result<NormalKey, NativeError> {
-        self.semantics().normal_key(key)?.ok_or_else(invalid_key)
+    /// The resident key of `key`, refusing a value that is no legal key.
+    #[inline]
+    pub fn key(&self, key: &Value) -> Result<Key, NativeError> {
+        self.semantics().key(key)?.ok_or_else(invalid_key)
     }
 
     /// The value the table `handle` holds under `key`.
+    #[inline]
     pub fn table_get(
         &self,
         handle: ArenaHandle,
@@ -267,20 +268,12 @@ impl Arena {
         value: Value,
     ) -> Result<(), NativeError> {
         self.warm(handle)?;
-        // The key's normal form is borrowed to find it, and kept only
-        // for a new entry.
-        let found = self.semantics().with_key(&key, |normal| {
-            let normal = normal.ok_or_else(invalid_key)?;
-            Ok(match self.table_find(handle, normal)? {
-                Some((place, _)) => Ok(place),
-                None => Err(normal.clone()),
-            })
-        })?;
-        let seq = match found {
-            Ok(place) => self.table_replace(handle, place, value)?,
-            Err(normal) => {
+        let resident = self.key(&key)?;
+        let seq = match self.table_find(handle, &resident)? {
+            Some((place, _)) => self.table_replace(handle, place, value)?,
+            None => {
                 self.resident = self.resident.saturating_add(2);
-                self.table_append(handle, normal, key, value)?
+                self.table_append(handle, resident, key, value)?
             }
         };
         self.mark(handle, Some(seq / CARD))
@@ -289,11 +282,11 @@ impl Arena {
     /// Removes the entry under `key` of the table `handle`, if any.
     pub fn table_delete(&mut self, handle: ArenaHandle, key: &Value) -> Result<(), NativeError> {
         self.warm(handle)?;
-        let normal = self.key(key)?;
-        if self.table_find(handle, &normal)?.is_none() {
+        let resident = self.key(key)?;
+        if self.table_find(handle, &resident)?.is_none() {
             return Ok(());
         }
-        let removed = self.table_remove(handle, &normal)?;
+        let removed = self.table_remove(handle, &resident)?;
         if removed.is_some() {
             self.resident = self.resident.saturating_sub(2);
         }

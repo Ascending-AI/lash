@@ -82,8 +82,19 @@ impl ShortText {
         })
     }
 
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
+    }
+
+    /// The text's length then its bytes, zero-padded, as one word: two
+    /// short texts are equal exactly when their words are.
+    #[inline]
+    pub fn word(&self) -> u128 {
+        let mut word = [0u8; 16];
+        word[0] = self.len;
+        word[1..=Self::MAX].copy_from_slice(&self.bytes);
+        u128::from_le_bytes(word)
     }
 
     #[expect(

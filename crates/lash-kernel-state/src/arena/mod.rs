@@ -46,6 +46,7 @@
 mod bench;
 mod chunks;
 mod keys;
+mod layouts;
 mod ops;
 mod reach;
 mod tables;
@@ -54,11 +55,11 @@ mod texts;
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
-pub use keys::{ArenaSemantics, text_key};
+pub use keys::{ArenaSemantics, Key, text_key};
 use ops::composite;
 pub use ops::invalid_key;
 pub use reach::{Reach, Reached};
-pub use tables::{Index, Place};
+pub use tables::{Index, Place, Sequences};
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -104,7 +105,7 @@ pub struct Facts {
     /// An immutable composite's summary.
     pub summary: Summary,
     /// A resident map's, set's or record's key index.
-    pub index: Option<Box<Index>>,
+    pub index: Option<Index>,
     /// A proxy whose head the machine has not opened: its body is a cold
     /// placeholder of its kind.
     pub cold: bool,
@@ -122,7 +123,9 @@ pub struct Facts {
     /// What a ref to it is keyed by while it is resident: process-local,
     /// never persisted, independent of where the arena put it.
     token: u64,
-    /// Invalidates process-local positions before any body or index edit.
+    /// Invalidates process-local positions before any edit that adds,
+    /// removes or moves an entry, or replaces the body: a value written
+    /// over a table entry keeps it.
     revision: u64,
     mark: bool,
 }
@@ -199,7 +202,7 @@ impl ProxyKind {
 #[derive(Debug)]
 pub struct Chilled {
     body: Body,
-    index: Option<Box<Index>>,
+    index: Option<Index>,
 }
 
 /// The objects of one run and their facts.
@@ -208,6 +211,8 @@ pub struct Arena {
     objects: Objects,
     keys: keys::KeyCache,
     facts: Vec<Facts>,
+    /// The shared key layouts of the tables the run built.
+    layouts: layouts::Layouts,
     /// The one handle of each durable object the run has seen.
     entities: HashMap<EntityId, ArenaHandle>,
     /// The primary ordinal the next object a projection saves takes.
@@ -285,13 +290,14 @@ impl Arena {
     }
 
     /// The bytes the capacity meter counts the arena holding: its resident
-    /// value slots at [`VALUE_BYTES`] each, and the control state the
-    /// machine counted (FIG-6791).
+    /// value slots at [`VALUE_BYTES`] each, the control state the machine
+    /// counted (FIG-6791), and its tables' shared layouts.
     #[inline(always)]
     pub fn held(&self) -> u64 {
         self.resident
             .saturating_mul(VALUE_BYTES)
             .saturating_add(self.control)
+            .saturating_add(self.layouts.held())
     }
 
     /// Whether what the arena holds reached the capacity mark: the meter's
@@ -372,8 +378,8 @@ impl Arena {
             .ok_or_else(|| malformed("a stale handle reached the machine"))
     }
 
-    /// The body and facts of `handle`, for an edit: the caller marks it
-    /// dirty.
+    /// The body and facts of `handle`, for an edit that may move what it
+    /// holds, which revokes its position proofs: the caller marks it dirty.
     #[inline]
     pub fn parts_mut(
         &mut self,
@@ -460,7 +466,7 @@ impl Arena {
 
     /// The facts of a mutable object the run creates: dirty, and without
     /// a durable id until a projection saves it.
-    fn created(&mut self, index: Option<Box<Index>>) -> Facts {
+    fn created(&mut self, index: Option<Index>) -> Facts {
         self.allocations += 1;
         Facts {
             dirty: true,
@@ -741,20 +747,30 @@ impl Arena {
         let (body, index) = match object {
             NewObject::List(values) => (Body::List(Sequence::whole(values)), None),
             NewObject::Map(entries) => {
-                let (table, index) =
-                    tables::build(&self.objects, &self.facts, entries.into_iter())?;
+                let (table, index) = tables::build(
+                    &self.objects,
+                    &self.facts,
+                    &self.layouts,
+                    entries.into_iter(),
+                )?;
                 (Body::Map(table), Some(index))
             }
             NewObject::Set(members) => {
                 let (table, index) = tables::build(
                     &self.objects,
                     &self.facts,
+                    &self.layouts,
                     members.into_iter().map(|m| (m, Value::Absent)),
                 )?;
                 (Body::Set(table), Some(index))
             }
             NewObject::Record(fields) => {
-                let (table, index) = tables::build(&self.objects, &self.facts, fields.into_iter())?;
+                let (table, index) = tables::build(
+                    &self.objects,
+                    &self.facts,
+                    &self.layouts,
+                    fields.into_iter(),
+                )?;
                 (Body::Record(table), Some(index))
             }
             NewObject::Tuple(members) => {
@@ -811,7 +827,7 @@ impl Arena {
                 ));
             }
         };
-        Ok((body, self.created(index.map(Box::new))))
+        Ok((body, self.created(index)))
     }
 
     fn install_one(&mut self, handle: ArenaHandle, body: Body, facts: Facts) {
@@ -823,12 +839,13 @@ impl Arena {
     /// Replaces a proxy's cold body with the contents the machine decoded,
     /// clean, with its table index.
     pub fn materialized(&mut self, handle: ArenaHandle, body: Body) -> Result<(), NativeError> {
-        let index = match &body {
-            Body::Map(table) | Body::Set(table) | Body::Record(table) => Some(Box::new(
-                tables::index_of(&self.objects, &self.facts, handle, table)?,
-            )),
-            _ => None,
-        };
+        let index =
+            match &body {
+                Body::Map(table) | Body::Set(table) | Body::Record(table) => Some(
+                    tables::index_of(&self.objects, &self.facts, &self.layouts, handle, table)?,
+                ),
+                _ => None,
+            };
         self.resident = self.resident.saturating_add(body_values(&body));
         if self.needs_decode(handle)? && !has_cold(&body) {
             self.colds = self.colds.saturating_sub(1);

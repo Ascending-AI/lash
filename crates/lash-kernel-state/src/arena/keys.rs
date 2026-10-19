@@ -53,6 +53,104 @@ impl KeyCache {
     }
 }
 
+/// A key as a resident table's index holds it (`K-KEY-002`): a short
+/// text's bytes or a word's integer directly, any other key by its normal
+/// form, so a lookup by a short text or an integer normalizes, allocates
+/// and hashes no token bytes. Two keys are equal exactly when their normal
+/// forms are: every text of at most [`ShortText::MAX`] bytes is a
+/// [`Key::Text`], an integral float is the integer it equals, and every
+/// other key (a longer text, a larger integer, any other kind) has its
+/// normal form only. Process-local: never projected, iterated or ordered.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum Key {
+    /// A text's [`ShortText::word`], in halves.
+    Text(u64, u64),
+    Int(i64),
+    Normal(Box<NormalKey>),
+}
+
+impl Key {
+    /// The key of short text `short`.
+    #[inline]
+    pub fn text(short: &ShortText) -> Self {
+        let word = short.word();
+        Self::Text(word as u64, (word >> 64) as u64)
+    }
+
+    /// The key of `value`, whose normal form is `normal`: a short text or
+    /// a word directly, any other key by `normal`.
+    pub fn normalized(value: &Value, normal: NormalKey) -> Self {
+        match value {
+            Value::Text(short) => Self::text(short),
+            Value::Int(word) => Self::Int(*word),
+            Value::Float(float) => match word_of(float.get()) {
+                Some(word) => Self::Int(word),
+                None => Self::Normal(Box::new(normal)),
+            },
+            _ => Self::Normal(Box::new(normal)),
+        }
+    }
+
+    /// The key of a field name or a text key.
+    pub fn of_text(text: &str) -> Self {
+        match ShortText::new(text) {
+            Some(short) => Self::text(&short),
+            None => Self::Normal(Box::new(text_key(text))),
+        }
+    }
+}
+
+impl std::fmt::Debug for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(low, high) => {
+                let packed = (u128::from(*high) << 64 | u128::from(*low)).to_le_bytes();
+                let len = usize::from(packed[0]).min(ShortText::MAX);
+                write!(f, "Text({:?})", String::from_utf8_lossy(&packed[1..=len]))
+            }
+            Self::Int(word) => write!(f, "Int({word})"),
+            Self::Normal(normal) => write!(f, "Normal({normal:?})"),
+        }
+    }
+}
+
+/// The word an integral float equals, when it fits one: `-2^63` and `2^63`
+/// are exact in `f64`, and a float in between with no fraction is a word.
+#[inline]
+fn word_of(float: f64) -> Option<i64> {
+    (float.fract() == 0.0 && (-(2f64.powi(63))..2f64.powi(63)).contains(&float))
+        .then_some(float as i64)
+}
+
+/// `value`'s key, or `None` when it is no legal key.
+#[inline]
+pub(crate) fn key_of(
+    objects: &Objects,
+    facts: &[Facts],
+    value: &Value,
+) -> Result<Option<Key>, NativeError> {
+    match value {
+        Value::Text(short) => return Ok(Some(Key::text(short))),
+        Value::Int(word) => return Ok(Some(Key::Int(*word))),
+        Value::Float(float) => {
+            if let Some(word) = word_of(float.get()) {
+                return Ok(Some(Key::Int(word)));
+            }
+        }
+        Value::LongText(_) => {
+            let text = text(objects, value)?;
+            return Ok(Some(Key::of_text(text)));
+        }
+        Value::BigInt(_) => {
+            if let Some(word) = integer(objects, value)?.and_then(|int| int.word()) {
+                return Ok(Some(Key::Int(word)));
+            }
+        }
+        _ => {}
+    }
+    Ok(normal_key(objects, facts, value)?.map(|normal| Key::Normal(Box::new(normal))))
+}
+
 fn body(objects: &Objects, handle: ArenaHandle) -> Result<&Body, NativeError> {
     objects
         .get(handle)
@@ -299,9 +397,9 @@ pub(crate) fn equal(
                 values,
             } => {
                 for entry in left.as_chunks::<2>().0.iter().rev() {
-                    let normal = normal_key(objects, facts, &entry[0])?
+                    let key = key_of(objects, facts, &entry[0])?
                         .ok_or(NativeError::Malformed("an entry's key is not a legal key"))?;
-                    let Some(other) = lookup(objects, facts, right, &normal)? else {
+                    let Some(other) = lookup(objects, facts, right, &key)? else {
                         return Ok(false);
                     };
                     if values {
@@ -398,12 +496,13 @@ pub(crate) fn equal(
     Ok(true)
 }
 
-/// The value a resident table holds under normal form `normal`.
+/// The value a resident table holds under `key`.
+#[inline]
 pub(crate) fn lookup<'a>(
     objects: &'a Objects,
     facts: &'a [Facts],
     handle: ArenaHandle,
-    normal: &NormalKey,
+    key: &Key,
 ) -> Result<Option<&'a Value>, NativeError> {
     let table = match body(objects, handle)? {
         Body::Map(table) | Body::Set(table) | Body::Record(table) => table,
@@ -411,9 +510,9 @@ pub(crate) fn lookup<'a>(
     };
     let index = facts
         .get(handle.index() as usize)
-        .and_then(|facts| facts.index.as_deref())
+        .and_then(|facts| facts.index.as_ref())
         .ok_or(NativeError::Malformed("a resident table has no index"))?;
-    match super::tables::find(handle, table, index, normal)? {
+    match super::tables::find(handle, table, index, key)? {
         Some(place) => Ok(Some(&super::tables::pair(table, place)?[1])),
         None => Ok(None),
     }
@@ -424,8 +523,8 @@ pub(crate) fn lookup<'a>(
 pub struct ArenaSemantics<'a> {
     objects: &'a Objects,
     facts: &'a [Facts],
-    limits: KernelDataLimits,
     keys: &'a KeyCache,
+    limits: KernelDataLimits,
 }
 
 impl<'a> ArenaSemantics<'a> {
@@ -451,6 +550,12 @@ impl<'a> ArenaSemantics<'a> {
             value,
             |normal| Ok(normal.cloned()),
         )
+    }
+
+    /// `value`'s key, or `None` when it is no legal key.
+    #[inline]
+    pub fn key(&self, value: &Value) -> Result<Option<Key>, NativeError> {
+        key_of(self.objects, self.facts, value)
     }
 
     /// A text's or a function name's UTF-8, whole.
@@ -483,36 +588,16 @@ impl<'a> ArenaSemantics<'a> {
         Ok(table(self.objects, handle)?.1)
     }
 
-    /// What `read` makes of `value`'s normal form, borrowed from the key
-    /// cache: `None` when it is no legal key.
-    pub(super) fn with_key<R>(
-        &self,
-        value: &Value,
-        read: impl FnOnce(Option<&NormalKey>) -> Result<R, NativeError>,
-    ) -> Result<R, NativeError> {
-        self.keys.with(self.objects, self.facts, value, read)
-    }
-
     /// A machine table read refuses an illegal key; native lookup instead
-    /// answers absent for one. Both borrow the cached normal form.
+    /// answers absent for one.
+    #[inline]
     pub(super) fn table_get(
         &self,
         table: ArenaHandle,
         key: &Value,
     ) -> Result<Option<&'a Value>, NativeError> {
-        self.keys.with(self.objects, self.facts, key, |normal| {
-            let normal = normal.ok_or_else(super::ops::invalid_key)?;
-            lookup(self.objects, self.facts, table, normal)
-        })
-    }
-
-    /// The value a resident table holds under normal form `normal`.
-    pub fn find(
-        &self,
-        handle: ArenaHandle,
-        normal: &NormalKey,
-    ) -> Result<Option<&'a Value>, NativeError> {
-        lookup(self.objects, self.facts, handle, normal)
+        let key = self.key(key)?.ok_or_else(super::ops::invalid_key)?;
+        lookup(self.objects, self.facts, table, &key)
     }
 }
 
@@ -522,17 +607,16 @@ impl Semantics for ArenaSemantics<'_> {
     }
 
     fn check_key(&self, key: &Value) -> Result<(), NativeError> {
-        self.keys.with(self.objects, self.facts, key, |normal| {
-            normal.map(|_| ()).ok_or_else(super::ops::invalid_key)
-        })
+        self.key(key)?
+            .map(|_| ())
+            .ok_or_else(super::ops::invalid_key)
     }
 
     fn lookup(&self, table: ArenaHandle, key: &Value) -> Result<Option<&Value>, NativeError> {
-        self.keys
-            .with(self.objects, self.facts, key, |normal| match normal {
-                Some(normal) => lookup(self.objects, self.facts, table, normal),
-                None => Ok(None),
-            })
+        match self.key(key)? {
+            Some(key) => lookup(self.objects, self.facts, table, &key),
+            None => Ok(None),
+        }
     }
 
     fn normal_key(&self, key: &Value) -> Result<Option<NormalKey>, NativeError> {
@@ -551,6 +635,7 @@ impl Semantics for ArenaSemantics<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_kernel_doc::Float;
 
     /// K-KEY-002: a bounded normalization cache collision never aliases keys.
     /// The cache must agree with the canonical grammar, including UTF-8 and
@@ -572,6 +657,61 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
+        }
+    }
+
+    /// K-KEY-002: a resident key is the same key as another exactly when
+    /// their normal forms are equal, over every spelling a key may take:
+    /// short texts of every length and UTF-8, the same text as a function
+    /// name, words and the integral floats that equal them, signed zero,
+    /// floats past a word, booleans and null.
+    #[test]
+    fn resident_keys_agree_with_normal_forms() {
+        let objects = Objects::default();
+        let texts: Vec<String> = (0..=ShortText::MAX)
+            .map(|len| "x".repeat(len))
+            .chain(["clé".into(), "é".into(), "0".into(), "1".into()])
+            .collect();
+        let mut values: Vec<Value> = texts
+            .iter()
+            .flat_map(|text| {
+                let short = ShortText::new(text).unwrap();
+                [Value::Text(short), Value::Function(short)]
+            })
+            .collect();
+        for word in [0, 1, -1, 2, i64::MAX, i64::MIN, 1 << 53] {
+            values.push(Value::Int(word));
+        }
+        for float in [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            2.0,
+            0.5,
+            -(2f64.powi(63)),
+            2f64.powi(63),
+            2f64.powi(64),
+            2f64.powi(53),
+            f64::INFINITY,
+        ] {
+            values.push(Value::Float(Float::new(float)));
+        }
+        values.extend([Value::Bool(true), Value::Bool(false), Value::Null]);
+        for a in &values {
+            for b in &values {
+                let (Some(normal_a), Some(normal_b)) = (
+                    normal_key(&objects, &[], a).unwrap(),
+                    normal_key(&objects, &[], b).unwrap(),
+                ) else {
+                    continue;
+                };
+                let (key_a, key_b) = (
+                    key_of(&objects, &[], a).unwrap().unwrap(),
+                    key_of(&objects, &[], b).unwrap().unwrap(),
+                );
+                assert_eq!(key_a == key_b, normal_a == normal_b, "{a:?} {b:?}");
+            }
         }
     }
 }

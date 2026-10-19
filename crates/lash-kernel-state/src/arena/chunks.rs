@@ -15,7 +15,7 @@ use lash_kernel_doc::heap::{NormalKey, PAYLOAD_LEAF_BYTES, PageRef};
 use lash_kernel_doc::{NativeError, Value};
 
 use super::tables::{self, Index};
-use super::{Arena, NO_PAGE, ProxyKind, body_values, first_cold, malformed};
+use super::{Arena, Key, NO_PAGE, ProxyKind, body_values, first_cold, malformed};
 
 /// What a cold chunk holds, for the machine to read from the heap.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,7 +113,7 @@ impl Arena {
         let (held, facts) = self.parts_mut(handle)?;
         *held = body;
         facts.cold = false;
-        facts.index = Some(Box::new(Index::chunked(width, count, next)));
+        facts.index = Some(Index::chunked(width, count, next));
         Ok(())
     }
 
@@ -149,7 +149,7 @@ impl Arena {
                 let index = self
                     .facts(handle)?
                     .index
-                    .as_deref()
+                    .as_ref()
                     .ok_or_else(|| malformed("a table has no index"))?;
                 for (at, chunk) in table.chunks.iter().enumerate().skip(from as usize) {
                     if out.len() as u32 == count {
@@ -219,7 +219,7 @@ impl Arena {
         let (body, facts) = self.parts_mut(handle)?;
         let index = facts
             .index
-            .as_deref_mut()
+            .as_mut()
             .ok_or_else(|| malformed("a table has no index"))?;
         let table = table_mut(body)?;
         let Chunks::Split(chunks) = &mut table.chunks else {
@@ -231,7 +231,7 @@ impl Arena {
         let mut pairs = Vec::with_capacity(entries.len() * 2);
         let mut seqs = Vec::with_capacity(entries.len());
         for (seq, key, value, normal) in entries {
-            index.resolved(normal, Some(seq));
+            index.resolved(Key::normalized(&key, normal), Some(seq));
             seqs.push(seq);
             pairs.push(key);
             pairs.push(value);
@@ -258,7 +258,7 @@ impl Arena {
                 }
                 facts
                     .index
-                    .as_deref_mut()
+                    .as_mut()
                     .ok_or_else(|| malformed("a table has no index"))?
                     .join();
             }
@@ -416,28 +416,39 @@ impl Arena {
     /// The normal form of `key` when the table `handle` must look it up in
     /// the heap's key index first: it has a cold chunk and its index does
     /// not know the key. A proxy answers [`lash_kernel_doc::Retry::Cold`].
+    #[inline]
     pub fn unresolved(
         &self,
         handle: ArenaHandle,
         key: &Value,
     ) -> Result<Option<NormalKey>, NativeError> {
+        if self.colds == 0 {
+            // No object has a cold chunk or is a proxy.
+            return Ok(None);
+        }
         self.warm(handle)?;
         if let Body::Map(table) | Body::Set(table) | Body::Record(table) = self.body(handle)?
             && table.chunks.first_cold().is_none()
         {
             return Ok(None);
         }
-        let normal = self.key(key)?;
-        Ok(self.unresolved_normal(handle, &normal)?.then_some(normal))
+        if !self.unresolved_key(handle, &self.key(key)?)? {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.semantics()
+                .normal_key(key)?
+                .ok_or_else(super::invalid_key)?,
+        ))
     }
 
-    /// Whether the table `handle` must look normal form `normal` up in the
-    /// heap's key index first.
-    pub fn unresolved_normal(
-        &self,
-        handle: ArenaHandle,
-        normal: &NormalKey,
-    ) -> Result<bool, NativeError> {
+    /// Whether the table `handle` must look `key` up in the heap's key
+    /// index first.
+    #[inline]
+    pub fn unresolved_key(&self, handle: ArenaHandle, key: &Key) -> Result<bool, NativeError> {
+        if self.colds == 0 {
+            return Ok(false);
+        }
         self.warm(handle)?;
         let cold = match self.body(handle)? {
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
@@ -445,26 +456,27 @@ impl Arena {
             }
             _ => return Ok(false),
         };
-        Ok(self
-            .facts(handle)?
-            .index
-            .as_deref()
-            .is_some_and(|index| index.unknown(normal, cold)))
+        Ok(cold
+            && self
+                .facts(handle)?
+                .index
+                .as_ref()
+                .is_some_and(|index| index.unknown(key, cold)))
     }
 
-    /// Records what the heap's key index holds for `normal` in the table
+    /// Records what the heap's key index holds for `key` in the table
     /// `handle`: the entry's sequence, or none.
     pub fn resolved(
         &mut self,
         handle: ArenaHandle,
-        normal: NormalKey,
+        key: Key,
         seq: Option<u64>,
     ) -> Result<(), NativeError> {
         self.facts_mut(handle)?
             .index
-            .as_deref_mut()
+            .as_mut()
             .ok_or_else(|| malformed("a table has no index"))?
-            .resolved(normal, seq);
+            .resolved(key, seq);
         Ok(())
     }
 
