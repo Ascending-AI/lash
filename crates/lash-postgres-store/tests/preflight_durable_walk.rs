@@ -149,7 +149,7 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         .collect();
     for session in &sessions {
         // Each root dangles: the walk still names its session as an item.
-        seed_session(&scratch, session, &format!("collected-{session}")).await;
+        seed_session(&scratch, session.as_str(), &format!("collected-{session}")).await;
     }
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
@@ -196,13 +196,8 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     let (manifest_ref, manifest) = encoded_manifest(Some(execution_root));
     seed_blob(&scratch, &component_ref, &component).await;
     seed_blob(&scratch, &manifest_ref, &manifest).await;
-    seed_session(&scratch, &SessionId::from("session-healthy"), &manifest_ref).await;
-    seed_session(
-        &scratch,
-        &SessionId::from("session-dangling"),
-        "hash-that-was-collected",
-    )
-    .await;
+    seed_session(&scratch, "session-healthy", &manifest_ref).await;
+    seed_session(&scratch, "session-dangling", "hash-that-was-collected").await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -267,9 +262,9 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
     seed_blob(&scratch, &execution_root.to_hex(), &execution).await;
     seed_blob(&scratch, &with_ref, &manifest_with).await;
     seed_blob(&scratch, &without_ref, &manifest_without).await;
-    seed_session(&scratch, &SessionId::from("session-1"), &with_ref).await;
+    seed_session(&scratch, "session-1", &with_ref).await;
     // Scanned second, emits nothing: it names no execution root at all.
-    seed_session(&scratch, &SessionId::from("session-2"), &without_ref).await;
+    seed_session(&scratch, "session-2", &without_ref).await;
 
     let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
         .scan_durable(&DurableScan::first(
@@ -285,6 +280,82 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
         Some("session-2"),
         "the page resumes after the last session scanned, not the last item emitted"
     );
+
+    scratch.cleanup().await;
+}
+
+/// The schema stores session keys as plain text, so a foreign or damaged
+/// catalog can hold a key no `SessionId` parses, such as the empty string. The
+/// walk pages on the stored key: a page whose only row carries such a key is
+/// still a full page and resumes after it, and the later valid session is
+/// walked exactly once on both deep surfaces.
+#[tokio::test]
+async fn a_page_of_unparseable_session_keys_still_continues_to_the_next() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping preflight durable walk: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let (execution_root, execution) = execution_root_node();
+    let (with_ref, manifest_with) = encoded_manifest(Some(execution_root));
+    let (without_ref, manifest_without) = encoded_manifest(None);
+    seed_blob(&scratch, &execution_root.to_hex(), &execution).await;
+    seed_blob(&scratch, &with_ref, &manifest_with).await;
+    seed_blob(&scratch, &without_ref, &manifest_without).await;
+    // Sorts first and names no execution root, so its execution page is empty.
+    seed_session(&scratch, "", &without_ref).await;
+    seed_session(&scratch, "z-valid", &with_ref).await;
+
+    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
+    let walk = |surface| {
+        let preflight = &preflight;
+        async move {
+            let mut walked = Vec::new();
+            let mut after: Option<String> = None;
+            for _ in 0..8 {
+                let scan = DurableScan {
+                    surface,
+                    after: after.clone(),
+                    limit: 1,
+                };
+                let page = preflight.scan_durable(&scan).await.expect("walk one row");
+                assert_eq!(page.coverage, ScanCoverage::Scanned);
+                walked.extend(page.items);
+                match page.next {
+                    Some(cursor) => after = Some(cursor),
+                    None => return walked,
+                }
+            }
+            panic!("{} did not reach exhaustion", surface.name());
+        }
+    };
+
+    let checkpoints = walk(DurableSurface::SessionCheckpoint).await;
+    let walked: Vec<(&str, Option<&str>)> = checkpoints
+        .iter()
+        .map(|item| (item.cursor.as_str(), item.session_id.as_deref()))
+        .collect();
+    assert_eq!(
+        walked,
+        [("", None), ("z-valid", Some("z-valid"))],
+        "the unparseable key is reported under its raw cursor and the walk continues past it"
+    );
+    assert_eq!(
+        checkpoints[0].payload,
+        DurablePayload::GraphNode(manifest_without)
+    );
+
+    let executions = walk(DurableSurface::SessionExecutionState).await;
+    let walked: Vec<(&str, Option<&str>)> = executions
+        .iter()
+        .map(|item| (item.cursor.as_str(), item.session_id.as_deref()))
+        .collect();
+    assert_eq!(
+        walked,
+        [("z-valid", Some("z-valid"))],
+        "a filtered first page still resumes to the valid session behind it"
+    );
+    assert_eq!(executions[0].payload, DurablePayload::GraphNode(execution));
 
     scratch.cleanup().await;
 }
@@ -321,8 +392,9 @@ fn execution_root_node() -> (
 }
 
 /// Seeds the session past the foreign keys: a dangling checkpoint root is
-/// foreign data the schema refuses, and the walk must still report it.
-async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {
+/// foreign data the schema refuses, and the walk must still report it. The key
+/// is raw text because the schema admits keys no `SessionId` parses.
+async fn seed_session(scratch: &ScratchSchema, session_id: &str, checkpoint_ref: &str) {
     scratch
         .apply(&format!(
             "BEGIN;

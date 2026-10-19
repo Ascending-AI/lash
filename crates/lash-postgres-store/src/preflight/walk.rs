@@ -162,9 +162,9 @@ async fn scan_session_checkpoints(
         .iter()
         .map(|session| DurableItem {
             surface: DurableSurface::SessionCheckpoint,
-            cursor: session.session_id.clone().to_string(),
+            cursor: session.session_key.clone(),
             process_id: None,
-            session_id: Some(session.session_id.clone()),
+            session_id: SessionId::parse(session.session_key.clone()).ok(),
             status: None,
             owner_record: None,
             payload: match blobs.get(session.checkpoint_ref.as_str()) {
@@ -177,7 +177,7 @@ async fn scan_session_checkpoints(
                     reason: format!(
                         "session `{}` points at checkpoint blob `{}`, which is absent from \
                          lash_blobs",
-                        session.session_id, session.checkpoint_ref
+                        session.session_key, session.checkpoint_ref
                     ),
                 },
             },
@@ -185,9 +185,7 @@ async fn scan_session_checkpoints(
         .collect();
     let next = page_cursor(
         scan,
-        sessions
-            .last()
-            .map(|session| session.session_id.to_string()),
+        sessions.last().map(|session| session.session_key.clone()),
         sessions.len(),
     );
     finish(snapshot, Ok(scanned(items, next))).await
@@ -232,18 +230,18 @@ async fn scan_session_execution_state(
     // A manifest blob that is itself absent drops out here too: the dangling root is already a
     // `Missing` item on the `SessionCheckpoint` surface, and reporting it a second time as an
     // absent execution state would claim a root the store never said existed.
-    let mut resolved: Vec<(String, String)> = Vec::with_capacity(sessions.len());
+    let mut resolved: Vec<(&str, String)> = Vec::with_capacity(sessions.len());
     for session in &sessions {
         let Some(manifest) = manifests.get(session.checkpoint_ref.as_str()) else {
             continue;
         };
         if let Some(blob_ref) = execution_state_ref(manifest) {
-            resolved.push((session.session_id.clone().to_string(), blob_ref));
+            resolved.push((session.session_key.as_str(), blob_ref));
         }
     }
     let component_refs: Vec<String> = resolved
         .iter()
-        .map(|(_session_id, blob_ref)| blob_ref.clone())
+        .map(|(_session_key, blob_ref)| blob_ref.clone())
         .collect();
     let components = match fetch_blobs(&mut snapshot, &component_refs).await {
         Ok(components) => components,
@@ -252,11 +250,11 @@ async fn scan_session_execution_state(
 
     let items: Vec<DurableItem> = resolved
         .iter()
-        .map(|(session_id, blob_ref)| DurableItem {
+        .map(|&(session_key, ref blob_ref)| DurableItem {
             surface: DurableSurface::SessionExecutionState,
-            cursor: session_id.clone(),
+            cursor: session_key.to_owned(),
             process_id: None,
-            session_id: SessionId::parse(session_id.clone()).ok(),
+            session_id: SessionId::parse(session_key).ok(),
             status: None,
             owner_record: None,
             payload: match components.get(blob_ref.as_str()) {
@@ -266,7 +264,7 @@ async fn scan_session_execution_state(
                 // "this session has none" case above.
                 None => DurablePayload::Missing {
                     reason: format!(
-                        "session `{session_id}` names execution-state blob `{blob_ref}`, which is \
+                        "session `{session_key}` names execution-state blob `{blob_ref}`, which is \
                          absent from lash_blobs"
                     ),
                 },
@@ -276,9 +274,7 @@ async fn scan_session_execution_state(
     // Deliberately the last *session*, not the last item — see the doc comment.
     let next = page_cursor(
         scan,
-        sessions
-            .last()
-            .map(|session| session.session_id.to_string()),
+        sessions.last().map(|session| session.session_key.clone()),
         sessions.len(),
     );
     finish(snapshot, Ok(scanned(items, next))).await
@@ -305,6 +301,10 @@ fn execution_state_ref(manifest: &[u8]) -> Option<String> {
 }
 
 /// One page of sessions holding a checkpoint root, shared by both deep surfaces.
+///
+/// Every row the statement returns is kept: the page's count and last key are
+/// what tell a keyset walk whether it reached the end, so dropping a row here
+/// would make a full page read as the last one.
 async fn fetch_sessions(
     snapshot: &mut Transaction<'_, Postgres>,
     scan: &DurableScan,
@@ -330,11 +330,9 @@ async fn fetch_sessions(
         .await?;
     Ok(rows
         .into_iter()
-        .filter_map(|(session_id, checkpoint_ref)| {
-            Some(SessionCheckpointRow {
-                session_id: SessionId::parse(session_id).ok()?,
-                checkpoint_ref,
-            })
+        .map(|(session_key, checkpoint_ref)| SessionCheckpointRow {
+            session_key,
+            checkpoint_ref,
         })
         .collect())
 }
@@ -466,8 +464,12 @@ fn page_cursor(scan: &DurableScan, last: Option<String>, returned: usize) -> Opt
 
 /// A session that has published a checkpoint root, named rather than positional
 /// because both deep surfaces pass it around well away from its query.
+///
+/// `session_key` is the stored key, not a `SessionId`: it is the page's cursor,
+/// and the schema admits keys no `SessionId` parses. Only an item's optional
+/// `session_id` is parsed from it.
 struct SessionCheckpointRow {
-    session_id: SessionId,
+    session_key: String,
     checkpoint_ref: String,
 }
 
