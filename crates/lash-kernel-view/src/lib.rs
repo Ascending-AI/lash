@@ -291,17 +291,19 @@ pub struct ActionView {
     /// Calls through values have no static callee name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<CalleeView>,
-    /// The callables the action runs that the view can derive, in argument
-    /// order: what a call or `spawn` through a variable runs, when every
-    /// write of the variable that can hold a callable writes the same one,
-    /// and each closure a library callee is passed and its kernel body
-    /// applies (TypeScript's `ts.promise.start(<closure>)`, Python's
-    /// `py.task.run`). A closure is named by its expression's site, a
-    /// [`CallableView::site`] of this view; a declared function by its
-    /// body's root, `Site::new(unit, [])`, which [`derive_callable`] opens.
-    /// A callable that reaches the action through a parameter, a collection,
-    /// a library call's result or a variable written two callables is not
-    /// derived.
+    /// The may-call set of a call or `spawn` through a value, and of the
+    /// document callables a library callee applies, deduplicated in site
+    /// order. Union all writes and follow aliases, parameters from document
+    /// call sites, collection members selected by kernel library bodies,
+    /// and library results (including wrappers that apply an input).
+    /// A closure is named by its expression's site, a [`CallableView::site`];
+    /// a declared function by `Site::new(unit, [])`, opened by [`derive_callable`].
+    /// Host inputs, perform results and native-only library results supply
+    /// no known callable. Session writes in this document are followed;
+    /// earlier session values, including saved functions, are underived:
+    /// [`WorkflowDocument`] supplies no session binding-to-function identities.
+    /// `Promise.all` and `asyncio.gather` only await tasks; the nested actions
+    /// that start their members name the closures, not the aggregate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applies: Vec<Site>,
     pub args: Vec<ArgumentView>,
@@ -528,7 +530,7 @@ pub fn derive_callable(
             execution_sites: graph.execution_sites().iter().map(execution_site).collect(),
         },
         uses: BTreeMap::new(),
-        links: applies::Links::new(graph),
+        links: applies::Links::new(),
     };
     let at = Context {
         block: walk.entry.site.clone(),
@@ -1254,3 +1256,6 @@ fn available(graph: &Graph, node: &GraphNode) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod applies_tests;

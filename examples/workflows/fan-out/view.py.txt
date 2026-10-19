@@ -11,10 +11,10 @@ scope fn demo/1/0/1/1/1/1/1/1/0/1/0/0 ordinal=9 depth=1 Closure
 action fn demo/0/0/0/0/0/0/1 library id=c9577269a338e9de71987d8f4aa60455693ac5af4eb2774138e6958d05790ce9 name=py.arg_missing label="Python arg missing"
 action fn demo/0/0/0/0/0/1 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
 action fn demo/0/0/0/0/0/1/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/1/0/1/1/1/1/1/1/0/0 library id=4c101896846d468753c0737a490e0141b23941901ec24fe3a0b25e0fb6a415bc name=py.task.run label="Python task run"
-action fn demo/1/0/1/1/1/1/1/1/0/0/0/0/0/0 None
-action fn demo/1/0/1/1/1/1/1/1/0/1 library id=4c101896846d468753c0737a490e0141b23941901ec24fe3a0b25e0fb6a415bc name=py.task.run label="Python task run"
-action fn demo/1/0/1/1/1/1/1/1/0/1/0/0/0/0 None
+action fn demo/1/0/1/1/1/1/1/1/0/0 applies=fn demo/1/0/1/1/1/1/1/1/0/0/0 library id=4c101896846d468753c0737a490e0141b23941901ec24fe3a0b25e0fb6a415bc name=py.task.run label="Python task run"
+action fn demo/1/0/1/1/1/1/1/1/0/0/0/0/0/0 applies=fn demo/0/0 None
+action fn demo/1/0/1/1/1/1/1/1/0/1 applies=fn demo/1/0/1/1/1/1/1/1/0/1/0 library id=4c101896846d468753c0737a490e0141b23941901ec24fe3a0b25e0fb6a415bc name=py.task.run label="Python task run"
+action fn demo/1/0/1/1/1/1/1/1/0/1/0/0/0/0 applies=fn demo/0/0 None
 action fn demo/1/0/1/1/1/1/1/1/1 library id=388ae16d76d6f29ff823babf770181df293b7a47862bc6f50111c12cf5ff3a2f name=py.gather label="Python gather"
 caption callable 0 block=fn demo "Echo two values at once"
 caption node 0 site=fn demo/0 "Describe how to echo one value"

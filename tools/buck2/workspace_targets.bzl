@@ -1373,7 +1373,8 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
@@ -1600,7 +1601,8 @@ WORKSPACE_DEV_SUITE_LABELS = [
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
@@ -2439,10 +2441,6 @@ WORKSPACE_TEST_BATCHES = {
     "//crates/lash-kernel-edit:test_batch": [
         "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin__unit_test",
         "//crates/lash-kernel-edit:lash-kernel-edit__unit_test",
-    ],
-    "//crates/lash-kernel-view:test_batch": [
-        "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
-        "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     ],
     "//crates/lash-llm-transport:test_batch": [
         "//crates/lash-llm-transport:lash-llm-transport__unit_test",

@@ -85848,7 +85848,8 @@
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_10e59cc4",
@@ -89705,8 +89706,12 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-dialect-python",
+        "lash-dialect-typescript",
         "lash-helper-labels",
+        "lash-internal-vm-worker",
         "lash-kernel-check",
+        "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-edit",
         "schemars",
@@ -89757,11 +89762,8 @@
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-kernel-view:test_batch",
-        "members": [
-          "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
-          "//crates/lash-kernel-view:lash-kernel-view__unit_test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -94910,7 +94912,6 @@
     "//crates/lash-kernel-state:lash-kernel-state__unit_test": 300,
     "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test": 300,
     "//crates/lash-kernel-view:lash-kernel-view__unit_test": 300,
-    "//crates/lash-kernel-view:test_batch": 300,
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test": 300,
     "//crates/lash-llm-tools:lash-llm-tools__unit_test": 300,
     "//crates/lash-llm-transport:lash-llm-transport__unit_test": 300,
@@ -97736,7 +97737,8 @@
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
@@ -97946,7 +97948,8 @@
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
@@ -98540,10 +98543,6 @@
       "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin__unit_test",
       "//crates/lash-kernel-edit:lash-kernel-edit__unit_test"
     ],
-    "//crates/lash-kernel-view:test_batch": [
-      "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
-      "//crates/lash-kernel-view:lash-kernel-view__unit_test"
-    ],
     "//crates/lash-llm-transport:test_batch": [
       "//crates/lash-llm-transport:lash-llm-transport__unit_test",
       "//crates/lash-llm-transport:property__test"
@@ -98685,7 +98684,8 @@
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test",
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test",
     "//crates/lash-kernel-state:lash-kernel-state__unit_test",
-    "//crates/lash-kernel-view:test_batch",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test",
+    "//crates/lash-kernel-view:lash-kernel-view__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",

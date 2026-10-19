@@ -22,7 +22,7 @@ scope main/2/0/4/0/0/0/0/0/4/1 ordinal=12 depth=3 Then
 scope main/2/0/4/0/0/0/0/0/4/1/1/1 ordinal=15 depth=4 Then
 scope main/2/0/4/0/0/0/0/0/4/1/1/2 ordinal=17 depth=4 Else
 scope main/2/0/4/0/0/0/0/0/4/2 ordinal=18 depth=3 Else
-action main/2/0/4/0/0/0 library id=4583407113f75ecf7b1820430a11b2fc8d399fd55f86c145903250b08c4e24e7 name=ts.promise.start label="TypeScript promise start"
+action main/2/0/4/0/0/0 applies=main/2/0/4/0/0/0/0 library id=4583407113f75ecf7b1820430a11b2fc8d399fd55f86c145903250b08c4e24e7 name=ts.promise.start label="TypeScript promise start"
 action main/2/0/4/0/0/0/0/0/0/0/1 library id=4397141e867d8cc6f131074cdb679fea54b22344aadac9df5e1aee34395a21b1 name=ts.pad label="TypeScript pad"
 action main/2/0/4/0/0/0/0/0/4/2/0/0 library id=f6b649b343330494de1291f781d6bcee15b35fb829d7f655171f3a8339bd1a6f name=ts.get_computed label="TypeScript get computed"
 action main/3/0 Some(Effect(QualifiedName("corpus.echo")))

@@ -141,6 +141,9 @@ pub(super) fn view(
     }
     for action in &view.dataflow.actions {
         write!(text, "action {}", action.site)?;
+        for callable in &action.applies {
+            write!(text, " applies={callable}")?;
+        }
         match &action.callee {
             Some(CalleeView::Library { id, name }) => writeln!(
                 text,

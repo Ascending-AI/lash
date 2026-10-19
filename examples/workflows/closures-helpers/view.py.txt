@@ -10,7 +10,7 @@ scope fn demo/0/0/0 ordinal=4 depth=1 Closure
 scope fn demo/2/1 ordinal=8 depth=1 For
 action fn demo/0/0/0/0/0/0/1 library id=c9577269a338e9de71987d8f4aa60455693ac5af4eb2774138e6958d05790ce9 name=py.arg_missing label="Python arg missing"
 action fn demo/0/0/0/0/0/1 library id=1903be2841d029d1210ae4076e2b41e2bdb773276f0c92d27ee6da83fd077f4b name=py.length label="Python length"
-action fn demo/2/1/0/2 None
+action fn demo/2/1/0/2 applies=fn demo/0/0 None
 caption callable 0 block=fn demo "Measure each word"
 caption node 0 site=fn demo/0 "Describe how to measure one word"
 caption node 3 site=fn demo/3 "Measure every word in the list"

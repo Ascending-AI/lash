@@ -51,8 +51,12 @@ lash_rust_unit_test(
     extra_compile_data = [
         "//:host_schemas",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-kernel-view",
     package_name = "lash-kernel-view",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -86,12 +90,16 @@ lash_rust_unit_test(
     crate_root = "src/bin/kernel_view_schema_generator.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-kernel-view", "kernel_view_schema_generator", "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-kernel-view",
     library_crate_name = "lash_kernel_view",
     manifest_dir = "crates/lash-kernel-view",
     package_name = "lash-kernel-view",
     tags = [],
     version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 export_file(
@@ -106,18 +114,6 @@ export_file(
     src = "kernel-workflow-view-v1.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-kernel-view:test_batch"),
-    jobs = 2,
-    tests = [
-        ":kernel_view_schema_generator__bin__unit_test",
-        ":lash-kernel-view__unit_test",
-    ],
 )
 
 filegroup(

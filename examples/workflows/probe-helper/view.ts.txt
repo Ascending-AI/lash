@@ -25,7 +25,7 @@ scope fn summarize_inbox/0/0/4/0/0/0/0/0/3/1/0/1 ordinal=13 depth=4 Then
 scope fn summarize_inbox/0/0/4/0/0/0/0/0/3/1/0/2 ordinal=15 depth=4 Else
 scope fn summarize_inbox/0/0/4/0/0/0/0/0/3/2 ordinal=17 depth=3 Else
 scope fn summarize_inbox/3/1 ordinal=25 depth=1 For
-action fn summarize_inbox/0/0/4/0/0/0 library id=4583407113f75ecf7b1820430a11b2fc8d399fd55f86c145903250b08c4e24e7 name=ts.promise.start label="TypeScript promise start"
+action fn summarize_inbox/0/0/4/0/0/0 applies=fn summarize_inbox/0/0/4/0/0/0/0 library id=4583407113f75ecf7b1820430a11b2fc8d399fd55f86c145903250b08c4e24e7 name=ts.promise.start label="TypeScript promise start"
 action fn summarize_inbox/0/0/4/0/0/0/0/0/0/0/1 library id=4397141e867d8cc6f131074cdb679fea54b22344aadac9df5e1aee34395a21b1 name=ts.pad label="TypeScript pad"
 action fn summarize_inbox/0/0/4/0/0/0/0/0/3/1/0/2/0/0 library id=48746010a2fe231fe1d115e148b0ce0f1ab19703d807f7e9ebe65b2f345e2258 name=ts.read label="TypeScript read"
 action fn summarize_inbox/0/0/4/0/0/0/0/0/3/2/0/0 library id=48746010a2fe231fe1d115e148b0ce0f1ab19703d807f7e9ebe65b2f345e2258 name=ts.read label="TypeScript read"
@@ -36,7 +36,7 @@ action fn summarize_inbox/0/0/4/0/0/0/0/0/5/0/0 library id=ac89e50257ae69e06fe10
 action fn summarize_inbox/1/0 Some(Effect(QualifiedName("gmail.list_recent")))
 action fn summarize_inbox/1/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
 action fn summarize_inbox/3/1/0/2 library id=fcbd74712debde9fcdc88f1d085fceb067549ecab375e4fd9dec0ddc520d098d name=ts.await label="TypeScript await"
-action fn summarize_inbox/3/1/0/2/0/1/1/1 None
+action fn summarize_inbox/3/1/0/2/0/1/1/1 applies=fn summarize_inbox/0/0/4 None
 caption callable 0 block=fn summarize_inbox "Summarize the inbox"
 caption node 0 site=fn summarize_inbox/0 "Describe how to summarize and show one email"
 caption node 2 site=fn summarize_inbox/1 "Get the three newest emails"

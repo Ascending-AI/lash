@@ -143,7 +143,7 @@ fn an_action_that_runs_a_derivable_closure_names_its_callable() {
         );
         // Python calls `work` through the variable its `def` writes once. A
         // TypeScript call goes through `ts.callable` of a function token,
-        // which the view, linking no dialect, does not resolve.
+        // which the view resolves from the helper's kernel return paths.
         if dialect == "Python" {
             assert!(
                 view.dataflow

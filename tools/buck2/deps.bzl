@@ -1497,7 +1497,11 @@ PACKAGE_DEPS = {
     "lash-kernel-view": {
         "build": {},
         "dev": {
-            "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
         },
         "normal": {
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",

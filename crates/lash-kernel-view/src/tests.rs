@@ -1119,12 +1119,8 @@ main { finish null }
     ));
 }
 
-/// A variable whose every write agrees on one callable names it, however
-/// many writes reach that callable: through one alias written twice, and
-/// through a diamond of aliases converging on it. Cycle detection follows
-/// only the variables still being resolved, so a completed dependency is
-/// never mistaken for a back-edge; a real cycle and disagreeing writes stay
-/// unknown.
+/// Alias writes, converging aliases and recursive alias cycles keep every
+/// reachable document callable in the may-call set.
 #[test]
 fn agreeing_writes_of_one_alias_resolve_to_its_callee() {
     let document = parse_document(
@@ -1167,7 +1163,11 @@ main { finish null }
     };
     let work = site("flow", &[0, 0]);
     assert_eq!(applies(3), &vec![work.clone()], "one alias written twice");
-    assert_eq!(applies(8), &vec![work], "a diamond of aliases");
-    assert!(applies(12).is_empty(), "a cycle of aliases");
-    assert!(applies(16).is_empty(), "disagreeing writes");
+    assert_eq!(applies(8), &vec![work.clone()], "a diamond of aliases");
+    assert_eq!(applies(12), &vec![work.clone()], "a cyclic alias");
+    assert_eq!(
+        applies(16),
+        &vec![work, site("flow", &[13, 0])],
+        "disagreeing writes contribute both possible callees",
+    );
 }
