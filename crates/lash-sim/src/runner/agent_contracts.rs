@@ -1238,8 +1238,11 @@ fn hex_prefix(bytes: &[u8], len: usize) -> String {
 
 fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -> Value {
     let mut completed_entries = BTreeSet::new();
+    // Processes are counted by their own identity; the references describe
+    // them and two distinct processes can share one.
+    let mut completed_lash_vm_processes = BTreeSet::new();
     let mut completed_lash_vm_process_refs = BTreeSet::new();
-    let mut completed_document_entry_process_refs = BTreeSet::new();
+    let mut completed_document_entry_processes = BTreeSet::new();
     let mut statuses = BTreeMap::<String, usize>::new();
     let mut kinds = BTreeMap::<String, usize>::new();
     for process in processes {
@@ -1265,13 +1268,14 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
                 .and_then(Value::as_str)
                 .is_some_and(|kind| kind == lash_vm_runtime::LASH_VM_ENGINE_KIND)
             {
+                completed_lash_vm_processes.insert(&process.raw_process_id);
                 completed_lash_vm_process_refs.insert(process.process_ref.clone());
                 if process
                     .observed
                     .get("document_entry")
                     .is_some_and(Value::is_string)
                 {
-                    completed_document_entry_process_refs.insert(process.process_ref.clone());
+                    completed_document_entry_processes.insert(&process.raw_process_id);
                 }
             }
         }
@@ -1283,8 +1287,8 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
             .filter(|process| process.observed.get("terminal").and_then(Value::as_bool) == Some(true))
             .count(),
         "completed_entries": completed_entries.into_iter().collect::<Vec<_>>(),
-        "completed_lash_vm_process_count": completed_lash_vm_process_refs.len(),
-        "completed_document_entry_process_count": completed_document_entry_process_refs.len(),
+        "completed_lash_vm_process_count": completed_lash_vm_processes.len(),
+        "completed_document_entry_process_count": completed_document_entry_processes.len(),
         "completed_lash_vm_process_refs": completed_lash_vm_process_refs.into_iter().collect::<Vec<_>>(),
         "status_counts": statuses,
         "kind_counts": kinds,

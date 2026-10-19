@@ -790,7 +790,7 @@ impl DurableStore for FaultStore {
         node: Option<&lash_durable::Owner>,
         actor: &ActorKey,
     ) -> Result<lash_durable::ClaimFacts, DurableError> {
-        self.inner.claim_facts(node, actor).await
+        self.read(self.inner.claim_facts(node, actor)).await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
@@ -877,8 +877,7 @@ impl DurableReads for FaultStore {
         max_rows: usize,
         limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
-        self.inner
-            .run_facts_within(owner, run, max_rows, limits)
+        self.read(self.inner.run_facts_within(owner, run, max_rows, limits))
             .await
     }
 
@@ -899,7 +898,8 @@ impl DurableReads for FaultStore {
         run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
-        self.inner.cell_roots_within(session, run, max_rows).await
+        self.read(self.inner.cell_roots_within(session, run, max_rows))
+            .await
     }
 
     async fn hydrate(
@@ -1120,6 +1120,103 @@ mod tests {
         assert!(!call.is_finished());
         deployment.clock.advance_to(2_000).await;
         call.await.expect("the call ran").expect("the commit stood");
+    }
+
+    /// The bounded diagnostic reads take the node's read path: a running
+    /// node's read is counted as in flight, a paused node's waits until it
+    /// resumes, and a dead node's never enters.
+    #[tokio::test]
+    async fn diagnostic_reads_obey_node_life_and_count_in_flight_work() {
+        type Read = Pin<Box<dyn Future<Output = ()> + Send>>;
+        type StartRead = Box<dyn Fn() -> Read>;
+        let deployment = Deployment::new().await;
+        let (store, life) = deployment.node("a");
+        let session = SessionId::try_from("diagnosed".to_owned()).expect("a session id");
+        let run =
+            lash_protocol_types::TurnId::try_from("diagnosed-turn".to_owned()).expect("a turn id");
+        let owner = OwnerKey::Turn(session.clone(), run.clone());
+        let reads: [(&str, StartRead); 3] = [
+            (
+                "claim_facts",
+                Box::new({
+                    let store = Arc::clone(&store);
+                    move || {
+                        let store = Arc::clone(&store);
+                        Box::pin(async move {
+                            let _ = store.claim_facts(None, &actor("diagnosed")).await;
+                        })
+                    }
+                }),
+            ),
+            (
+                "run_facts_within",
+                Box::new({
+                    let store = Arc::clone(&store);
+                    move || {
+                        let (store, owner) = (Arc::clone(&store), owner.clone());
+                        Box::pin(async move {
+                            let limits =
+                                lash_durable::domain::checkpoint_graph::DecodeLimits::within_total(
+                                    1 << 20,
+                                );
+                            let _ = store.run_facts_within(&owner, None, 8, limits).await;
+                        })
+                    }
+                }),
+            ),
+            (
+                "cell_roots_within",
+                Box::new({
+                    let store = Arc::clone(&store);
+                    move || {
+                        let (store, session, run) =
+                            (Arc::clone(&store), session.clone(), run.clone());
+                        Box::pin(async move {
+                            let _ = store.cell_roots_within(&session, &run, 8).await;
+                        })
+                    }
+                }),
+            ),
+        ];
+        for (name, read) in &reads {
+            let entered = deployment.activity.entered();
+            read().await;
+            assert_eq!(
+                deployment.activity.entered(),
+                entered + 1,
+                "a running node's {name} is counted while it runs"
+            );
+
+            life.pause();
+            let call = tokio::spawn(read());
+            settle().await;
+            assert!(!call.is_finished(), "a paused node's {name} waits");
+            assert_eq!(
+                deployment.activity.entered(),
+                entered + 1,
+                "a paused node's {name} has not entered"
+            );
+            life.resume();
+            call.await.expect("the read ran");
+            assert_eq!(
+                deployment.activity.entered(),
+                entered + 2,
+                "a resumed node's {name} enters"
+            );
+        }
+        life.kill();
+        let entered = deployment.activity.entered();
+        let calls: Vec<_> = reads.iter().map(|(_, read)| tokio::spawn(read())).collect();
+        settle().await;
+        for ((name, _), call) in reads.iter().zip(&calls) {
+            assert!(!call.is_finished(), "a dead node's {name} never returns");
+        }
+        assert_eq!(
+            deployment.activity.entered(),
+            entered,
+            "a dead node's reads never enter"
+        );
+        calls.iter().for_each(tokio::task::JoinHandle::abort);
     }
 
     /// A zombie's write is held, with its node, before it enters the store;

@@ -1438,7 +1438,8 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
     const RUN: &str = "cancelled-finish-run";
     let core: Arc<std::sync::OnceLock<lash::LashCore>> = Arc::default();
     let cancels = Arc::new(AtomicUsize::new(0));
-    let hook_core = Arc::clone(&core);
+    // The law owns the core; the hook that cancels through it borrows it.
+    let hook_core = Arc::downgrade(&core);
     let hook_cancels = Arc::clone(&cancels);
     let cancel_at_completion: Arc<dyn lash_core::plugin::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -1446,12 +1447,13 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
             lash_core::facade_support::PluginSpec::new().with_checkpoint(
                 lash_core::hook_key!("cancel-at-completion"),
                 Arc::new(move |ctx: lash_core::plugin::CheckpointHookContext| {
-                    let core = Arc::clone(&hook_core);
+                    let core = std::sync::Weak::clone(&hook_core);
                     let cancels = Arc::clone(&hook_cancels);
                     Box::pin(async move {
                         if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
                             && cancels.fetch_add(1, Ordering::SeqCst) == 0
                         {
+                            let core = core.upgrade().expect("the law outlives its turn");
                             let core = core.get().expect("the core is built before its turn");
                             core.session(ctx.session_id.clone())
                                 .durable()
@@ -1539,7 +1541,14 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         published_finish.is_empty(),
         "a cancelled turn published a finish: {published_finish:?}"
     );
+    drop(session);
     world.shutdown().await;
+    let root = Arc::downgrade(&core);
+    drop(core);
+    assert!(
+        root.upgrade().is_none(),
+        "the law's core is released with its world: the hook that cancels through it never keeps it"
+    );
 }
 
 /// A session handle opened before the node ran its turn closes without a

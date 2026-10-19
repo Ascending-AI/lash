@@ -42,7 +42,7 @@ mod dialect;
 mod sim;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
@@ -125,14 +125,17 @@ enum Arrival {
 }
 
 impl Arrival {
-    async fn send(self, core: &OnceLock<lash::LashCore>) {
+    /// Send the steer through the scenario's core, which the tools and
+    /// model that send it borrow: the scenario owns it.
+    async fn send(self, core: &Weak<OnceLock<lash::LashCore>>) {
+        let core = core.upgrade().expect("the scenario outlives its turn");
         let boundary = match self {
             Self::Candidate => lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion,
             Self::Work | Self::Terminal => {
                 lash::persistence::TurnInputCheckpointBoundary::AfterWork
             }
         };
-        send_steer(core, boundary).await;
+        send_steer(&core, boundary).await;
     }
 
     fn at_work(self) -> bool {
@@ -171,7 +174,7 @@ async fn send_steer(
 
 /// `steer_round`'s body: it sends what arrives on the first round, then
 /// answers its label.
-struct SteerRound(Arc<OnceLock<lash::LashCore>>, Arrival);
+struct SteerRound(Weak<OnceLock<lash::LashCore>>, Arrival);
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SteerRound {
@@ -185,7 +188,7 @@ impl StaticToolExecute for SteerRound {
 }
 
 fn steer_round(
-    core: Arc<OnceLock<lash::LashCore>>,
+    core: Weak<OnceLock<lash::LashCore>>,
     arrival: Arrival,
 ) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
@@ -212,7 +215,7 @@ fn steer_round(
 
 /// `finish_round`'s body: the first round's call sends the steer, then
 /// every call finishes the turn with its label.
-struct FinishRound(Arc<OnceLock<lash::LashCore>>, Arrival);
+struct FinishRound(Weak<OnceLock<lash::LashCore>>, Arrival);
 
 #[async_trait::async_trait]
 impl StaticToolExecute for FinishRound {
@@ -256,7 +259,7 @@ fn finish_definition(tool: &str) -> lash_core::ToolDefinition {
 }
 
 fn finish_round(
-    core: Arc<OnceLock<lash::LashCore>>,
+    core: Weak<OnceLock<lash::LashCore>>,
     arrival: Arrival,
 ) -> Arc<dyn lash_core::ToolProvider> {
     Arc::new(StaticToolProvider::new(
@@ -305,7 +308,7 @@ fn call_tool(tool: &str, call: &str, label: &str) -> LlmResponse {
 /// `seen`.
 fn model(
     arrival: Arrival,
-    core: Arc<OnceLock<lash::LashCore>>,
+    core: Weak<OnceLock<lash::LashCore>>,
     seen: Arc<Mutex<Vec<String>>>,
 ) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
@@ -313,7 +316,7 @@ fn model(
         .requires_streaming(true)
         .complete(move |request: LlmRequest| {
             let seen = Arc::clone(&seen);
-            let core = Arc::clone(&core);
+            let core = Weak::clone(&core);
             async move {
                 let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
                 seen.lock_recover().push(rendered.clone());
@@ -404,17 +407,21 @@ impl Steering {
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
-                        model(self.arrival, Arc::clone(&self.core), Arc::clone(&self.seen)),
+                        model(
+                            self.arrival,
+                            Arc::downgrade(&self.core),
+                            Arc::clone(&self.seen),
+                        ),
                         metadata(),
                     )
                     .tools(
                         lash::tool_provider_key!("tools"),
                         match self.arrival {
                             Arrival::Candidate => {
-                                finish_round(Arc::clone(&self.core), self.arrival)
+                                finish_round(Arc::downgrade(&self.core), self.arrival)
                             }
                             Arrival::Work | Arrival::Terminal => {
-                                steer_round(Arc::clone(&self.core), self.arrival)
+                                steer_round(Arc::downgrade(&self.core), self.arrival)
                             }
                         },
                     )
@@ -926,13 +933,24 @@ async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres() {
 /// to answer with its next finish (FIG-5800).
 #[tokio::test]
 async fn a_steer_at_a_completion_candidate_supersedes_it_and_the_turn_goes_on_on_sqlite_memory() {
+    let cores = Mutex::new(Vec::new());
     let report = Matrix::new()
         .faults(&[])
         .horizon(Duration::from_secs(600))
-        .run(|| Steering::new(Arrival::Candidate, Dialect::SqliteMemory, None))
+        .run(|| {
+            let steering = Steering::new(Arrival::Candidate, Dialect::SqliteMemory, None);
+            cores.lock_recover().push(Arc::downgrade(&steering.core));
+            steering
+        })
         .await;
     report.assert_held();
     report.assert_baseline_labels(&uncut_labels(Arrival::Candidate));
+    let cores = cores.into_inner().expect("the core cells");
+    assert!(!cores.is_empty(), "the matrix made its scenario");
+    assert!(
+        cores.iter().all(|core| core.upgrade().is_none()),
+        "each scenario's core is released with it: its tools and model never keep it"
+    );
 }
 
 /// On SQLite in memory: the supersession killed at every label, the

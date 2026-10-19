@@ -151,3 +151,33 @@ await control.finish(result);
     crate::oracles::require_agent_document_entry_processes(&result, 1, "test")
         .expect("a renamed display label must not change the document-entry verdict");
 }
+
+/// Two processes are two processes even when everything a process reference
+/// describes of them is the same: the completed counts follow each process's
+/// own identity, and a process observed twice still counts once.
+#[test]
+fn distinct_processes_with_identical_descriptions_count_separately() {
+    let observation = |id: &str| AgentContractProcessObservation {
+        raw_process_id: ProcessId::parse(id).expect("a minted process id"),
+        process_ref: "process-ref-identical".to_string(),
+        observed: json!({
+            "process_ref": "process-ref-identical",
+            "kind": lash_vm_runtime::LASH_VM_ENGINE_KIND,
+            "label": "lookup",
+            "status": "completed",
+            "terminal": true,
+            "definition_present": true,
+            "document_entry": "lookup",
+            "child_session_present": false,
+        }),
+    };
+    let first = "p_0192a5b4c3d27e8f9a0b1c2d3e4f5a6b";
+    let second = "p_0192a5b4c3d27e8f9a0b1c2d3e4f5a6c";
+    let facts = agent_contract_process_facts(&[
+        observation(first),
+        observation(second),
+        observation(first),
+    ]);
+    assert_eq!(facts["completed_lash_vm_process_count"], 2);
+    assert_eq!(facts["completed_document_entry_process_count"], 2);
+}

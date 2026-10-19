@@ -301,15 +301,22 @@ pub fn provider_request_text(request: &lash_core::LlmRequest) -> String {
 pub struct PausedCommitReplayStore {
     pub inner: lash_core::facade_support::InMemoryLiveReplayStore,
     pub boundary: PublicationBoundary,
-    pub pause: Arc<PublicationPause>,
+    pause: Arc<PublicationPause>,
 }
 
-#[derive(Debug)]
-pub struct PublicationPause {
-    pub boundary_reached: std::sync::atomic::AtomicBool,
-    pub release_boundary: std::sync::atomic::AtomicBool,
-    pub pause_lock: StdMutex<()>,
-    pub pause_changed: std::sync::Condvar,
+/// The publication boundary's pause: whether a commit reached it and
+/// whether the law released it, both under the one lock its waiters wait
+/// on, so a release can never fall between a waiter's check and its wait.
+#[derive(Debug, Default)]
+struct PublicationPause {
+    state: StdMutex<PauseState>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Debug, Default)]
+struct PauseState {
+    reached: bool,
+    released: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,12 +416,7 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
 
 impl PausedCommitReplayStore {
     pub fn at(boundary: PublicationBoundary) -> Self {
-        let pause = Arc::new(PublicationPause {
-            boundary_reached: std::sync::atomic::AtomicBool::new(false),
-            release_boundary: std::sync::atomic::AtomicBool::new(false),
-            pause_lock: StdMutex::new(()),
-            pause_changed: std::sync::Condvar::new(),
-        });
+        let pause = Arc::new(PublicationPause::default());
         let inner = if boundary == PublicationBoundary::BeforeNotification {
             let notification_pause = Arc::clone(&pause);
             lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing(
@@ -452,11 +454,7 @@ impl PausedCommitReplayStore {
 
     pub async fn wait_for_commit_append(&self) {
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while !self
-                .pause
-                .boundary_reached
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
+            while !self.pause.reached() {
                 tokio::task::yield_now().await;
             }
         })
@@ -465,24 +463,28 @@ impl PausedCommitReplayStore {
     }
 
     pub fn release_commit_install(&self) {
-        self.pause
-            .release_boundary
-            .store(true, std::sync::atomic::Ordering::Release);
-        self.pause.pause_changed.notify_all();
+        self.pause.release();
     }
 }
 
 impl PublicationPause {
-    pub fn pause(&self) {
-        self.boundary_reached
-            .store(true, std::sync::atomic::Ordering::Release);
-        let mut guard = self.pause_lock.lock_recover();
-        while !self
-            .release_boundary
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
-            guard = self.pause_changed.wait(guard).recover();
+    /// Mark the boundary reached and hold the caller until it is released.
+    fn pause(&self) {
+        let mut state = self.state.lock_recover();
+        state.reached = true;
+        while !state.released {
+            state = self.changed.wait(state).recover();
         }
+    }
+
+    fn reached(&self) -> bool {
+        self.state.lock_recover().reached
+    }
+
+    /// Release every pause, now and later.
+    fn release(&self) {
+        self.state.lock_recover().released = true;
+        self.changed.notify_all();
     }
 }
 

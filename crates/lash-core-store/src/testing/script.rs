@@ -279,23 +279,50 @@ struct Shared {
     recorded: tokio::sync::Notify,
 }
 
-impl Shared {
+impl State {
     /// Record one phase of a call and answer the first armed rule it fires.
-    fn record(&self, mut call: Call, unruled: Outcome) -> Option<Action> {
-        let action = {
+    fn record(&mut self, mut call: Call, unruled: Outcome) -> Option<Action> {
+        let action = self
+            .rules
+            .iter_mut()
+            .find(|rule| rule.target.matches(&call))
+            .map(|rule| {
+                rule.fired += 1;
+                rule.action.clone()
+            });
+        call.outcome = action.as_ref().map_or(unruled, Action::outcome);
+        self.trace.push(call);
+        action
+    }
+}
+
+impl Shared {
+    /// Enter a call of `op` by `actor`: its positions among all calls and
+    /// among the actor's, the rule it fires and its Before entry are one
+    /// step, so concurrent callers each hold their own position.
+    fn enter(&self, actor: &Arc<str>, op: Op) -> (Call, Option<Action>) {
+        let (call, action) = {
             let mut state = self.state.lock_recover();
-            let action = state
-                .rules
-                .iter_mut()
-                .find(|rule| rule.target.matches(&call))
-                .map(|rule| {
-                    rule.fired += 1;
-                    rule.action.clone()
-                });
-            call.outcome = action.as_ref().map_or(unruled, Action::outcome);
-            state.trace.push(call);
-            action
+            let call = Call {
+                nth: Self::entries(&state.trace, op, None) + 1,
+                actor_nth: Self::entries(&state.trace, op, Some(actor)) + 1,
+                actor: Arc::clone(actor),
+                op,
+                phase: Phase::Before,
+                outcome: Outcome::Entered,
+            };
+            let action = state.record(call.clone(), Outcome::Entered);
+            (call, action)
         };
+        self.recorded.notify_waiters();
+        (call, action)
+    }
+
+    /// Record the After phase of an entered call and answer the first armed
+    /// rule it fires.
+    fn leave(&self, mut call: Call, unruled: Outcome) -> Option<Action> {
+        call.phase = Phase::After;
+        let action = self.state.lock_recover().record(call, unruled);
         self.recorded.notify_waiters();
         action
     }
@@ -617,31 +644,19 @@ impl<S: ?Sized> Scripted<S> {
     where
         S: Send + Sync,
     {
-        let mut call = {
-            let op = op.into();
-            let state = self.shared.state.lock_recover();
-            Call {
-                nth: Shared::entries(&state.trace, op, None) + 1,
-                actor_nth: Shared::entries(&state.trace, op, Some(&self.actor)) + 1,
-                actor: Arc::clone(&self.actor),
-                op,
-                phase: Phase::Before,
-                outcome: Outcome::Entered,
-            }
-        };
-        if let Some(action) = self.shared.record(call.clone(), Outcome::Entered)
+        let (call, entered) = self.shared.enter(&self.actor, op.into());
+        if let Some(action) = entered
             && let Some(fault) = Self::apply(action).await
         {
             return Err(E::from_store_fault(fault));
         }
         let answer = store.await;
-        call.phase = Phase::After;
         let unruled = if answer.is_ok() {
             Outcome::Returned
         } else {
             Outcome::Refused
         };
-        if let Some(action) = self.shared.record(call, unruled)
+        if let Some(action) = self.shared.leave(call, unruled)
             && let Some(fault) = Self::apply(action).await
         {
             return Err(E::from_store_fault(fault));
@@ -818,6 +833,123 @@ mod tests {
             rendered(&script).last().map(String::as_str),
             Some("b:unfinished_run#3 before fail(transient)")
         );
+    }
+
+    /// Calls entered at once from many threads, two per actor, each get a
+    /// distinct position among all calls and among their actor's, keep it
+    /// from before to after the store, and a one-call rule fires once.
+    #[test]
+    fn concurrent_calls_each_enter_at_their_own_position_and_a_one_call_rule_fires_once() {
+        const ACTORS: [&str; 4] = ["a", "b", "c", "d"];
+        const THREADS_PER_ACTOR: usize = 2;
+        const CALLS_PER_THREAD: usize = 250;
+        const ALL: usize = ACTORS.len() * THREADS_PER_ACTOR * CALLS_PER_THREAD;
+        const PER_ACTOR: usize = THREADS_PER_ACTOR * CALLS_PER_THREAD;
+        let script = Script::new();
+        let inner = Arc::new(Counter::default());
+        script
+            .on(StoreOp::unfinished_run)
+            .nth(ALL / 2)
+            .before()
+            .fail(permanent);
+        script
+            .on(StoreOp::unfinished_run)
+            .by("b")
+            .nth(PER_ACTOR / 2)
+            .before()
+            .fail(transient);
+        let start = std::sync::Barrier::new(ACTORS.len() * THREADS_PER_ACTOR);
+        let faults: Vec<StoreError> = std::thread::scope(|threads| {
+            let callers: Vec<_> = ACTORS
+                .iter()
+                .flat_map(|actor| std::iter::repeat_n(*actor, THREADS_PER_ACTOR))
+                .map(|actor| {
+                    let store = script.wrap(actor, Arc::clone(&inner));
+                    let start = &start;
+                    threads.spawn(move || {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .build()
+                            .expect("a caller runtime");
+                        start.wait();
+                        runtime.block_on(async {
+                            let mut faults = Vec::new();
+                            for _ in 0..CALLS_PER_THREAD {
+                                if let Err(fault) = store
+                                    .call(StoreOp::unfinished_run, store.inner().work())
+                                    .await
+                                {
+                                    faults.push(fault);
+                                }
+                            }
+                            faults
+                        })
+                    })
+                })
+                .collect();
+            callers
+                .into_iter()
+                .flat_map(|caller| caller.join().expect("a caller thread"))
+                .collect()
+        });
+        let trace = script.trace();
+        // The positions entered calls were given, as (shared, missing): a
+        // position two calls hold, and one no call holds.
+        let misplaced = |actor: Option<&str>, count: usize| -> (Vec<usize>, Vec<usize>) {
+            let mut held = vec![0_usize; count + 1];
+            for call in trace.iter().filter(|call| call.phase == Phase::Before) {
+                if actor.is_none_or(|actor| *call.actor == *actor) {
+                    let nth = if actor.is_some() {
+                        call.actor_nth
+                    } else {
+                        call.nth
+                    };
+                    held[nth.min(count)] += 1;
+                }
+            }
+            let positions = || (1..=count).map(|nth| (nth, held[nth]));
+            (
+                positions()
+                    .filter(|(_, n)| *n > 1)
+                    .map(|(nth, _)| nth)
+                    .collect(),
+                positions()
+                    .filter(|(_, n)| *n == 0)
+                    .map(|(nth, _)| nth)
+                    .collect(),
+            )
+        };
+        assert_eq!(misplaced(None, ALL), (vec![], vec![]));
+        for actor in ACTORS {
+            assert_eq!(
+                misplaced(Some(actor), PER_ACTOR),
+                (vec![], vec![]),
+                "{actor}"
+            );
+        }
+        let mut before: Vec<(usize, &str, usize)> = Vec::new();
+        let mut after: Vec<(usize, &str, usize)> = Vec::new();
+        for call in &trace {
+            let identity = (call.nth, &*call.actor, call.actor_nth);
+            match (call.phase, call.outcome) {
+                (Phase::Before, Outcome::Entered) => before.push(identity),
+                (Phase::Before, _) => {}
+                (Phase::After, _) => after.push(identity),
+            }
+        }
+        before.sort_unstable();
+        after.sort_unstable();
+        assert_eq!(before, after);
+        assert_eq!(faults.len(), 2, "each one-call rule fires once");
+        assert!(
+            faults
+                .iter()
+                .any(|fault| matches!(fault, StoreError::Contended))
+        );
+        assert!(faults.iter().any(|fault| matches!(
+            fault,
+            StoreError::UnsupportedStoreOperation { operation: "law" }
+        )));
+        script.finish().expect("every rule fired");
     }
 
     #[tokio::test(start_paused = true)]

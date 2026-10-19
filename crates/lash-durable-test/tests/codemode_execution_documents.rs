@@ -137,11 +137,12 @@ fn finished(events: &[&TraceLanguageExecution], started: &TraceLanguageExecution
 }
 
 /// A `web.fetch` that reads, while the cell that called it is still running,
-/// the document that cell's start named.
+/// the document that cell's start named. It borrows the law's core: the core
+/// owns this tool, so the tool never owns the core.
 #[derive(Default)]
 struct ReadingFetch {
     sink: Arc<RecordingSink>,
-    core: std::sync::OnceLock<lash::LashCore>,
+    core: std::sync::OnceLock<std::sync::Weak<lash::LashCore>>,
     read: Mutex<Vec<(WorkflowDocumentRef, Option<WorkflowDocument>)>>,
     /// The same reference read from the store alone, with no engine and no
     /// registry: what a fresh reader of the retained document holds.
@@ -179,7 +180,11 @@ impl lash_core::ToolProvider for ReadingFetch {
             .map(|(_, reference)| reference.clone())
             .next_back()
             .expect("the calling run started");
-        let core = self.core.get().expect("the law's core");
+        let core = self
+            .core
+            .get()
+            .and_then(std::sync::Weak::upgrade)
+            .expect("the law's core outlives its calls");
         let document = match core
             .host_artifacts()
             .execution_document(&reference)
@@ -204,7 +209,11 @@ impl lash_core::ToolProvider for ReadingFetch {
     }
 }
 
-async fn reading_world(sink: &Arc<RecordingSink>) -> (served::World, Arc<ReadingFetch>) {
+/// The law's world, its reading tool, and the law's own handle on the core
+/// the tool borrows; the law holds it until the world is shut down.
+async fn reading_world(
+    sink: &Arc<RecordingSink>,
+) -> (served::World, Arc<ReadingFetch>, Arc<lash::LashCore>) {
     let tools = Arc::new(ReadingFetch {
         sink: Arc::clone(sink),
         ..ReadingFetch::default()
@@ -217,8 +226,9 @@ async fn reading_world(sink: &Arc<RecordingSink>) -> (served::World, Arc<Reading
     )
     .await
     .expect("SQLite memory is available");
-    assert!(tools.core.set(world.core.clone()).is_ok());
-    (world, tools)
+    let core = Arc::new(world.core.clone());
+    assert!(tools.core.set(Arc::downgrade(&core)).is_ok());
+    (world, tools, core)
 }
 
 /// FIG-5576: a cell's start names a document a host can read while the cell
@@ -227,7 +237,7 @@ async fn reading_world(sink: &Arc<RecordingSink>) -> (served::World, Arc<Reading
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_cell_names_a_document_readable_while_it_runs_and_reports_its_calls_at_its_sites() {
     let sink = Arc::new(RecordingSink::default());
-    let (world, tools) = reading_world(&sink).await;
+    let (world, tools, core) = reading_world(&sink).await;
     let output = world
         .run(
             "cell-document",
@@ -315,6 +325,13 @@ await control.finish(fetched.url);
     );
     assert!(finished(&events, started), "the cell reported its end");
     world.shutdown().await;
+    drop(core);
+    let provider = Arc::downgrade(&tools);
+    drop(tools);
+    assert!(
+        provider.upgrade().is_none(),
+        "the law's tool is released with its world: the core it reads through never keeps it"
+    );
 }
 
 /// DOC-CELL (FIG-6379): a cell's document is retained with the declarations
@@ -324,7 +341,7 @@ await control.finish(fetched.url);
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_retained_cell_draws_its_main_view_without_the_producing_engines_registry() {
     let sink = Arc::new(RecordingSink::default());
-    let (world, tools) = reading_world(&sink).await;
+    let (world, tools, core) = reading_world(&sink).await;
     let output = world
         .run(
             "cell-retained",
@@ -366,4 +383,5 @@ await control.finish(fetched.url);
         lash::workflow::view::derive(drawn).expect("the engine's read draws"),
     );
     world.shutdown().await;
+    drop(core);
 }
