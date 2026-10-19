@@ -186,11 +186,19 @@ impl CommitAdmissionCoordinator {
                     event = "commit_admission.queued",
                     "same-session commit attempt entered the FIFO"
                 );
-                Some((waiter, queue_depth))
+                Some((
+                    CommitAdmissionTicket {
+                        inner: Arc::clone(&self.inner),
+                        session_id: claim.session_id.clone(),
+                        waiter,
+                        armed: true,
+                    },
+                    queue_depth,
+                ))
             }
         };
 
-        let Some((waiter, queue_depth)) = queued else {
+        let Some((mut ticket, queue_depth)) = queued else {
             return Ok(CommitAdmissionGuard::new(
                 Arc::clone(&self.inner),
                 claim,
@@ -204,15 +212,13 @@ impl CommitAdmissionCoordinator {
             TimedOut,
         }
         let outcome = tokio::select! {
-            () = waiter.admitted.notified() => WaitOutcome::Admitted,
+            () = ticket.waiter.admitted.notified() => WaitOutcome::Admitted,
             () = cancellation.cancelled() => WaitOutcome::Cancelled,
             // Substrate-boundary allowlist: process-local TTL, not durable time.
             () = tokio::time::sleep(policy.wait_ttl) => WaitOutcome::TimedOut,
         };
 
-        if !matches!(outcome, WaitOutcome::Admitted)
-            && self.withdraw_waiter(&claim.session_id, waiter.waiter_id)
-        {
+        if !matches!(outcome, WaitOutcome::Admitted) && ticket.withdraw() {
             let waited_ms = queued_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
             return Err(match outcome {
                 WaitOutcome::Cancelled => CommitAdmissionError::Cancelled {
@@ -240,29 +246,7 @@ impl CommitAdmissionCoordinator {
             event = "commit_admission.admitted",
             "same-session commit attempt left the FIFO"
         );
-        Ok(CommitAdmissionGuard::new(
-            Arc::clone(&self.inner),
-            claim,
-            observation,
-        ))
-    }
-
-    fn withdraw_waiter(&self, session_id: &SessionId, waiter_id: u64) -> bool {
-        let mut state = self.inner.state.lock_recover();
-        let Some(session) = state.sessions.get_mut(session_id) else {
-            return false;
-        };
-        let Some(index) = session
-            .waiters
-            .iter()
-            .position(|waiter| waiter.waiter_id == waiter_id)
-        else {
-            // Release already transferred ownership to this waiter. Admission
-            // wins the race so the newly active session cannot be orphaned.
-            return false;
-        };
-        session.waiters.remove(index);
-        true
+        Ok(ticket.admit(claim, observation))
     }
 
     #[cfg(test)]
@@ -385,6 +369,78 @@ where
         .await
 }
 
+/// Owns a queued acquisition from the moment its FIFO node is pushed until it
+/// withdraws or becomes the active guard. Release can hand the lane to this
+/// node before its future is polled again, so dropping an armed ticket either
+/// removes the still-queued node or passes the already granted lane on.
+struct CommitAdmissionTicket {
+    inner: Arc<CommitAdmissionInner>,
+    session_id: SessionId,
+    waiter: Arc<CommitAdmissionWaiter>,
+    armed: bool,
+}
+
+impl CommitAdmissionTicket {
+    /// Ends a cancelled or timed-out wait. Returns `false` when release has
+    /// already granted this node the lane: admission wins, and the ticket stays
+    /// armed until it becomes the active guard.
+    fn withdraw(&mut self) -> bool {
+        let mut state = self.inner.state.lock_recover();
+        if !withdraw_queued_waiter(&mut state, &self.session_id, self.waiter.waiter_id) {
+            return false;
+        }
+        self.armed = false;
+        true
+    }
+
+    /// Transfers a granted lane into the guard that releases it.
+    fn admit(
+        mut self,
+        claim: CommitAdmissionClaim,
+        observation: CommitAdmissionObservation,
+    ) -> CommitAdmissionGuard {
+        self.armed = false;
+        CommitAdmissionGuard::new(Arc::clone(&self.inner), claim, observation)
+    }
+}
+
+impl Drop for CommitAdmissionTicket {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let next = {
+            let mut state = self.inner.state.lock_recover();
+            if withdraw_queued_waiter(&mut state, &self.session_id, self.waiter.waiter_id) {
+                return;
+            }
+            hand_on_session(&mut state, &self.session_id)
+        };
+        notify_released(&self.session_id, &self.waiter.work_identity, false, next);
+    }
+}
+
+/// Removes a still-queued node. `false` means release already popped it and
+/// granted that node the lane.
+fn withdraw_queued_waiter(
+    state: &mut CommitAdmissionState,
+    session_id: &SessionId,
+    waiter_id: u64,
+) -> bool {
+    let Some(session) = state.sessions.get_mut(session_id) else {
+        return false;
+    };
+    let Some(index) = session
+        .waiters
+        .iter()
+        .position(|waiter| waiter.waiter_id == waiter_id)
+    else {
+        return false;
+    };
+    session.waiters.remove(index);
+    true
+}
+
 struct CommitAdmissionGuard {
     inner: Arc<CommitAdmissionInner>,
     claim: CommitAdmissionClaim,
@@ -426,32 +482,45 @@ impl Drop for CommitAdmissionGuard {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the claim's session row is held under this same lock"
-)]
 fn release_session(
     inner: &CommitAdmissionInner,
     claim: &CommitAdmissionClaim,
     head_advanced: bool,
 ) {
-    let next = {
-        let mut state = inner.state.lock_recover();
-        let session = state
-            .sessions
-            .get_mut(&claim.session_id)
-            .expect("a live commit admission guard retains its session entry");
-        match session.waiters.pop_front() {
-            Some(waiter) => Some(waiter),
-            None => {
-                state.sessions.remove(&claim.session_id);
-                None
-            }
-        }
-    };
+    let next = hand_on_session(&mut inner.state.lock_recover(), &claim.session_id);
+    notify_released(&claim.session_id, &claim.work_identity, head_advanced, next);
+}
+
+/// Passes the lane held by the caller to the next FIFO node, or frees the
+/// session when none waits.
+#[expect(
+    clippy::expect_used,
+    reason = "the lane's owner retains its session row, and the caller holds the lock"
+)]
+fn hand_on_session(
+    state: &mut CommitAdmissionState,
+    session_id: &SessionId,
+) -> Option<Arc<CommitAdmissionWaiter>> {
+    let session = state
+        .sessions
+        .get_mut(session_id)
+        .expect("a live commit admission owner retains its session entry");
+    let next = session.waiters.pop_front();
+    if next.is_none() {
+        state.sessions.remove(session_id);
+    }
+    next
+}
+
+fn notify_released(
+    session_id: &SessionId,
+    work_identity: &str,
+    head_advanced: bool,
+    next: Option<Arc<CommitAdmissionWaiter>>,
+) {
     tracing::debug!(
-        session_id = %claim.session_id,
-        work_identity = %claim.work_identity,
+        session_id = %session_id,
+        work_identity = %work_identity,
         head_advanced,
         next_work_identity = next.as_ref().map(|waiter| waiter.work_identity.as_str()),
         event = "commit_admission.released",
@@ -486,6 +555,80 @@ mod tests {
         })
         .await
         .expect("waiters entered the admission queue");
+    }
+
+    type PendingAcquisition = std::pin::Pin<
+        Box<dyn Future<Output = Result<CommitAdmissionGuard, CommitAdmissionError>> + Send>,
+    >;
+
+    fn pending_acquisition(
+        coordinator: &CommitAdmissionCoordinator,
+        identity: &'static str,
+    ) -> PendingAcquisition {
+        let coordinator = coordinator.clone();
+        Box::pin(async move {
+            coordinator
+                .acquire_typed(
+                    CommitAdmissionClaim::new("session", identity),
+                    CancellationToken::new(),
+                    CommitAdmissionPolicy::standard(),
+                )
+                .await
+        })
+    }
+
+    fn poll_acquisition(
+        acquisition: &mut PendingAcquisition,
+    ) -> std::task::Poll<Result<CommitAdmissionGuard, CommitAdmissionError>> {
+        acquisition
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+    }
+
+    #[tokio::test]
+    async fn dropped_acquisitions_relinquish_queued_and_granted_ownership() {
+        let session = SessionId::from("session");
+        for granted_before_drop in [true, false] {
+            let coordinator = CommitAdmissionCoordinator::default();
+            let holder = coordinator
+                .acquire_typed(
+                    CommitAdmissionClaim::new("session", "holder"),
+                    CancellationToken::new(),
+                    CommitAdmissionPolicy::standard(),
+                )
+                .await
+                .expect("holder admission");
+            let mut dropped = pending_acquisition(&coordinator, "dropped");
+            let mut next = pending_acquisition(&coordinator, "next");
+            assert!(poll_acquisition(&mut dropped).is_pending());
+            assert!(poll_acquisition(&mut next).is_pending());
+            assert_eq!(
+                coordinator.queued_work_identities(&session),
+                ["dropped", "next"]
+            );
+
+            if granted_before_drop {
+                // Release hands the lane to `dropped`, whose future is
+                // destroyed before it is polled again.
+                holder.release_after_head_advance();
+                assert_eq!(coordinator.queued_work_identities(&session), ["next"]);
+                drop(dropped);
+            } else {
+                drop(dropped);
+                assert_eq!(coordinator.queued_work_identities(&session), ["next"]);
+                holder.release_after_head_advance();
+            }
+
+            let std::task::Poll::Ready(admitted) = poll_acquisition(&mut next) else {
+                panic!(
+                    "the next acquirer proceeds after a dropped acquisition (granted before drop: {granted_before_drop})"
+                );
+            };
+            let admitted = admitted.expect("next admission");
+            assert_eq!(admitted.claim.work_identity, "next");
+            admitted.release_after_head_advance();
+            assert_eq!(coordinator.active_session_count(), 0);
+        }
     }
 
     #[tokio::test]
