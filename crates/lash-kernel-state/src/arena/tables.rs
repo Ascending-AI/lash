@@ -16,7 +16,7 @@
 
 use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Table};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Objects, Table};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Value};
 
@@ -35,11 +35,24 @@ pub struct Index {
     /// The sequences each chunk spans while the table is chunked; 0 while
     /// it is one chunk.
     width: u64,
-    /// Each chunk's resident entries' sequences, ascending.
+    /// Each chunk's resident entries' sequences, ascending. Empty while the
+    /// table is one chunk whose entries take sequences `0..next`, at most
+    /// [`DENSE`]'s, as a table the run built does until it removes one.
     seqs: Vec<Vec<u64>>,
     /// The sequence the next new entry takes.
     next: u64,
 }
+
+/// The sequences of a dense index's entries.
+static DENSE: [u64; 64] = {
+    let mut seqs = [0; 64];
+    let mut seq = 0;
+    while seq < seqs.len() {
+        seqs[seq] = seq as u64;
+        seq += 1;
+    }
+    seqs
+};
 
 /// Where an entry sits: its chunk and its position in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,7 +87,51 @@ impl Index {
 
     /// The resident entries' sequences of chunk `chunk`, ascending.
     pub fn sequences(&self, chunk: usize) -> &[u64] {
-        self.seqs.get(chunk).map_or(&[], Vec::as_slice)
+        match self.seqs.get(chunk) {
+            Some(seqs) => seqs,
+            None if self.is_dense() && chunk == 0 => &DENSE[..self.next as usize],
+            None => &[],
+        }
+    }
+
+    /// Whether the index is one chunk whose entries take sequences
+    /// `0..next`, which it keeps in no vector.
+    fn is_dense(&self) -> bool {
+        self.seqs.is_empty() && self.width == 0
+    }
+
+    /// The index of a one-chunk table whose `len` entries take sequences
+    /// from zero.
+    fn dense(keys: HashMap<NormalKey, u64>, len: u64) -> Self {
+        Self {
+            keys,
+            absent: HashSet::new(),
+            width: 0,
+            seqs: if len as usize <= DENSE.len() {
+                Vec::new()
+            } else {
+                vec![(0..len).collect()]
+            },
+            next: len,
+        }
+    }
+
+    /// The sequences of chunk `chunk`, to edit.
+    fn sequences_mut(&mut self, chunk: usize) -> Option<&mut Vec<u64>> {
+        if self.is_dense() {
+            self.seqs = vec![DENSE[..self.next as usize].to_vec()];
+        }
+        self.seqs.get_mut(chunk)
+    }
+
+    /// Appends entry `seq`, the index's next, to chunk `chunk`.
+    fn push(&mut self, chunk: usize, seq: u64) -> Result<(), NativeError> {
+        if !(self.is_dense() && chunk == 0 && seq == self.next && seq < DENSE.len() as u64) {
+            self.sequences_mut(chunk)
+                .ok_or(NativeError::Malformed("a table's index names no chunk"))?
+                .push(seq);
+        }
+        Ok(())
     }
 
     /// The sequences chunk `chunk` spans: everything while the table is one
@@ -113,7 +170,7 @@ impl Index {
     }
 
     pub(super) fn resequence(&mut self, seqs: Vec<u64>, next: u64) -> Result<(), NativeError> {
-        let held = self.seqs.first().map_or(0, Vec::len);
+        let held = self.sequences(0).len();
         if self.width != 0
             || self.seqs.len() > 1
             || seqs.len() != held
@@ -193,15 +250,13 @@ pub(super) fn width(len: u64, next: u64) -> u64 {
 /// chunk 0 when every chunk is resident: the machine decodes, and joins
 /// the chunks into one.
 pub(crate) fn pairs(object: ArenaHandle, table: &Table) -> Result<&[Value], NativeError> {
-    match table.chunks.as_slice() {
-        [] => Ok(&[]),
-        [Chunk::Resident(values)] => Ok(values),
-        chunks => Err(Retry::Cold {
+    table.chunks.values().ok_or_else(|| {
+        Retry::Cold {
             object,
-            chunk: super::first_cold(chunks).unwrap_or(0),
+            chunk: table.chunks.first_cold().unwrap_or(0),
         }
-        .into()),
-    }
+        .into()
+    })
 }
 
 fn invalid_key() -> NativeError {
@@ -235,20 +290,9 @@ pub(super) fn build(
     // Duplicate inputs must not leave a larger retained key buffer than
     // constructing the index from the final unique rows would have used.
     keys.shrink_to_fit();
-    let len = (values.len() / 2) as u64;
-    Ok((
-        Table {
-            len,
-            chunks: vec![Chunk::Resident(values)],
-        },
-        Index {
-            keys,
-            absent: HashSet::new(),
-            width: 0,
-            seqs: vec![(0..len).collect()],
-            next: len,
-        },
-    ))
+    let table = Table::whole(values);
+    let index = Index::dense(keys, table.len);
+    Ok((table, index))
 }
 
 /// The index of a resident one-chunk table whose entries take sequences
@@ -265,14 +309,7 @@ pub(super) fn index_of(
         let normal = normal_key(objects, facts, key)?.ok_or_else(invalid_key)?;
         keys.insert(normal, at as u64);
     }
-    let len = (values.len() / 2) as u64;
-    Ok(Index {
-        keys,
-        absent: HashSet::new(),
-        width: 0,
-        seqs: vec![(0..len).collect()],
-        next: len,
-    })
+    Ok(Index::dense(keys, (values.len() / 2) as u64))
 }
 
 fn table_of(body: &Body) -> Result<&Table, NativeError> {
@@ -293,7 +330,7 @@ fn resident(
     object: ArenaHandle,
     table: &Table,
     chunk: usize,
-) -> Result<Option<&Vec<Value>>, NativeError> {
+) -> Result<Option<&[Value]>, NativeError> {
     match table.chunks.get(chunk) {
         Some(Chunk::Resident(values)) => Ok(Some(values)),
         Some(Chunk::Cold { .. }) => Err(Retry::Cold {
@@ -305,12 +342,13 @@ fn resident(
     }
 }
 
+/// Chunk `chunk` of a table, to grow or shrink it.
 fn resident_mut(
     object: ArenaHandle,
     table: &mut Table,
     chunk: usize,
 ) -> Result<&mut Vec<Value>, NativeError> {
-    match table.chunks.get_mut(chunk) {
+    match table.chunks.vec_mut(chunk) {
         Some(Chunk::Resident(values)) => Ok(values),
         Some(Chunk::Cold { .. }) => Err(Retry::Cold {
             object,
@@ -330,7 +368,7 @@ pub(crate) fn find(
     index: &Index,
     normal: &NormalKey,
 ) -> Result<Option<Place>, NativeError> {
-    let cold = super::first_cold(&table.chunks);
+    let cold = table.chunks.first_cold();
     match index.known(normal, cold.is_some()) {
         Known::Seq(seq) => {
             let chunk = index.chunk_of(seq);
@@ -394,11 +432,22 @@ impl super::Arena {
         value: Value,
     ) -> Result<u64, NativeError> {
         let (table, index) = self.table_parts(handle)?;
-        let seq = index.seqs[place.chunk][place.at];
-        let old = std::mem::replace(
-            &mut resident_mut(handle, table, place.chunk)?[place.at * 2 + 1],
-            value,
-        );
+        let seq = *index
+            .sequences(place.chunk)
+            .get(place.at)
+            .ok_or(NativeError::Malformed("a table's index names no entry"))?;
+        let values = match table.chunks.get_mut(place.chunk) {
+            Some(Chunk::Resident(values)) => values,
+            Some(Chunk::Cold { .. }) => {
+                return Err(Retry::Cold {
+                    object: handle,
+                    chunk: place.chunk as u32,
+                }
+                .into());
+            }
+            None => return Err(NativeError::Malformed("a table's index names no chunk")),
+        };
+        let old = std::mem::replace(&mut values[place.at * 2 + 1], value);
         self.hold(&value);
         self.unhold(&old);
         Ok(seq)
@@ -417,21 +466,26 @@ impl super::Arena {
         let (table, index) = self.table_parts(handle)?;
         let seq = index.next;
         let chunk = index.chunk_of(seq);
-        if chunk >= table.chunks.len() {
-            table
-                .chunks
-                .resize_with(chunk + 1, || Chunk::Resident(Vec::new()));
+        if let Chunks::Split(chunks) = &mut table.chunks
+            && chunk >= chunks.len()
+        {
+            chunks.resize_with(chunk + 1, || Chunk::Resident(Vec::new()));
             index.seqs.resize_with(chunk + 1, Vec::new);
         }
-        let values = resident_mut(handle, table, chunk)?;
-        index.next = seq
+        let next = seq
             .checked_add(1)
             .ok_or(NativeError::Malformed("a table's sequence overflows"))?;
+        if !table.chunks.push_inline(key) {
+            let values = resident_mut(handle, table, chunk)?;
+            values.push(key);
+            values.push(value);
+        } else if !table.chunks.push_inline(value) {
+            resident_mut(handle, table, chunk)?.push(value);
+        }
+        index.push(chunk, seq)?;
+        index.next = next;
         index.absent.remove(&normal);
         index.keys.insert(normal, seq);
-        index.seqs[chunk].push(seq);
-        values.push(key);
-        values.push(value);
         table.len += 1;
         self.hold(&key);
         self.hold(&value);
@@ -452,7 +506,10 @@ impl super::Arena {
         let values = resident_mut(handle, table, place.chunk)?;
         let value = values.remove(place.at * 2 + 1);
         let key = values.remove(place.at * 2);
-        let seq = index.seqs[place.chunk].remove(place.at);
+        let seq = index
+            .sequences_mut(place.chunk)
+            .ok_or(NativeError::Malformed("a table's index names no chunk"))?
+            .remove(place.at);
         index.keys.remove(normal);
         if index.width != 0 {
             index.absent.insert(normal.clone());

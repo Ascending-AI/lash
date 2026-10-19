@@ -107,7 +107,7 @@ fn keyed(key: &Value, name: &[u8]) -> bool {
 mod tests {
     use super::*;
     use lash_kernel_doc::Datum;
-    use lash_kernel_doc::arena::{Body, Chunk, Table};
+    use lash_kernel_doc::arena::{Body, Table};
     use lash_kernel_state::arena::Bench;
 
     /// PLAN-INDEP: a proved position skips normalization only for its object,
@@ -166,17 +166,14 @@ mod tests {
         arena
             .materialized(
                 record,
-                Body::Record(Table {
-                    len: 3,
-                    chunks: vec![Chunk::Resident(vec![
-                        a,
-                        Value::Int(7),
-                        b,
-                        Value::Int(2),
-                        c,
-                        Value::Int(3),
-                    ])],
-                }),
+                Body::Record(Table::whole(vec![
+                    a,
+                    Value::Int(7),
+                    b,
+                    Value::Int(2),
+                    c,
+                    Value::Int(3),
+                ])),
             )
             .unwrap();
         let (replaced, _) = find(arena, record, slot, b"a", || Ok(text_key("a"))).unwrap();

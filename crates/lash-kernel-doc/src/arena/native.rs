@@ -27,8 +27,8 @@ use std::sync::Arc;
 use std::borrow::Cow;
 
 use super::{
-    ArenaHandle, Body, Bytes, Chunk, ErrorBody, LongText, Objects, Sequence, ShortText, Table,
-    Value,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
+    Table, Value,
 };
 use crate::KernelDataLimits;
 use crate::heap::{IMMUTABLE_INLINE_MAX, LogicalBytes, NormalKey};
@@ -366,7 +366,7 @@ impl<'call> Args<'call> {
 /// length and its chunks before the call reads any.
 #[inline]
 fn proxy(object: ArenaHandle, sequence: &Sequence) -> Result<(), NativeError> {
-    match sequence.chunks.first() {
+    match sequence.chunks.get(0) {
         Some(Chunk::Cold { .. }) if sequence.len == 0 => {
             Err(Retry::Cold { object, chunk: 0 }.into())
         }
@@ -377,17 +377,10 @@ fn proxy(object: ArenaHandle, sequence: &Sequence) -> Result<(), NativeError> {
 /// Answers [`Retry::Cold`] for a table with a cold chunk: a table's view
 /// reads it resident whole.
 #[inline]
-fn warm(object: ArenaHandle, chunks: &[Chunk<Vec<Value>>]) -> Result<(), NativeError> {
-    match chunks
-        .iter()
-        .position(|chunk| matches!(chunk, Chunk::Cold { .. }))
-    {
+fn warm(object: ArenaHandle, chunks: &Chunks) -> Result<(), NativeError> {
+    match chunks.first_cold() {
         None => Ok(()),
-        Some(chunk) => Err(Retry::Cold {
-            object,
-            chunk: chunk as u32,
-        }
-        .into()),
+        Some(chunk) => Err(Retry::Cold { object, chunk }.into()),
     }
 }
 
@@ -418,32 +411,25 @@ impl<'call> SequenceView<'call> {
         if index >= self.sequence.len {
             return Ok(None);
         }
-        // A sequence in one chunk holds every value there; chunk `k` of a
-        // chunked one holds indexes `k * CHUNK ..`.
-        let (chunk, at) = match self.sequence.chunks.len() {
-            1 => (0, index),
-            _ => (
-                index / Sequence::CHUNK as u64,
-                index % Sequence::CHUNK as u64,
-            ),
-        };
-        let Some(held) = self.sequence.chunks.get(chunk as usize) else {
+        let (chunk, at) = self.sequence.locate(index);
+        let Some(held) = self.sequence.chunks.get(chunk) else {
             return Err(NativeError::Malformed(
                 "a sequence's chunks miss its length",
             ));
         };
-        let values = resident(self.object, chunk as u32, held)?;
-        Ok(values.get(at as usize))
+        match held {
+            Chunk::Resident(values) => Ok(values.get(at)),
+            Chunk::Cold { .. } => Err(Retry::Cold {
+                object: self.object,
+                chunk: chunk as u32,
+            }
+            .into()),
+        }
     }
 
     /// The values, chunk by chunk.
     pub fn chunks(self) -> impl Iterator<Item = Result<&'call [Value], NativeError>> + 'call {
-        let object = self.object;
-        self.sequence
-            .chunks
-            .iter()
-            .enumerate()
-            .map(move |(at, chunk)| resident(object, at as u32, chunk))
+        values(self.object, &self.sequence.chunks)
     }
 }
 
@@ -459,12 +445,7 @@ impl<'call> TableView<'call> {
     /// The entries in insertion order, as key and value pairs, chunk by
     /// chunk.
     pub fn chunks(self) -> impl Iterator<Item = Result<&'call [Value], NativeError>> + 'call {
-        let object = self.object;
-        self.table
-            .chunks
-            .iter()
-            .enumerate()
-            .map(move |(at, chunk)| resident(object, at as u32, chunk))
+        values(self.object, &self.table.chunks)
     }
 }
 
@@ -571,6 +552,24 @@ impl<'call> TextView<'call> {
     }
 }
 
+/// The values of `chunks`, chunk by chunk.
+fn values(
+    object: ArenaHandle,
+    chunks: &Chunks,
+) -> impl Iterator<Item = Result<&[Value], NativeError>> {
+    chunks
+        .iter()
+        .enumerate()
+        .map(move |(at, chunk)| match chunk {
+            Chunk::Resident(values) => Ok(values),
+            Chunk::Cold { .. } => Err(Retry::Cold {
+                object,
+                chunk: at as u32,
+            }
+            .into()),
+        })
+}
+
 #[inline]
 fn resident<T: std::ops::Deref>(
     object: ArenaHandle,
@@ -613,6 +612,25 @@ pub enum NewObject {
         message: Value,
         data: Value,
     },
+}
+
+impl NewObject {
+    /// The value that names the object, by the slot it takes.
+    pub fn naming(&self) -> fn(ArenaHandle) -> Value {
+        match self {
+            Self::List(_) => Value::List,
+            Self::Tuple(_) => Value::Tuple,
+            Self::Map(_) => Value::Map,
+            Self::Set(_) => Value::Set,
+            Self::Record(_) => Value::Record,
+            Self::LongText(_) => Value::LongText,
+            Self::LongFunction(_) => Value::LongFunction,
+            Self::Bytes(_) => Value::Bytes,
+            Self::BigInt(_) => Value::BigInt,
+            Self::Timestamp(_) => Value::BigTimestamp,
+            Self::Error { .. } => Value::Error,
+        }
+    }
 }
 
 /// What one call allocates: objects in slots the arena reserved, installed
@@ -740,19 +758,7 @@ impl<'call> Nursery<'call> {
     /// Builds `object` in a reserved slot, and gives the value naming it.
     pub fn allocate(&mut self, object: NewObject) -> Value {
         let handle = self.objects.reserve();
-        let value = match &object {
-            NewObject::List(_) => Value::List(handle),
-            NewObject::Tuple(_) => Value::Tuple(handle),
-            NewObject::Map(_) => Value::Map(handle),
-            NewObject::Set(_) => Value::Set(handle),
-            NewObject::Record(_) => Value::Record(handle),
-            NewObject::LongText(_) => Value::LongText(handle),
-            NewObject::LongFunction(_) => Value::LongFunction(handle),
-            NewObject::Bytes(_) => Value::Bytes(handle),
-            NewObject::BigInt(_) => Value::BigInt(handle),
-            NewObject::Timestamp(_) => Value::BigTimestamp(handle),
-            NewObject::Error { .. } => Value::Error(handle),
-        };
+        let value = object.naming()(handle);
         self.new.push((handle, object));
         value
     }

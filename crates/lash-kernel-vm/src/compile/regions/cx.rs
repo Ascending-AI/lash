@@ -220,17 +220,16 @@ impl Cx<'_> {
 
     /// Builds `object`, as the reference's construction does.
     pub(super) fn build(&mut self, object: NewObject) -> Option<Value> {
-        let (value, new) = {
-            let mut nursery = Nursery::new(self.arena.objects(), LogicalBytes(u64::MAX));
-            let value = nursery.allocate(object);
-            if !self.admitted(&nursery, 0) {
-                nursery.discard();
-                return None;
+        if self.memory && self.arena.object_bound(&object) > self.free() {
+            return None;
+        }
+        match self.arena.create(object) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.fault = Some(HeapFault::Malformed(error.to_string()));
+                None
             }
-            (value, nursery.into_new())
-        };
-        self.install(new)?;
-        Some(value)
+        }
     }
 
     /// What `plan` charges a call of `args` that gave `result`, measured

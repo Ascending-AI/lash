@@ -46,21 +46,21 @@ impl Arena {
     #[inline]
     pub fn install_bound(&self, new: &[(ArenaHandle, NewObject)]) -> u64 {
         new.iter()
-            .map(|(_, object)| {
-                body_bytes(match object {
-                    NewObject::List(values) | NewObject::Tuple(values) => values.len() as u64,
-                    NewObject::Map(entries) | NewObject::Record(entries) => {
-                        2 * entries.len() as u64
-                    }
-                    NewObject::Set(members) => 2 * members.len() as u64,
-                    NewObject::LongText(text) | NewObject::LongFunction(text) => {
-                        text.len() as u64 / 16
-                    }
-                    NewObject::Bytes(bytes) => bytes.len() as u64 / 16,
-                    NewObject::BigInt(_) | NewObject::Timestamp(_) | NewObject::Error { .. } => 0,
-                })
-            })
+            .map(|(_, object)| self.object_bound(object))
             .fold(0, u64::saturating_add)
+    }
+
+    /// What [`Self::install_bound`] gives for `object` alone.
+    #[inline]
+    pub fn object_bound(&self, object: &NewObject) -> u64 {
+        body_bytes(match object {
+            NewObject::List(values) | NewObject::Tuple(values) => values.len() as u64,
+            NewObject::Map(entries) | NewObject::Record(entries) => 2 * entries.len() as u64,
+            NewObject::Set(members) => 2 * members.len() as u64,
+            NewObject::LongText(text) | NewObject::LongFunction(text) => text.len() as u64 / 16,
+            NewObject::Bytes(bytes) => bytes.len() as u64 / 16,
+            NewObject::BigInt(_) | NewObject::Timestamp(_) | NewObject::Error { .. } => 0,
+        })
     }
 
     /// No more than [`Self::install_bound`] gives for a new list, set, map

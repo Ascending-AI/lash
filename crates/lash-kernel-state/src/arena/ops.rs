@@ -6,7 +6,7 @@
 //! marks its object dirty, with the card it changed; what it grew by is in
 //! the resident count the capacity meter reads (FIG-6791).
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LocalCode, Sequence};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
@@ -20,25 +20,12 @@ pub fn invalid_key() -> NativeError {
     )
 }
 
-/// Where position `index` of a sequence sits: its chunk and its place in
-/// it. A sequence in one chunk holds every position there; a chunked one
-/// holds positions `k * CHUNK ..` in chunk `k`.
-fn locate(chunks: &[Chunk<Vec<Value>>], index: u64) -> (usize, usize) {
-    if chunks.len() <= 1 {
-        (0, index as usize)
-    } else {
-        (
-            (index / Sequence::CHUNK as u64) as usize,
-            (index % Sequence::CHUNK as u64) as usize,
-        )
-    }
-}
-
+/// Chunk `chunk` of a sequence, to edit its values in place.
 fn chunk_mut(
     handle: ArenaHandle,
-    chunks: &mut [Chunk<Vec<Value>>],
+    chunks: &mut Chunks,
     chunk: usize,
-) -> Result<&mut Vec<Value>, NativeError> {
+) -> Result<&mut [Value], NativeError> {
     match chunks.get_mut(chunk) {
         Some(Chunk::Resident(values)) => Ok(values),
         Some(Chunk::Cold { .. }) => Err(Retry::Cold {
@@ -50,22 +37,34 @@ fn chunk_mut(
     }
 }
 
-/// The values of a sequence in one resident chunk. A chunked one answers
-/// [`Retry::Cold`] for its first cold chunk, or for chunk 0 when every
-/// chunk is resident: the machine decodes, and joins the chunks into one.
-pub(super) fn values(
+/// Chunk `chunk` of a sequence, to grow or shrink it.
+fn chunk_vec(
     handle: ArenaHandle,
-    chunks: &[Chunk<Vec<Value>>],
-) -> Result<&[Value], NativeError> {
-    match chunks {
-        [] => Ok(&[]),
-        [Chunk::Resident(values)] => Ok(values),
-        chunks => Err(Retry::Cold {
+    chunks: &mut Chunks,
+    chunk: usize,
+) -> Result<&mut Vec<Value>, NativeError> {
+    match chunks.vec_mut(chunk) {
+        Some(Chunk::Resident(values)) => Ok(values),
+        Some(Chunk::Cold { .. }) => Err(Retry::Cold {
             object: handle,
-            chunk: super::first_cold(chunks).unwrap_or(0),
+            chunk: chunk as u32,
         }
         .into()),
+        None => Err(malformed("a sequence's chunks miss its length")),
     }
+}
+
+/// The values of a sequence in one resident piece. A chunked one answers
+/// [`Retry::Cold`] for its first cold chunk, or for chunk 0 when every
+/// chunk is resident: the machine decodes, and joins the chunks into one.
+pub(super) fn values(handle: ArenaHandle, chunks: &Chunks) -> Result<&[Value], NativeError> {
+    chunks.values().ok_or_else(|| {
+        Retry::Cold {
+            object: handle,
+            chunk: chunks.first_cold().unwrap_or(0),
+        }
+        .into()
+    })
 }
 
 fn list_mut(
@@ -139,7 +138,7 @@ impl Arena {
         if index >= sequence.len {
             return Ok(None);
         }
-        let (chunk, at) = locate(&sequence.chunks, index);
+        let (chunk, at) = sequence.locate(index);
         match sequence.chunks.get(chunk) {
             Some(Chunk::Resident(values)) => Ok(values.get(at).copied()),
             Some(Chunk::Cold { .. }) => Err(Retry::Cold {
@@ -166,22 +165,26 @@ impl Arena {
         let sequence = list_mut(&mut self.objects, handle)?;
         let mut old = None;
         if index < len {
-            let (chunk, at) = locate(&sequence.chunks, index);
+            let (chunk, at) = sequence.locate(index);
             old = Some(std::mem::replace(
                 &mut chunk_mut(handle, &mut sequence.chunks, chunk)?[at],
                 value,
             ));
         } else if index == len {
-            match sequence.chunks.len() {
-                0 => sequence.chunks.push(Chunk::Resident(Vec::new())),
-                1 => {}
-                chunks if len == chunks as u64 * Sequence::CHUNK as u64 => {
-                    sequence.chunks.push(Chunk::Resident(Vec::new()));
+            if let Chunks::Split(chunks) = &mut sequence.chunks {
+                match chunks.len() {
+                    0 => chunks.push(Chunk::Resident(Vec::new())),
+                    1 => {}
+                    count if len == count as u64 * Sequence::CHUNK as u64 => {
+                        chunks.push(Chunk::Resident(Vec::new()));
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-            let last = sequence.chunks.len() - 1;
-            chunk_mut(handle, &mut sequence.chunks, last)?.push(value);
+            if !sequence.chunks.push_inline(value) {
+                let last = sequence.chunks.count() - 1;
+                chunk_vec(handle, &mut sequence.chunks, last)?.push(value);
+            }
             sequence.len += 1;
             self.resident = self.resident.saturating_add(1);
         } else {
@@ -205,28 +208,30 @@ impl Arena {
             return Err(malformed("a list removal past its length"));
         }
         let old = if index + 1 == len {
-            let (chunk, _) = locate(&sequence.chunks, index);
-            let held = chunk_mut(handle, &mut sequence.chunks, chunk)?;
+            let (chunk, _) = sequence.locate(index);
+            let held = chunk_vec(handle, &mut sequence.chunks, chunk)?;
             let old = held.pop();
-            if held.is_empty() && sequence.chunks.len() > 1 {
-                sequence.chunks.pop();
+            if held.is_empty()
+                && let Chunks::Split(chunks) = &mut sequence.chunks
+                && chunks.len() > 1
+            {
+                chunks.pop();
             }
             old
         } else {
-            if sequence.chunks.len() > 1 {
+            if sequence.chunks.count() > 1 {
                 // A removal moves every later value: the list is one chunk
                 // for it.
-                if let Some(chunk) = super::first_cold(&sequence.chunks) {
+                if let Some(chunk) = sequence.chunks.first_cold() {
                     return Err(Retry::Cold {
                         object: handle,
                         chunk,
                     }
                     .into());
                 }
-                let joined = super::join(std::mem::take(&mut sequence.chunks));
-                sequence.chunks = vec![Chunk::Resident(joined)];
+                sequence.chunks.join();
             }
-            Some(chunk_mut(handle, &mut sequence.chunks, 0)?.remove(index as usize))
+            Some(chunk_vec(handle, &mut sequence.chunks, 0)?.remove(index as usize))
         };
         let old = old.ok_or_else(|| malformed("a list's chunks miss its length"))?;
         sequence.len -= 1;

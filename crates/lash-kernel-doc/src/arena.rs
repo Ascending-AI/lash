@@ -241,35 +241,269 @@ pub enum Chunk<T> {
     Cold { page: PageRef, len: u32 },
 }
 
-/// A list's or a tuple's values. A sequence the run built, or whose chunks
-/// are all resident, is one chunk holding all its values, so an append is
-/// amortized O(1) and a whole read borrows one slice. A large list opened
-/// from its pages is in chunks by position: chunk `k` holds indexes
-/// `k * CHUNK ..`, each cold or resident on its own, so a point read or
+/// A list's, a tuple's or a table's values (a table's as key and value
+/// pairs). What the run built, and a body whose chunks are all resident,
+/// is whole: at most [`Chunks::INLINE`] values held in the body itself, so
+/// a tiny list or tuple allocates no storage, else one resident vector,
+/// so an append is amortized O(1) and a whole read borrows one slice. A
+/// large one opened from its pages is split: a list in chunks by position,
+/// chunk `k` holding indexes `k * Sequence::CHUNK ..`, a table in chunks by
+/// insertion sequence, each cold or resident on its own, so a point read or
 /// write decodes one chunk and its index path.
+#[derive(Debug)]
+pub enum Chunks {
+    /// The first `len` of `values`; the rest are [`Value::Absent`].
+    Inline {
+        len: u8,
+        values: [Value; Chunks::INLINE],
+    },
+    Whole(Vec<Value>),
+    Split(Vec<Chunk<Vec<Value>>>),
+}
+
+impl Chunks {
+    /// The most values a body holds inline: a pair, or one table entry.
+    pub const INLINE: usize = 2;
+
+    /// `values` whole: inline when they fit, so their vector is dropped
+    /// at once rather than held for the object's life.
+    #[inline]
+    pub fn whole(values: Vec<Value>) -> Self {
+        Self::of(&values).unwrap_or(Self::Whole(values))
+    }
+
+    /// `values` inline, when they fit.
+    #[inline]
+    pub fn of(values: &[Value]) -> Option<Self> {
+        if values.len() > Self::INLINE {
+            return None;
+        }
+        let mut inline = [Value::Absent; Self::INLINE];
+        inline[..values.len()].copy_from_slice(values);
+        Some(Self::Inline {
+            len: values.len() as u8,
+            values: inline,
+        })
+    }
+
+    /// How many chunks: one when whole.
+    #[inline]
+    pub fn count(&self) -> usize {
+        match self {
+            Self::Inline { .. } | Self::Whole(_) => 1,
+            Self::Split(chunks) => chunks.len(),
+        }
+    }
+
+    /// Chunk `chunk`: chunk 0 is all of a whole body.
+    #[inline]
+    pub fn get(&self, chunk: usize) -> Option<Chunk<&[Value]>> {
+        match self {
+            Self::Inline { len, values } => {
+                (chunk == 0).then(|| Chunk::Resident(&values[..usize::from(*len)]))
+            }
+            Self::Whole(values) => (chunk == 0).then_some(Chunk::Resident(values.as_slice())),
+            Self::Split(chunks) => chunks.get(chunk).map(|held| match held {
+                Chunk::Resident(values) => Chunk::Resident(values.as_slice()),
+                Chunk::Cold { page, len } => Chunk::Cold {
+                    page: *page,
+                    len: *len,
+                },
+            }),
+        }
+    }
+
+    /// Chunk `chunk`, for an edit of the values it holds in place.
+    #[inline]
+    pub fn get_mut(&mut self, chunk: usize) -> Option<Chunk<&mut [Value]>> {
+        match self {
+            Self::Inline { len, values } => {
+                (chunk == 0).then(|| Chunk::Resident(&mut values[..usize::from(*len)]))
+            }
+            Self::Whole(values) => (chunk == 0).then_some(Chunk::Resident(values.as_mut_slice())),
+            Self::Split(chunks) => chunks.get_mut(chunk).map(|held| match held {
+                Chunk::Resident(values) => Chunk::Resident(values.as_mut_slice()),
+                Chunk::Cold { page, len } => Chunk::Cold {
+                    page: *page,
+                    len: *len,
+                },
+            }),
+        }
+    }
+
+    /// Chunk `chunk`, for an edit that grows or shrinks it: an inline body
+    /// moves to a vector first.
+    #[inline]
+    pub fn vec_mut(&mut self, chunk: usize) -> Option<Chunk<&mut Vec<Value>>> {
+        if let Self::Inline { len, values } = self {
+            if chunk != 0 {
+                return None;
+            }
+            // Room to grow past the inline values, as a first push gives.
+            let mut spilled = Vec::with_capacity(Self::INLINE * 2);
+            spilled.extend_from_slice(&values[..usize::from(*len)]);
+            *self = Self::Whole(spilled);
+        }
+        match self {
+            Self::Inline { .. } => None,
+            Self::Whole(values) => (chunk == 0).then_some(Chunk::Resident(values)),
+            Self::Split(chunks) => chunks.get_mut(chunk).map(|held| match held {
+                Chunk::Resident(values) => Chunk::Resident(values),
+                Chunk::Cold { page, len } => Chunk::Cold {
+                    page: *page,
+                    len: *len,
+                },
+            }),
+        }
+    }
+
+    /// Appends `value` inline, when an inline body has room for it.
+    #[inline]
+    pub fn push_inline(&mut self, value: Value) -> bool {
+        match self {
+            Self::Inline { len, values } if usize::from(*len) < Self::INLINE => {
+                values[usize::from(*len)] = value;
+                *len += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Every chunk in order.
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = Chunk<&[Value]>> {
+        (0..self.count()).filter_map(|chunk| self.get(chunk))
+    }
+
+    /// Every value, when the body is in one resident piece.
+    #[inline]
+    pub fn values(&self) -> Option<&[Value]> {
+        match self {
+            Self::Inline { len, values } => Some(&values[..usize::from(*len)]),
+            Self::Whole(values) => Some(values),
+            Self::Split(chunks) => match chunks.as_slice() {
+                [] => Some(&[]),
+                [Chunk::Resident(values)] => Some(values),
+                _ => None,
+            },
+        }
+    }
+
+    /// The first cold chunk.
+    #[inline]
+    pub fn first_cold(&self) -> Option<u32> {
+        match self {
+            Self::Inline { .. } | Self::Whole(_) => None,
+            Self::Split(chunks) => chunks
+                .iter()
+                .position(|chunk| matches!(chunk, Chunk::Cold { .. }))
+                .map(|at| at as u32),
+        }
+    }
+
+    /// The values the resident chunks hold.
+    #[inline]
+    pub fn resident_len(&self) -> u64 {
+        match self {
+            Self::Inline { len, .. } => u64::from(*len),
+            Self::Whole(values) => values.len() as u64,
+            Self::Split(chunks) => chunks
+                .iter()
+                .map(|chunk| match chunk {
+                    Chunk::Resident(values) => values.len() as u64,
+                    Chunk::Cold { .. } => 0,
+                })
+                .sum(),
+        }
+    }
+
+    /// Joins the chunks into one whole body once every chunk is resident;
+    /// gives whether it did.
+    pub fn join(&mut self) -> bool {
+        let Self::Split(chunks) = self else {
+            return false;
+        };
+        if chunks.len() <= 1
+            || chunks
+                .iter()
+                .any(|chunk| matches!(chunk, Chunk::Cold { .. }))
+        {
+            return false;
+        }
+        let mut joined = Vec::new();
+        for chunk in std::mem::take(chunks) {
+            if let Chunk::Resident(values) = chunk {
+                if joined.is_empty() {
+                    joined = values;
+                } else {
+                    joined.extend(values);
+                }
+            }
+        }
+        *self = Self::Whole(joined);
+        true
+    }
+}
+
+/// A list's or a tuple's values, as [`Chunks`].
 #[derive(Debug)]
 pub struct Sequence {
     pub len: u64,
-    pub chunks: Vec<Chunk<Vec<Value>>>,
+    pub chunks: Chunks,
 }
 
 impl Sequence {
     /// The values one chunk holds: one sequence leaf
     /// (`lash_kernel_state::paged::source::SEQUENCE_LEAF_CELLS`).
     pub const CHUNK: usize = 64;
+
+    /// A sequence of `values`, whole.
+    #[inline]
+    pub fn whole(values: Vec<Value>) -> Self {
+        Self {
+            len: values.len() as u64,
+            chunks: Chunks::whole(values),
+        }
+    }
+
+    /// Where position `index` sits: its chunk and its place in it. A whole
+    /// sequence holds every position in chunk 0; a split one holds
+    /// positions `k * CHUNK ..` in chunk `k`.
+    #[inline]
+    pub fn locate(&self, index: u64) -> (usize, usize) {
+        if self.chunks.count() <= 1 {
+            (0, index as usize)
+        } else {
+            (
+                (index / Self::CHUNK as u64) as usize,
+                (index % Self::CHUNK as u64) as usize,
+            )
+        }
+    }
 }
 
 /// A map's, a set's or a record's entries in insertion order, as key and
-/// value pairs (a set's values are [`Value::Absent`]). A table the run
-/// built, or whose chunks are all resident, is one chunk. A large table
-/// opened from its pages is in chunks by insertion sequence, each holding
-/// whole pairs, so chunks differ in size. The key index that finds an
-/// entry, and the sequences each chunk spans, are the arena's
+/// value pairs in [`Chunks`] (a set's values are [`Value::Absent`]). A
+/// large table opened from its pages is in chunks by insertion sequence,
+/// each holding whole pairs, so chunks differ in size. The key index that
+/// finds an entry, and the sequences each chunk spans, are the arena's
 /// (`native::Semantics::lookup`).
 #[derive(Debug)]
 pub struct Table {
     pub len: u64,
-    pub chunks: Vec<Chunk<Vec<Value>>>,
+    pub chunks: Chunks,
+}
+
+impl Table {
+    /// A table of `pairs`, key then value, whole.
+    #[inline]
+    pub fn whole(pairs: Vec<Value>) -> Self {
+        Self {
+            len: (pairs.len() / 2) as u64,
+            chunks: Chunks::whole(pairs),
+        }
+    }
 }
 
 /// A long text: its lengths, and its UTF-8 bytes in chunks that end on
@@ -329,6 +563,10 @@ pub enum Body {
     /// fresh one (`K-CLO-002`): not a value kind, only a holder of one.
     Cell(Value),
 }
+
+// A tiny list's, tuple's or table's inline values fit beside the widest
+// body, a closure's: no slot is wider for them.
+const _: () = assert!(std::mem::size_of::<Body>() == 56);
 
 /// The code a closure runs, as one prepared executable numbers its codes:
 /// a process-local cache of the lookup by the closure's site. Like an

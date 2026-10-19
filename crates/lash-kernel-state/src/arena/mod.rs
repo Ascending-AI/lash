@@ -63,7 +63,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::arena::{
-    ArenaHandle, Body, Bytes, Chunk, ErrorBody, LongText, Objects, Sequence, ShortText,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
 };
 use lash_kernel_doc::heap::{EntityId, PageValue, TextSummary};
 use lash_kernel_doc::heap_values::text_summary;
@@ -162,10 +162,10 @@ impl ProxyKind {
     /// The cold placeholder body of a proxy of this kind.
     pub fn placeholder(self) -> Body {
         let cold = || {
-            vec![Chunk::Cold {
+            Chunks::Split(vec![Chunk::Cold {
                 page: NO_PAGE,
                 len: 0,
-            }]
+            }])
         };
         match self {
             Self::List => Body::List(Sequence {
@@ -667,12 +667,8 @@ impl Arena {
         if summary.depth as usize > depth_limit {
             return Err(Raise::TooDeep);
         }
-        let sequence = Sequence {
-            len: members.len() as u64,
-            chunks: vec![Chunk::Resident(members)],
-        };
         Ok(Value::Tuple(self.insert(
-            Body::Tuple(sequence),
+            Body::Tuple(Sequence::whole(members)),
             Facts {
                 summary,
                 ..Facts::default()
@@ -705,115 +701,16 @@ impl Arena {
 
     /// Installs what a native call built, in reservation order. None takes
     /// a durable id: a projection that saves one gives it.
-    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
-        for (handle, object) in &mut new {
-            let handle = *handle;
-            // Keep the original handle column for the ownership pass after
-            // every object exists, including forward references in this batch.
-            let object = std::mem::replace(object, NewObject::List(Vec::new()));
-            let (body, index) = match object {
-                NewObject::List(values) => (
-                    Body::List(Sequence {
-                        len: values.len() as u64,
-                        chunks: vec![Chunk::Resident(values)],
-                    }),
-                    None,
-                ),
-                NewObject::Map(entries) => {
-                    let (table, index) =
-                        tables::build(&self.objects, &self.facts, entries.into_iter())?;
-                    (Body::Map(table), Some(index))
-                }
-                NewObject::Set(members) => {
-                    let (table, index) = tables::build(
-                        &self.objects,
-                        &self.facts,
-                        members.into_iter().map(|m| (m, Value::Absent)),
-                    )?;
-                    (Body::Set(table), Some(index))
-                }
-                NewObject::Record(fields) => {
-                    let (table, index) =
-                        tables::build(&self.objects, &self.facts, fields.into_iter())?;
-                    (Body::Record(table), Some(index))
-                }
-                NewObject::Tuple(members) => {
-                    let summary = composite(&self.facts, &members);
-                    self.install_one(
-                        handle,
-                        Body::Tuple(Sequence {
-                            len: members.len() as u64,
-                            chunks: vec![Chunk::Resident(members)],
-                        }),
-                        Facts {
-                            summary,
-                            ..Facts::default()
-                        },
-                    );
-                    continue;
-                }
-                NewObject::LongText(text) => {
-                    self.install_one(
-                        handle,
-                        Body::LongText(resident_text(text.as_ref().into())),
-                        Facts::default(),
-                    );
-                    continue;
-                }
-                NewObject::Bytes(bytes) => {
-                    self.install_one(
-                        handle,
-                        Body::Bytes(Bytes {
-                            len: bytes.len() as u64,
-                            chunks: Box::new([Chunk::Resident(bytes.as_ref().into())]),
-                        }),
-                        Facts::default(),
-                    );
-                    continue;
-                }
-                NewObject::BigInt(int) => {
-                    self.install_one(handle, Body::BigInt(int), Facts::default());
-                    continue;
-                }
-                NewObject::Timestamp(nanoseconds) => {
-                    self.install_one(handle, Body::Timestamp(nanoseconds), Facts::default());
-                    continue;
-                }
-                NewObject::LongFunction(name) => {
-                    self.install_one(
-                        handle,
-                        Body::LongFunction(resident_text(name.as_ref().into())),
-                        Facts::default(),
-                    );
-                    continue;
-                }
-                NewObject::Error {
-                    kind,
-                    message,
-                    data,
-                } => {
-                    let summary = composite(&self.facts, std::slice::from_ref(&data));
-                    self.install_one(
-                        handle,
-                        Body::Error(ErrorBody {
-                            kind,
-                            message,
-                            data,
-                        }),
-                        Facts {
-                            summary,
-                            ..Facts::default()
-                        },
-                    );
-                    continue;
-                }
-            };
-            let facts = self.created(index.map(Box::new));
+    pub fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
+        let mut built = Vec::with_capacity(new.len());
+        for (handle, object) in new {
+            let (body, facts) = self.new_body(object)?;
             self.install_one(handle, body, facts);
+            built.push(handle);
         }
         // Members are counted once the whole batch is placed: an object
         // may hold one built after it in the same call.
-        for (handle, _) in new {
+        for handle in built {
             if let Some(body) = self.objects.get(handle) {
                 let facts = &mut self.facts;
                 each_member(body, &mut |value| {
@@ -826,6 +723,94 @@ impl Arena {
             }
         }
         Ok(())
+    }
+
+    /// Creates `object` in a fresh slot, as [`Self::install`] installs one
+    /// a native call built: what a region's construction makes, its
+    /// members' own objects already there. Its storage moves into the body.
+    pub fn create(&mut self, object: NewObject) -> Result<Value, NativeError> {
+        let naming = object.naming();
+        let (body, facts) = self.new_body(object)?;
+        Ok(naming(self.insert(body, facts)))
+    }
+
+    /// The body and facts of a new object: a mutable one created, without
+    /// a durable id; an immutable composite with its summary.
+    fn new_body(&mut self, object: NewObject) -> Result<(Body, Facts), NativeError> {
+        let (body, index) = match object {
+            NewObject::List(values) => (Body::List(Sequence::whole(values)), None),
+            NewObject::Map(entries) => {
+                let (table, index) =
+                    tables::build(&self.objects, &self.facts, entries.into_iter())?;
+                (Body::Map(table), Some(index))
+            }
+            NewObject::Set(members) => {
+                let (table, index) = tables::build(
+                    &self.objects,
+                    &self.facts,
+                    members.into_iter().map(|m| (m, Value::Absent)),
+                )?;
+                (Body::Set(table), Some(index))
+            }
+            NewObject::Record(fields) => {
+                let (table, index) = tables::build(&self.objects, &self.facts, fields.into_iter())?;
+                (Body::Record(table), Some(index))
+            }
+            NewObject::Tuple(members) => {
+                let summary = composite(&self.facts, &members);
+                return Ok((
+                    Body::Tuple(Sequence::whole(members)),
+                    Facts {
+                        summary,
+                        ..Facts::default()
+                    },
+                ));
+            }
+            NewObject::LongText(text) => {
+                return Ok((
+                    Body::LongText(resident_text(text.as_ref().into())),
+                    Facts::default(),
+                ));
+            }
+            NewObject::Bytes(bytes) => {
+                return Ok((
+                    Body::Bytes(Bytes {
+                        len: bytes.len() as u64,
+                        chunks: Box::new([Chunk::Resident(bytes.as_ref().into())]),
+                    }),
+                    Facts::default(),
+                ));
+            }
+            NewObject::BigInt(int) => return Ok((Body::BigInt(int), Facts::default())),
+            NewObject::Timestamp(nanoseconds) => {
+                return Ok((Body::Timestamp(nanoseconds), Facts::default()));
+            }
+            NewObject::LongFunction(name) => {
+                return Ok((
+                    Body::LongFunction(resident_text(name.as_ref().into())),
+                    Facts::default(),
+                ));
+            }
+            NewObject::Error {
+                kind,
+                message,
+                data,
+            } => {
+                let summary = composite(&self.facts, std::slice::from_ref(&data));
+                return Ok((
+                    Body::Error(ErrorBody {
+                        kind,
+                        message,
+                        data,
+                    }),
+                    Facts {
+                        summary,
+                        ..Facts::default()
+                    },
+                ));
+            }
+        };
+        Ok((body, self.created(index.map(Box::new))))
     }
 
     fn install_one(&mut self, handle: ArenaHandle, body: Body, facts: Facts) {
@@ -910,7 +895,7 @@ impl Arena {
             Body::Record(_) => ProxyKind::Record.placeholder(),
             Body::Tuple(sequence) => Body::Tuple(Sequence {
                 len: sequence.len,
-                chunks: vec![cold(sequence.len)],
+                chunks: Chunks::Split(vec![cold(sequence.len)]),
             }),
             Body::LongText(text) => Body::LongText(LongText {
                 summary: text.summary,
@@ -1154,6 +1139,7 @@ impl Arena {
         let rooted = self.mark_roots(roots);
         let mut pending = std::mem::take(&mut self.zero);
         let mut kept = Vec::new();
+        let mut freed = Vec::new();
         while let Some(handle) = pending.pop() {
             if self.objects.get(handle).is_none() {
                 continue;
@@ -1167,8 +1153,8 @@ impl Arena {
                 kept.push(handle);
                 continue;
             }
-            let freed = self.free(handle);
-            for member in freed {
+            self.free(handle, &mut freed);
+            for member in freed.drain(..) {
                 let Some(facts) = self.facts.get_mut(member.index() as usize) else {
                     continue;
                 };
@@ -1207,14 +1193,14 @@ impl Arena {
         rooted
     }
 
-    /// Frees `handle`: gives what its body held, uncounted by the caller.
-    fn free(&mut self, handle: ArenaHandle) -> Vec<ArenaHandle> {
+    /// Frees `handle`: gives what its body held to `members`, uncounted by
+    /// the caller.
+    fn free(&mut self, handle: ArenaHandle, members: &mut Vec<ArenaHandle>) {
         let index = handle.index() as usize;
         let facts = std::mem::take(&mut self.facts[index]);
         if let Some(entity) = facts.entity {
             self.entities.remove(&entity);
         }
-        let mut members = Vec::new();
         if let Some(body) = self.objects.get(handle) {
             self.resident = self.resident.saturating_sub(body_values(body));
             if facts.cold || has_cold(body) {
@@ -1226,7 +1212,6 @@ impl Arena {
             }
         }
         self.objects.release(handle);
-        members
     }
 
     /// Whether a cycle collection is due: resident values grew past the
@@ -1277,7 +1262,7 @@ impl Arena {
             let Some(handle) = self.objects.handle_at(index as u32) else {
                 continue;
             };
-            survivors.extend(self.free(handle));
+            self.free(handle, &mut survivors);
         }
         // What a freed object held and survives is held one member less.
         for member in survivors {
@@ -1315,21 +1300,6 @@ pub(crate) fn first_cold<T>(chunks: &[Chunk<T>]) -> Option<u32> {
         .map(|at| at as u32)
 }
 
-/// The values of resident `chunks`, in order, in one vector.
-pub(crate) fn join(chunks: Vec<Chunk<Vec<Value>>>) -> Vec<Value> {
-    let mut chunks = chunks.into_iter();
-    let mut joined = match chunks.next() {
-        Some(Chunk::Resident(values)) => values,
-        _ => Vec::new(),
-    };
-    for chunk in chunks {
-        if let Chunk::Resident(values) = chunk {
-            joined.extend(values);
-        }
-    }
-    joined
-}
-
 /// A guest error the arena's own constructors raise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Raise {
@@ -1363,8 +1333,10 @@ fn has_cold(body: &Body) -> bool {
             .any(|chunk| matches!(chunk, Chunk::Cold { .. }))
     }
     match body {
-        Body::List(sequence) | Body::Tuple(sequence) => cold(&sequence.chunks),
-        Body::Map(table) | Body::Set(table) | Body::Record(table) => cold(&table.chunks),
+        Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.first_cold().is_some(),
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+            table.chunks.first_cold().is_some()
+        }
         Body::LongText(text) | Body::LongFunction(text) => cold(&text.chunks),
         Body::Bytes(bytes) => cold(&bytes.chunks),
         _ => false,
@@ -1374,18 +1346,9 @@ fn has_cold(body: &Body) -> bool {
 /// How many values a body holds resident, plus one: the collection
 /// trigger's measure.
 fn body_values(body: &Body) -> u64 {
-    let chunked = |chunks: &[Chunk<Vec<Value>>]| -> u64 {
-        chunks
-            .iter()
-            .map(|chunk| match chunk {
-                Chunk::Resident(values) => values.len() as u64,
-                Chunk::Cold { .. } => 0,
-            })
-            .sum()
-    };
     1 + match body {
-        Body::List(sequence) | Body::Tuple(sequence) => chunked(&sequence.chunks),
-        Body::Map(table) | Body::Set(table) | Body::Record(table) => chunked(&table.chunks),
+        Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.resident_len(),
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.resident_len(),
         Body::LongText(text) | Body::LongFunction(text) => text.summary.utf8_bytes / 16,
         Body::Bytes(bytes) => bytes.len / 16,
         Body::Closure { captures, .. } => captures.len() as u64,
@@ -1396,8 +1359,8 @@ fn body_values(body: &Body) -> u64 {
 /// Visits every value `body` holds resident. A closure's captured cells
 /// are handles, not values: its `captures`.
 pub fn each_member(body: &Body, visit: &mut dyn FnMut(&Value)) {
-    let chunked = |chunks: &[Chunk<Vec<Value>>], visit: &mut dyn FnMut(&Value)| {
-        for chunk in chunks {
+    let chunked = |chunks: &Chunks, visit: &mut dyn FnMut(&Value)| {
+        for chunk in chunks.iter() {
             if let Chunk::Resident(values) = chunk {
                 values.iter().for_each(&mut *visit);
             }
@@ -1461,10 +1424,7 @@ mod tests {
             ordinal: 1,
         };
         let handle = arena.proxy(entity, ProxyKind::List);
-        let body = Body::List(Sequence {
-            len: 2,
-            chunks: vec![Chunk::Resident(vec![Value::Null, Value::Null])],
-        });
+        let body = Body::List(Sequence::whole(vec![Value::Null, Value::Null]));
         arena.materialized(handle, body).unwrap();
         let counted = arena.held();
         arena.recount_resident();

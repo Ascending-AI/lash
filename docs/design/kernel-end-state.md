@@ -376,10 +376,17 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
   between two content-placed boundaries. Chunks materialize lazily
   (`Chunk::Cold { page, len }` to `Chunk::Resident`).
 - **Resident chunks own their storage by value** (ruled 2026-10-17, FIG-6708):
-  a list's, map's, set's or record's chunks are `Vec<Chunk<Vec<Value>>>`,
-  and immutables keep boxed exact-size storage. A boxed slice cannot grow,
-  so an append would copy the whole object; amortized O(1) append is
-  required. `Objects::get_mut` and `Objects::insert` serve the machine's own
+  a list's, tuple's, map's, set's or record's values are `Chunks`, and
+  immutable payloads keep boxed exact-size storage. A boxed slice cannot
+  grow, so an append would copy the whole object; amortized O(1) append is
+  required. A whole body (what the run built, or one joined once every chunk
+  is resident) holds up to `Chunks::INLINE` (2) values inline, so a fresh
+  `[n]` or pair allocates no storage and frees none at release, and is
+  otherwise one `Vec<Value>` with no chunk list; only a large object opened
+  from its pages is `Chunks::Split(Vec<Chunk<Vec<Value>>>)` (FIG-6794). The
+  inline values fit beside the widest body, so no arena slot widens. A fresh
+  table's insertion sequences `0..next` are implicit until it removes an
+  entry. `Objects::get_mut` and `Objects::insert` serve the machine's own
   edits and allocations outside a native call.
 - **Dirty-chunk worklist.** Each object keeps its dirty chunk indexes; the arena
   keeps the set of objects with dirty chunks (cards). The worklist says which

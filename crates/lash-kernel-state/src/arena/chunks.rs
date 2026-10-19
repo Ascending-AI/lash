@@ -10,12 +10,12 @@
 
 use std::ops::Range;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, LongText, Sequence, Table};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, Chunks, LongText, Sequence, Table};
 use lash_kernel_doc::heap::{NormalKey, PAYLOAD_LEAF_BYTES, PageRef};
 use lash_kernel_doc::{NativeError, Value};
 
 use super::tables::{self, Index};
-use super::{Arena, NO_PAGE, ProxyKind, body_values, first_cold, join, malformed};
+use super::{Arena, NO_PAGE, ProxyKind, body_values, first_cold, malformed};
 
 /// What a cold chunk holds, for the machine to read from the heap.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,9 +77,11 @@ impl Arena {
     /// per [`Sequence::CHUNK`] positions.
     pub fn open_list(&mut self, handle: ArenaHandle, len: u64) -> Result<(), NativeError> {
         let width = Sequence::CHUNK as u64;
-        let chunks = (0..len.div_ceil(width))
-            .map(|chunk| cold(width.min(len - chunk * width)))
-            .collect();
+        let chunks = Chunks::Split(
+            (0..len.div_ceil(width))
+                .map(|chunk| cold(width.min(len - chunk * width)))
+                .collect(),
+        );
         let (body, facts) = self.parts_mut(handle)?;
         *body = Body::List(Sequence { len, chunks });
         facts.cold = false;
@@ -100,7 +102,7 @@ impl Arena {
         let count = next.div_ceil(width) as usize;
         let table = Table {
             len,
-            chunks: (0..count).map(|_| cold(0)).collect(),
+            chunks: Chunks::Split((0..count).map(|_| cold(0)).collect()),
         };
         let body = match kind {
             ProxyKind::Map => Body::Map(table),
@@ -137,7 +139,7 @@ impl Arena {
                             at as u32,
                             ColdChunk::List {
                                 start: at as u64 * width,
-                                count: u64::from(*len),
+                                count: u64::from(len),
                             },
                         ));
                     }
@@ -183,7 +185,10 @@ impl Arena {
                 .get_mut(handle)
                 .ok_or_else(|| malformed("a stale handle reached the machine"))?,
         )?;
-        match sequence.chunks.get_mut(chunk as usize) {
+        let Chunks::Split(chunks) = &mut sequence.chunks else {
+            return Err(malformed("a decoded list chunk is not cold"));
+        };
+        match chunks.get_mut(chunk as usize) {
             Some(held @ Chunk::Cold { .. }) => {
                 if let Chunk::Cold { len, .. } = held
                     && u64::from(*len) != added
@@ -217,7 +222,10 @@ impl Arena {
             .as_deref_mut()
             .ok_or_else(|| malformed("a table has no index"))?;
         let table = table_mut(body)?;
-        let Some(held @ Chunk::Cold { .. }) = table.chunks.get_mut(chunk as usize) else {
+        let Chunks::Split(chunks) = &mut table.chunks else {
+            return Err(malformed("a decoded table chunk is not cold"));
+        };
+        let Some(held @ Chunk::Cold { .. }) = chunks.get_mut(chunk as usize) else {
             return Err(malformed("a decoded table chunk is not cold"));
         };
         let mut pairs = Vec::with_capacity(entries.len() * 2);
@@ -243,17 +251,11 @@ impl Arena {
     pub fn join_chunks(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
         let (body, facts) = self.parts_mut(handle)?;
         match body {
-            Body::List(sequence) | Body::Tuple(sequence)
-                if sequence.chunks.len() > 1 && first_cold(&sequence.chunks).is_none() =>
-            {
-                let joined = join(std::mem::take(&mut sequence.chunks));
-                sequence.chunks = vec![Chunk::Resident(joined)];
-            }
-            Body::Map(table) | Body::Set(table) | Body::Record(table)
-                if table.chunks.len() > 1 && first_cold(&table.chunks).is_none() =>
-            {
-                let joined = join(std::mem::take(&mut table.chunks));
-                table.chunks = vec![Chunk::Resident(joined)];
+            Body::List(sequence) | Body::Tuple(sequence) => return Ok(sequence.chunks.join()),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                if !table.chunks.join() {
+                    return Ok(false);
+                }
                 facts
                     .index
                     .as_deref_mut()
@@ -289,8 +291,8 @@ impl Arena {
     /// whose chunks are all resident.
     pub fn first_cold_chunk(&self, handle: ArenaHandle) -> Result<u32, NativeError> {
         Ok(match self.body(handle)? {
-            Body::List(sequence) | Body::Tuple(sequence) => first_cold(&sequence.chunks),
-            Body::Map(table) | Body::Set(table) | Body::Record(table) => first_cold(&table.chunks),
+            Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.first_cold(),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.first_cold(),
             Body::LongText(text) | Body::LongFunction(text) => first_cold(&text.chunks),
             Body::Bytes(bytes) => first_cold(&bytes.chunks),
             _ => None,
@@ -301,8 +303,8 @@ impl Arena {
     /// How many chunks the body of `handle` is in.
     pub fn chunk_count(&self, handle: ArenaHandle) -> Result<usize, NativeError> {
         Ok(match self.body(handle)? {
-            Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.len(),
-            Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.len(),
+            Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.count(),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.count(),
             Body::LongText(text) | Body::LongFunction(text) => text.chunks.len(),
             Body::Bytes(bytes) => bytes.chunks.len(),
             _ => 0,
@@ -421,7 +423,7 @@ impl Arena {
     ) -> Result<Option<NormalKey>, NativeError> {
         self.warm(handle)?;
         if let Body::Map(table) | Body::Set(table) | Body::Record(table) = self.body(handle)?
-            && first_cold(&table.chunks).is_none()
+            && table.chunks.first_cold().is_none()
         {
             return Ok(None);
         }
@@ -439,7 +441,7 @@ impl Arena {
         self.warm(handle)?;
         let cold = match self.body(handle)? {
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
-                first_cold(&table.chunks).is_some()
+                table.chunks.first_cold().is_some()
             }
             _ => return Ok(false),
         };

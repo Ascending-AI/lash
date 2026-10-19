@@ -23,7 +23,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, ErrorBody, LongText, Sequence};
+use lash_kernel_doc::arena::{
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Sequence,
+};
 use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, PageReader as _, PageValue, Payload, TextRef,
 };
@@ -143,7 +145,7 @@ fn immutable(
     let members = match arena.body(handle).map_err(arena_fault)? {
         Body::Tuple(sequence) => {
             let mut members = Vec::with_capacity(sequence.len as usize);
-            for chunk in &sequence.chunks {
+            for chunk in sequence.chunks.iter() {
                 let Chunk::Resident(values) = chunk else {
                     return Err(malformed("a tuple with no page form is not resident"));
                 };
@@ -271,22 +273,22 @@ pub(crate) fn admit(
                 task_edges: tuple.summary.task_edges,
                 has_edges: tuple.summary.has_edges,
             };
-            let chunk = match &tuple.body {
-                Payload::Resident(members) => Chunk::Resident(
+            let chunks = match &tuple.body {
+                Payload::Resident(members) => Chunks::whole(
                     members
                         .iter()
                         .map(|member| admit(arena, pages, member))
                         .collect::<Result<Vec<_>, _>>()?,
                 ),
-                Payload::Paged(page) => Chunk::Cold {
+                Payload::Paged(page) => Chunks::Split(vec![Chunk::Cold {
                     page: **page,
                     len: u32::try_from(tuple.summary.len).unwrap_or(u32::MAX),
-                },
+                }]),
             };
             Value::Tuple(arena.immutable(
                 Body::Tuple(Sequence {
                     len: tuple.summary.len,
-                    chunks: vec![chunk],
+                    chunks,
                 }),
                 summary,
                 Some(value.clone()),
@@ -472,13 +474,7 @@ fn open(
                 .iter()
                 .map(|value| admit(arena, pages, value))
                 .collect::<Result<Vec<_>, _>>()?;
-            (
-                Body::List(Sequence {
-                    len: values.len() as u64,
-                    chunks: vec![Chunk::Resident(values)],
-                }),
-                None,
-            )
+            (Body::List(Sequence::whole(values)), None)
         }
         StoredHead::Table { kind, len, next } if len > chunk => {
             let kind = match kind {
@@ -506,10 +502,7 @@ fn open(
                 });
                 seqs.push(*seq);
             }
-            let table = lash_kernel_doc::arena::Table {
-                len: entries.len() as u64,
-                chunks: vec![Chunk::Resident(pairs)],
-            };
+            let table = lash_kernel_doc::arena::Table::whole(pairs);
             (
                 match kind {
                     ObjectKind::Map => Body::Map(table),
@@ -639,10 +632,7 @@ fn warm_immutable(
             if members.len() as u64 != len {
                 return Err(malformed("a tuple's pages disagree with its length"));
             }
-            Body::Tuple(Sequence {
-                len,
-                chunks: vec![Chunk::Resident(members)],
-            })
+            Body::Tuple(Sequence::whole(members))
         }
         _ => return Ok(()),
     };
@@ -786,9 +776,9 @@ fn stored(
     exe: &Executable,
     handle: ArenaHandle,
 ) -> Result<StoredObject, HeapFault> {
-    let resident = |chunks: &[Chunk<Vec<Value>>]| -> Result<Vec<Value>, HeapFault> {
+    let resident = |chunks: &Chunks| -> Result<Vec<Value>, HeapFault> {
         let mut values = Vec::new();
-        for chunk in chunks {
+        for chunk in chunks.iter() {
             let Chunk::Resident(held) = chunk else {
                 return Err(malformed("a dirty object is not resident"));
             };
@@ -819,7 +809,7 @@ fn stored(
             Held::Table(
                 kind,
                 resident(&table.chunks)?,
-                (0..table.chunks.len())
+                (0..table.chunks.count())
                     .flat_map(|chunk| index.sequences(chunk).iter().copied())
                     .collect(),
                 index.next(),
