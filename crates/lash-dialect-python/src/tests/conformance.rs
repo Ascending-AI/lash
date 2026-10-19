@@ -241,11 +241,11 @@ fn a_while_test_keeps_its_actions_in_the_condition() {
     );
     // It prints, and its printed source reads back to it (`K-DIALECT-001`).
     let printed =
-        crate::print(&lowered.document, Default::default()).expect("the lowered loop prints");
+        crate::print(&lowered.document, None, Default::default()).expect("the lowered loop prints");
     let read = crate::read(&printed.source, &lowered.document, Default::default())
         .expect("its source reads back");
     assert_eq!(
-        read.canonical_bytes(),
+        read.0.canonical_bytes(),
         lowered.document.canonical_bytes(),
         "{}",
         printed.source

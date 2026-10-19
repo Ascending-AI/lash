@@ -179,10 +179,11 @@ quoted data and unrelated unknown names do not trigger this refusal. Source
 without these unresolved references carries no provenance marker and is not
 guaranteed to be distinguishable from newly authored source.
 
-`lash::vm::WorkerService::print(document, format, options)` and
+`lash::vm::WorkerService::print(document, captions, format, options)` and
 `::read_exported(source, base, format, limits)` run the same operations in the
 worker crash domain. The read request carries the base Document's JSON; the
-response is a Document, without a library, helper-release choice or admission.
+response is a Document with the captions its source spells, without a
+library, helper-release choice or admission.
 The installed dialect package owns a `read` function pointer alongside its
 authored front end and printer. The worker wire-v1 snapshots change in place
 before the 1.0 cut; no stored shape changes.

@@ -783,7 +783,7 @@
     },
     "Document": {
       "additionalProperties": false,
-      "description": "A workflow document: `main`, the declared functions, the entries a host\nmay start, the private bindings and the requirements manifest.\n\nA document holds behaviour only. Where its nodes came from in authored\nsource is an optional [`crate::SourceMap`], stored apart and keyed to the\ndocument's [`DocumentId`].",
+      "description": "A workflow document: `main`, the declared functions, the entries a host\nmay start, the private bindings and the requirements manifest.\n\nA document holds behaviour only. Where its nodes came from in authored\nsource is an optional [`crate::SourceMap`], and what its steps are called\nis an optional [`crate::Captions`]; both are stored apart and keyed to\nthe document's [`DocumentId`].",
       "properties": {
         "entries": {
           "additionalProperties": {

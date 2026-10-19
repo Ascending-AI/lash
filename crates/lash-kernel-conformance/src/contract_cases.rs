@@ -122,6 +122,7 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
         "K-CHG-001" => charge_invariance(shard, registry),
         "K-MACH-001" => instance_isolation(shard, registry),
         "K-MACH-004" => delivery_errors(shard, registry),
+        rule if rule.starts_with("K-CAP-") => super::captions::verify(rule),
         _ => {}
     }
 }

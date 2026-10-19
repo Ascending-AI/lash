@@ -437,6 +437,7 @@ fn coarse_spans() {
     assert!(view.nodes[0].bindings.contains(&shadowed[1].id));
     let printed = lash::typescript::print(
         document.document(),
+        None,
         lash::dialect::PrintOptions {
             source_map: true,
             ..Default::default()

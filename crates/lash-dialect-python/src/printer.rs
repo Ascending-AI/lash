@@ -13,7 +13,13 @@ pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 /// Render plain Python without compiling or resolving dependencies. The
 /// manifest, entries, private bindings, helper identities and name renames
 /// are not written: [`crate::read`] takes them from the base document.
-pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSource, PrintError> {
+/// Captions are not yet spelled in this dialect: every one is reported in
+/// [`PrintedSource::dropped`].
+pub fn print(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    options: PrintOptions,
+) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
         return Err(PrintError::Invalid("unsupported kernel version".into()));
@@ -21,7 +27,7 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     let plan = NamePlan::new(document, legal_identifier);
     let inline = InlinePlan::new(document);
     let mut r = Renderer {
-        out: SourceWriter::new(options),
+        out: SourceWriter::with_captions(options, document, captions)?,
         plan: &plan,
         inline: &inline,
         indent: 0,
@@ -38,7 +44,10 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         r.name(name);
         r.parameters(&function.params);
         r.out.write(":\n");
-        let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
+        let unit = r
+            .out
+            .tracks_sites()
+            .then(|| k::Unit::Function(name.clone()));
         r.scope = BindingScope::new(&function.params);
         r.root_block(&function.body, unit.as_ref());
     }
@@ -49,16 +58,18 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     } else {
         "def main():\n"
     });
-    r.root_block(&document.main, options.source_map.then_some(&k::Unit::Main));
+    let tracks = r.out.tracks_sites();
+    r.root_block(&document.main, tracks.then_some(&k::Unit::Main));
     r.out.finish(document, SourceFormat::PythonV1)
 }
 impl Printer for Python {
     fn print(
         &self,
         document: &k::Document,
+        captions: Option<&k::Captions>,
         options: PrintOptions,
     ) -> Result<PrintedSource, PrintError> {
-        print(document, options)
+        print(document, captions, options)
     }
 }
 

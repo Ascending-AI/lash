@@ -32,6 +32,8 @@ use std::collections::BTreeMap;
 
 mod activity;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
+mod captions;
+pub use captions::{ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption};
 mod coarse;
 pub use coarse::{
     CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,

@@ -30,13 +30,14 @@ mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
-    CellEnvironment, EffectControl, Environment, FrontEnd, Lowered, Mode, Package, Printer,
+    CaptionSupport, CellEnvironment, EffectControl, Environment, FrontEnd, Lowered, Mode, Package,
+    Printer, ReadSource,
 };
 pub use lash_kernel_state::WaitId;
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
-pub use notes::{Note, site_layers};
+pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, Kept, Left, NotSaved, Unusable, closure_of, install,
@@ -51,7 +52,7 @@ pub use written::{CallParam, CallShape, Written, closure_site, written_table};
 
 pub use imperative::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
-    check_document_depth,
+    check_captions, check_document_depth,
 };
 
 /// Operand facts used only by exact generated-source codecs.

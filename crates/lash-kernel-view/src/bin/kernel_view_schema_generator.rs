@@ -1,13 +1,13 @@
-//! Emits the checked-in JSON Schema document of the [`WorkflowView`] a host
+//! Emits the checked-in JSON Schema documents of the [`WorkflowView`] a host
 //! draws and edits against, with the run [`WorkflowCoverage`] it reads
-//! through `coverage`.
+//! through `coverage`, and of the [`CaptionView`] it joins with it.
 //!
 //! It is owned by [`KERNEL_VERSION`]: its payloads are the forms and sites of
 //! that version. Every object is closed and no position admits arbitrary
 //! JSON.
 
 use lash_kernel_doc::KERNEL_VERSION;
-use lash_kernel_view::{WorkflowCoverage, WorkflowView};
+use lash_kernel_view::{CaptionView, WorkflowCoverage, WorkflowView};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
@@ -17,14 +17,15 @@ fn main() -> Result<(), String> {
     // The view document also ships the run coverage a host reads through
     // `coverage`, so its declaration names every type a run's JSON answers
     // with.
-    let documents = vec![document::<WorkflowView>(
-        "kernel-workflow-view",
-        |generator| {
+    let documents = vec![
+        document::<WorkflowView>("kernel-workflow-view", |generator| {
             generator.subschema_for::<WorkflowCoverage>();
             generator.subschema_for::<lash_kernel_view::NodeCoverage>();
             generator.subschema_for::<lash_kernel_view::ActionActivity<Value>>();
-        },
-    )?];
+        })?,
+        // The captions a host joins with the view, by view location.
+        document::<CaptionView>("kernel-caption-view", |_| {})?,
+    ];
     println!("{}", Value::Array(documents));
     Ok(())
 }

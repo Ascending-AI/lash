@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "Caption": {
+      "additionalProperties": false,
+      "description": "A step's title and optional description, in the one text domain every\ndialect can spell and read back exactly (`K-CAP-005`). A value exists only\nonce [`Caption::new`] accepted its text; decoding checks it the same way.",
+      "properties": {
+        "description": {
+          "description": "At most [`CAPTION_DESCRIPTION_BYTES`] of trimmed lines separated by\n`\\n`, with no blank first or last line and no two blank lines in a\nrow. Never empty: no description is `None`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "One non-empty, trimmed line of at most [`CAPTION_TITLE_BYTES`].",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "CaptionEntry": {
+      "additionalProperties": false,
+      "description": "One site's caption.",
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-captions/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The captions of one document, by site: strictly ascending and unique,\neach a captionable site of the document of identity `document`. It is\nseparate from the [`crate::SourceMap`]: captions outlive the source bytes\na map is keyed to. A host holds it; lash stores none.\n\nDecoding checks the order; validate a decoded value against its document\nbefore using its sites.",
+  "properties": {
+    "document": {
+      "$ref": "#/$defs/DocumentId"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/CaptionEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "document"
+  ],
+  "title": "Captions",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

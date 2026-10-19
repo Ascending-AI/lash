@@ -26,10 +26,14 @@ pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
 pub use intrinsics::read;
 pub use lash_kernel_dialect::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
+    CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
 pub use printer::print;
+
+/// The captions the dialect spells: none yet. Its front end and reader
+/// extract none and its printer drops every one.
+pub const CAPTIONS: CaptionSupport = CaptionSupport::NONE;
 
 /// Build provenance for standalone dialect measurement tools.
 #[doc(hidden)]

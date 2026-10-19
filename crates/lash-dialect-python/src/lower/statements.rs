@@ -44,9 +44,7 @@ impl Lowerer<'_> {
             stmts: vec![stmt],
             notes: vec![Note {
                 span: self.span,
-                blocks: Vec::new(),
-                written: None,
-                nested_written: Vec::new(),
+                ..Note::default()
             }],
         }
     }
@@ -1248,8 +1246,7 @@ impl Lowerer<'_> {
                             }],
                             Vec::new(),
                         ],
-                        written: None,
-                        nested_written: Vec::new(),
+                        ..Note::default()
                     },
                 );
             }

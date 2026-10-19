@@ -44,6 +44,26 @@ host_schemas! {
             include_str!("../../../../schemas/host/kernel-authoring-operation/v1.schema.json")
         ),
     }
+    kernel_caption_view {
+        TYPESCRIPT_DECLARATION: (
+            include_str!("../../host-schemas/kernel-caption-view/v1.d.ts"),
+            include_str!("../../../../schemas/host/kernel-caption-view/v1.d.ts")
+        ),
+        JSON_SCHEMA: (
+            include_str!("../../host-schemas/kernel-caption-view/v1.schema.json"),
+            include_str!("../../../../schemas/host/kernel-caption-view/v1.schema.json")
+        ),
+    }
+    kernel_captions {
+        TYPESCRIPT_DECLARATION: (
+            include_str!("../../host-schemas/kernel-captions/v1.d.ts"),
+            include_str!("../../../../schemas/host/kernel-captions/v1.d.ts")
+        ),
+        JSON_SCHEMA: (
+            include_str!("../../host-schemas/kernel-captions/v1.schema.json"),
+            include_str!("../../../../schemas/host/kernel-captions/v1.schema.json")
+        ),
+    }
     kernel_correspondence {
         JSON_SCHEMA: (
             include_str!("../../host-schemas/kernel-correspondence/v1.schema.json"),

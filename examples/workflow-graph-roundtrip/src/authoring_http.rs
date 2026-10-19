@@ -44,7 +44,7 @@ pub(crate) async fn import_source(
             .await
             .map_err(|error| ErrorResponse::invalid("source_read", error))?;
         match read {
-            WorkflowImport::Read { document } => (
+            WorkflowImport::Read { document, .. } => (
                 document
                     .to_document()
                     .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,

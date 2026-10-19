@@ -343,6 +343,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
     let entry = Name::new("digest");
     let printed = lash::typescript::print(
         &document,
+        None,
         lash::dialect::PrintOptions {
             source_map: true,
             ..Default::default()

@@ -3248,6 +3248,7 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-edit",
  "lash-kernel-exec",
  "lash-kernel-lib",
  "lash-kernel-state",

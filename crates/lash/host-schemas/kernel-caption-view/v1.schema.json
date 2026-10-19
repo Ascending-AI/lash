@@ -1,0 +1,211 @@
+{
+  "$defs": {
+    "ArmCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "arm": {
+          "description": "The arm's index in that node's `arms`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "node": {
+          "description": "The control node's index in [`WorkflowView::nodes`].",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "arm",
+        "block",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "CallableCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "callable": {
+          "description": "The callable's index in [`WorkflowView::callables`].",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        }
+      },
+      "required": [
+        "callable",
+        "block",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "Caption": {
+      "additionalProperties": false,
+      "description": "A step's title and optional description, in the one text domain every\ndialect can spell and read back exactly (`K-CAP-005`). A value exists only\nonce [`Caption::new`] accepted its text; decoding checks it the same way.",
+      "properties": {
+        "description": {
+          "description": "At most [`CAPTION_DESCRIPTION_BYTES`] of trimmed lines separated by\n`\\n`, with no blank first or last line and no two blank lines in a\nrow. Never empty: no description is `None`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "One non-empty, trimmed line of at most [`CAPTION_TITLE_BYTES`].",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "NodeCaption": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "$ref": "#/$defs/Caption"
+        },
+        "node": {
+          "description": "The node's index in [`WorkflowView::nodes`].",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The captioned statement or arm."
+        }
+      },
+      "required": [
+        "node",
+        "site",
+        "caption"
+      ],
+      "type": "object"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-caption-view/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A view's captions, each keyed by where the view draws it. Wording for a\nstep without a caption is the host's.",
+  "properties": {
+    "arms": {
+      "description": "By node, then arm: a control node's [`crate::ControlArm`] captions.",
+      "items": {
+        "$ref": "#/$defs/ArmCaption"
+      },
+      "type": "array"
+    },
+    "callables": {
+      "description": "By callable: a declared function's caption, on its\n[`crate::CallableView`]. The entry's is the workflow's title.",
+      "items": {
+        "$ref": "#/$defs/CallableCaption"
+      },
+      "type": "array"
+    },
+    "document": {
+      "$ref": "#/$defs/DocumentId"
+    },
+    "nodes": {
+      "description": "By node, then site. An action or control node has its carrier\nstatement's caption; a statement with several actions gives it to\nthe node of its first. A code node has the caption of every member,\nand of every clause arm of a member, that has one.",
+      "items": {
+        "$ref": "#/$defs/NodeCaption"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "document",
+    "nodes",
+    "arms",
+    "callables"
+  ],
+  "title": "CaptionView",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

@@ -404,7 +404,7 @@ fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {
             ]),
         }],
     );
-    assert_eq!(decoded.canonical_bytes(), expected.canonical_bytes());
+    assert_eq!(decoded.0.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, true);
 }
 
@@ -487,6 +487,7 @@ main {
     assert_eq!(
         crate::read(ORDINARY_WORKFLOW, &document, Default::default())
             .unwrap()
+            .0
             .canonical_bytes(),
         document.canonical_bytes()
     );
@@ -548,7 +549,7 @@ fn generated_decoder(
     source: &str,
     base: &k::Document,
     limits: lash_kernel_dialect::GeneratedSourceLimits,
-) -> Result<k::Document, lash_kernel_dialect::Diagnostic> {
+) -> Result<(k::Document, k::Captions), lash_kernel_dialect::Diagnostic> {
     crate::read(source, base, limits).map_err(Into::into)
 }
 fn generic_form(node: k::Node<'_>, source: &str) -> Option<&'static str> {
@@ -788,6 +789,7 @@ fn native_operator_aliases_preserve_helper_identity_precedence_and_ambiguity() {
     assert_eq!(
         crate::read(independent, &document, Default::default())
             .unwrap()
+            .0
             .canonical_bytes(),
         document.canonical_bytes()
     );

@@ -432,6 +432,7 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
                 lash_dialect_typescript::read(source, base, limits).map_err(Into::into)
             },
             printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
+            captions: lash_dialect_typescript::CAPTIONS,
             function_values: Some(lash_dialect_typescript::function_values()),
             functions: Vec::new(),
         }),

@@ -41,6 +41,36 @@ fn k_adm_009() {
 }
 
 #[test]
+fn k_cap_001() {
+    super::run_rule("K-CAP-001", include_str!("../corpus/cap/K-CAP-001.json"));
+}
+
+#[test]
+fn k_cap_002() {
+    super::run_rule("K-CAP-002", include_str!("../corpus/cap/K-CAP-002.json"));
+}
+
+#[test]
+fn k_cap_003() {
+    super::run_rule("K-CAP-003", include_str!("../corpus/cap/K-CAP-003.json"));
+}
+
+#[test]
+fn k_cap_004() {
+    super::run_rule("K-CAP-004", include_str!("../corpus/cap/K-CAP-004.json"));
+}
+
+#[test]
+fn k_cap_005() {
+    super::run_rule("K-CAP-005", include_str!("../corpus/cap/K-CAP-005.json"));
+}
+
+#[test]
+fn k_cap_006() {
+    super::run_rule("K-CAP-006", include_str!("../corpus/cap/K-CAP-006.json"));
+}
+
+#[test]
 fn k_chg_001() {
     super::run_rule("K-CHG-001", include_str!("../corpus/chg/K-CHG-001.json"));
 }

@@ -13,14 +13,20 @@ use lash_kernel_doc as k;
 /// Print without compilation, library lookup or admission. The manifest,
 /// entries' result types, private bindings, helper identities and name
 /// renames are not written: [`crate::read`] takes them from the base document.
-pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSource, PrintError> {
+/// Captions are not yet spelled in this dialect: every one is reported in
+/// [`PrintedSource::dropped`].
+pub fn print(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    options: PrintOptions,
+) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
         return Err(PrintError::Invalid("unsupported kernel version".into()));
     }
     let plan = NamePlan::new(document, legal_identifier);
     let mut renderer = Renderer {
-        out: SourceWriter::new(options),
+        out: SourceWriter::with_captions(options, document, captions)?,
         plan: &plan,
         indent: 0,
         operators: generated_operators::bindings(&document.manifest),
@@ -33,7 +39,10 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
             "async function "
         });
         renderer.name(name);
-        let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
+        let unit = renderer
+            .out
+            .tracks_sites()
+            .then(|| k::Unit::Function(name.clone()));
         renderer.parameters(&function.params);
         renderer.types = Default::default();
         renderer.node(k::Node::Block(&function.body), unit.as_ref());
@@ -41,9 +50,10 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     }
     renderer.types = Default::default();
     renderer.out.write("async function main() ");
+    let tracks = renderer.out.tracks_sites();
     renderer.node(
         k::Node::Block(&document.main),
-        options.source_map.then_some(&k::Unit::Main),
+        tracks.then_some(&k::Unit::Main),
     );
     renderer.out.write("\n");
     renderer.out.finish(document, SourceFormat::TypeScriptV1)
@@ -52,9 +62,10 @@ impl Printer for TypeScript {
     fn print(
         &self,
         document: &k::Document,
+        captions: Option<&k::Captions>,
         options: PrintOptions,
     ) -> Result<PrintedSource, PrintError> {
-        print(document, options)
+        print(document, captions, options)
     }
 }
 

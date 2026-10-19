@@ -61,11 +61,14 @@ pub enum Request {
         controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
-    /// Print `document` (its token body) in the selected generated format.
+    /// Print `document` (its token body) in the selected generated format,
+    /// spelling `captions` of it where the dialect can.
     Print {
         format: lash_kernel_dialect::SourceFormat,
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        captions: Option<lash_kernel_doc::Captions>,
         options: lash_kernel_dialect::PrintOptions,
     },
     /// Read exported source back against `base` (its token body), the
@@ -224,6 +227,11 @@ pub enum Response {
         /// the site of its closure ([`lash_kernel_dialect::Lowered::written`]).
         #[serde(with = "lash_kernel_dialect::written_table")]
         written: BTreeMap<Site, lash_kernel_dialect::Written>,
+        /// The captions the source spelled, checked against the document by
+        /// the dialect that lowered it: a workflow import's
+        /// ([`lash_kernel_dialect::Lowered::captions`]). A cell has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        captions: Option<lash_kernel_doc::Captions>,
         /// What the dialect's function values are, where its sessions keep
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Package::function_values`]).
@@ -239,6 +247,8 @@ pub enum Response {
         /// The document's token body.
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
+        /// The captions the source spelled, of that document.
+        captions: lash_kernel_doc::Captions,
     },
     DialectRefused(DialectRefusal),
     /// The worker has no such dialect installed.

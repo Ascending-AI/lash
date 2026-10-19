@@ -260,13 +260,13 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
                   console.log(p instanceof Promise, 1 instanceof Promise);";
     let original = lower(source).expect("promise predicates lower");
     let printed =
-        crate::print(&original.document, Default::default()).expect("the document prints");
+        crate::print(&original.document, None, Default::default()).expect("the document prints");
     let re_lowered = crate::read(&printed.source, &original.document, Default::default())
         .expect("printed promise predicates lower");
     // The same document runs the same.
     assert_eq!(
         original.document.canonical_bytes(),
-        re_lowered.canonical_bytes()
+        re_lowered.0.canonical_bytes()
     );
     let recorded = run(source, &[]);
     assert_eq!(recorded.lines(), ["true false"]);

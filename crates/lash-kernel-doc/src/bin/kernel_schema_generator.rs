@@ -1,12 +1,13 @@
 //! Emits the checked-in JSON Schema documents for the kernel's stored
-//! shapes: the workflow [`Document`], its [`SourceMap`] and a
+//! shapes: the workflow [`Document`], its [`SourceMap`] and [`Captions`], a
 //! [`FunctionDefinition`], plus the library declarations a runtime exports.
 //!
 //! All are owned by [`KERNEL_VERSION`]. Every object in them is
 //! closed: an unknown member is refused, as the decoders refuse it.
 
 use lash_kernel_doc::{
-    Correspondence, Document, FunctionDeclarations, FunctionDefinition, KERNEL_VERSION, SourceMap,
+    Captions, Correspondence, Document, FunctionDeclarations, FunctionDefinition, KERNEL_VERSION,
+    SourceMap,
 };
 use schemars::JsonSchema;
 use serde_json::{Value, json};
@@ -17,6 +18,7 @@ fn main() -> Result<(), String> {
     let documents = vec![
         document::<Document>("kernel-document")?,
         document::<SourceMap>("kernel-source-map")?,
+        document::<Captions>("kernel-captions")?,
         document::<Correspondence>("kernel-correspondence")?,
         document::<FunctionDefinition>("kernel-function")?,
         document::<FunctionDeclarations>("kernel-function-declarations")?,

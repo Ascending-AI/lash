@@ -1,5 +1,7 @@
 //! Bounded final-text writing and optional Site collection for generated codecs.
-use lash_kernel_doc::{Document, Node, Site, Unit};
+use std::collections::BTreeMap;
+
+use lash_kernel_doc::{Caption, Captions, Document, Node, Site, Unit};
 use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
 
 /// Generated source is a separate, disposable format from stored documents.
@@ -53,6 +55,10 @@ pub struct PrintedSource {
     pub format: SourceFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_map: Option<SourceMap>,
+    /// The captions the dialect could not spell, ascending: every one of a
+    /// kind its [`crate::CaptionSupport`] lacks (`K-CAP-006`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<Site>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PrintError {
@@ -134,6 +140,23 @@ pub fn check_document_depth(
         limit: limits.max_bytes,
     })?;
     Ok(())
+}
+/// Refuse captions that do not validate against `document`, or whose text
+/// alone exceeds the byte budget, before any source is written.
+///
+/// # Errors
+///
+/// [`PrintError::Invalid`] naming the captions' refusal, or
+/// [`PrintError::Bytes`].
+pub fn check_captions(
+    document: &Document,
+    captions: &Captions,
+    limits: GeneratedSourceLimits,
+) -> Result<(), PrintError> {
+    captions
+        .validate(document)
+        .map_err(|refusal| PrintError::Invalid(refusal.to_string()))?;
+    check_leaf_size(captions.text_bytes(), limits.max_bytes)
 }
 fn check_leaf_size(size: usize, limit: usize) -> Result<(), PrintError> {
     if size > limit {
@@ -272,13 +295,16 @@ struct Frame {
     child: u32,
 }
 /// A single append-only output buffer. Codecs emit final layout directly.
-/// A disabled collector allocates no frames, Sites, ranges or hashes.
+/// Sites are tracked while a map is collected or a caption waits to be
+/// spelled; otherwise no frames, Sites, ranges or hashes are allocated.
 pub struct SourceWriter {
     source: String,
     limit: usize,
     error: Option<PrintError>,
     frames: Option<Vec<Frame>>,
     sites: Option<Vec<SourceSite>>,
+    /// The captions not yet spelled, by site.
+    captions: BTreeMap<Site, Caption>,
     #[cfg(test)]
     map_work: usize,
 }
@@ -290,9 +316,49 @@ impl SourceWriter {
             error: None,
             frames: options.source_map.then(Vec::new),
             sites: options.source_map.then(Vec::new),
+            captions: BTreeMap::new(),
             #[cfg(test)]
             map_work: 0,
         }
+    }
+    /// A writer for `document` that also holds `captions` for the codec to
+    /// spell, checked by [`check_captions`] first.
+    ///
+    /// # Errors
+    ///
+    /// [`check_captions`]'s refusals.
+    pub fn with_captions(
+        options: PrintOptions,
+        document: &Document,
+        captions: Option<&Captions>,
+    ) -> Result<Self, PrintError> {
+        let mut writer = Self::new(options);
+        if let Some(captions) = captions.filter(|captions| !captions.is_empty()) {
+            check_captions(document, captions, options.limits)?;
+            writer.captions = captions
+                .entries()
+                .iter()
+                .map(|entry| (entry.site.clone(), entry.caption.clone()))
+                .collect();
+            writer.frames.get_or_insert_with(Vec::new);
+        }
+        Ok(writer)
+    }
+    /// Whether nodes' Sites are tracked: a codec opens its roots with
+    /// [`Self::begin_node`] whenever they are.
+    pub fn tracks_sites(&self) -> bool {
+        self.frames.is_some()
+    }
+    /// The Site the next [`Self::begin_node`] (`None`) or
+    /// [`Self::begin_child`] (`Some(index)`) opens, while Sites are tracked.
+    pub fn next_site(&self, index: Option<u32>) -> Option<Site> {
+        let parent = self.frames.as_ref()?.last()?;
+        Some(parent.site.child(index.unwrap_or(parent.child)))
+    }
+    /// The caption of `site`, taken to be spelled: a caption never taken is
+    /// reported dropped.
+    pub fn take_caption(&mut self, site: &Site) -> Option<Caption> {
+        self.captions.remove(site)
     }
     pub fn write(&mut self, text: &str) {
         if self.error.is_some() {
@@ -395,8 +461,6 @@ impl SourceWriter {
                     ranges,
                     implicit,
                 });
-            } else {
-                self.refuse(PrintError::Invalid("missing map collector".into()));
             }
         }
     }
@@ -419,6 +483,7 @@ impl SourceWriter {
             source: self.source,
             format,
             source_map,
+            dropped: self.captions.into_keys().collect(),
         })
     }
 }
@@ -461,6 +526,74 @@ mod tests {
         let map = printed.source_map.unwrap();
         map.validate(&document, &printed.source).unwrap();
         assert!(map.sites.windows(2).all(|pair| pair[0].site < pair[1].site));
+    }
+
+    /// K-CAP-006: a codec spells the captions it takes, at Sites tracked
+    /// with or without a map, and every caption it leaves is dropped.
+    /// Caption bytes count against the byte budget before any is written.
+    #[test]
+    fn untaken_captions_are_dropped_and_caption_bytes_are_budgeted() {
+        use lash_kernel_doc::{Caption, CaptionEntry, Captions};
+        let document = lash_kernel_doc::parse_document(
+            "kernel 1\nnumbers float\nmain { if true { print 1 } else { print 2 } return null }\n",
+        )
+        .unwrap();
+        let entry = |path: &[u32], title: &str| CaptionEntry {
+            site: Site::new(Unit::Main, path.to_vec()),
+            caption: Caption::new(title, None).unwrap(),
+        };
+        let captions = Captions::new(
+            &document,
+            vec![
+                entry(&[0], "Decide"),
+                entry(&[0, 2], "Otherwise"),
+                entry(&[1], "Done"),
+            ],
+        )
+        .unwrap();
+        for source_map in [false, true] {
+            let options = PrintOptions {
+                source_map,
+                ..Default::default()
+            };
+            let mut writer = SourceWriter::with_captions(options, &document, Some(&captions))
+                .expect("valid captions");
+            assert!(writer.tracks_sites());
+            writer.begin_node(Some(&Unit::Main));
+            let mut spelled = Vec::new();
+            for _ in 0..2 {
+                let site = writer.next_site(None).expect("tracked");
+                if let Some(caption) = writer.take_caption(&site) {
+                    spelled.push(caption.title().to_owned());
+                }
+                writer.begin_node(None);
+                writer.write("statement;");
+                writer.end_node();
+            }
+            writer.end_node();
+            let printed = writer
+                .finish(&document, SourceFormat::TypeScriptV1)
+                .unwrap();
+            assert_eq!(spelled, ["Decide", "Done"]);
+            assert_eq!(printed.dropped, [Site::new(Unit::Main, vec![0, 2])]);
+            assert_eq!(printed.source_map.is_some(), source_map);
+        }
+        let tight = PrintOptions {
+            limits: GeneratedSourceLimits {
+                max_bytes: "DecideOtherwiseDone".len() - 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(matches!(
+            SourceWriter::with_captions(tight, &document, Some(&captions)),
+            Err(PrintError::Bytes { .. })
+        ));
+        let other = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { }\n").unwrap();
+        assert!(matches!(
+            SourceWriter::with_captions(PrintOptions::default(), &other, Some(&captions)),
+            Err(PrintError::Invalid(_))
+        ));
     }
 
     /// G-SOURCE-MAP-OFF: even root Site allocation is optional.

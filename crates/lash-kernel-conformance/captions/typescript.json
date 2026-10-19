@@ -1,0 +1,9 @@
+{
+  "authored": [],
+  "readback": [
+    {
+      "name": "every captionable kind",
+      "source": "export async function demo(flag: boolean, items: string[]) {\n  let result = await corpus.echo(\"start\");\n  if (flag) { result = await corpus.echo(\"yes\"); } else { result = \"no\"; }\n  if (result === \"a\") { result = \"b\"; } else if (result === \"c\") { result = \"d\"; } else {}\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  try { result = await corpus.echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await corpus.echo(\"finally\"); }\n  for (const item of items) { await corpus.echo(item); }\n  while (flag) { flag = false; }\n  return [result, both];\n}\n"
+    }
+  ]
+}

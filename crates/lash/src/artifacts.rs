@@ -287,8 +287,8 @@ impl HostArtifacts {
     /// carry the same codes in every dialect. Source printed from a document
     /// is read back with [`Self::import_exported_workflow`] instead.
     ///
-    /// The answer carries the document, its source map and the source, for
-    /// [`Self::publish_workflow`] to keep together; the opaque bytes retain
+    /// The answer carries the document, its source map, the source and the
+    /// captions it spelled, for [`Self::publish_workflow`] to keep together; the opaque bytes retain
     /// every entry, available through an explicit typed read for editing.
     /// Select an entry when publishing. Without `limits` the dialect's standard source policy
     /// applies.
@@ -374,16 +374,17 @@ impl HostArtifacts {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };
-        let document = match checked
+        let (document, captions) = match checked
             .worker_service()
             .read_exported(source, base, format, Default::default())
             .await
         {
-            Ok(document) => document,
+            Ok(read) => read,
             Err(error) => return crate::workflow::import::source_refusal(error),
         };
         Ok(crate::workflow::import::admit_read(
             document,
+            captions,
             &checked.checker(),
         ))
     }

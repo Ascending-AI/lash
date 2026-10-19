@@ -913,7 +913,7 @@ fn native_operators_require_unique_identity_and_exact_arity() {
         check_map(&doc, &printed);
         let changed = printed.source.replace(&expected, "x");
         let decoded = crate::read(&changed, &doc, Default::default()).unwrap();
-        assert_ne!(doc.canonical_bytes(), decoded.canonical_bytes());
+        assert_ne!(doc.canonical_bytes(), decoded.0.canonical_bytes());
         // An arity mismatch cannot use the native operator inverse.
         doc.main = vec![finish(k::Expr::Call {
             function: id,
@@ -1133,7 +1133,7 @@ def main():
         },
     );
     let decoded = crate::read(source, &doc, Default::default()).unwrap();
-    assert_eq!(doc.canonical_bytes(), decoded.canonical_bytes());
+    assert_eq!(doc.canonical_bytes(), decoded.0.canonical_bytes());
     roundtrip(&doc, true);
 }
 

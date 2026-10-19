@@ -9,6 +9,7 @@ include!("corpus_files.rs");
 #[path = "contract_cases.rs"]
 mod contract_cases;
 
+mod captions;
 mod charge;
 mod protocol;
 mod regions;

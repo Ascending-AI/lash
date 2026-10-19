@@ -3,7 +3,9 @@
 //! [`DocumentRunner`] is the reader seam. [`MachineRunner`] adapts any kernel
 //! machine, scripting deliveries and synchronous host answers. [`check_native`]
 //! compares cold and warm runs for every registered native implementation.
+//! [`captions`] checks any dialect's caption seam against the `K-CAP` rules.
 
+pub mod captions;
 mod case;
 mod coverage;
 mod machine;

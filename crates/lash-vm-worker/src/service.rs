@@ -94,6 +94,8 @@ pub(crate) fn perform(
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
+                    // A cell has no captions.
+                    captions: None,
                     function_values: embedding
                         .dialects
                         .get(&dialect)
@@ -124,6 +126,7 @@ pub(crate) fn perform(
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
+                    captions: Some(lowered.captions),
                     function_values: None,
                     reads: Default::default(),
                 },
@@ -133,6 +136,7 @@ pub(crate) fn perform(
         Request::Print {
             format,
             document,
+            captions,
             options,
         } => {
             let dialect = format.dialect();
@@ -145,7 +149,7 @@ pub(crate) fn perform(
                 None => Response::UnknownDialect {
                     dialect: dialect.into(),
                 },
-                Some(printer) => match printer.print(&document, options) {
+                Some(printer) => match printer.print(&document, captions.as_ref(), options) {
                     Ok(printed) => Response::Printed(printed),
                     Err(error) => Response::DialectRefused(refusal(error.into())),
                 },
@@ -161,8 +165,9 @@ pub(crate) fn perform(
                 dialect: format.dialect().into(),
             },
             Some(package) => match (package.read)(&source, &decoded_document(base)?, limits) {
-                Ok(document) => Response::Read {
+                Ok((document, captions)) => Response::Read {
                     document: document.canonical_bytes(),
+                    captions,
                 },
                 Err(error) => Response::DialectRefused(refusal(error)),
             },
@@ -379,14 +384,16 @@ mod tests {
         _: &str,
         _: &Document,
         _: GeneratedSourceLimits,
-    ) -> Result<Document, Diagnostic> {
+    ) -> Result<(Document, lash_kernel_doc::Captions), Diagnostic> {
         READER_CALLS.set(READER_CALLS.get() + 1);
-        Ok(Document::new(
+        let document = Document::new(
             lash_kernel_doc::NumberPolicy::Float,
             vec![lash_kernel_doc::Stmt::Finish {
                 value: lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Null),
             }],
-        ))
+        );
+        let captions = lash_kernel_doc::Captions::empty(document.identity());
+        Ok((document, captions))
     }
 
     /// Printing invokes only the installed printer. Even mapped printing
@@ -408,6 +415,7 @@ mod tests {
                 let request = Request::Print {
                     format,
                     document: document.canonical_bytes(),
+                    captions: None,
                     options: PrintOptions {
                         source_map,
                         ..Default::default()
@@ -442,7 +450,7 @@ mod tests {
                             .expect("Python read")
                     }
                 };
-                assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
+                assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
                 assert_eq!(READER_CALLS.get(), 0);
             }
             let encoded = EncodedPayload(

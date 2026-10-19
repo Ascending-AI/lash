@@ -2,7 +2,7 @@
 //! shared workflow contract, then admission, without publication.
 use lash_kernel_dialect::Environment;
 use lash_kernel_dialect::workflow::WorkflowSourceLimits;
-use lash_kernel_doc::{DocumentBytes, SourceLanguage, SourceMap};
+use lash_kernel_doc::{Captions, DocumentBytes, SourceLanguage, SourceMap};
 
 use super::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
 
@@ -19,17 +19,23 @@ pub enum WorkflowImport {
     /// published. The opaque bytes retain every entry; reading a tree is
     /// explicit through `DocumentBytes::to_document`. `source_map` maps the
     /// document to `source`, the text it was lowered from; publish both with
-    /// the document to keep them.
+    /// the document to keep them. `captions` are those the source spelled:
+    /// they replace whatever the host held for this workflow.
     Imported {
         document: DocumentBytes,
         source_map: SourceMap,
         source: String,
+        captions: Captions,
     },
     /// Exported source read back against the document it was printed from
     /// ([`HostArtifacts::import_exported_workflow`](crate::process::HostArtifacts::import_exported_workflow))
     /// and admitted. Nothing was published. Reading back makes no map:
-    /// printing the document answers one with its text.
-    Read { document: DocumentBytes },
+    /// printing the document answers one with its text. `captions` are those
+    /// the source spelled, which replace the host's.
+    Read {
+        document: DocumentBytes,
+        captions: Captions,
+    },
     /// The front end refused the source, with its original byte spans.
     Refused(Vec<WorkflowSourceDiagnostic>),
     /// The lowered document cannot run against the supplied environment.
@@ -58,7 +64,7 @@ pub(crate) async fn import(
     checker: &lash_kernel_check::Environment<'_>,
     limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
-    let (document, source_map) = match workers
+    let (document, source_map, captions) = match workers
         .import_workflow(language, source, dialect, limits)
         .await
     {
@@ -74,6 +80,7 @@ pub(crate) async fn import(
         document: bytes,
         source_map,
         source: source.to_owned(),
+        captions,
     })
 }
 
@@ -106,6 +113,7 @@ pub(crate) fn source_refusal(
 /// Admits exported source read back against its base.
 pub(crate) fn admit_read(
     document: lash_kernel_doc::Document,
+    captions: Captions,
     checker: &lash_kernel_check::Environment<'_>,
 ) -> WorkflowImport {
     let bytes = DocumentBytes::from(document.clone());
@@ -113,5 +121,8 @@ pub(crate) fn admit_read(
         Ok(document) => document,
         Err(refusal) => return WorkflowImport::Admission(refusal),
     };
-    WorkflowImport::Read { document: bytes }
+    WorkflowImport::Read {
+        document: bytes,
+        captions,
+    }
 }

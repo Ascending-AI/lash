@@ -26,10 +26,14 @@ mod tests;
 pub use diagnostics::{Code, GeneratedSourceCode};
 pub use generated::read;
 pub use lash_kernel_dialect::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
+    CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
 pub use printer::print;
+
+/// The captions the dialect spells: none yet. Its front end and reader
+/// extract none and its printer drops every one.
+pub const CAPTIONS: CaptionSupport = CaptionSupport::NONE;
 
 use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Mode, Package};
 use lash_kernel_doc::Span;
@@ -185,6 +189,7 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
         front_end: Box::new(Python::default()),
         read,
         printer: Some(Box::new(Python::default())),
+        captions: CAPTIONS,
         function_values: Some(lash_kernel_doc::FunctionRepresentation::Bare),
         functions,
     }

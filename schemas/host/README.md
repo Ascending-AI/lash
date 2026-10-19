@@ -45,6 +45,8 @@ target runs all of them:
 | `kernel-edit-transaction` | kernel edit `Transaction` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-correspondence` | kernel edit `Correspondence` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-workflow-view` | kernel edit `view::WorkflowView` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
+| `kernel-captions` | kernel `Captions`, a host-held sidecar, never a checkpoint kind | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
+| `kernel-caption-view` | `view::CaptionView`, captions joined by view location | `KERNEL_VERSION` | `crates/lash-kernel-view/src/bin/kernel_view_schema_generator.rs` |
 
 The runtime registers and validates the process-event payload schemas. The
 three kernel documents are the typed readable/editable JSON forms of `lash-kernel-doc`

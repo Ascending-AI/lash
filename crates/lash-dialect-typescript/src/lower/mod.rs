@@ -477,18 +477,21 @@ pub(crate) fn lower(
         );
     }
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    let (source_map, written) = lash_kernel_dialect::site_layers(
+    // No caption is spelled yet: the notes carry none.
+    let layers = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::TypeScript,
         &main.notes,
         &lowerer.declared_notes,
+        &BTreeMap::new(),
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {
         document,
-        source_map: Some(source_map),
-        written,
+        source_map: Some(layers.source_map),
+        written: layers.written,
+        captions: layers.captions,
     })
 }
 
@@ -839,9 +842,8 @@ impl Lowerer<'_> {
         self.buf.stmts.push(stmt);
         self.buf.notes.push(Note {
             span: self.span,
-            written: None,
-            nested_written: Vec::new(),
             blocks,
+            ..Note::default()
         });
     }
 

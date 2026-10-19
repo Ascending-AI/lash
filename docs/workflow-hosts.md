@@ -485,10 +485,64 @@ A run's observations belong to the document it ran. After an edit, a new
 run reports against the new document. Do not paint an old run onto an
 edited document; if you compare revisions, use the correspondence.
 
+## Captions
+
+A caption is a step's plain-language title and optional description:
+`lash::workflow::document::Caption`. `Captions` holds a document's captions
+by site, keyed to its `DocumentId` like a source map but separate from it, and
+serialises as the `kernel-captions` host schema. Your host holds it; lash
+stores none, and no edit, draft, admission, checkpoint or identity reads it
+(`K-CAP-001`).
+
+A caption may name a statement, a clause arm (an `if`'s else block, a
+`try`'s catch or finally block, a loop's non-empty else block) or a declared
+function's body: `CaptionKind::captionable(&document)` lists them. A then-arm
+or loop body is named by its statement, and the entry function's caption is
+the workflow's title. Build a value with `Caption::new(title, description)`
+and `Captions::new(&document, entries)`; both refuse text outside the one
+domain every dialect can spell (`CaptionRefusal`: one trimmed title line of at
+most 200 bytes, at most 2 KiB of description, no `*/`, no `@` line, no
+control characters or line separators other than `\n`) and sites that are
+not captionable (`CaptionsRefusal`). There is no edit operation for a
+caption: to change one, build a new `Captions` and keep it.
+
+**Authority.** The sidecar you hold is authoritative. Importing a source
+(`WorkflowImport::Imported { captions, .. }`) or reading back printed source
+(`WorkflowImport::Read { captions, .. }`) answers the captions that source
+spells; replace the sidecar with them wholesale. Once a version has any
+change that did not come from its source, a canvas edit or a caption change,
+show `print(document, Some(&captions), options)` in your source editor rather
+than the stored authored source, so the next save cannot revert captions.
+Captions a dialect cannot spell are listed in `PrintedSource::dropped`
+(`K-CAP-006`): the source read back will not have them, so tell the author
+before a source edit replaces them.
+
+**Through edits.** After an applied transaction,
+`captions.rekey(&applied.correspondence, draft.document())` answers
+`Rekeyed { captions, touched }`: the captions whose step survived, at their
+new sites, and the sites of those whose step, or anything beneath it, the
+edit wrote or made new (`K-CAP-004`). Mark the `touched` captions for review:
+"Email the team" may no longer describe a step whose recipient changed.
+
+**Showing them.** `view.captions(&captions)` joins them with a
+`WorkflowView` by view location, as the `kernel-caption-view` schema: an
+action or control node shows its carrier statement's caption (a statement
+with several actions shows it on the node of its first), a code node every
+caption among its `members` and their arms, a control its `arms`' by
+`ControlArm.block`, and a callable its function's, on `CallableView.block`.
+The view itself is unchanged by captions, so a caption-only change keeps its
+identity. Wording for a step without a caption is yours.
+
+**Telling a model.** Each dialect declares the caption kinds it spells and a
+short guide in its own syntax (`lash::typescript::CAPTIONS`,
+`lash::python::CAPTIONS`, a `CaptionSupport`). Put the `guide` in a model's
+prompt rather than hard-coding a syntax. Both dialects spell none yet: their
+`kinds` are empty and their printers drop every caption.
+
 ## TypeScript is a lens
 
 None of the above prints or parses a source language. With the `typescript`
-feature, `lash::typescript::print(document.document(), options)` answers
+feature, `lash::typescript::print(document.document(), captions, options)` answers
 equivalent TypeScript for a document, keeping every temporary and statement
 boundary. It is a read-only view. `dialect-typescript` and `dialect-python`
 select helper releases and never link a parser into the host's own process:
@@ -539,10 +593,11 @@ only code; the manifest, entries, helper identities and renames come from
 `base`, and the result is admitted against `environment`. An edit the reader
 has no exact inverse for is a typed refusal naming the construct.
 
-`WorkflowImport::Imported { document, source_map, source }` carries the
-admitted opaque document bytes, the map from its sites to the source and that source:
-pass both to `publish_workflow` to keep them. Exported source read back with
-`import_exported_workflow` answers `WorkflowImport::Read { document }`, with
+`WorkflowImport::Imported { document, source_map, source, captions }` carries the
+admitted opaque document bytes, the map from its sites to the source, that source
+and the captions it spells: pass the map and source to `publish_workflow` to keep
+them, and keep the captions in your sidecar ([Captions](#captions)). Exported source read back with
+`import_exported_workflow` answers `WorkflowImport::Read { document, captions }`, with
 no map of its own. `Refused(diagnostics)` carries front-end
 diagnostics with byte spans, `Admission(WorkflowAdmissionRefusal)` names a
 checker or catalogue refusal, and `Unsupported(WorkflowImportUnsupported)`

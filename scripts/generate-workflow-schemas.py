@@ -131,7 +131,8 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
         relative = Path(shape) / f"v{version}.schema.json"
         documents[relative] = json.dumps(schema, indent=2) + "\n"
         if shape in {"kernel-workflow-view", "kernel-authoring-operation",
-                     "kernel-migration-refusal", "kernel-parked-refusal"}:
+                     "kernel-migration-refusal", "kernel-parked-refusal",
+                     "kernel-captions", "kernel-caption-view"}:
             documents[Path(shape) / f"v{version}.d.ts"] = typescript_declarations(schema)
     return documents
 

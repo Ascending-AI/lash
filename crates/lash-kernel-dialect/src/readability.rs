@@ -2,7 +2,7 @@
 //! This acceptance harness is separate from production printing. A dialect
 //! detector classifies mapped nodes; an allowlist must name the precise rule,
 //! node kind and documented reason, rather than exempting a whole program.
-use crate::{Diagnostic, GeneratedSourceLimits, PrintOptions, Printer};
+use crate::{Diagnostic, PrintOptions, Printer};
 use lash_kernel_doc as k;
 
 pub struct Case {
@@ -19,8 +19,9 @@ pub struct Unavoidable {
 pub struct Dialect<'a> {
     pub name: &'a str,
     pub printer: &'a dyn Printer,
-    /// Read exported source against the base document it was printed from.
-    pub decode: fn(&str, &k::Document, GeneratedSourceLimits) -> Result<k::Document, Diagnostic>,
+    /// Read exported source against the base document it was printed from:
+    /// the dialect's [`crate::Package::read`].
+    pub decode: crate::ReadSource,
     /// Return a documented generic rule for this node's final source range.
     /// Do not scan quoted data or count child occurrences again in a parent.
     pub generic: fn(k::Node<'_>, &str) -> Option<&'static str>,
@@ -66,14 +67,16 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     .printer
                     .print(
                         &case.document,
+                        None,
                         PrintOptions {
                             source_map: true,
                             ..Default::default()
                         },
                     )
                     .map_err(|e| e.to_string())?;
-                let decoded = (dialect.decode)(&printed.source, &case.document, Default::default())
-                    .map_err(|e| format!("{e:?}"))?;
+                let (decoded, _) =
+                    (dialect.decode)(&printed.source, &case.document, Default::default())
+                        .map_err(|e| format!("{e:?}"))?;
                 // Equal canonical bytes are one DocumentId (`K-ID-001`).
                 if decoded.canonical_bytes() != case.document.canonical_bytes() {
                     return Err("canonical bytes differ".into());
@@ -542,7 +545,7 @@ fn site_node<'a>(document: &'a k::Document, site: &k::Site) -> Option<k::Node<'a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PrintError, SourceFormat, SourceWriter};
+    use crate::{GeneratedSourceLimits, PrintError, SourceFormat, SourceWriter};
 
     struct Witness;
     struct Spelling(&'static str);
@@ -550,9 +553,10 @@ mod tests {
         fn print(
             &self,
             document: &k::Document,
+            captions: Option<&k::Captions>,
             options: PrintOptions,
         ) -> Result<crate::PrintedSource, PrintError> {
-            let mut printed = Witness.print(document, options)?;
+            let mut printed = Witness.print(document, captions, options)?;
             let old = printed.source.len();
             printed.source = printed.source.strip_suffix("generic").unwrap().to_owned() + self.0;
             printed.source_map.as_mut().unwrap().sites[0].ranges[0].end = printed.source.len();
@@ -564,6 +568,7 @@ mod tests {
         fn print(
             &self,
             document: &k::Document,
+            _: Option<&k::Captions>,
             options: PrintOptions,
         ) -> Result<crate::PrintedSource, PrintError> {
             let mut writer = SourceWriter::new(options);
@@ -578,17 +583,17 @@ mod tests {
         _: &str,
         base: &k::Document,
         _: GeneratedSourceLimits,
-    ) -> Result<k::Document, Diagnostic> {
-        Ok(base.clone())
+    ) -> Result<(k::Document, k::Captions), Diagnostic> {
+        Ok((base.clone(), k::Captions::empty(base.identity())))
     }
     fn mutated_decode(
         source: &str,
         base: &k::Document,
         limits: GeneratedSourceLimits,
-    ) -> Result<k::Document, Diagnostic> {
-        let mut document = decode(source, base, limits)?;
+    ) -> Result<(k::Document, k::Captions), Diagnostic> {
+        let (mut document, captions) = decode(source, base, limits)?;
         document.manifest.numbers = k::NumberPolicy::BySpelling;
-        Ok(document)
+        Ok((document, captions))
     }
     fn generic(_: k::Node<'_>, source: &str) -> Option<&'static str> {
         (source == "generic").then_some("witness")
@@ -661,6 +666,7 @@ mod tests {
         fn print(
             &self,
             document: &k::Document,
+            _: Option<&k::Captions>,
             options: PrintOptions,
         ) -> Result<crate::PrintedSource, PrintError> {
             let mut writer = SourceWriter::new(options);

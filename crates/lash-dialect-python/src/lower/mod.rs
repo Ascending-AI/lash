@@ -389,12 +389,18 @@ pub(crate) fn lower_with_calls(
         )
     })?;
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    let (mut source_map, written) = lash_kernel_dialect::site_layers(
+    // No caption is spelled yet: the notes carry none.
+    let lash_kernel_dialect::SiteLayers {
+        mut source_map,
+        written,
+        captions,
+    } = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::Python,
         &main.notes,
         &lowerer.declared_notes,
+        &BTreeMap::new(),
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     let mut mapped: BTreeSet<_> = source_map
@@ -439,6 +445,7 @@ pub(crate) fn lower_with_calls(
         document,
         source_map: Some(source_map),
         written,
+        captions,
     })
 }
 
@@ -920,8 +927,7 @@ impl Lowerer<'_> {
         self.buf.notes.push(Note {
             span: self.span,
             blocks,
-            written: None,
-            nested_written: Vec::new(),
+            ..Note::default()
         });
     }
 

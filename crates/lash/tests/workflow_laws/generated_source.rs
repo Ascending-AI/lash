@@ -9,18 +9,24 @@ fn local(document: &WorkflowDocument, format: SourceFormat, maps: bool) -> Print
         ..Default::default()
     };
     match format {
-        SourceFormat::TypeScriptV1 => lash::typescript::print(document.document(), options),
-        SourceFormat::PythonV1 => lash::python::print(document.document(), options),
+        SourceFormat::TypeScriptV1 => lash::typescript::print(document.document(), None, options),
+        SourceFormat::PythonV1 => lash::python::print(document.document(), None, options),
     }
     .expect("local print succeeds")
 }
 
 fn decode(source: &str, base: &Document, format: SourceFormat) -> Document {
     match format {
-        SourceFormat::TypeScriptV1 => lash::typescript::read(source, base, Default::default())
-            .expect("TypeScript reads against its base without a library"),
-        SourceFormat::PythonV1 => lash::python::read(source, base, Default::default())
-            .expect("Python reads against its base without a library"),
+        SourceFormat::TypeScriptV1 => {
+            lash::typescript::read(source, base, Default::default())
+                .expect("TypeScript reads against its base without a library")
+                .0
+        }
+        SourceFormat::PythonV1 => {
+            lash::python::read(source, base, Default::default())
+                .expect("Python reads against its base without a library")
+                .0
+        }
     }
 }
 
@@ -107,6 +113,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 let remote = service
                     .print(
                         &document,
+                        None,
                         format,
                         PrintOptions {
                             source_map: maps,
@@ -122,7 +129,8 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 let decoded = service
                     .read_exported(&remote.source, &document, format, Default::default())
                     .await
-                    .expect("worker decode");
+                    .expect("worker decode")
+                    .0;
                 exact(&document, &decoded);
                 assert_eq!(printed.format, format);
                 if let Some(map) = &printed.source_map {
@@ -180,7 +188,7 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
     ] {
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
             let printed = service
-                .print(&document, format, Default::default())
+                .print(&document, None, format, Default::default())
                 .await
                 .expect("print needs no helpers");
             exact(&document, &decode(&printed.source, &document, format));
@@ -192,7 +200,8 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
                     GeneratedSourceLimits::default(),
                 )
                 .await
-                .expect("decoding needs no helpers");
+                .expect("decoding needs no helpers")
+                .0;
             exact(&document, &decoded);
             let refusal = WorkflowDocument::admit(decoded, WorkflowDocumentEntry::Main, &checker)
                 .expect_err("dependency mismatch refuses admission");
@@ -259,7 +268,7 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
         .expect("core");
     let document =
         k::parse_document("kernel 1\nnumbers float\nmain { finish null }\n").expect("document");
-    let printed = lash::typescript::print(&document, Default::default()).expect("print");
+    let printed = lash::typescript::print(&document, None, Default::default()).expect("print");
     exact(
         &document,
         &decode(&printed.source, &document, SourceFormat::TypeScriptV1),
@@ -272,7 +281,10 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
         .import_exported_workflow(&printed.source, SourceFormat::TypeScriptV1, &document, &env)
         .await
         .expect("import");
-    let lash::workflow::WorkflowImport::Read { document: imported } = imported else {
+    let lash::workflow::WorkflowImport::Read {
+        document: imported, ..
+    } = imported
+    else {
         panic!("full identities must bypass name resolution: {imported:?}");
     };
     exact(

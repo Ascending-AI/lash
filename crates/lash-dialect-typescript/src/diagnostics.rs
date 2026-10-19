@@ -823,10 +823,11 @@ mod tests {
     fn every_accepted_repair_idiom_lowers() {
         use DiagnosticCode::*;
         let document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
-        let generated = crate::print(&document, Default::default()).expect("small document prints");
+        let generated =
+            crate::print(&document, None, Default::default()).expect("small document prints");
         let decoded = crate::read(&generated.source, &document, Default::default())
             .expect("small, shallow generated source decodes");
-        assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
+        assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
         let examples = [
             (PrintedSourceNeedsBase, generated.source.as_str()),
             (GeneratedSourceBytes, generated.source.as_str()),

@@ -41,7 +41,20 @@ fn depth_error() -> Diagnostic {
 /// that document as edited, without an installed helper catalogue or
 /// admission. The source carries only code; the manifest, entries, private
 /// bindings, helper identities and name renames come from `base`.
+///
+/// The captions are those the source spells: none yet, as the printer
+/// spells none.
 pub fn read(
+    source: &str,
+    base: &k::Document,
+    limits: GeneratedSourceLimits,
+) -> Result<(k::Document, k::Captions)> {
+    let document = read_document(source, base, limits)?;
+    let captions = k::Captions::empty(document.identity());
+    Ok((document, captions))
+}
+
+fn read_document(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,

@@ -1,0 +1,30 @@
+{
+  "rule": "K-CAP-001",
+  "cases": [
+    {
+      "name": "a document with every captionable kind runs as it does without captions",
+      "document": "kernel 1\nnumbers by_spelling\nfn helper() { return 1 }\nmain {\n let flag = true\n if flag { print 1 } else { print 2 }\n try { print 3 } catch e { print e } finally { print 4 }\n for item in [5] { print item }\n let r = call helper()\n finish r\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          },
+          {
+            "int": "4"
+          },
+          {
+            "int": "5"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        }
+      }
+    }
+  ]
+}

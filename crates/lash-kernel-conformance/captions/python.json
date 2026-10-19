@@ -1,0 +1,9 @@
+{
+  "authored": [],
+  "readback": [
+    {
+      "name": "every captionable kind",
+      "source": "async def demo(flag: bool, items: list[str]):\n    result = await corpus.echo(\"start\")\n    if flag:\n        result = await corpus.echo(\"yes\")\n    else:\n        result = \"no\"\n    if result == \"a\":\n        result = \"b\"\n    elif result == \"c\":\n        result = \"d\"\n    both = await corpus.echo(await corpus.echo(\"inner\"))\n    try:\n        result = await corpus.echo(\"try\")\n    except Exception:\n        result = \"caught\"\n    finally:\n        await corpus.echo(\"finally\")\n    for item in items:\n        await corpus.echo(item)\n    else:\n        result = \"done\"\n    while flag:\n        flag = False\n    else:\n        result = \"stopped\"\n    return [result, both]\n"
+    }
+  ]
+}

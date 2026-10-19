@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     let printed = crate::print(
         document,
+        None,
         PrintOptions {
             source_map: maps,
             ..Default::default()
@@ -15,10 +16,10 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
     .expect("valid in-budget document prints");
     let decoded = crate::read(&printed.source, document, Default::default())
         .expect("exported source reads back against its base without a library");
-    assert_eq!(document.identity(), decoded.identity());
+    assert_eq!(document.identity(), decoded.0.identity());
     assert_eq!(
         document.canonical_bytes(),
-        decoded.canonical_bytes(),
+        decoded.0.canonical_bytes(),
         "{}",
         printed.source
     );
@@ -71,7 +72,7 @@ fn hand_document() -> k::Document {
 fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
     let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
-    assert_eq!(decoded.canonical_bytes(), expected.canonical_bytes());
+    assert_eq!(decoded.0.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, false);
     let mut controls = vec![];
     let mut changed = expected.clone();
@@ -431,6 +432,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     };
     let at_limit = crate::print(
         &document,
+        None,
         PrintOptions {
             limits,
             ..Default::default()
@@ -440,6 +442,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert_eq!(
         crate::read(&at_limit.source, &document, limits)
             .unwrap()
+            .0
             .canonical_bytes(),
         document.canonical_bytes()
     );
@@ -450,6 +453,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert!(matches!(
         crate::print(
             &document,
+            None,
             PrintOptions {
                 limits: short,
                 ..Default::default()
@@ -469,6 +473,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     };
     let accepted = crate::print(
         &document,
+        None,
         PrintOptions {
             limits: exact_depth,
             ..Default::default()
@@ -478,6 +483,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert_eq!(
         crate::read(&accepted.source, &document, exact_depth)
             .unwrap()
+            .0
             .canonical_bytes(),
         document.canonical_bytes()
     );
@@ -488,6 +494,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert!(matches!(
         crate::print(
             &document,
+            None,
             PrintOptions {
                 limits: shallow,
                 ..Default::default()
@@ -526,6 +533,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert!(matches!(
         crate::print(
             &large_bytes,
+            None,
             PrintOptions {
                 limits: GeneratedSourceLimits {
                     max_bytes: 1024,
@@ -547,6 +555,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert!(matches!(
         crate::print(
             &large_integer,
+            None,
             PrintOptions {
                 limits: GeneratedSourceLimits {
                     max_bytes: 1024,
@@ -566,7 +575,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         vec![k::Stmt::Finish { value: expr }],
     );
     assert!(matches!(
-        crate::print(&deep, Default::default()),
+        crate::print(&deep, None, Default::default()),
         Err(crate::PrintError::Depth { .. })
     ));
 }
@@ -1466,7 +1475,7 @@ fn authored_import_of_printed_source_needs_its_base() {
     )
     .unwrap()
     .document;
-    let printed = crate::print(&document, Default::default()).unwrap();
+    let printed = crate::print(&document, None, Default::default()).unwrap();
     let refusal = crate::lower(&printed.source, &environment, module).unwrap_err();
     assert_eq!(
         refusal.code,
@@ -1547,7 +1556,7 @@ fn authored_import_of_printed_source_needs_its_base() {
         crate::DiagnosticCode::UnknownBinding
     );
     let read = crate::read(&printed.source, &document, Default::default()).unwrap();
-    assert_eq!(read.identity(), document.identity());
+    assert_eq!(read.0.identity(), document.identity());
 }
 
 /// FIG-6471 / G-SOURCE-EXACT: discarded expressions have exact source inverses.

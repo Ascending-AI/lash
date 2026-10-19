@@ -3,7 +3,7 @@
 //! The kernel is one small, dialect-free language with one meaning
 //! (`docs/kernel/semantics.md`). This crate is its vocabulary and nothing
 //! that runs: the values, the type grammar, the forms, the document with its
-//! manifest and optional source map, library-function definitions with the
+//! manifest, optional source map and captions, library-function definitions with the
 //! interface a native implementation satisfies, content-addressed
 //! identities, the JSON encoding, structural validation, the decoding of an
 //! inbound datum by a type, and the kernel text notation. A host that only
@@ -12,12 +12,17 @@
 //! It depends on no other lash crate.
 
 mod ast;
+mod caption;
 mod correspondence;
 mod declarations;
 mod source_map;
 mod source_map_codec;
 #[cfg(test)]
 mod source_map_tests;
+pub use caption::{
+    CAPTION_DESCRIPTION_BYTES, CAPTION_TITLE_BYTES, Caption, CaptionEntry, CaptionField,
+    CaptionKind, CaptionRefusal, Captions, CaptionsRefusal, Rekeyed,
+};
 pub use correspondence::{Correspondence, Survivor};
 pub use declarations::{
     CheckedDeclarations, DeclarationRefusal, check_declarations, required_declarations,
@@ -82,7 +87,7 @@ pub use ast::{
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
-    DecodeError, Document, EncodeError, Entry, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
+    DecodeError, Document, EncodeError, Entry, KERNEL_VERSION, MAX_NESTING_DEPTH, Manifest,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,

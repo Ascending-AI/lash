@@ -84,8 +84,8 @@ fn printed(
         ..Default::default()
     };
     Ok(match lang {
-        SourceLanguage::TypeScript => lash_dialect_typescript::print(document, options)?,
-        SourceLanguage::Python => lash_dialect_python::print(document, options)?,
+        SourceLanguage::TypeScript => lash_dialect_typescript::print(document, None, options)?,
+        SourceLanguage::Python => lash_dialect_python::print(document, None, options)?,
     })
 }
 
@@ -100,7 +100,7 @@ fn roundtrip(document: &Document, lang: SourceLanguage) -> Result<String> {
         }
     };
     ensure!(
-        decoded.canonical_bytes() == document.canonical_bytes(),
+        decoded.0.canonical_bytes() == document.canonical_bytes(),
         "authored import -> print -> read changed canonical bytes"
     );
     output

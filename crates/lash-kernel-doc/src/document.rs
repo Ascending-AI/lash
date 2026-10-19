@@ -28,8 +28,9 @@ pub const MAX_NESTING_DEPTH: usize = 64;
 /// may start, the private bindings and the requirements manifest.
 ///
 /// A document holds behaviour only. Where its nodes came from in authored
-/// source is an optional [`crate::SourceMap`], stored apart and keyed to the
-/// document's [`DocumentId`].
+/// source is an optional [`crate::SourceMap`], and what its steps are called
+/// is an optional [`crate::Captions`]; both are stored apart and keyed to
+/// the document's [`DocumentId`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
@@ -344,12 +345,4 @@ pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
         });
     }
     from_json_with_limits(text, limits)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Label {
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
 }

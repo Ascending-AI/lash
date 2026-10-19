@@ -3,8 +3,7 @@
 //!
 //! Host-owned source operations, isolated in the service's worker pool.
 use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
-use lash_kernel_doc::Document;
-use lash_kernel_doc::graph_tokens::decode_body;
+use lash_kernel_doc::{Captions, Document, IdentifiedDocument};
 
 use super::{DialectRefusal, Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
 use crate::PoolError;
@@ -28,18 +27,27 @@ impl Service {
     /// Print exact generated source, optionally with disposable final-text
     /// spans. This performs no compilation, comparison, admission or storage.
     /// Whole-workflow limits are independent of the ordinary cell byte cap.
+    ///
+    /// `captions`, of `document`, are spelled where the dialect can; the rest
+    /// are listed in [`PrintedSource::dropped`]. Captions of another
+    /// document, or naming a site that is not captionable, are refused here.
     pub async fn print(
         &self,
         document: &Document,
+        captions: Option<&Captions>,
         format: SourceFormat,
         options: PrintOptions,
     ) -> Result<PrintedSource, SourceServiceError> {
         // Defend recursive serialization of a host-constructed document.
         lash_kernel_dialect::check_document_depth(document, options.limits)?;
+        if let Some(captions) = captions {
+            lash_kernel_dialect::check_captions(document, captions, options.limits)?;
+        }
         let response = self
             .request_accounted(Request::Print {
                 format,
                 document: document.canonical_bytes(),
+                captions: captions.cloned(),
                 options,
             })
             .await?;
@@ -59,7 +67,7 @@ impl Service {
         source: &str,
         environment: &lash_kernel_dialect::Environment<'_>,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
-    ) -> Result<(Document, lash_kernel_doc::SourceMap), SourceServiceError> {
+    ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
             .request_accounted(Request::ImportWorkflow {
                 language,
@@ -74,28 +82,34 @@ impl Service {
             Response::Lowered {
                 document,
                 source_map,
+                captions,
                 ..
             } => {
-                let document = decode_body::<Document>(&document)
+                let document = IdentifiedDocument::decode_standard(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                // A module import answers the map of the source it read.
-                let map = source_map.ok_or_else(|| {
+                // A module import answers the map and the captions of the
+                // source it read.
+                let (map, captions) = source_map.zip(captions).ok_or_else(|| {
                     PoolError::payload(
                         PayloadKind::ServiceResponse,
-                        "a workflow import answered without its source map",
+                        "a workflow import answered without its source map or captions",
                     )
                 })?;
-                map.validate(&document, source)
+                map.validate_identified(&document, source)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                Ok((document, map))
+                captions
+                    .validate_identified(&document)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                Ok((document.into_document(), map, captions))
             }
             other => Err(refused(other)),
         }
     }
 
     /// Read exported source back against `base`, the document it was printed
-    /// from, without resolving or admitting its dependencies. The source
-    /// carries only code; the environment is the base document's. A host may
+    /// from, without resolving or admitting its dependencies, with the
+    /// captions the source spells. The source carries only code; the
+    /// environment is the base document's. A host may
     /// then compare `Document::canonical_bytes()`, the canonical token
     /// encoding identities are taken over (`K-ID-003`), and separately admit
     /// the document against its execution environment.
@@ -105,7 +119,7 @@ impl Service {
         base: &Document,
         format: SourceFormat,
         limits: GeneratedSourceLimits,
-    ) -> Result<Document, SourceServiceError> {
+    ) -> Result<(Document, Captions), SourceServiceError> {
         if source.len() > limits.max_bytes {
             let diagnostic: lash_kernel_dialect::Diagnostic =
                 lash_kernel_dialect::PrintError::Bytes {
@@ -129,8 +143,14 @@ impl Service {
             })
             .await?;
         match response {
-            Response::Read { document } => decode_body::<Document>(&document)
-                .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error).into()),
+            Response::Read { document, captions } => {
+                let document = IdentifiedDocument::decode_standard(&document)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                captions
+                    .validate_identified(&document)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                Ok((document.into_document(), captions))
+            }
             other => Err(refused(other)),
         }
     }

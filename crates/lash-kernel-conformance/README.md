@@ -138,3 +138,14 @@ numeric natives the documents call. Charge cases pin the total charge written
 in each fixture; sizes and magnitudes are never inferred from the machine.
 The owner-completion law also rejects any of these 26 rules reappearing in
 `pending.json`.
+
+`captions` is the caption harness (`K-CAP-001`..`K-CAP-006`), the same for
+every dialect: `CaptionDialect` takes a dialect `Package`, what its modules
+lower against and its corpus (`captions/<dialect>.json`), and each K-CAP
+shard's law runs it for TypeScript and Python. Readback cases are printed
+with a caption on every captionable site and read back; authored cases pair
+a source with its stripped twin and the exact `(site, caption)` table it
+imports with. A dialect that spells captions declares the kinds in its
+`CaptionSupport` and adds authored cases; the laws stay as they are.
+Rekeying (`K-CAP-004`) and the text domain (`K-CAP-005`) take no dialect and
+run once over kernel documents.

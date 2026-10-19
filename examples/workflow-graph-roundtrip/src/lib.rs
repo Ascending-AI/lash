@@ -143,8 +143,10 @@ impl SavedWorkflow {
                     ..Default::default()
                 };
                 let (printed, source_unavailable, cause) = match match source_dialect {
-                    Dialect::TypeScript => lash::typescript::print(derived.document(), options),
-                    Dialect::Python => lash::python::print(derived.document(), options),
+                    Dialect::TypeScript => {
+                        lash::typescript::print(derived.document(), None, options)
+                    }
+                    Dialect::Python => lash::python::print(derived.document(), None, options),
                 } {
                     Ok(printed) => (Some(printed), None, None),
                     Err(error) => {

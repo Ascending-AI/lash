@@ -167,7 +167,7 @@ fn a_missing_helper_is_named() {
 fn every_advertised_repair_form_lowers() {
     use Code::*;
     let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
-    let printed = crate::print(&base, Default::default()).unwrap();
+    let printed = crate::print(&base, None, Default::default()).unwrap();
     let examples = [
         (PrintedSourceNeedsBase, printed.source.as_str()),
         (

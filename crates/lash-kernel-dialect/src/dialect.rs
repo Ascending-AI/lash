@@ -5,7 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Document, EffectName, FunctionDefinition, Name, Signature, Site, SourceMap};
+use lash_kernel_doc::{
+    CaptionKind, Captions, Document, EffectName, FunctionDefinition, Name, Signature, Site,
+    SourceMap,
+};
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
@@ -62,7 +65,8 @@ impl CellEnvironment<'static> {
 #[derive(Clone, Copy)]
 pub enum Mode<'a> {
     /// A cell of a session: its top-level bindings are the session's, and
-    /// it continues the session in `CellEnvironment`.
+    /// it continues the session in `CellEnvironment`. A cell has no
+    /// captions: a front end extracts none.
     Cell(CellEnvironment<'a>),
     /// A workflow module: each top-level async function declaration is an
     /// entry of the document, assembled by [`crate::workflow::Module`] under
@@ -98,6 +102,10 @@ pub struct Lowered {
     /// What the source wrote of each function the cell's code makes, by
     /// the site of its closure.
     pub written: BTreeMap<Site, crate::Written>,
+    /// The captions the source wrote, in the dialect's spelling; empty for
+    /// a cell ([`Mode::Cell`]). Like the source map, they never change
+    /// behaviour or the document's identity (`K-CAP-001`).
+    pub captions: Captions,
 }
 
 /// Lowers source in one language to a kernel document.
@@ -131,13 +139,51 @@ pub trait FrontEnd {
 /// document the source was printed from and reconstructs identical canonical
 /// bytes. Optional maps describe final UTF-8 offsets and never change the
 /// source.
+///
+/// `captions`, of `document`, are spelled in the dialect's caption syntax;
+/// the source then reads back with them (`K-CAP-002`). Each caption the
+/// dialect cannot spell is listed in [`crate::PrintedSource::dropped`]
+/// (`K-CAP-006`). Captions that do not validate against `document` are
+/// [`crate::PrintError::Invalid`].
 pub trait Printer {
     fn print(
         &self,
         document: &Document,
+        captions: Option<&Captions>,
         options: crate::PrintOptions,
     ) -> Result<crate::PrintedSource, crate::PrintError>;
 }
+
+/// The caption syntax a dialect spells, for a host to tell a model how to
+/// write captions without knowing the dialect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaptionSupport {
+    /// The captionable kinds the dialect's front end, reader and printer
+    /// spell; a caption of any other kind is dropped on print.
+    pub kinds: &'static [CaptionKind],
+    /// A short authoring guide in the dialect's spelling; empty when it
+    /// spells none.
+    pub guide: &'static str,
+}
+
+impl CaptionSupport {
+    /// A dialect that spells no caption: printing drops every one.
+    pub const NONE: Self = Self {
+        kinds: &[],
+        guide: "",
+    };
+
+    #[must_use]
+    pub fn supports(&self, kind: CaptionKind) -> bool {
+        self.kinds.contains(&kind)
+    }
+}
+
+/// A dialect's reader of exported source ([`Package::read`]): the source,
+/// the base document it was printed from and the limits it is read under,
+/// to the document and the captions the source spells.
+pub type ReadSource =
+    fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<(Document, Captions), Diagnostic>;
 
 /// A dialect, as an embedder installs it.
 pub struct Package {
@@ -147,10 +193,13 @@ pub struct Package {
     /// Read exported source back against `base`, the document it was printed
     /// from, without a library, admission or execution: the environment is
     /// the base document's, the code is the source's. This is separate from
-    /// authored cell lowering and from printing.
-    pub read: fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<Document, Diagnostic>,
+    /// authored cell lowering and from printing. The captions are those the
+    /// source spells, of the document read.
+    pub read: ReadSource,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
+    /// The captions its front end, reader and printer spell.
+    pub captions: CaptionSupport,
     /// How the dialect holds a function as a value, where a session of it
     /// keeps the functions a cell binds for later cells; `None` for a
     /// dialect whose sessions keep none ([`crate::NotSaved::Dialect`]).

@@ -496,6 +496,7 @@ async fn link_cell(
             written,
             function_values,
             reads,
+            ..
         }) => (document, source_map, written, function_values, reads),
         Ok(Response::DialectRefused(mut refusal)) => {
             let feedback =

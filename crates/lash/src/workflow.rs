@@ -151,9 +151,10 @@
 //! unsupported reasons. Import writes no artifact and runs no effect.
 //!
 //! With the matching `typescript` or `python` feature,
-//! `lash::typescript::print(document, options)` or `lash::python::print`
-//! returns plain source, only the
-//! code an agent could have written, and an optional disposable map. The
+//! `lash::typescript::print(document, captions, options)` or
+//! `lash::python::print` returns plain source, only the
+//! code an agent could have written, an optional disposable map, and the
+//! captions the dialect could not spell (`PrintedSource::dropped`). The
 //! environment (effect manifest, number mode, entry signatures, private
 //! bindings, helper identities and name renames) stays in the document and
 //! is never printed. Printing does not compile or admit it. Hosts read the
@@ -209,7 +210,7 @@ pub mod document {
         FunctionValueLimits, FunctionValueRefusal, Guard, GuardExceeded, Handle,
         IdentifiedDocument, Identity, Implementation, Integer, Invalid, InvalidBytes, InvalidFloat,
         InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName, InvalidReason,
-        JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopCounts, MAX_DECODE_DEPTH,
+        JoinMode, KERNEL_VERSION, KernelVersion, Literal, LoopCounts, MAX_DECODE_DEPTH,
         MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name, NativeCall,
         NativeError, NativeFunction, NewObject, Node, NumberPolicy, NumberToken, Nursery,
         ObservationReader, Operand, Param, ParseError, ParseErrorReason, Place, PositionCounts,
@@ -224,6 +225,12 @@ pub mod document {
         parse_document, parse_document_with_limits, plan, print_definition, print_document,
         required_declarations, testkit, validate_definition, validate_definition_with_limits,
         validate_document, validate_document_with_limits,
+    };
+    /// Plain-language captions for a document's steps, held beside it like
+    /// its source map (`K-CAP-001`..`K-CAP-006`).
+    pub use lash_kernel_doc::{
+        CAPTION_DESCRIPTION_BYTES, CAPTION_TITLE_BYTES, Caption, CaptionEntry, CaptionField,
+        CaptionKind, CaptionRefusal, Captions, CaptionsRefusal, Rekeyed,
     };
 }
 
@@ -276,6 +283,10 @@ pub mod view {
         ScopeKind, ScopeView, SiteKind, StatementCoverage, StatementView, TYPESCRIPT_DECLARATION,
         TaskPath, Use, ViewError, WorkflowCoverage, WorkflowNode, WorkflowNodeKind, WorkflowView,
         coverage, derive, derive_callable, path,
+    };
+    /// A view's captions, joined by view location ([`WorkflowView::captions`]).
+    pub use lash_kernel_view::{
+        ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption,
     };
 }
 

@@ -110,7 +110,7 @@ fn document(body: &str) -> k::Document {
 }
 fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, library: &NamedLibrary) {
     let source = TypeScript::default()
-        .print(document, Default::default())
+        .print(document, None, Default::default())
         .unwrap()
         .source;
     let bindings = BTreeSet::new();
@@ -124,7 +124,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         controls: &BTreeMap::new(),
         tool_roots: &std::collections::BTreeSet::new(),
     };
-    let lowered = crate::read(&source, document, Default::default())
+    let (lowered, _) = crate::read(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
@@ -376,8 +376,10 @@ fn generated_decoding_does_not_require_installed_dependencies() {
             args: vec![],
         },
     });
-    let source = crate::print(&document, Default::default()).unwrap().source;
+    let source = crate::print(&document, None, Default::default())
+        .unwrap()
+        .source;
     let decoded = crate::read(&source, &document, Default::default())
         .expect("decoding is independent of admission");
-    assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
+    assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
 }

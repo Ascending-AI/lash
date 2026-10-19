@@ -591,14 +591,14 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     ) else {
         return false;
     };
-    let printed = lash_dialect_typescript::print(&original.document, Default::default())
+    let printed = lash_dialect_typescript::print(&original.document, None, Default::default())
         .expect("an admitted document prints");
     let re_lowered =
         lash_dialect_typescript::read(&printed.source, &original.document, Default::default())
             .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
     assert_eq!(
         original.document.canonical_bytes(),
-        re_lowered.canonical_bytes(),
+        re_lowered.0.canonical_bytes(),
         "{relative}"
     );
     true
@@ -1019,10 +1019,12 @@ fn async_tests_are_judged_by_done_completion() {
         ),
     ] {
         let document = lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers by_spelling\nmain {{ {prints} let __test262Completed = true return null }}")).unwrap();
+        let captions = lash_kernel_doc::Captions::empty(document.identity());
         let lowered = Lowered {
             source_map: None,
             written: Default::default(),
             document: document.into(),
+            captions,
         };
         let end = executor().run(&lowered).unwrap();
         assert_eq!(judge(end, &meta) == Observed::Pass, expected, "{prints}");

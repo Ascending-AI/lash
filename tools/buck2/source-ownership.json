@@ -85,6 +85,10 @@
     "compile_data": [
       "host-schemas/kernel-authoring-operation/v1.d.ts",
       "host-schemas/kernel-authoring-operation/v1.schema.json",
+      "host-schemas/kernel-caption-view/v1.d.ts",
+      "host-schemas/kernel-caption-view/v1.schema.json",
+      "host-schemas/kernel-captions/v1.d.ts",
+      "host-schemas/kernel-captions/v1.schema.json",
       "host-schemas/kernel-correspondence/v1.schema.json",
       "host-schemas/kernel-document/v1.schema.json",
       "host-schemas/kernel-edit-refusal/v1.schema.json",

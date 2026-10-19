@@ -884,3 +884,108 @@ main { finish null }
     assert_eq!(view_of(&reparsed, "demo"), view);
     assert_eq!(view_of(&decoded, "demo"), view);
 }
+
+/// K-CAP-003's view join: an action or control node shows its carrier
+/// statement's caption, a statement with several actions only on the node
+/// of its first, a code node every caption among its members and their
+/// arms, a control its arms', and a function's on its callable. Captions of
+/// another document are refused.
+#[test]
+fn captions_join_the_view_by_node_arm_and_callable() {
+    use lash_kernel_doc::{Caption, CaptionEntry, Captions};
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+effect one() -> Any
+effect two() -> Any
+effect test() -> Bool
+effect send(x: Any) -> Any
+entry flow() -> Any
+fn flow() {
+  let a = 1
+  let b = 2
+  if true { let c = 3 } else { let d = 4 }
+  let x = perform send([perform one() as Any, perform two() as Any]) as Any
+  if perform test() as Bool { do perform two() as Any } else {}
+  return x
+}
+main { finish null }
+"#,
+    )
+    .expect("workflow");
+    let view = view_of(&document, "flow");
+    let entry = |path: &[u32], title: &str| CaptionEntry {
+        site: site("flow", path),
+        caption: Caption::new(title, None).expect("caption"),
+    };
+    let captions = Captions::new(
+        &document,
+        vec![
+            entry(&[1], "Second"),
+            entry(&[2, 2], "Code else"),
+            entry(&[3], "Send"),
+            entry(&[4], "Decide"),
+            entry(&[4, 2], "Otherwise"),
+            entry(&[], "Workflow"),
+        ],
+    )
+    .expect("captions");
+    let joined = view.captions(&captions).expect("one document");
+    let node = |kind: crate::WorkflowNodeKind, statement: &[u32]| {
+        view.nodes
+            .iter()
+            .position(|node| node.kind == kind && node.members.contains(&site("flow", statement)))
+            .expect("node")
+    };
+    let code = node(crate::WorkflowNodeKind::Code, &[0]);
+    let first_action = node(crate::WorkflowNodeKind::Action, &[3]);
+    let control = node(crate::WorkflowNodeKind::Control, &[4]);
+    assert_eq!(
+        view.nodes
+            .iter()
+            .filter(|node| node.statement == site("flow", &[3]))
+            .count(),
+        3,
+        "one node per action of the statement"
+    );
+    let shown: Vec<(usize, Site, &str)> = joined
+        .nodes
+        .iter()
+        .map(|shown| (shown.node, shown.site.clone(), shown.caption.title()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (code, site("flow", &[1]), "Second"),
+            (code, site("flow", &[2, 2]), "Code else"),
+            (first_action, site("flow", &[3]), "Send"),
+            (control, site("flow", &[4]), "Decide"),
+        ]
+    );
+    let arms: Vec<_> = joined
+        .arms
+        .iter()
+        .map(|arm| (arm.node, arm.block.clone(), arm.caption.title()))
+        .collect();
+    assert_eq!(arms, [(control, site("flow", &[4, 2]), "Otherwise")]);
+    assert_eq!(
+        view.nodes[control].arms[joined.arms[0].arm].block,
+        site("flow", &[4, 2])
+    );
+    let titled: Vec<_> = joined
+        .callables
+        .iter()
+        .map(|callable| {
+            (
+                view.callables[callable.callable].block.clone(),
+                callable.caption.title(),
+            )
+        })
+        .collect();
+    assert_eq!(titled, [(site("flow", &[]), "Workflow")]);
+    let other = parse_document("kernel 1\nnumbers float\nmain { finish null }\n").expect("other");
+    assert!(matches!(
+        view.captions(&Captions::empty(other.identity())),
+        Err(crate::CaptionViewRefusal::Document { .. })
+    ));
+}
