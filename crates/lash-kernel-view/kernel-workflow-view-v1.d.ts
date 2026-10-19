@@ -138,12 +138,31 @@ export type ActionObservation = {
   "state": ActionState;
 };
 
+/**
+ * Whose code or which outside party an action reaches.
+ */
+export type ActionRole = ("effect" | "wait" | "sub_workflow" | "library" | "task");
+
 export type ActionState = ("running" | "waiting" | "completed" | "failed" | "cancelled" | "incomplete");
 
 /**
  * One action.
  */
 export type ActionView = {
+  /**
+   * The callables the action runs that the view can derive, in argument
+   * order: what a call or `spawn` through a variable runs, when every
+   * write of the variable that can hold a callable writes the same one,
+   * and each closure a library callee is passed and its kernel body
+   * applies (TypeScript's `ts.promise.start(<closure>)`, Python's
+   * `py.task.run`). A closure is named by its expression's site, a
+   * [`CallableView::site`] of this view; a declared function by its
+   * body's root, `Site::new(unit, [])`, which [`derive_callable`] opens.
+   * A callable that reaches the action through a parameter, a collection,
+   * a library call's result or a variable written two callables is not
+   * derived.
+   */
+  "applies"?: Array<Site>;
   "args": Array<ArgumentView>;
   "available": Array<number>;
   "block": Site;
@@ -162,6 +181,11 @@ export type ActionView = {
    * A `perform`'s declared result, else the checker's facet.
    */
   "result_type": Type;
+  /**
+   * Whose code or which outside party the action reaches: what a host
+   * picks the steps a person recognises by, never a callee's name.
+   */
+  "role": ActionRole;
   "site": Site;
   "statement": Site;
 };

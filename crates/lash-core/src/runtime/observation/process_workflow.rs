@@ -54,6 +54,26 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 
 /// One task's latest visit to a document site. The VM's zero-based occurrence
 /// index counts entries, including sleeps and calls, independently of effects.
+///
+/// Lash stores no wall time on an occurrence. One effect attempt's start,
+/// end and result join, for every host, on its [`EffectId`] (the task, site,
+/// occurrence and loops of `EffectIdentity`) across the process events the
+/// host stores, each timed by its own `occurred_at_ms`:
+/// - its result and end are the committed `process.effect_outcome` whose
+///   `at` is that id: outcome class, failure code and, for a tool, the
+///   `call_id` that names the call's record and answer;
+/// - its start is the committed `process.waiting` whose `wait.site` is that
+///   id, when the call was still in flight as the process released, and its
+///   `process.resumed` ends that wait. A call that settles inside the run
+///   segment that issued it commits no start: the host's tool
+///   implementation sees its `call_id` when it begins.
+///
+/// A sleep is entered by its `process.waiting` and settled by its
+/// `process.resumed`. An occurrence past the evidence cap has no outcome of
+/// its own; `process.effect_omissions` counts it. `first_entered` and
+/// `last_settled` are the sequences of the first and the latest of these
+/// events across the row's occurrences, so they bound the site's history,
+/// not one attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowSite {
     pub at: EffectId,

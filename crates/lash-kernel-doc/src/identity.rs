@@ -97,6 +97,11 @@ impl Site {
     }
 }
 impl PositionLabel {
+    /// The document site this position names: the key a host looks the
+    /// position up by in a workflow view.
+    pub fn site(&self) -> &Site {
+        &self.0
+    }
     /// The callee's display label, when this position is in a named function.
     pub fn callee_label(&self) -> Option<&str> {
         match &self.0.unit {

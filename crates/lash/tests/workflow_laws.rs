@@ -1944,3 +1944,7 @@ mod crossing;
 
 #[path = "workflow_laws/inline_starts.rs"]
 mod inline_starts;
+
+#[cfg(all(feature = "typescript", feature = "python"))]
+#[path = "workflow_laws/view_links.rs"]
+mod view_links;

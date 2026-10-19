@@ -275,14 +275,14 @@ pub use lash_kernel_edit::authoring;
 #[cfg(feature = "workflow-view")]
 pub mod view {
     pub use lash_kernel_view::{
-        ActionActivity, ActionObservation, ActionState, ActionView, ActivityRefusal, ArgumentView,
-        AssignmentView, BindingKind, BindingView, CallableView, CalleeView, ControlArm,
-        ControlHeader, Dataflow, ExecutionSiteView, ExpressionView, FlowEdge, FlowKind, FlowTarget,
-        HeaderRole, JSON_SCHEMA, LazyArm, LineRange, NodeCoverage, PathSite, PathStep, RanCounts,
-        ReadableLens, ReadableRefusal, ReplayPath, ReturnView, RunObservation, ScopeCoverage,
-        ScopeKind, ScopeView, SiteKind, StatementCoverage, StatementView, TYPESCRIPT_DECLARATION,
-        TaskPath, Use, ViewError, WorkflowCoverage, WorkflowNode, WorkflowNodeKind, WorkflowView,
-        coverage, derive, derive_callable, path,
+        ActionActivity, ActionObservation, ActionRole, ActionState, ActionView, ActivityRefusal,
+        ArgumentView, AssignmentView, BindingKind, BindingView, CallableView, CalleeView,
+        ControlArm, ControlHeader, Dataflow, ExecutionSiteView, ExpressionView, FlowEdge, FlowKind,
+        FlowTarget, HeaderRole, JSON_SCHEMA, LazyArm, LineRange, NodeCoverage, PathSite, PathStep,
+        RanCounts, ReadableLens, ReadableRefusal, ReplayPath, ReturnView, RunObservation,
+        ScopeCoverage, ScopeKind, ScopeView, SiteKind, StatementCoverage, StatementView,
+        TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError, WorkflowCoverage, WorkflowNode,
+        WorkflowNodeKind, WorkflowView, coverage, derive, derive_callable, path,
     };
     /// A view's captions, joined by view location ([`WorkflowView::captions`]).
     pub use lash_kernel_view::{

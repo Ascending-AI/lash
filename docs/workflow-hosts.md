@@ -131,7 +131,23 @@ action, nested ones included, with its kind, callee and arguments as written,
 lexical availability, parameters, returns and assignments) and every
 `execution_sites` entry with its typed `kind` and, for a nested action, the
 action it is an argument of (`within`). A host draws a statement as one node
-and its actions as parts of it, never as extra statements. The
+and its actions as parts of it, never as extra statements.
+
+Each action has a `role`: `effect` (a `perform`, such as a tool call),
+`wait` (a `sleep`), `sub_workflow` (a call or `spawn` of the document's own
+code), `library` (a call or `spawn` of a library function, and an `await`
+through its dialect's policy) or `task` (`join`, `join_many`, `cancel`,
+`yield`). Pick the steps a person recognises by role, never by callee name.
+An action's `applies` names the callables it runs that the view can
+derive: TypeScript's `ts.promise.start(<closure>)` and Python's
+`py.task.run(<closure>)` name that closure, and a call through a variable
+that only ever holds one closure names it. A closure is named by its
+expression's site, one of the view's `callables`; a declared function by
+its body's root, which `derive_callable` opens. Draw "this step opens onto
+that body" from `applies`, never by matching sites by position. A callable
+passed through a parameter, a collection or a library call's result (such
+as a TypeScript function token read through `ts.callable`) is not derived,
+and `applies` is empty. The
 projection matches every kernel statement and expression kind, so a new kind
 reaches every host through this one read.
 
@@ -145,7 +161,7 @@ name its `use` line gives it. `lash::helper_labels::labels()` reads the
 shipped helper labels, keyed by name, with no dialect or helper release;
 `helper_labels::title(&labels, &name)` answers the label, or the bare name for a
 helper this build does not know. Lash keeps no per-node host data: wording,
-icons, layout, roles and step labels are the host's, keyed by site.
+icons, layout and step labels are the host's, keyed by site.
 
 ### Reading one
 
@@ -449,7 +465,8 @@ so folding can continue after reopen.
 An occurrence has an opaque `EffectId`. Its `task()`, `position()` and
 `visit()` readers return `TaskLabel`, `PositionLabel` and `VisitId` handles.
 Store and compare these handles; their ordering and encoding belong to the
-engine. JSON carries opaque string tokens. Display a typed handle with
+engine. `PositionLabel::site()` is the document site a position names, the
+key to look it up by in a workflow view. JSON carries opaque string tokens. Display a typed handle with
 `Display`, or use the process row's `label`; never parse either display labels
 or tokens. `ObservationReader::counts(&at)` supplies exact semantic starts and
 loop-entry counts, and `ObservationReader::fold` folds duplicate or reordered
@@ -460,6 +477,25 @@ with their latest occurrence state and occurrence count. `terminal_unobserved`
 means the process ended without an observed terminal for that action. Its first
 committed entry and latest settlement name event sequences; hosts read times
 from those events. Tasks spawned at one site remain separate rows.
+
+Lash stores no wall time on an occurrence, and a row's `first_entered` and
+`last_settled` span all its occurrences. One effect attempt joins on its
+`EffectId` across the process events you store, each timed by its own
+`occurred_at_ms`:
+
+- **Result and end:** the committed `process.effect_outcome` whose `at` is
+  the attempt's id. It carries the outcome class, the failure code of a
+  failure and, for a tool, the `call_id` that names the call's record and
+  what it answered.
+- **Start:** the committed `process.waiting` whose `wait.site` is the id,
+  for a call still in flight when the process released; its
+  `process.resumed` ends that wait. A call that settles inside the run
+  segment that issued it commits no start. Your tool implementation sees
+  its `call_id` when it begins, so record the start there if you need it.
+- **Sleeps:** a sleep's `process.waiting` and `process.resumed` are its
+  start and end. A sleep that never parks commits neither.
+- **Omitted occurrences:** an occurrence past the evidence cap has no outcome
+  event of its own. `process.effect_omissions` counts it.
 
 Direct kernel embeddings select `MachineOptions` with `Machine::set_options`
 for each run segment. `ObservationMode::Counts` records semantic `SiteCounts`;

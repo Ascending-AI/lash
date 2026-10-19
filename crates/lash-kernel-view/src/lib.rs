@@ -31,6 +31,7 @@
 use std::collections::BTreeMap;
 
 mod activity;
+mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
 mod captions;
 pub use captions::{ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption};
@@ -256,6 +257,9 @@ pub struct ExpressionView {
 pub struct ActionView {
     pub site: Site,
     pub kind: SiteKind,
+    /// Whose code or which outside party the action reaches: what a host
+    /// picks the steps a person recognises by, never a callee's name.
+    pub role: ActionRole,
     pub statement: Site,
     pub block: Site,
     /// What an assignment of the action's result writes, when the action
@@ -266,6 +270,19 @@ pub struct ActionView {
     /// Calls through values have no static callee name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<CalleeView>,
+    /// The callables the action runs that the view can derive, in argument
+    /// order: what a call or `spawn` through a variable runs, when every
+    /// write of the variable that can hold a callable writes the same one,
+    /// and each closure a library callee is passed and its kernel body
+    /// applies (TypeScript's `ts.promise.start(<closure>)`, Python's
+    /// `py.task.run`). A closure is named by its expression's site, a
+    /// [`CallableView::site`] of this view; a declared function by its
+    /// body's root, `Site::new(unit, [])`, which [`derive_callable`] opens.
+    /// A callable that reaches the action through a parameter, a collection,
+    /// a library call's result or a variable written two callables is not
+    /// derived.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies: Vec<Site>,
     pub args: Vec<ArgumentView>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
@@ -348,6 +365,28 @@ pub struct ExecutionSiteView {
     /// The loops enclosing it inside its own function body, outermost
     /// first.
     pub loops: Vec<Site>,
+}
+
+/// Whose code or which outside party an action reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionRole {
+    /// A `perform`: a request the host answers, such as a tool call. Each
+    /// run of it is one effect occurrence, named by its `EffectId`.
+    Effect,
+    /// A `sleep`: a timed wait. Each run of it is an effect occurrence too,
+    /// which no host answers.
+    Wait,
+    /// A call or `spawn` of the document's own code: a declared function, or
+    /// the closure or function reference a variable holds.
+    SubWorkflow,
+    /// A call or `spawn` of a library function, or an `await` through its
+    /// dialect's policy: the dialect's or the kernel's code. `applies`
+    /// names a closure of the document it runs.
+    Library,
+    /// A `join`, `join_many`, `cancel` or `yield`: coordination among the
+    /// run's tasks.
+    Task,
 }
 
 /// What an action does.
@@ -462,6 +501,7 @@ pub fn derive_callable(
             execution_sites: graph.execution_sites().iter().map(execution_site).collect(),
         },
         uses: BTreeMap::new(),
+        links: applies::Links::new(graph),
     };
     let at = Context {
         block: walk.entry.site.clone(),
@@ -564,6 +604,7 @@ struct Walk<'a> {
     entry: Callable,
     view: WorkflowView,
     uses: BTreeMap<BindingId, Vec<Use>>,
+    links: applies::Links,
 }
 
 impl<'a> Walk<'a> {
@@ -956,13 +997,26 @@ impl<'a> Walk<'a> {
             ) => signature.map_or(Type::Any, |signature| signature.result.clone()),
             _ => node.facet.clone().unwrap_or(Type::Any),
         };
+        let role = match (kind, &callee) {
+            (SiteKind::Perform, _) => ActionRole::Effect,
+            (SiteKind::Sleep, _) => ActionRole::Wait,
+            (SiteKind::Call | SiteKind::Spawn, Some(CalleeView::Library { .. }))
+            | (SiteKind::Await, _) => ActionRole::Library,
+            (SiteKind::Call | SiteKind::Spawn, _) => ActionRole::SubWorkflow,
+            (SiteKind::Join | SiteKind::JoinMany | SiteKind::Cancel | SiteKind::Yield, _) => {
+                ActionRole::Task
+            }
+        };
+        let applies = self.links.applies(self.graph, self.functions, derived);
         self.view.dataflow.actions.push(ActionView {
             site: node.site.clone(),
             kind,
+            role,
             statement,
             block: at.block.clone(),
             destination: at.assigns.clone(),
             callee,
+            applies,
             args,
             result_type,
             available: available(self.graph, node),
@@ -973,7 +1027,7 @@ impl<'a> Walk<'a> {
 
 /// An action as the checker derived it.
 #[derive(Clone, Copy)]
-enum Derived<'a> {
+pub(crate) enum Derived<'a> {
     Statement(&'a ActionNode),
     Nested(&'a ActNode, &'a [NodeId]),
 }

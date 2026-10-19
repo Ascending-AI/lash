@@ -62,7 +62,8 @@
         "tests/workflow_laws/documents.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/inline_starts.rs",
-        "tests/workflow_laws/node_spans.rs"
+        "tests/workflow_laws/node_spans.rs",
+        "tests/workflow_laws/view_links.rs"
       ]
     },
     "test_data": {

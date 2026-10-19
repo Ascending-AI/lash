@@ -415,6 +415,36 @@
       ],
       "type": "object"
     },
+    "ActionRole": {
+      "description": "Whose code or which outside party an action reaches.",
+      "oneOf": [
+        {
+          "const": "effect",
+          "description": "A `perform`: a request the host answers, such as a tool call. Each\nrun of it is one effect occurrence, named by its `EffectId`.",
+          "type": "string"
+        },
+        {
+          "const": "wait",
+          "description": "A `sleep`: a timed wait. Each run of it is an effect occurrence too,\nwhich no host answers.",
+          "type": "string"
+        },
+        {
+          "const": "sub_workflow",
+          "description": "A call or `spawn` of the document's own code: a declared function, or\nthe closure or function reference a variable holds.",
+          "type": "string"
+        },
+        {
+          "const": "library",
+          "description": "A call or `spawn` of a library function, or an `await` through its\ndialect's policy: the dialect's or the kernel's code. `applies`\nnames a closure of the document it runs.",
+          "type": "string"
+        },
+        {
+          "const": "task",
+          "description": "A `join`, `join_many`, `cancel` or `yield`: coordination among the\nrun's tasks.",
+          "type": "string"
+        }
+      ]
+    },
     "ActionState": {
       "enum": [
         "running",
@@ -430,6 +460,13 @@
       "additionalProperties": false,
       "description": "One action.",
       "properties": {
+        "applies": {
+          "description": "The callables the action runs that the view can derive, in argument\norder: what a call or `spawn` through a variable runs, when every\nwrite of the variable that can hold a callable writes the same one,\nand each closure a library callee is passed and its kernel body\napplies (TypeScript's `ts.promise.start(<closure>)`, Python's\n`py.task.run`). A closure is named by its expression's site, a\n[`CallableView::site`] of this view; a declared function by its\nbody's root, `Site::new(unit, [])`, which [`derive_callable`] opens.\nA callable that reaches the action through a parameter, a collection,\na library call's result or a variable written two callables is not\nderived.",
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
+        },
         "args": {
           "items": {
             "$ref": "#/$defs/ArgumentView"
@@ -476,6 +513,10 @@
           "$ref": "#/$defs/Type",
           "description": "A `perform`'s declared result, else the checker's facet."
         },
+        "role": {
+          "$ref": "#/$defs/ActionRole",
+          "description": "Whose code or which outside party the action reaches: what a host\npicks the steps a person recognises by, never a callee's name."
+        },
         "site": {
           "$ref": "#/$defs/Site"
         },
@@ -486,6 +527,7 @@
       "required": [
         "site",
         "kind",
+        "role",
         "statement",
         "block",
         "args",
