@@ -1210,6 +1210,12 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "dict record",
             "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key_\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
         ),
+        // FIG-6820: the region's membership test of a record at long
+        // keys, present and missing, made in the loop from short texts.
+        (
+            "dict record at long keys",
+            "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key-past-limit\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
+        ),
         (
             "push and text",
             "function build(n) {\n  const rows = [];\n  for (let i = 0; i < n; i++) {\n    rows.push(\"row-\" + String(i));\n  }\n  return rows.join(\",\");\n}\nconst result = build(6);\nconst call = build;\ncall(2);\n",

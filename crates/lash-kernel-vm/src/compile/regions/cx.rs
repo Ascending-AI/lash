@@ -317,6 +317,49 @@ impl Cx<'_> {
         }
     }
 
+    /// Native `function`'s membership test of `table` on `values`, the
+    /// table and the key (FIG-6820): looked up as its call looks the key
+    /// up ([`Self::member`]) and charged its formula as [`Self::general`]
+    /// charges it; its general call where the lookup declines.
+    pub(super) fn contains(
+        &mut self,
+        function: &Lib,
+        table: Table,
+        values: [Value; 2],
+    ) -> Option<Value> {
+        let Some(value) = self.member(table, values[0], values[1]) else {
+            return self.windowed(&values, |cx, args| cx.general(function, args));
+        };
+        if self.charging {
+            let units = self.formula(&function.charge, &values, Some(&value))?;
+            self.meter.measured(units);
+        }
+        Some(value)
+    }
+
+    /// `<table>.contains(target, key)`, looked up as the native's call
+    /// looks it up, through the same views, without its call: it builds and
+    /// reserves nothing. `None` where the call raises or must decode first.
+    fn member(&self, table: Table, target: Value, key: Value) -> Option<Value> {
+        if !matches!(
+            (table, target),
+            (Table::Map, Value::Map(_))
+                | (Table::Set, Value::Set(_))
+                | (Table::Record, Value::Record(_))
+        ) {
+            return None;
+        }
+        let semantics = self.arena.semantics().with_limits(self.limits);
+        let args = Args::new(&[], self.arena.objects(), &semantics);
+        let view = args.table(&target).ok()??;
+        match table {
+            Table::Record if !matches!(key, Value::Text(_) | Value::LongText(_)) => return None,
+            Table::Record => {}
+            Table::Map | Table::Set => legal_key(&args, &key)?,
+        }
+        Some(Value::Bool(args.lookup(view, &key).ok()?.is_some()))
+    }
+
     /// `call` on a window holding `values`, released after it.
     fn windowed(
         &mut self,
@@ -843,29 +886,12 @@ impl TemplateHeap for HeapCx<'_, '_> {
         Some(Value::Int(length as i64))
     }
 
-    /// Looks the key up as the native's call does, through the same
-    /// views, without its call: it builds and reserves nothing.
+    /// Looks the key up as the native's call does ([`Cx::member`]).
     fn contains(&mut self, table: Table, target: Value, key: Value) -> Option<Value> {
         if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
-        if !matches!(
-            (table, target),
-            (Table::Map, Value::Map(_))
-                | (Table::Set, Value::Set(_))
-                | (Table::Record, Value::Record(_))
-        ) {
-            return None;
-        }
-        let semantics = self.cx.arena.semantics().with_limits(self.cx.limits);
-        let args = Args::new(&[], self.cx.arena.objects(), &semantics);
-        let view = args.table(&target).ok()??;
-        match table {
-            Table::Record if !matches!(key, Value::Text(_) | Value::LongText(_)) => return None,
-            Table::Record => {}
-            Table::Map | Table::Set => legal_key(&args, &key)?,
-        }
-        Some(Value::Bool(args.lookup(view, &key).ok()?.is_some()))
+        self.cx.member(table, target, key)
     }
 }
 

@@ -19,12 +19,14 @@
 use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
 use lash_kernel_state::arena::VALUE_BYTES;
 
 use super::super::expr::{self, Callee, Expr, Kind, Make};
 use super::super::{
-    BindingName, BlockId, Constant, Executable, Lib, LibId, ReadSite, Source, Stream, find_property,
+    BindingName, BlockId, Constant, Executable, Lib, LibId, LibRun, ReadSite, Source, Stream,
+    find_property,
 };
 use super::GuestCall;
 use super::cx::Cx;
@@ -628,7 +630,42 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option
     if !libs.general || operands.len() > function.arity {
         return None;
     }
+    if let Some(table) = membership(function)
+        && operands.len() == 2
+    {
+        let mut operands = operands.into_iter();
+        return Some(contains(id, table, operands.next()?, operands.next()?));
+    }
     Some(direct::<false>(id, function.arity, operands, fresh))
+}
+
+/// The table whose membership test native `function` is, where the region
+/// answers its call by [`Cx::contains`] (FIG-6820): `map.contains`,
+/// `set.contains` and `record.contains`, unguarded, with no prepared entry.
+fn membership(function: &Lib) -> Option<Table> {
+    if !matches!(function.run, LibRun::Native { .. })
+        || function.arity != 2
+        || function.limit.is_some()
+        || function.prepared.is_some()
+    {
+        return None;
+    }
+    match function.definition.name.as_str() {
+        "map.contains" => Some(Table::Map),
+        "set.contains" => Some(Table::Set),
+        "record.contains" => Some(Table::Record),
+        _ => None,
+    }
+}
+
+/// The compiled membership test of native `id` on `table`: its operands
+/// evaluated in order, then [`Cx::contains`].
+fn contains(id: LibId, table: Table, target: Node, key: Node) -> Node {
+    Box::new(move |slots, cx| {
+        let values = [target(slots, cx)?, key(slots, cx)?];
+        let function = cx.exe.lib(id);
+        cx.contains(function, table, values)
+    })
 }
 
 /// Which of a call's operands are constructions of no members, by

@@ -263,6 +263,26 @@ const ALLOCATING: &[(&str, &str)] = &[
         "fn tally(n) { let i = 0 let counts = map{} while num.lt(i, n) { let key = text.concat(\"key_\", num.to_text(num.rem_trunc(i, 6))) if map.contains(counts, key) { set counts[key] = num.add(map.get(counts, key), 1) } else { set counts[key] = 1 } set i = num.add(i, 1) } return counts }\n\
          main { let r = call tally(16) finish r }",
     ),
+    // FIG-6820: the region's own membership tests of maps, sets and
+    // records, by key kind: tuple, long text, normalized number and NaN
+    // keys present and missing, and, after keys that answer, the keys
+    // whose call raises. A long key is made in the loop from short texts:
+    // a long literal there is a barrier.
+    (
+        "membership tests of maps, sets and records by key kind",
+        "fn probe(n) { let i = 0 let s = 0 let m = map{\"key-past-limit1\": 1, (1, 2): 2, 3: 3, nan: 4} let xs = set{\"a\", 2.5, (1, ())} let r = {a: 1, b2: 2, key_past_limit2: 3} while num.lt(i, n) { let k = num.rem_trunc(i, 3) if map.contains(m, (1, num.add(k, 1))) { set s = num.add(s, 1) } if map.contains(m, text.concat(\"key-past-limit\", num.to_text(k))) { set s = num.add(s, 10) } if map.contains(m, num.add(k, 2.0)) { set s = num.add(s, 100) } if map.contains(m, nan) { set s = num.add(s, 1000) } if set.contains(xs, num.add(k, 1.5)) { set s = num.add(s, 10000) } if record.contains(r, text.concat(\"b\", num.to_text(k))) { set s = num.add(s, 100000) } if record.contains(r, text.concat(\"key_past_limit\", num.to_text(k))) { set s = num.add(s, 1000000) } set i = num.add(i, 1) } return s }\n\
+         main { let r = call probe(7) finish r }",
+    ),
+    (
+        "a map tested at an unhashable key",
+        "fn probe(m, keys) { let s = 0 for key in keys { if map.contains(m, key) { set s = num.add(s, 1) } } return s }\n\
+         main { try { let r = call probe(map{1: 1}, [1, 2, 1, [1]]) finish r } catch e { finish e.kind } }",
+    ),
+    (
+        "a record tested at a number",
+        "fn probe(r, keys) { let s = 0 for key in keys { if record.contains(r, key) { set s = num.add(s, 1) } } return s }\n\
+         main { try { let r = call probe({a: 1}, [\"a\", \"b\", \"a\", 1]) finish r } catch e { finish e.kind } }",
+    ),
     (
         "a record whose shape changes under its field reads and writes",
         "fn shapes(n) { let i = 0 let s = 0 while num.lt(i, n) { let r = {a: i, b: 1} if num.lt(num.rem_trunc(i, 2), 1) { set r = {b: 2, c: 3, a: i} } set s = num.add(s, r.a) set r.b = s set i = num.add(i, 1) } return s }\n\

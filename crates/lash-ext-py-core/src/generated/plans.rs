@@ -3735,15 +3735,17 @@ fn py_text_printable_template(args: &[Value], natives: &[lash_kernel_doc::Prepar
         [Value::Int(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Int(32)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(32)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], Value::Int(126)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(true)) { return None; }
+                    Some(Value::Bool(false))
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(false)) { return None; }
+                    let v1 = (natives[1].entry)(&[args[0], Value::Int(126)])?; let _ = v1;
+                    if !matches!(v1, Value::Bool(true)) { return None; }
+                    Some(Value::Bool(true))
+                })() { return Some(value); }
+                None
             })() { return Some(value); }
             None
         },
@@ -9170,43 +9172,53 @@ fn py_index_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]
         [Value::Int(_), Value::Int(_), Value::Text(_), Value::Text(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
-                let v2 = (natives[2].entry)(&[Value::Int(0), v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = (natives[0].entry)(&[v1, args[1]])?; let _ = v3;
-                let v4 = (natives[3].entry)(&[v3])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                Some(v1)
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
-                let v2 = (natives[2].entry)(&[Value::Int(0), v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v5 = (natives[3].entry)(&[v2])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                Some(v1)
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v6 = (natives[2].entry)(&[Value::Int(0), args[0]])?; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v7;
-                let v8 = (natives[3].entry)(&[v7])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v6 = (natives[2].entry)(&[Value::Int(0), args[0]])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v9 = (natives[3].entry)(&[v6])?; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                Some(args[0])
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(true)) { return None; }
+                    if let Some(value) = (|| {
+                        let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
+                        if let Some(value) = (|| {
+                            let v2 = (natives[2].entry)(&[Value::Int(0), v1])?; let _ = v2;
+                            if let Some(value) = (|| {
+                                if !matches!(v2, Value::Bool(true)) { return None; }
+                                let v3 = (natives[0].entry)(&[v1, args[1]])?; let _ = v3;
+                                let v4 = (natives[3].entry)(&[v3])?; let _ = v4;
+                                if !matches!(v4, Value::Bool(false)) { return None; }
+                                Some(v1)
+                            })() { return Some(value); }
+                            if let Some(value) = (|| {
+                                if !matches!(v2, Value::Bool(false)) { return None; }
+                                let v5 = (natives[3].entry)(&[v2])?; let _ = v5;
+                                if !matches!(v5, Value::Bool(false)) { return None; }
+                                Some(v1)
+                            })() { return Some(value); }
+                            None
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v6 = (natives[2].entry)(&[Value::Int(0), args[0]])?; let _ = v6;
+                        if let Some(value) = (|| {
+                            if !matches!(v6, Value::Bool(true)) { return None; }
+                            let v7 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v7;
+                            let v8 = (natives[3].entry)(&[v7])?; let _ = v8;
+                            if !matches!(v8, Value::Bool(false)) { return None; }
+                            Some(args[0])
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v6, Value::Bool(false)) { return None; }
+                            let v9 = (natives[3].entry)(&[v6])?; let _ = v9;
+                            if !matches!(v9, Value::Bool(false)) { return None; }
+                            Some(args[0])
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
             })() { return Some(value); }
             None
         },
@@ -12451,29 +12463,35 @@ fn py_int_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
             })() { return Some(value); }
             None
         },
+        [Value::Bool(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
+                if let Some(value) = (|| {
+                    let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
+                    if let Some(value) = (|| {
+                        if !matches!(v1, Value::Bool(false)) { return None; }
+                        if let Some(value) = (|| {
+                            if !matches!(args[0], Value::Bool(true)) { return None; }
+                            Some(Value::Int(1))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(args[0], Value::Bool(false)) { return None; }
+                            Some(Value::Int(0))
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        },
         [Value::Int(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
                 let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
                 if !matches!(v1, Value::Bool(false)) { return None; }
                 Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Int(1))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[5].entry)(&[args[1], Value::Absent])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Int(0))
             })() { return Some(value); }
             None
         },
@@ -13110,37 +13128,44 @@ fn py_abs_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
         [Value::Int(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(args[0])
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(true)) { return None; }
+                    let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
+                    Some(v1)
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(false)) { return None; }
+                    Some(args[0])
+                })() { return Some(value); }
+                None
             })() { return Some(value); }
             None
         },
         [Value::Float(_)] => {
             if let Some(value) = (|| {
                 let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0], Value::Int(0)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0], Value::Int(0)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(args[0])
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(true)) { return None; }
+                    let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
+                    Some(v1)
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v0, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v2 = (natives[2].entry)(&[args[0], Value::Int(0)])?; let _ = v2;
+                        if let Some(value) = (|| {
+                            if !matches!(v2, Value::Bool(true)) { return None; }
+                            Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v2, Value::Bool(false)) { return None; }
+                            Some(args[0])
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
             })() { return Some(value); }
             None
         },

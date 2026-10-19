@@ -18,9 +18,14 @@ pub fn integer_to_float(value: &Integer) -> Result<Float, NativeError> {
 /// Converts a finite, integral binary64 exactly to an arbitrary integer.
 /// Non-finite or fractional values raise `number_range`. Both zeros become 0.
 pub fn float_to_integer(value: Float) -> Result<Integer, NativeError> {
+    /// 2^63: every integral float in `[-2^63, 2^63)` is exactly a word.
+    const WORD: f64 = 9_223_372_036_854_775_808.0;
     let value = value.get();
     if !value.is_finite() || value.trunc() != value {
         return Err(raised("number_range", "expected a finite integral float"));
+    }
+    if (-WORD..WORD).contains(&value) {
+        return Ok(Integer::from(value as i64));
     }
     BigInt::from_f64(value)
         .map(Integer::new)
@@ -55,6 +60,35 @@ pub(crate) fn dyadic(value: f64) -> (BigInt, i32) {
     )
 }
 
+/// [`int_float_cmp`] of `integer`, a word compared in place (FIG-6820).
+fn integer_float_cmp(integer: &Integer, float: f64) -> Option<Ordering> {
+    match integer.word() {
+        Some(word) => word_float_cmp(word, float),
+        None => int_float_cmp(&integer.as_bigint(), float),
+    }
+}
+
+/// [`int_float_cmp`] of a word, exact without an arbitrary integer: a
+/// float in `[-2^63, 2^63)` is its integral part, a word, and its fraction.
+fn word_float_cmp(word: i64, float: f64) -> Option<Ordering> {
+    /// 2^63: every integral float in `[-2^63, 2^63)` is exactly a word.
+    const WORD: f64 = 9_223_372_036_854_775_808.0;
+    if float.is_nan() {
+        return None;
+    }
+    if float >= WORD {
+        return Some(Ordering::Less);
+    }
+    if float < -WORD {
+        return Some(Ordering::Greater);
+    }
+    let whole = float.trunc();
+    Some(
+        word.cmp(&(whole as i64))
+            .then_with(|| whole.partial_cmp(&float).unwrap_or(Ordering::Equal)),
+    )
+}
+
 pub(crate) fn int_float_cmp(integer: &BigInt, float: f64) -> Option<Ordering> {
     if float.is_nan() {
         return None;
@@ -83,9 +117,9 @@ pub(crate) fn scalar_cmp(a: &Numeric, b: &Numeric) -> Result<Option<Ordering>, N
     match (a, b) {
         (Numeric::Int(a), Numeric::Int(b)) => Ok(Some(a.cmp(b))),
         (Numeric::Float(a), Numeric::Float(b)) => Ok(float_cmp(*a, *b)),
-        (Numeric::Int(a), Numeric::Float(b)) => Ok(int_float_cmp(&a.as_bigint(), b.get())),
+        (Numeric::Int(a), Numeric::Float(b)) => Ok(integer_float_cmp(a, b.get())),
         (Numeric::Float(a), Numeric::Int(b)) => {
-            Ok(int_float_cmp(&b.as_bigint(), a.get()).map(Ordering::reverse))
+            Ok(integer_float_cmp(b, a.get()).map(Ordering::reverse))
         }
         _ => Err(raised("type_error", "expected two numbers")),
     }
@@ -209,4 +243,118 @@ pub(crate) fn number_cmp(
     new: &mut Nursery<'_>,
 ) -> Result<Option<Ordering>, NativeError> {
     scalar_cmp(&Numeric::read(a, args, new)?, &Numeric::read(b, args, new)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_kernel_doc::{Float, Integer};
+    use num_bigint::BigInt;
+    use num_traits::FromPrimitive;
+
+    use super::float_to_integer;
+
+    /// A word compares with a float as its arbitrary integer does
+    /// ([`super::int_float_cmp`]) on both sides of 2^53 and 2^63, negated,
+    /// at fractions, zeros, infinities and NaN (FIG-6820).
+    #[test]
+    fn word_float_comparison_is_exact_across_the_word_bounds() {
+        let two53 = 9_007_199_254_740_992.0_f64;
+        let two63 = 9_223_372_036_854_775_808.0_f64;
+        let mut words = vec![
+            0_i64,
+            1,
+            2,
+            (1 << 53) - 1,
+            1 << 53,
+            (1 << 53) + 1,
+            i64::MAX - 1,
+            i64::MAX,
+        ];
+        words.extend(words.clone().into_iter().map(|word| -word));
+        words.push(i64::MIN);
+        let mut floats = vec![
+            0.0,
+            0.5,
+            1.0,
+            1.5,
+            two53 - 1.0,
+            two53,
+            two53 + 2.0,
+            f64::from_bits(two63.to_bits() - 1),
+            two63,
+            f64::from_bits(two63.to_bits() + 1),
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::INFINITY,
+        ];
+        floats.extend(floats.clone().into_iter().map(|value| -value));
+        floats.push(f64::NAN);
+        for &word in &words {
+            for &float in &floats {
+                assert_eq!(
+                    super::word_float_cmp(word, float),
+                    super::int_float_cmp(&BigInt::from(word), float),
+                    "{word} against {float:e}"
+                );
+            }
+        }
+    }
+
+    /// An integral float converts to the integer `BigInt::from_f64` makes
+    /// of it on both sides of the word path's bounds, 2^53 and 2^63, and
+    /// negated, and every non-finite or fractional float raises
+    /// `number_range` (FIG-6820).
+    #[test]
+    fn float_to_integer_is_exact_across_the_word_bounds() {
+        let two53 = 9_007_199_254_740_992.0_f64;
+        let two63 = 9_223_372_036_854_775_808.0_f64;
+        let mut integral = vec![
+            0.0,
+            -0.0,
+            1.0,
+            two53 - 1.0,
+            two53,
+            two53 + 2.0,
+            two63 / 2.0,
+            f64::from_bits(two63.to_bits() - 1),
+            two63,
+            f64::from_bits(two63.to_bits() + 1),
+            two63 * 2.0,
+            f64::MAX,
+        ];
+        integral.extend(integral.clone().into_iter().map(|value| -value));
+        for value in integral {
+            let expected = Integer::new(BigInt::from_f64(value).expect("an integral float"));
+            let converted = float_to_integer(Float::new(value)).expect("an integral float");
+            assert_eq!(converted, expected, "{value:e}");
+            assert_eq!(converted.word(), expected.word(), "{value:e}");
+        }
+        assert_eq!(
+            float_to_integer(Float::new(-two63))
+                .ok()
+                .and_then(|n| n.word()),
+            Some(i64::MIN)
+        );
+        assert_eq!(
+            float_to_integer(Float::new(two63))
+                .ok()
+                .and_then(|n| n.word()),
+            None
+        );
+        for value in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            0.5,
+            -1.5,
+            two53 / 2.0 - 0.5,
+        ] {
+            let error =
+                float_to_integer(Float::new(value)).expect_err("not a finite integral float");
+            assert!(
+                format!("{error:?}").contains("number_range"),
+                "{value:e}: {error:?}"
+            );
+        }
+    }
 }

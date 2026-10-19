@@ -289,16 +289,69 @@ impl std::fmt::Display for Step {
             } => write!(f, "heap.set_index({target}, {index}, {value})?;"),
             Self::Alternatives { name, alternatives } => {
                 writeln!(f, "let {name} = (|| {{")?;
-                for (steps, value) in alternatives {
-                    writeln!(f, "if let Some(value) = (|| {{")?;
-                    for step in steps {
-                        writeln!(f, "{step}")?;
-                    }
-                    writeln!(f, "Some({value})\n}})() {{ return Some(value); }}")?;
-                }
+                let alternatives: Vec<_> = alternatives
+                    .iter()
+                    .map(|(steps, value)| (steps.as_slice(), value.as_str()))
+                    .collect();
+                let mut code = String::new();
+                tree(&mut code, &alternatives, "");
+                f.write_str(&code)?;
                 writeln!(f, "None\n}})()?;\nlet _ = {name};")
             }
         }
+    }
+}
+
+/// Whether `step` computes from its operands alone and changes nothing:
+/// two alternatives that begin with it compute it alike, and it declines
+/// in both or in neither.
+fn pure(step: &Step) -> bool {
+    matches!(step, Step::Entry { .. } | Step::Guard { .. })
+}
+
+/// `alternatives`, each its steps and value, tried in order until one
+/// answers, rendered at `pad`: consecutive ones that begin with the same
+/// pure step compute it once, then try what follows it in each, so that
+/// where it declines none of them is tried (FIG-6820). The first to answer
+/// is the one the alternatives in order give, at the same steps.
+fn tree(code: &mut String, alternatives: &[(&[Step], &str)], pad: &str) {
+    let mut at = 0;
+    while let Some(&(steps, value)) = alternatives.get(at) {
+        let first = steps
+            .first()
+            .filter(|step| pure(step))
+            .map(ToString::to_string);
+        let run = match &first {
+            Some(first) => alternatives[at..]
+                .iter()
+                .take_while(|(steps, _)| {
+                    steps
+                        .first()
+                        .is_some_and(|step| pure(step) && step.to_string() == *first)
+                })
+                .count(),
+            None => 1,
+        };
+        let _ = writeln!(code, "{pad}if let Some(value) = (|| {{");
+        match first {
+            Some(first) if run > 1 => {
+                let _ = writeln!(code, "{pad}    {first}");
+                let rest: Vec<_> = alternatives[at..at + run]
+                    .iter()
+                    .map(|&(steps, value)| (&steps[1..], value))
+                    .collect();
+                tree(code, &rest, &format!("{pad}    "));
+                let _ = writeln!(code, "{pad}    None");
+            }
+            _ => {
+                for step in steps {
+                    let _ = writeln!(code, "{pad}    {step}");
+                }
+                let _ = writeln!(code, "{pad}    Some({value})");
+            }
+        }
+        let _ = writeln!(code, "{pad}}})() {{ return Some(value); }}");
+        at += run;
     }
 }
 
@@ -1113,6 +1166,28 @@ impl Evaluator<'_> {
                 }
             }
             let mut code = String::new();
+            if !self.heap {
+                // A scalar path's steps are pure: alternatives share what
+                // they begin with alike.
+                let mut values = Vec::new();
+                for (state, value) in &results {
+                    pass.depth = pass.depth.max(state.depth);
+                    values.push(
+                        value
+                            .clone()
+                            .or_else(|| Symbol::constant(Value::Null))?
+                            .code,
+                    );
+                }
+                let alternatives: Vec<_> = results
+                    .iter()
+                    .zip(&values)
+                    .map(|((state, _), value)| (state.steps.as_slice(), value.as_str()))
+                    .collect();
+                tree(&mut code, &alternatives, "            ");
+                pass.arms.entry(code).or_default().push(names);
+                continue;
+            }
             // What an earlier alternative declared is not a later one's.
             let binds = results.iter().any(|(state, _)| state.effects().binds);
             for (state, value) in results {
