@@ -283,7 +283,8 @@ impl Reader<'_> {
                         kind: k::ActKind::Call(k::Callee::Library(function)),
                         args,
                     }));
-                    height = height.max(h) + 1;
+                    // `h` counts the call node over the other operands.
+                    height = (height + 1).max(h);
                     self.depth(height)?;
                     continue;
                 }
@@ -345,53 +346,30 @@ impl Reader<'_> {
         }
         Ok((expr, height))
     }
-    /// Builtins and methods retain their nested expression operands.
+    /// A builtin or `type(...).__name__` as an author writes it, with its
+    /// expression operands; a method or slice is a postfix of its receiver.
+    /// None, before reading any name, when the text is not one.
     fn authored_expression(
         &self,
         c: &mut Cursor<'_>,
         nesting: usize,
     ) -> Result<Option<(k::Expr, usize)>> {
         let mut probe = Cursor::new(c.text);
-        if let Ok(Some(action)) = self.authored_call(&mut probe) {
-            c.text = probe.text;
-            return Ok(Some((action.into(), 2)));
-        }
-        let mut probe = Cursor::new(c.text);
-        let (label, mut args) = if probe.text.trim_start().starts_with('"') {
-            let receiver = k::Expr::Literal(k::Literal::Text(probe.string()?));
-            if !probe.take(".") {
-                return Ok(None);
-            }
-            let method = probe.word()?;
-            (format!("py.method.{method}"), vec![receiver])
-        } else {
-            let Ok(word) = probe.word() else {
-                return Ok(None);
-            };
-            if let Some(label) = crate::generated_operators::builtin_label(word) {
-                (label.to_owned(), Vec::new())
-            } else if word == "type" && probe.text.trim_start().starts_with('(') {
-                ("py.type".to_owned(), Vec::new())
-            } else {
-                if !probe.take(".") {
-                    return Ok(None);
-                }
-                let method = probe.word()?;
-                let label = format!("py.method.{method}");
-                if self.operators.unique(&label).is_none() {
-                    return Ok(None);
-                }
-                (label, vec![k::Expr::Variable(self.named(word)?)])
-            }
+        let Ok(word) = probe.word() else {
+            return Ok(None);
         };
-        let Some(function) = self.operators.unique(&label) else {
+        let label = match crate::generated_operators::builtin_label(word) {
+            Some(label) => label,
+            None if word == "type" => "py.type",
+            None => return Ok(None),
+        };
+        let Some(function) = self.operators.unique(label) else {
             return Ok(None);
         };
         if !probe.take("(") {
             return Ok(None);
         }
-        let (more, height) = self.inline_items(&mut probe, ")", nesting + 1)?;
-        args.extend(more);
+        let (args, height) = self.inline_items(&mut probe, ")", nesting + 1)?;
         if label == "py.type" {
             probe.expect(".__name__")?;
         }
@@ -401,7 +379,7 @@ impl Reader<'_> {
                 kind: k::ActKind::Call(k::Callee::Library(function)),
                 args,
             })),
-            height + 1,
+            height,
         )))
     }
 

@@ -502,127 +502,21 @@ impl<'a> Reader<'a> {
         }
         Ok(params)
     }
+    /// A whole right-hand side. A library action whose operands are all
+    /// atoms is the statement action, a leaf; any other stays an expression.
     fn inline_rhs(&self, c: &mut Cursor<'_>, depth: usize) -> Result<k::Rhs> {
         self.depth(depth)?;
         if c.text.trim_start().starts_with("k.") && Self::action_form(c.text) {
             return self.action_cursor(c).map(k::Rhs::Action);
         }
-        if let Ok(Some(action)) = self.authored_call(c) {
+        let (expr, height) = self.inline_value(c, 0)?;
+        if let k::Expr::Act(act) = &expr
+            && let Some(action) = act.as_action()
+        {
             return Ok(k::Rhs::Action(action));
         }
-        self.inline(c, depth).map(|expr| match expr {
-            k::Expr::Act(act) => match act.as_action() {
-                Some(action) => k::Rhs::Action(action),
-                None => k::Rhs::Expr(k::Expr::Act(act)),
-            },
-            expr => k::Rhs::Expr(expr),
-        })
-    }
-
-    /// A library action spelled as an author writes it: a builtin call or a
-    /// method of a variable ([`crate::generated_operators::Authored`]). None
-    /// when the text is not one; the base document must hold its helper once.
-    fn authored_call(&self, c: &mut Cursor<'_>) -> Result<Option<k::Action>> {
-        let mut probe = Cursor::new(c.text);
-        let receiver = if probe.text.trim_start().starts_with('"') {
-            Err(probe.string()?)
-        } else {
-            let Ok(word) = probe.word() else {
-                return Ok(None);
-            };
-            if word == "type" && probe.take("(") {
-                let value = self.atom(&mut probe)?;
-                probe.expect(")")?;
-                probe.expect(".__name__")?;
-                return self.commit(c, probe, "py.type", vec![value]);
-            }
-            if let Some(label) = crate::generated_operators::builtin_label(word) {
-                if !probe.take("(") || probe.text.trim_start().starts_with(')') {
-                    return Ok(None);
-                }
-                let args = self.call_operands(&mut probe, vec![])?;
-                return self.commit(c, probe, label, args);
-            }
-            if probe.text.starts_with('[') {
-                // A slice; without a colon this is an index expression.
-                let mut slice = Cursor::new(probe.text);
-                slice.expect("[")?;
-                let mut bounds = vec![];
-                let mut colons = 0;
-                loop {
-                    bounds.push(if slice.text.trim_start().starts_with([':', ']']) {
-                        k::Atom::Literal(k::Literal::Absent)
-                    } else {
-                        match self.atom(&mut slice) {
-                            Ok(atom) => atom,
-                            Err(_) => return Ok(None),
-                        }
-                    });
-                    if slice.take("]") {
-                        break;
-                    }
-                    if !slice.take(":") || colons == 2 {
-                        return Ok(None);
-                    }
-                    colons += 1;
-                }
-                if colons == 0 {
-                    return Ok(None);
-                }
-                bounds.resize(3, k::Atom::Literal(k::Literal::Absent));
-                let mut args = vec![k::Atom::Variable(self.named(word)?)];
-                args.extend(bounds);
-                return self.commit(c, slice, "py.slice", args);
-            }
-            Ok(word)
-        };
-        if !probe.take(".") {
-            return Ok(None);
-        }
-        let Ok(method) = probe.word() else {
-            return Ok(None);
-        };
-        let label = format!("py.method.{method}");
-        if self.operators.unique(&label).is_none() || !probe.take("(") {
-            return Ok(None);
-        }
-        let receiver = match receiver {
-            Ok(word) => k::Atom::Variable(self.named(word)?),
-            Err(text) => k::Atom::Literal(k::Literal::Text(text)),
-        };
-        let args = self.call_operands(&mut probe, vec![receiver])?;
-        self.commit(c, probe, &label, args)
-    }
-    /// Atoms up to the closing parenthesis, after `leading`.
-    fn call_operands(&self, c: &mut Cursor<'_>, mut args: Vec<k::Atom>) -> Result<Vec<k::Atom>> {
-        if !c.take(")") {
-            loop {
-                args.push(self.atom(c)?);
-                if c.take(")") {
-                    break;
-                }
-                c.expect(",")?;
-            }
-        }
-        Ok(args)
-    }
-    fn commit<'c>(
-        &self,
-        c: &mut Cursor<'c>,
-        probe: Cursor<'c>,
-        label: &str,
-        args: Vec<k::Atom>,
-    ) -> Result<Option<k::Action>> {
-        let function = self.operators.unique(label).ok_or_else(|| {
-            invalid(format!(
-                "`{label}` has no unique library action in the base document"
-            ))
-        })?;
-        c.text = probe.text;
-        Ok(Some(k::Action::Call {
-            callee: k::Callee::Library(function),
-            args,
-        }))
+        self.depth(depth + height - 1)?;
+        Ok(k::Rhs::Expr(expr))
     }
     fn await_call(&self, c: &mut Cursor<'_>) -> Result<k::Action> {
         self.awaited_expr(c, 0)?
@@ -1205,12 +1099,6 @@ impl<'a> Reader<'a> {
             c.finish()?;
             k::Stmt::Do {
                 value: k::Expr::Act(act),
-            }
-        } else if let Ok(Some(action)) = self.authored_call(&mut c) {
-            self.depth(depth + 1)?;
-            c.finish()?;
-            k::Stmt::Do {
-                value: action.into(),
             }
         } else if !c.text.starts_with("k.") {
             // Parse the place separately from the RHS; an annotation is the

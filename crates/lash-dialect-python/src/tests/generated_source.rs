@@ -1509,6 +1509,79 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
     );
 }
 
+/// G-SOURCE-RESOURCES: an authored call's argument charges each decoded alias
+/// occurrence once, whether the call is the whole right-hand side or computes
+/// its argument, so a budget the document fits reads it back exactly.
+#[test]
+fn authored_call_arguments_charge_each_decoded_alias_once() {
+    // The long illegal name prints as `kernel_name_1`, three times.
+    let long: k::Name = "a ".repeat(2048).as_str().into();
+    let length = k::FunctionId::from_bytes([94; 32]);
+    let len = |arg: k::Expr| {
+        k::Expr::Act(Box::new(k::ActExpr {
+            kind: k::ActKind::Call(k::Callee::Library(length)),
+            args: vec![arg],
+        }))
+    };
+    let mut document = k::Document::new(
+        k::NumberPolicy::BySpelling,
+        vec![
+            k::Stmt::Let {
+                name: long.clone(),
+                value: k::Rhs::Expr(k::Expr::Record(vec![k::RecordEntry {
+                    field: "field".into(),
+                    value: k::Expr::Literal(k::Literal::Text("v".into())),
+                }])),
+            },
+            k::Stmt::Let {
+                name: "computed".into(),
+                value: k::Rhs::Expr(len(k::Expr::Member(Box::new(k::Member::Field {
+                    target: k::Expr::Variable(long.clone()),
+                    field: "field".into(),
+                })))),
+            },
+            k::Stmt::Let {
+                name: "atomic".into(),
+                value: k::Rhs::Action(k::Action::Call {
+                    callee: k::Callee::Library(length),
+                    args: vec![k::Atom::Variable(long)],
+                }),
+            },
+            k::Stmt::Finish {
+                value: k::Expr::List(vec![
+                    k::Expr::Variable("computed".into()),
+                    k::Expr::Variable("atomic".into()),
+                ]),
+            },
+        ],
+    );
+    document
+        .manifest
+        .functions
+        .insert(length, k::FunctionName::new("py.length").unwrap());
+    let printed = roundtrip(&document, false);
+    assert!(
+        printed.source.contains("len(kernel_name_1.field)")
+            && printed.source.contains("atomic = len(kernel_name_1)"),
+        "{}",
+        printed.source
+    );
+    let limits = GeneratedSourceLimits {
+        max_bytes: printed
+            .source
+            .len()
+            .max(serde_json::to_vec(&document).unwrap().len()),
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::read(&printed.source, &document, limits)
+            .unwrap()
+            .0
+            .canonical_bytes(),
+        document.canonical_bytes()
+    );
+}
+
 mod acceptance;
 mod readable;
 
