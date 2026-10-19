@@ -23,6 +23,22 @@ fn parsed(lab: &mut Lab, text: &str, ty: &Type, policy: NumberPolicy) -> Result<
     });
     result.map_err(|error| lab.kind(Err::<(), _>(error)))
 }
+/// `parsed`, with the guest objects the call built, counted in its nursery
+/// before the bench installs or discards them (a big integer counts here,
+/// though `lab.allocated` counts only mutable objects).
+fn parsed_built(lab: &mut Lab, text: &str, ty: &Type) -> (Result<Value, String>, usize) {
+    let (result, built) = lab.spy(&[], |args, new| {
+        let result = parse_json(
+            text,
+            ty,
+            NumberPolicy::Float,
+            args.limits().document_depth(),
+            new,
+        );
+        (result, new.built().len())
+    });
+    (result.map_err(|error| lab.kind(Err::<(), _>(error))), built)
+}
 fn stringified(lab: &mut Lab, value: &Value) -> Result<String, String> {
     let value = *value;
     let result = lab.spy(&[value], |args, new| stringify_json(&value, &args, new));
@@ -195,13 +211,29 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
         }],
         rest: None,
     });
-    for json in ["{}", r#"{"x":[1.5]}"#, r#"{"x":[1],"extra":0}"#] {
-        assert_eq!(
-            parsed(&mut lab, json, &ty, NumberPolicy::Float).unwrap_err(),
-            "effect_result"
-        );
-        assert_eq!(lab.allocated, 0);
+    for json in [
+        "{}",
+        r#"{"x":[1.5]}"#,
+        r#"{"x":[1],"extra":0}"#,
+        r#"{"x":[18446744073709551617],"extra":0}"#,
+    ] {
+        let (result, built) = parsed_built(&mut lab, json, &ty);
+        assert_eq!(result.unwrap_err(), "effect_result", "{json}");
+        assert_eq!(built, 0, "{json} built before its refusal");
     }
+    // Every union member fails past an early big integer: nothing is built.
+    // When the last fits, the big integer and its tuple are built once each.
+    let pair = |second| Type::Tuple(vec![Type::Int, second]);
+    let refused = Type::Union(vec![pair(Type::Text), pair(Type::Bool)]);
+    let (result, built) = parsed_built(&mut lab, "[18446744073709551617,0]", &refused);
+    assert_eq!((result.unwrap_err().as_str(), built), ("effect_result", 0));
+    let fitting = Type::Union(vec![pair(Type::Text), pair(Type::Int)]);
+    let (result, built) = parsed_built(&mut lab, "[18446744073709551617,0]", &fitting);
+    assert_eq!(
+        lab.datum(&result.unwrap()),
+        Datum::Tuple(vec![big("18446744073709551617"), i(0)])
+    );
+    assert_eq!(built, 2);
     let value = parsed(&mut lab, r#"{"x":[1.0,1e3]}"#, &ty, NumberPolicy::Float).unwrap();
     assert_eq!(stringified(&mut lab, &value).unwrap(), r#"{"x":[1,1000]}"#);
     let value = parsed(

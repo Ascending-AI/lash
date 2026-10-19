@@ -32,6 +32,33 @@ pub fn decode_number(
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
+    Ok(convert_number(token, expected, policy, new)?.store(new))
+}
+
+/// A JSON number converted for its stated type, not yet stored.
+enum Number {
+    Int(Integer),
+    Float(Float),
+}
+
+impl Number {
+    /// The value naming the number: a big integer is built in `new`.
+    fn store(self, new: &mut Nursery<'_>) -> Value {
+        match self {
+            Number::Int(integer) => new.integer(integer),
+            Number::Float(float) => Value::Float(float),
+        }
+    }
+}
+
+/// `decode_number`'s conversion. It builds nothing: `new` only reserves the
+/// digits an exponent adds.
+fn convert_number(
+    token: &NumberToken,
+    expected: &Type,
+    policy: NumberPolicy,
+    new: &mut Nursery<'_>,
+) -> Result<Number, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
             if policy == NumberPolicy::BySpelling && token.is_integer_spelling() {
@@ -42,8 +69,8 @@ pub fn decode_number(
         }
         Type::Union(members) => {
             for member in members {
-                match decode_number(token, member, policy, new) {
-                    Ok(value) => return Ok(value),
+                match convert_number(token, member, policy, new) {
+                    Ok(number) => return Ok(number),
                     Err(error) if raised(&error) => {}
                     Err(error) => return Err(error),
                 }
@@ -55,14 +82,14 @@ pub fn decode_number(
     match selected {
         Type::Int => {
             let integer = exact_integer(token.as_str(), new)?;
-            Ok(new.integer(Integer::new(integer)))
+            Ok(Number::Int(Integer::new(integer)))
         }
         Type::Float => token
             .as_str()
             .parse::<f64>()
             .ok()
             .filter(|f| f.is_finite())
-            .map(|f| Value::Float(Float::new(f)))
+            .map(|f| Number::Float(Float::new(f)))
             .ok_or_else(mismatch),
         _ => Err(mismatch()),
     }
@@ -119,145 +146,134 @@ enum Json {
 mod reader;
 use reader::{read, syntax};
 
-fn fits(
-    json: &Json,
+/// A JSON value checked against its stated type: its numbers converted and
+/// its containers' kinds chosen, its text borrowed from the parsed tree.
+/// Checking builds no guest object; [`build`] does, from these decisions.
+enum Checked<'j> {
+    Null,
+    Bool(bool),
+    Text(&'j str),
+    Number(Number),
+    List(Vec<Checked<'j>>),
+    Tuple(Vec<Checked<'j>>),
+    Record(Vec<(&'j str, Checked<'j>)>),
+    Map(Vec<(&'j str, Checked<'j>)>),
+}
+
+fn check<'j>(
+    json: &'j Json,
     ty: &Type,
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
-) -> Result<(), NativeError> {
+) -> Result<Checked<'j>, NativeError> {
     if let Type::Union(members) = ty {
         for member in members {
-            match fits(json, member, policy, new) {
-                Ok(()) => return Ok(()),
+            match check(json, member, policy, new) {
+                Ok(checked) => return Ok(checked),
                 Err(error) if raised(&error) => {}
                 Err(error) => return Err(error),
             }
         }
         return Err(mismatch());
     }
-    match (json, ty) {
-        (Json::Number(token), _) => {
-            decode_number(token, ty, policy, new)?;
-        }
-        (Json::Null, Type::Null | Type::Any)
-        | (Json::Bool(_), Type::Bool | Type::Any)
-        | (Json::Text(_), Type::Text | Type::Any) => {}
-        (Json::Text(text), Type::Enum(members)) if members.contains(text) => {}
-        (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => {
-            for (item, ty) in items.iter().zip(types) {
-                fits(item, ty, policy, new)?;
-            }
-        }
-        (Json::Array(items), Type::List(element)) => {
-            for item in items {
-                fits(item, element, policy, new)?;
-            }
-        }
-        (Json::Array(items), Type::Any) => {
-            for item in items {
-                fits(item, &Type::Any, policy, new)?;
-            }
-        }
-        (Json::Object(fields), Type::Any) => {
-            for (_, value) in fields {
-                fits(value, &Type::Any, policy, new)?;
-            }
-        }
+    let list = |items: &'j [Json], element: &Type, new: &mut Nursery<'_>| {
+        items
+            .iter()
+            .map(|item| check(item, element, policy, new))
+            .collect::<Result<_, _>>()
+    };
+    Ok(match (json, ty) {
+        (Json::Number(token), _) => Checked::Number(convert_number(token, ty, policy, new)?),
+        (Json::Null, Type::Null | Type::Any) => Checked::Null,
+        (Json::Bool(value), Type::Bool | Type::Any) => Checked::Bool(*value),
+        (Json::Text(text), Type::Text | Type::Any) => Checked::Text(text),
+        (Json::Text(text), Type::Enum(members)) if members.contains(text) => Checked::Text(text),
+        (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => Checked::Tuple(
+            items
+                .iter()
+                .zip(types)
+                .map(|(item, ty)| check(item, ty, policy, new))
+                .collect::<Result<_, _>>()?,
+        ),
+        (Json::Array(items), Type::List(element)) => Checked::List(list(items, element, new)?),
+        (Json::Array(items), Type::Any) => Checked::List(list(items, &Type::Any, new)?),
+        (Json::Object(fields), Type::Any) => Checked::Record(
+            fields
+                .iter()
+                .map(|(name, value)| Ok((name.as_str(), check(value, &Type::Any, policy, new)?)))
+                .collect::<Result<_, NativeError>>()?,
+        ),
         (Json::Object(fields), Type::Record(record)) => {
             for field in &record.fields {
                 if !field.optional && !fields.iter().any(|(name, _)| *name == field.name) {
                     return Err(mismatch());
                 }
             }
-            for (name, value) in fields {
-                let ty = record
-                    .fields
+            Checked::Record(
+                fields
                     .iter()
-                    .find(|field| field.name == *name)
-                    .map(|field| &field.ty)
-                    .or(record.rest.as_deref())
-                    .ok_or_else(mismatch)?;
-                fits(value, ty, policy, new)?;
-            }
-        }
-        (Json::Object(fields), Type::Map(map)) => {
-            for (name, value) in fields {
-                fits(&Json::Text(name.clone()), &map.key, policy, new)?;
-                fits(value, &map.value, policy, new)?;
-            }
-        }
-        _ => return Err(mismatch()),
-    }
-    Ok(())
-}
-
-fn decode(
-    json: &Json,
-    ty: &Type,
-    policy: NumberPolicy,
-    new: &mut Nursery<'_>,
-) -> Result<Value, NativeError> {
-    if let Type::Union(members) = ty {
-        for member in members {
-            match fits(json, member, policy, new) {
-                Ok(()) => return decode(json, member, policy, new),
-                Err(error) if raised(&error) => {}
-                Err(error) => return Err(error),
-            }
-        }
-        return Err(mismatch());
-    }
-    match json {
-        Json::Null => Ok(Value::Null),
-        Json::Bool(value) => Ok(Value::Bool(*value)),
-        Json::Text(text) => Ok(new.text(text)),
-        Json::Number(token) => decode_number(token, ty, policy, new),
-        Json::Array(items) => {
-            let values: Result<Vec<_>, _> = items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| {
-                    let ty = match ty {
-                        Type::List(element) => element.as_ref(),
-                        Type::Tuple(types) => &types[index],
-                        _ => &Type::Any,
-                    };
-                    decode(item, ty, policy, new)
-                })
-                .collect();
-            let values = values?;
-            Ok(new.allocate(match ty {
-                Type::Tuple(_) => NewObject::Tuple(values),
-                _ => NewObject::List(values),
-            }))
-        }
-        Json::Object(fields) => {
-            let values: Result<Vec<_>, NativeError> = fields
-                .iter()
-                .map(|(name, item)| {
-                    let ty = match ty {
-                        Type::Record(record) => record
+                    .map(|(name, value)| {
+                        let ty = record
                             .fields
                             .iter()
                             .find(|field| field.name == *name)
                             .map(|field| &field.ty)
                             .or(record.rest.as_deref())
-                            .ok_or_else(mismatch)?,
-                        Type::Map(map) => &map.value,
-                        _ => &Type::Any,
-                    };
-                    let key = new.text(name);
-                    Ok((key, decode(item, ty, policy, new)?))
-                })
-                .collect();
-            let values = values?;
-            Ok(new.allocate(if matches!(ty, Type::Map(_)) {
-                NewObject::Map(values)
-            } else {
-                NewObject::Record(values)
-            }))
+                            .ok_or_else(mismatch)?;
+                        Ok((name.as_str(), check(value, ty, policy, new)?))
+                    })
+                    .collect::<Result<_, NativeError>>()?,
+            )
         }
+        (Json::Object(fields), Type::Map(map)) => Checked::Map(
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    if !key_fits(name, &map.key) {
+                        return Err(mismatch());
+                    }
+                    Ok((name.as_str(), check(value, &map.value, policy, new)?))
+                })
+                .collect::<Result<_, NativeError>>()?,
+        ),
+        _ => return Err(mismatch()),
+    })
+}
+
+/// Whether an object key, which is always text, fits a map's key type.
+fn key_fits(name: &str, ty: &Type) -> bool {
+    match ty {
+        Type::Text | Type::Any => true,
+        Type::Enum(members) => members.iter().any(|member| member == name),
+        Type::Union(members) => members.iter().any(|member| key_fits(name, member)),
+        _ => false,
     }
+}
+
+/// The fresh graph a checked value names, built by its decisions.
+fn build(checked: Checked<'_>, new: &mut Nursery<'_>) -> Value {
+    let object = match checked {
+        Checked::Null => return Value::Null,
+        Checked::Bool(value) => return Value::Bool(value),
+        Checked::Text(text) => return new.text(text),
+        Checked::Number(number) => return number.store(new),
+        Checked::List(items) => NewObject::List(build_all(items, new)),
+        Checked::Tuple(items) => NewObject::Tuple(build_all(items, new)),
+        Checked::Record(fields) => NewObject::Record(build_fields(fields, new)),
+        Checked::Map(fields) => NewObject::Map(build_fields(fields, new)),
+    };
+    new.allocate(object)
+}
+
+fn build_all(items: Vec<Checked<'_>>, new: &mut Nursery<'_>) -> Vec<Value> {
+    items.into_iter().map(|item| build(item, new)).collect()
+}
+
+fn build_fields(fields: Vec<(&str, Checked<'_>)>, new: &mut Nursery<'_>) -> Vec<(Value, Value)> {
+    fields
+        .into_iter()
+        .map(|(name, item)| (new.text(name), build(item, new)))
+        .collect()
 }
 
 /// Parses strict JSON into a fresh kernel graph, decoded by the stated type.
@@ -275,8 +291,8 @@ pub fn parse_json(
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     let json = read(text, depth_limit, new)?;
-    fits(&json, expected, policy, new)?;
-    decode(&json, expected, policy, new)
+    let checked = check(&json, expected, policy, new)?;
+    Ok(build(checked, new))
 }
 
 /// The text `stringify` writes. A shared object is written once for every
@@ -664,7 +680,9 @@ fn decode_with_numbers(
                 .collect::<Result<_, NativeError>>()?;
             Ok(new.allocate(NewObject::Record(values)))
         }
-        _ => decode(json, &Type::Any, policy, new),
+        Json::Null => Ok(Value::Null),
+        Json::Bool(value) => Ok(Value::Bool(*value)),
+        Json::Text(text) => Ok(new.text(text)),
     }
 }
 
