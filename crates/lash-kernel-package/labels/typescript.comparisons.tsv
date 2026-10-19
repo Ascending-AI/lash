@@ -1,0 +1,7 @@
+ts.ge	Ge
+ts.gt	Gt
+ts.le	Le
+ts.lt	Lt
+ts.not	Not
+ts.strict_equals	Eq
+ts.strict_not_equals	Ne

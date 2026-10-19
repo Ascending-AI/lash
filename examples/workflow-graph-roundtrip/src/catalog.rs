@@ -85,6 +85,11 @@ impl Catalog {
         core: &LashCore,
         environment: &WorkflowEnvironment,
     ) -> Result<Self, RunError> {
+        let packages =
+            lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
+        let package_view = packages
+            .view(&packages.own())
+            .map_err(|error| RunError::Invalid(error.to_string()))?;
         let cases: Vec<Case> = serde_json::from_str(workflow_corpus::CATALOG_JSON)?;
         let mut workflows = Vec::new();
         for case in cases {
@@ -161,12 +166,17 @@ impl Catalog {
             let typescript = twins.next().flatten();
             let python = twins.next().flatten();
             let size = |twin: &ImportedTwin| {
-                entry_view(&twin.document, &twin.entry, environment.functions())
-                    .map(|view| LoweringSize {
-                        statements: view.statements.len(),
-                        scopes: view.scopes.len(),
-                    })
-                    .map_err(RunError::Invalid)
+                entry_view(
+                    &twin.document,
+                    &twin.entry,
+                    environment.functions(),
+                    &package_view,
+                )
+                .map(|view| LoweringSize {
+                    statements: view.statements.len(),
+                    scopes: view.scopes.len(),
+                })
+                .map_err(RunError::Invalid)
             };
             let ts_size = typescript
                 .as_ref()
@@ -242,6 +252,7 @@ pub(crate) fn entry_view(
     document: &Document,
     entry: &Name,
     functions: &FunctionRegistry,
+    packages: &lash::package::PackageView<'_>,
 ) -> Result<lash::workflow::view::WorkflowView, String> {
     let checked = WorkflowDocument::derive(
         document.clone(),
@@ -251,7 +262,7 @@ pub(crate) fn entry_view(
         functions,
     )
     .map_err(|error| error.to_string())?;
-    lash::workflow::view::derive(&checked).map_err(|error| error.to_string())
+    lash::workflow::view::derive(&checked, packages).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -401,8 +412,13 @@ mod tests {
                 continue;
             };
             let unit = Unit::Function(workflow.entry.clone());
-            let view = entry_view(&workflow.document, &workflow.entry, environment.functions())
-                .expect("the example's view");
+            let view = entry_view(
+                &workflow.document,
+                &workflow.entry,
+                environment.functions(),
+                &crate::test_packages(),
+            )
+            .expect("the example's view");
             let n = (workflow.document.site_ordinals().len()
                 + workflow.document.action_ordinals().len()
                 + workflow.document.condition_ordinals().len()) as u32;

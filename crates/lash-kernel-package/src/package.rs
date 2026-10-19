@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-use lash_helper_labels::Label;
+use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{Export, MemberPath, PackagePath, Segment};
 use lash_kernel_doc::{
     ArtifactDigest, Expr, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Literal,
@@ -82,8 +82,8 @@ pub enum Origin {
 /// enters the digest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PackageDisplay {
-    pub members: BTreeMap<MemberPath, Label>,
-    pub definitions: BTreeMap<FunctionName, Label>,
+    pub members: BTreeMap<MemberPath, MemberDisplay>,
+    pub definitions: BTreeMap<FunctionName, MemberDisplay>,
 }
 
 /// The definition name of a package's generated building-artifact

@@ -2228,9 +2228,6 @@ dependencies = [
 [[package]]
 name = "lash-helper-labels"
 version = "0.0.0-dev"
-dependencies = [
- "lash-kernel-doc",
-]
 
 [[package]]
 name = "lash-internal-checkpoint-encoder"
@@ -3132,7 +3129,6 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
- "lash-helper-labels",
  "lash-internal-checkpoint-encoder",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3256,6 +3252,7 @@ dependencies = [
  "lash-kernel-edit",
  "lash-kernel-exec",
  "lash-kernel-lib",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-view",
  "lash-kernel-vm",
@@ -3371,11 +3368,13 @@ dependencies = [
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-helper-labels",
+ "lash-internal-vm-library",
  "lash-internal-vm-worker",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-edit",
+ "lash-kernel-package",
  "schemars",
  "serde",
  "serde_json",
@@ -3518,7 +3517,6 @@ dependencies = [
  "futures-util",
  "lash-dialect-python",
  "lash-dialect-typescript",
- "lash-helper-labels",
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-store",
@@ -6932,7 +6930,6 @@ dependencies = [
  "anyhow",
  "lash-dialect-python",
  "lash-dialect-typescript",
- "lash-helper-labels",
  "lash-internal-vm-worker",
  "lash-kernel-check",
  "lash-kernel-dialect",

@@ -1094,6 +1094,16 @@
   },
   "crates/lash-kernel-package": {
     "compile_data": [
+      "labels/date.tsv",
+      "labels/kernel.comparisons.tsv",
+      "labels/kernel.tsv",
+      "labels/python.comparisons.tsv",
+      "labels/python.replies.tsv",
+      "labels/python.tsv",
+      "labels/regex.tsv",
+      "labels/typescript.comparisons.tsv",
+      "labels/typescript.tsv",
+      "labels/url.tsv",
       "src/testing/dataframe.kernel",
       "src/testing/dataframe.labels.tsv",
       "src/testing/dataframe.surface"

@@ -1,129 +1,29 @@
-//! Display data keyed by the name on a document's `use` line.
+//! Package-owned display facts, without execution semantics.
 //!
-//! Labels carry no execution semantics and are never part of a function's
-//! definition or identity. Reading them links no dialect or helper release.
-//! Beside its labels, each library declares which of its functions are
-//! comparisons ([`Library::comparisons`]), so a reader shows a condition as
-//! the comparison its dialect wrote with no table of dialect names of its own,
-//! and which receive an effect's reply ([`Library::replies`]), so a reader
-//! names the step a value came from through its dialect's reply helper.
+//! The package crate owns each display entry and its key. This crate supplies
+//! the plain data and the two-column label reader; it owns no library inventory.
 
-use lash_kernel_doc::FunctionName;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-/// A host-facing title for a library function. Roles belong to the host.
+/// Display facts for one package member or one private library definition.
+///
+/// Each comparison holds for exactly the arguments the function answers
+/// `true` for, under its own equality, order or truth, in parameter order.
+/// A reply receiver takes one effect reply and returns that reply in its
+/// dialect's representation; it neither selects a part nor converts its kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Label {
+pub struct MemberDisplay {
     pub title: String,
+    pub comparison: Option<Comparison>,
+    pub reply: bool,
 }
 
-/// Labels are keyed by name, including when several retained ids share a name.
-pub type FunctionLabels = BTreeMap<FunctionName, Label>;
-
-/// One closed library, with its own reviewed label side file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Library {
-    Kernel,
-    TypeScript,
-    Python,
-    Regex,
-    Date,
-    Url,
-}
-
-impl Library {
-    pub const ALL: [Self; 6] = [
-        Self::Kernel,
-        Self::TypeScript,
-        Self::Python,
-        Self::Regex,
-        Self::Date,
-        Self::Url,
-    ];
-
-    fn data(self) -> &'static str {
-        match self {
-            Self::Kernel => include_str!("../labels/kernel.tsv"),
-            Self::TypeScript => include_str!("../labels/typescript.tsv"),
-            Self::Python => include_str!("../labels/python.tsv"),
-            Self::Regex => include_str!("../labels/regex.tsv"),
-            Self::Date => include_str!("../labels/date.tsv"),
-            Self::Url => include_str!("../labels/url.tsv"),
-        }
-    }
-
-    /// Reads this library's labels, refusing duplicate names and empty titles.
-    pub fn labels(self) -> Result<FunctionLabels, LabelError> {
-        read(self.data())
-    }
-
-    /// This library's functions that decide one comparison of their
-    /// arguments, in parameter order: each one's [`Comparison`] holds for
-    /// exactly the arguments the function answers `true` for, under the
-    /// library's own meaning of equality, order or truth. A function that
-    /// takes its operands in another order, packs them, or also converts
-    /// them is not listed.
-    pub fn comparisons(self) -> &'static [(&'static str, Comparison)] {
-        use Comparison::{Contains, EndsWith, Eq, Ge, Gt, Le, Lt, Ne, Not, StartsWith};
-        match self {
-            Self::Kernel => &[
-                ("bool.not", Not),
-                ("eq", Eq),
-                ("float.eq", Eq),
-                ("float.ge", Ge),
-                ("float.gt", Gt),
-                ("float.le", Le),
-                ("float.lt", Lt),
-                ("ge", Ge),
-                ("gt", Gt),
-                ("int.eq", Eq),
-                ("int.ge", Ge),
-                ("int.gt", Gt),
-                ("int.le", Le),
-                ("int.lt", Lt),
-                ("le", Le),
-                ("list.contains", Contains),
-                ("lt", Lt),
-                ("map.contains", Contains),
-                ("num.eq", Eq),
-                ("num.ge", Ge),
-                ("num.gt", Gt),
-                ("num.le", Le),
-                ("num.lt", Lt),
-                ("record.contains", Contains),
-                ("set.contains", Contains),
-                ("text.ends_with", EndsWith),
-                ("text.starts_with", StartsWith),
-                ("tuple.contains", Contains),
-            ],
-            Self::TypeScript => &[
-                ("ts.ge", Ge),
-                ("ts.gt", Gt),
-                ("ts.le", Le),
-                ("ts.lt", Lt),
-                ("ts.not", Not),
-                ("ts.strict_equals", Eq),
-                ("ts.strict_not_equals", Ne),
-            ],
-            Self::Python => &[
-                ("py.contains", Contains),
-                ("py.method.endswith", EndsWith),
-                ("py.method.startswith", StartsWith),
-            ],
-            Self::Regex | Self::Date | Self::Url => &[],
-        }
-    }
-
-    /// This library's functions that receive an effect's reply: each takes
-    /// one argument, what a `perform` yielded, and answers that reply as
-    /// the library's dialect holds it, so its value is still what the
-    /// effect returned. A function that reads a part of its argument or
-    /// converts it to another kind of value is not listed.
-    pub fn replies(self) -> &'static [&'static str] {
-        match self {
-            // The reply reads as `json.loads` gives it.
-            Self::Python => &["py.reply"],
-            Self::Kernel | Self::TypeScript | Self::Regex | Self::Date | Self::Url => &[],
+impl MemberDisplay {
+    pub fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            comparison: None,
+            reply: false,
         }
     }
 }
@@ -164,24 +64,6 @@ impl Comparison {
     }
 }
 
-/// Every shipped library's comparisons, by function name.
-pub fn comparisons() -> BTreeMap<&'static str, Comparison> {
-    Library::ALL
-        .into_iter()
-        .flat_map(Library::comparisons)
-        .copied()
-        .collect()
-}
-
-/// Every shipped library's reply receivers, by function name.
-pub fn replies() -> BTreeSet<&'static str> {
-    Library::ALL
-        .into_iter()
-        .flat_map(Library::replies)
-        .copied()
-        .collect()
-}
-
 /// A malformed shipped side file: a build defect, never guest input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LabelError {
@@ -196,8 +78,16 @@ impl std::fmt::Display for LabelError {
 }
 impl std::error::Error for LabelError {}
 
-fn read(data: &str) -> Result<FunctionLabels, LabelError> {
-    let mut labels = FunctionLabels::new();
+/// Read a package's `name<TAB>title` side file through its key parser.
+///
+/// The package supplies the interpretation of a name: a canonical member path
+/// for a host package, or a definition name for a built-in package. Duplicate
+/// parsed keys and empty titles are refused rather than silently overwritten.
+pub fn read_labels<K: Ord>(
+    data: &str,
+    mut parse_key: impl FnMut(&str) -> Option<K>,
+) -> Result<BTreeMap<K, MemberDisplay>, LabelError> {
+    let mut labels = BTreeMap::new();
     for (index, row) in data.lines().enumerate() {
         let fail = |message: &str| LabelError {
             line: index + 1,
@@ -206,92 +96,35 @@ fn read(data: &str) -> Result<FunctionLabels, LabelError> {
         let (name, title) = row
             .split_once('\t')
             .ok_or_else(|| fail("expected name and title"))?;
-        let name = FunctionName::new(name).map_err(|_| fail("invalid function name"))?;
+        let name = parse_key(name).ok_or_else(|| fail("invalid display key"))?;
         if title.trim().is_empty() || title.contains('\t') {
             return Err(fail("expected one non-empty title"));
         }
-        if labels
-            .insert(
-                name,
-                Label {
-                    title: title.into(),
-                },
-            )
-            .is_some()
-        {
-            return Err(fail("duplicate function name"));
+        if labels.insert(name, MemberDisplay::new(title)).is_some() {
+            return Err(fail("duplicate display key"));
         }
     }
     Ok(labels)
-}
-
-/// Reads all shipped labels independently of installed dialect features.
-pub fn labels() -> Result<FunctionLabels, LabelError> {
-    let mut labels = FunctionLabels::new();
-    for library in Library::ALL {
-        for (name, label) in library.labels()? {
-            if labels.insert(name, label).is_some() {
-                return Err(LabelError {
-                    line: 0,
-                    message: "name shared by label libraries".into(),
-                });
-            }
-        }
-    }
-    Ok(labels)
-}
-
-/// Unknown (including removed) helpers display their bare document name.
-pub fn title<'a>(labels: &'a FunctionLabels, name: &'a FunctionName) -> &'a str {
-    labels
-        .get(name)
-        .map_or_else(|| name.as_str(), |label| label.title.as_str())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// HELP-LABEL: a reader with only kernel-doc labels real TS and Python calls.
-    #[test]
-    fn a_reader_without_dialects_reads_labels_and_unknown_names() {
-        let labels = labels().unwrap();
-        for (name, expected) in [
-            ("ts.array.map", "TypeScript array map"),
-            ("py.str", "Python str"),
-        ] {
-            assert_eq!(title(&labels, &FunctionName::new(name).unwrap()), expected);
-        }
-        let unknown = FunctionName::new("future.removed_helper").unwrap();
-        assert_eq!(title(&labels, &unknown), "future.removed_helper");
-    }
-
-    /// HELP-COMPARE: a library declares comparisons and reply receivers
-    /// only of functions it labels, so neither name is ever a dialect name
-    /// of the reader's.
-    #[test]
-    fn a_library_declares_comparisons_and_replies_only_of_its_labelled_functions() {
-        for library in Library::ALL {
-            let labels = library.labels().unwrap();
-            let declared = library
-                .comparisons()
-                .iter()
-                .map(|(name, _)| (*name, "a comparison"))
-                .chain(library.replies().iter().map(|name| (*name, "a reply")));
-            for (name, what) in declared {
-                assert!(
-                    labels.contains_key(&FunctionName::new(name).unwrap()),
-                    "{library:?} declares {name} {what} but does not label it"
-                );
-            }
-        }
-    }
-
     /// HELP-LABEL: duplicate names and empty titles never silently become an entry.
     #[test]
-    fn side_files_refuse_duplicate_names_and_empty_titles() {
+    fn side_files_refuse_duplicate_keys_and_empty_titles() {
+        let read = |data| read_labels(data, |key| Some(key.to_owned()));
+        let labels = read("helper\tReviewed title\nother\tOther title\n").unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels["helper"].title, "Reviewed title");
         assert!(read("helper\tTitle\nhelper\tOther\n").is_err());
         assert!(read("helper\t  \n").is_err());
         assert!(read("helper\tOne\tTwo\n").is_err());
+        assert!(read_labels("bad\tTitle", |_| None::<String>).is_err());
+        assert!(
+            read_labels("one\tFirst\ntwo\tSecond", |_| Some(0)).is_err(),
+            "the parsed member identity, rather than the input spelling, owns an entry"
+        );
     }
 }

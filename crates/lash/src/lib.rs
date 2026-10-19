@@ -236,11 +236,12 @@ pub mod vm;
 /// (`Package::build(path, release, &sources, &[kernel])`, with `kernel`
 /// from [`package::lash_packages`]), installs both, and gives its workers
 /// natives only, by function identity.
-#[cfg(feature = "codemode")]
+#[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {
     pub use lash_kernel_package::*;
     /// lash's own packages as this build holds them, and why they did not
     /// assemble: a defect of the build.
+    #[cfg(feature = "codemode")]
     pub use lash_vm_runtime::{LibraryError, lash_packages};
 }
 /// Standard-lock poison recovery traits for application code.
@@ -295,8 +296,6 @@ pub use lash_core::engine::RecoveryPassBudget;
 pub use lash_core::runtime::durable::session::{
     ParkedTurnState, SessionParkReason, SessionPassFailure,
 };
-/// Display labels for the shipped kernel and dialect helpers.
-pub use lash_helper_labels as helper_labels;
 mod pacing;
 pub use lash_core::AwaitEventKey;
 pub use lash_core::AwaitEventWaitIdentity;

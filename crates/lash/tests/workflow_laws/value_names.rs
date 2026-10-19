@@ -78,7 +78,7 @@ fn view(document: Document) -> (WorkflowDocument, WorkflowView) {
         function: k::Name::new("route"),
     };
     let holder = WorkflowDocument::derive(document, entry, &functions).expect("link");
-    let view = derive(&holder).expect("view");
+    let view = derive(&holder, &super::test_packages()).expect("view");
     (holder, view)
 }
 

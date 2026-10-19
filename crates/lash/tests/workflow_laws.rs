@@ -1986,3 +1986,9 @@ mod entry_comparison;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/value_names.rs"]
 mod value_names;
+
+fn test_packages() -> lash::package::PackageView<'static> {
+    static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
+        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
+    HELD.view(&HELD.own()).unwrap()
+}

@@ -40,7 +40,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
-lash-helper-labels = { workspace = true }
 lash-kernel-package = { workspace = true }
 lash-checkpoint-encoder = { workspace = true }
 thiserror = { workspace = true }
@@ -59,7 +58,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-lash-helper-labels = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }

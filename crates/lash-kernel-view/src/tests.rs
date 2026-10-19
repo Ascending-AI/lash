@@ -23,7 +23,11 @@ fn checked(document: &Document, entry: &str, functions: &dyn FunctionCatalog) ->
 }
 
 fn view_of(document: &Document, entry: &str) -> WorkflowView {
-    derive(&checked(document, entry, &FunctionRegistry::default())).expect("view")
+    derive(
+        &checked(document, entry, &FunctionRegistry::default()),
+        &crate::test_packages(),
+    )
+    .expect("view")
 }
 
 fn site(entry: &str, path: &[u32]) -> Site {
@@ -973,7 +977,7 @@ main { finish null }
     )
     .expect("workflow");
     let holder = checked(&document, "flow", &FunctionRegistry::default());
-    let view = derive(&holder).expect("view");
+    let view = derive(&holder, &crate::test_packages()).expect("view");
     let caption = |title: &str| Caption::new(title, None).expect("caption");
     let entry = |path: &[u32], title: &str| CaptionEntry::site(site("flow", path), caption(title));
     let field = |root: FieldRoot, fields: &[&str], title: &str| CaptionEntry {

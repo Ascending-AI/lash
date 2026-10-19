@@ -117,9 +117,9 @@ fn task_finalizer(document: &Document, site: &Site) -> bool {
 pub(super) fn view(
     checked: &WorkflowDocument,
     view: &lash_kernel_view::WorkflowView,
+    packages: &lash::package::PackageView<'_>,
 ) -> Result<String> {
     use lash_kernel_view::CalleeView;
-    let labels = lash_helper_labels::labels()?;
     let mut text = format!("unit {:?}\n", checked.entry_unit());
     for statement in &view.statements {
         writeln!(
@@ -148,7 +148,7 @@ pub(super) fn view(
             Some(CalleeView::Library { id, name }) => writeln!(
                 text,
                 " library id={id} name={name} label={:?}",
-                lash_helper_labels::title(&labels, name)
+                packages.title(id, name)
             )?,
             other => writeln!(text, " {other:?}")?,
         }

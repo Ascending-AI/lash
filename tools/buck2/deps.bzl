@@ -269,9 +269,7 @@ PACKAGE_DEPS = {
     "lash-helper-labels": {
         "build": {},
         "dev": {},
-        "normal": {
-            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc"
-        }
+        "normal": {}
     },
     "lash-internal-checkpoint-encoder": {
         "build": {},
@@ -1261,7 +1259,6 @@ PACKAGE_DEPS = {
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
-            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
@@ -1275,7 +1272,6 @@ PACKAGE_DEPS = {
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
-            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {
@@ -1400,6 +1396,7 @@ PACKAGE_DEPS = {
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
             "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view"
         },
         "normal": {
@@ -1525,12 +1522,14 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
         },
         "normal": {
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
@@ -1698,7 +1697,6 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_execution_contracts": "//crates/lash-execution-contracts:lash-execution-contracts",
-            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_http_transport": "//crates/lash-http-transport:lash-http-transport",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -1886,7 +1884,6 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
-            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",

@@ -379,9 +379,15 @@ await control.finish(fetched.url);
             .collect::<Vec<_>>()
     );
     assert_eq!(
-        lash::workflow::view::derive(retained).expect("the retained cell draws"),
-        lash::workflow::view::derive(drawn).expect("the engine's read draws"),
+        lash::workflow::view::derive(retained, &test_packages()).expect("the retained cell draws"),
+        lash::workflow::view::derive(drawn, &test_packages()).expect("the engine's read draws"),
     );
     world.shutdown().await;
     drop(core);
+}
+
+fn test_packages() -> lash::package::PackageView<'static> {
+    static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
+        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
+    HELD.view(&HELD.own()).unwrap()
 }

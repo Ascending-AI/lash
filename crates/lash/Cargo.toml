@@ -40,7 +40,6 @@ lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
-lash-helper-labels = { workspace = true }
 lash-core = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
@@ -96,11 +95,12 @@ codemode = [
 rlm = ["codemode", "dep:lash-protocol-rlm", "dep:lash-rlm-types", "dep:lash-render"]
 
 # The canvas read of a checked document (`lash::workflow::view`), drawn with
-# the helper labels `lash::helper_labels` always ships, joined by name. It
+# display facts from the selected `lash::package::PackageView`. It
 # links the kernel's document, checker and view and no dialect, editor or
 # runtime: a viewer draws TypeScript and Python workflows alike without
 # either parser.
 workflow-view = [
+    "dep:lash-kernel-package",
     "dep:lash-kernel-doc",
     "dep:lash-kernel-check",
     "dep:lash-kernel-view",

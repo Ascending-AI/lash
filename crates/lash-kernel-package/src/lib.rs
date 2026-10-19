@@ -18,8 +18,10 @@ mod package;
 mod refusal;
 mod set;
 mod shape;
+pub mod shipped_display;
 mod stale;
 mod surface;
+pub use lash_helper_labels::{Comparison, LabelError, MemberDisplay};
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 

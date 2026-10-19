@@ -246,12 +246,11 @@ fn record_kernel_helper_catalog() {
     .unwrap();
 }
 
-/// HELP-SET / HELP-LABEL: release writes have the closed variants and one label.
+/// HELP-SET: release writes have the closed helper variants.
 #[test]
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-fn helper_sets_and_labels_cover_every_release_write_set() {
+fn helper_sets_cover_every_release_write_set() {
     use std::collections::{BTreeMap, BTreeSet};
-    let labels = lash_helper_labels::labels().unwrap();
     let kernel_names: BTreeSet<_> = lash_kernel_lib::KernelHelper::ALL
         .iter()
         .map(|helper| helper.name())
@@ -306,14 +305,6 @@ fn helper_sets_and_labels_cover_every_release_write_set() {
                     .unwrap();
                 let name = &f.definition.name;
                 assert!(names.insert(name.as_str()), "duplicate write name {name}");
-                assert!(
-                    !labels
-                        .get(name)
-                        .unwrap_or_else(|| panic!("unlabelled {name}"))
-                        .title
-                        .trim()
-                        .is_empty()
-                );
                 let key = (release.ordinal, name.clone());
                 if let Some(other) = installed.insert(key, *id) {
                     assert_eq!(other, *id, "installed sets disagree on {name}");

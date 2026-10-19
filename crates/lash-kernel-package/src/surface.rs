@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_helper_labels::Label;
+use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{
     BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, MemberPath, OperationExport, PackagePath,
     Segment, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
@@ -106,7 +106,7 @@ pub(crate) fn labels(
     path: &PackagePath,
     exports: &BTreeMap<Segment, Export>,
     labels: &str,
-) -> Result<BTreeMap<MemberPath, Label>, PackageRefusal> {
+) -> Result<BTreeMap<MemberPath, MemberDisplay>, PackageRefusal> {
     let mut read = BTreeMap::new();
     for (index, row) in labels.lines().enumerate() {
         if row.trim().is_empty() {
@@ -132,15 +132,7 @@ pub(crate) fn labels(
         if !declared {
             return Err(refuse(&format!("`{member}` is no export or member")));
         }
-        if read
-            .insert(
-                member,
-                Label {
-                    title: title.to_owned(),
-                },
-            )
-            .is_some()
-        {
+        if read.insert(member, MemberDisplay::new(title)).is_some() {
             return Err(refuse("a member labelled twice"));
         }
     }

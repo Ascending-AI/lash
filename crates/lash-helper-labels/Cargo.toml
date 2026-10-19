@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Dialect-neutral display labels for the shipped kernel and helper libraries."
+description = "Package-owned display facts and label parsing without execution semantics."
 publish = false
 
 [lib]
@@ -16,6 +16,3 @@ doctest = false
 
 [lints]
 workspace = true
-
-[dependencies]
-lash-kernel-doc = { workspace = true }

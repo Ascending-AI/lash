@@ -203,7 +203,12 @@ pub(crate) async fn observe(
     // The feed retains everything published while the document is read.
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let document = execution_document(&core, &snapshot.read_view).await?;
-    let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
+    let packages =
+        lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
+    let package_view = packages
+        .view(&packages.own())
+        .map_err(|error| RunError::Invalid(error.to_string()))?;
+    let mut overlay = Overlay::new(&document, process, workflow_version, host, &package_view)?;
     let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
@@ -439,12 +444,13 @@ impl Overlay {
         process: lash::ProcessId,
         workflow_version: u64,
         host: Arc<crate::display::HostTools>,
+        packages: &lash::package::PackageView<'_>,
     ) -> Result<Self, RunError> {
         let definition = document.identity().to_string();
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
         accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(document));
         Ok(Self {
-            view: lash::workflow::view::derive(document)
+            view: lash::workflow::view::derive(document, packages)
                 .map_err(|error| RunError::Invalid(error.to_string()))?,
             accumulator,
             identities: BTreeMap::new(),
@@ -984,7 +990,7 @@ mod tests {
             &lash::workflow::document::FunctionRegistry::default(),
         )
         .unwrap();
-        let mut view = lash::workflow::view::derive(&holder).unwrap();
+        let mut view = lash::workflow::view::derive(&holder, &crate::test_packages()).unwrap();
         view.document = DocumentId::from_bytes([1; 32]);
         Overlay {
             view,

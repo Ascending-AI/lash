@@ -1,8 +1,8 @@
 //! The `perform` a binding holds the reply of (`BindingView::produced_by`).
 //!
 //! A value is a perform's reply when it is the `perform` itself; the one
-//! argument of a function its library declares receives an effect's reply
-//! ([`lash_helper_labels::Library::replies`], Python's `py.reply`); an
+//! argument of a function the supplied package view declares receives an
+//! effect's reply; an
 //! `await` through its dialect's policy of a promise or task started on one
 //! closure whose body returns such a value (TypeScript's `ts.promise.start`
 //! and Python's `py.task.run`, as [`crate::ActionView::applies`] names the
@@ -17,6 +17,7 @@ use lash_kernel_check::{
     NodeKind, Reference, StmtNode,
 };
 use lash_kernel_doc::{FunctionDeclarations, FunctionId, Site};
+use lash_kernel_package::PackageView;
 
 use crate::ActionView;
 
@@ -26,7 +27,7 @@ pub(crate) struct Producers<'a> {
     functions: &'a FunctionDeclarations,
     /// The callables each action of the view applies, by site.
     applies: BTreeMap<&'a Site, &'a [Site]>,
-    replies: BTreeSet<&'static str>,
+    packages: &'a PackageView<'a>,
 }
 
 impl<'a> Producers<'a> {
@@ -34,6 +35,7 @@ impl<'a> Producers<'a> {
         graph: &'a Graph,
         functions: &'a FunctionDeclarations,
         actions: &'a [ActionView],
+        packages: &'a PackageView<'a>,
     ) -> Self {
         Self {
             graph,
@@ -42,7 +44,7 @@ impl<'a> Producers<'a> {
                 .iter()
                 .map(|action| (&action.site, action.applies.as_slice()))
                 .collect(),
-            replies: lash_helper_labels::replies(),
+            packages,
         }
     }
 
@@ -172,7 +174,10 @@ impl<'a> Producers<'a> {
         arity == 1
             && self.functions.get(function).is_some_and(|definition| {
                 definition.signature.params.len() == 1
-                    && self.replies.contains(definition.name.as_str())
+                    && self
+                        .packages
+                        .display_for_function(function)
+                        .is_some_and(|display| display.reply)
             })
     }
 }

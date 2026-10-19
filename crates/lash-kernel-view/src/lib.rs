@@ -17,7 +17,7 @@
 //! `kernel-workflow-view` host schema. Ids name bindings within one
 //! derivation; edits address sites, never these ids. A library callee
 //! carries its identity and the name its `use` line gives it; display
-//! labels join by that name outside this crate. Layout, styling and
+//! labels are read from the explicitly supplied package view. Layout, styling and
 //! templates are the host's.
 //!
 //! [`JSON_SCHEMA`] is self-contained: every `$ref` has the form
@@ -25,10 +25,8 @@
 //! `$id`-relative references. Definition names are stable within a lash
 //! version, so hosts may splice the definitions into their own OpenAPI schemas.
 //!
-//! The crate depends on `lash-kernel-doc`, `lash-kernel-check` and the
-//! dialect-neutral `lash-helper-labels`, whose libraries declare which of
-//! their functions compare, and on no other lash crate. It links no
-//! dialect, editor or runtime.
+//! Package display data declares which functions compare or receive replies.
+//! Reading a view links no dialect implementation, editor or runtime.
 
 use std::collections::BTreeMap;
 
@@ -66,6 +64,7 @@ use lash_kernel_doc::{
     FunctionDeclarations, FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type,
     Unit,
 };
+use lash_kernel_package::PackageView;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -458,14 +457,17 @@ pub enum ViewError {
 
 /// The view of `document` at the entry it is entered at, read from the
 /// graph the checker derived from it and the library declarations it linked
-/// against. No engine, registry or native code is needed: a holder decoded
-/// from a document and its declarations is enough.
+/// against, with display facts from the caller's selected package set. No
+/// engine or native code is needed.
 ///
 /// # Errors
 ///
 /// The holder's graph or declarations do not describe its document.
-pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
-    derive_callable(document, &document.entry_unit())
+pub fn derive(
+    document: &WorkflowDocument,
+    packages: &PackageView<'_>,
+) -> Result<WorkflowView, ViewError> {
+    derive_callable(document, &document.entry_unit(), packages)
 }
 
 /// Open a declared callable without publishing it as an entry or inlining it
@@ -477,6 +479,7 @@ pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
 pub fn derive_callable(
     document: &WorkflowDocument,
     entry: &Unit,
+    packages: &PackageView<'_>,
 ) -> Result<WorkflowView, ViewError> {
     let graph = document.graph();
     let functions = document.declarations();
@@ -544,7 +547,7 @@ pub fn derive_callable(
     let Walk {
         mut view, mut uses, ..
     } = walk;
-    let producers = produced::Producers::new(graph, functions, &view.dataflow.actions);
+    let producers = produced::Producers::new(graph, functions, &view.dataflow.actions, packages);
     let bindings = graph
         .bindings()
         .iter()
@@ -579,7 +582,7 @@ pub fn derive_callable(
         .collect();
     view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
-    coarse::project(document, graph, functions, &mut view);
+    coarse::project(document, graph, functions, &mut view, packages);
     Ok(view)
 }
 
@@ -1259,3 +1262,13 @@ mod tests;
 
 #[cfg(test)]
 mod applies_tests;
+
+#[cfg(test)]
+mod display_tests;
+
+#[cfg(test)]
+fn test_packages() -> PackageView<'static> {
+    static HELD: std::sync::LazyLock<std::sync::Arc<lash_kernel_package::HeldPackages>> =
+        std::sync::LazyLock::new(|| lash_vm_library::lash_packages().unwrap());
+    HELD.view(&HELD.own()).unwrap()
+}

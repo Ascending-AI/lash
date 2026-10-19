@@ -540,7 +540,7 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                 dialect.environment.library,
             )
             .map_err(|error| fail(&case.name, error.to_string()))?;
-            let view = lash_kernel_view::derive(&holder)
+            let view = lash_kernel_view::derive(&holder, &test_packages())
                 .map_err(|error| fail(&case.name, error.to_string()))?;
             let joined = view
                 .captions(&holder, &lowered.captions)
@@ -1098,4 +1098,10 @@ fn acts(node: Node<'_>) -> bool {
 
 fn closes(node: Node<'_>) -> bool {
     matches!(node, Node::Expr(Expr::Closure(_))) || node.children().into_iter().any(closes)
+}
+
+fn test_packages() -> lash_kernel_package::PackageView<'static> {
+    static HELD: std::sync::LazyLock<lash_kernel_package::HeldPackages> =
+        std::sync::LazyLock::new(|| lash_kernel_package::HeldPackages::install([]).unwrap());
+    HELD.view(&HELD.own()).unwrap()
 }

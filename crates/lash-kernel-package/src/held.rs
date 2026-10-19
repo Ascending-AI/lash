@@ -4,9 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_helper_labels::Label;
+use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{Export, MemberPath, OperationExport, PackagePath, QualifiedOperation};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction, PackageSetDigest};
+use lash_kernel_doc::{
+    FunctionId, FunctionName, FunctionRegistry, NativeFunction, PackageSetDigest,
+};
 
 use crate::{ArtifactKey, Origin, Package, PackageRefusal, PackageSet, Root};
 
@@ -241,13 +243,13 @@ impl<'a> PackageView<'a> {
     }
 
     /// The label of `member` of the set's package at `path`.
-    pub fn display(&self, path: &PackagePath, member: &MemberPath) -> Option<&'a Label> {
+    pub fn display(&self, path: &PackagePath, member: &MemberPath) -> Option<&'a MemberDisplay> {
         self.package(path)?.display().members.get(member)
     }
 
     /// The label of `function`: its first member's, else its defining
     /// package's label of its definition.
-    pub fn display_for_function(&self, function: &FunctionId) -> Option<&'a Label> {
+    pub fn display_for_function(&self, function: &FunctionId) -> Option<&'a MemberDisplay> {
         if let Some((path, member)) = self.members(function).first() {
             return self.display(path, member);
         }
@@ -260,6 +262,13 @@ impl<'a> PackageView<'a> {
                 .find(|(name, _)| name.as_str() == package.code().name(at))
                 .map(|(_, label)| label)
         })
+    }
+
+    /// A function's package-owned title, or its document name when this
+    /// selected set has no label for it, including a removed definition.
+    pub fn title<'b>(&'b self, function: &FunctionId, name: &'b FunctionName) -> &'b str {
+        self.display_for_function(function)
+            .map_or_else(|| name.as_str(), |display| display.title.as_str())
     }
 }
 

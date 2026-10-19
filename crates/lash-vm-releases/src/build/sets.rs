@@ -63,9 +63,8 @@ pub fn kernel_names(registry: &FunctionRegistry) -> Result<Vec<&str>, String> {
 pub fn validate(
     registry: &FunctionRegistry,
     helpers: &[lash_kernel_doc::FunctionName],
-    typescript: bool,
+    _typescript: bool,
 ) -> Result<(), String> {
-    use lash_helper_labels::{FunctionLabels, Library};
     let mut expected = BTreeSet::new();
     let mut add = |name: &str| {
         if expected.insert(name.to_owned()) {
@@ -88,7 +87,7 @@ pub fn validate(
         }
     }
     #[cfg(feature = "dialect-typescript")]
-    if typescript {
+    if _typescript {
         for op in lash_ext_regex_ecma::Operation::ALL {
             add(op.name())?;
         }
@@ -111,33 +110,6 @@ pub fn validate(
             "closed helper sets differ from registry: missing {:?}, extra {:?}",
             actual.difference(&expected),
             expected.difference(&actual)
-        ));
-    }
-    let libraries = if typescript {
-        vec![
-            Library::Kernel,
-            Library::TypeScript,
-            Library::Regex,
-            Library::Date,
-            Library::Url,
-        ]
-    } else {
-        vec![Library::Kernel, Library::Python]
-    };
-    let mut labels = FunctionLabels::new();
-    for library in libraries {
-        for (name, label) in library.labels().map_err(|error| error.to_string())? {
-            if labels.insert(name.clone(), label).is_some() {
-                return Err(format!("duplicate label for `{name}`"));
-            }
-        }
-    }
-    let labelled: BTreeSet<_> = labels.keys().map(ToString::to_string).collect();
-    if labelled != actual {
-        return Err(format!(
-            "labels differ from registry: missing {:?}, extra {:?}",
-            actual.difference(&labelled),
-            labelled.difference(&actual)
         ));
     }
     Ok(())

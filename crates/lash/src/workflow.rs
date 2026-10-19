@@ -30,8 +30,8 @@
 //! ports and wires are drawn from, and every execution site. It is lash's
 //! wire shape (the `kernel-workflow-view` host schema); layout and styling
 //! stay the host's. A library callee names its identity and the name the
-//! document's `use` line gives it; `lash::helper_labels::labels` reads the shipped
-//! display labels and `helper_labels::title` joins one by that name, falling back to the bare
+//! document's `use` line gives it; the selected `lash::package::PackageView`
+//! supplies display facts and its `title` joins one by identity, falling back to the bare
 //! name for a helper this build does not know. A [`WorkflowDocument`] holds
 //! the library declarations it was linked against, so the view needs no
 //! other catalog. A document's `use` lines carry names and ids but no
@@ -276,13 +276,11 @@ pub use lash_kernel_edit::authoring;
 /// ships the authoritative JSON Schema for validation and constraints.
 ///
 /// [`derive`] reads a checked [`WorkflowDocument`](super::WorkflowDocument)
-/// alone: the declarations it was linked against give library signatures,
-/// so no engine, registry, native code or dialect is needed. Labels are
-/// display data keyed by a callee's name:
-/// [`helper_labels::labels`](crate::helper_labels::labels) reads them with no
-/// dialect or helper release, and
-/// [`helper_labels::title`](crate::helper_labels::title) falls back to the
-/// bare name.
+/// with its selected [`PackageView`](crate::package::PackageView): the
+/// document's declarations give library signatures, and the package view
+/// supplies labels, comparisons and reply markers. No engine, native code
+/// or dialect parser is needed. `PackageView::title` falls back to the bare
+/// document name when that set has no label for the function.
 #[cfg(feature = "workflow-view")]
 pub mod view {
     pub use lash_kernel_view::{

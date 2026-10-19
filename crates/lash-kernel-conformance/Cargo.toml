@@ -30,6 +30,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+lash-kernel-package.workspace = true
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-edit.workspace = true
 lash-kernel-exec.workspace = true

@@ -181,7 +181,8 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
         document.manifest.functions.keys().collect::<Vec<_>>(),
         "the reader draws with the declarations the document was admitted against"
     );
-    let view = lash::workflow::view::derive(&inspection.document).expect("the view derives");
+    let view = lash::workflow::view::derive(&inspection.document, &super::test_packages())
+        .expect("the view derives");
     assert!(
         view.dataflow.actions.iter().any(|action| matches!(
             &action.callee,
@@ -270,8 +271,9 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
         .expect("the import is held with its shipped declarations");
     assert_eq!(held.declarations(), &used);
     assert_eq!(
-        lash::workflow::view::derive(&held).expect("the held import draws"),
-        lash::workflow::view::derive(&imported).expect("the import draws")
+        lash::workflow::view::derive(&held, &super::test_packages())
+            .expect("the held import draws"),
+        lash::workflow::view::derive(&imported, &super::test_packages()).expect("the import draws")
     );
 
     let mut corrupt = used;

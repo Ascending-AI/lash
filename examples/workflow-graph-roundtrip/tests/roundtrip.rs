@@ -576,7 +576,9 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         else {
                             panic!("stored definition");
                         };
-                        let mut expected = lash::workflow::view::derive(&stored.document).unwrap();
+                        let mut expected =
+                            lash::workflow::view::derive(&stored.document, &test_packages())
+                                .unwrap();
                         let map = serde_json::from_value(opened["sourceMap"].clone()).unwrap();
                         expected
                             .readable_ranges(
@@ -611,4 +613,10 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
     println!(
         "EXAMPLE-CORPUS observed {modules} module entries, {refusals} refused imports, {cells} cell witnesses"
     );
+}
+
+fn test_packages() -> lash::package::PackageView<'static> {
+    static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
+        std::sync::LazyLock::new(|| lash::package::lash_packages().expect("the test packages"));
+    HELD.view(&HELD.own()).expect("the selected test set")
 }

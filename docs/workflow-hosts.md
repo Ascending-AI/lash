@@ -184,8 +184,8 @@ from it. TypeScript's `if (priority === "high")` and Python's
 the literal `"high"`. The view follows a condition variable only when the
 statement right before the control binds it to the comparison and nothing
 else reads or reassigns it, as a lowering's temporary is. Which library
-functions compare is each library's declaration
-(`lash::helper_labels::Library::comparisons`), not a table of dialect names
+functions compare is each package's display declaration
+(`MemberDisplay::comparison` in the supplied `PackageView`), not a table of dialect names
 in the view or the host. Anything else, such as a reassigned variable, a
 call no library declares a comparison or a converted operand, has no
 `comparison`: show the condition's expression instead, never a guess.
@@ -196,10 +196,13 @@ checked-in `v1.d.ts` — to check its own copy hermetically.
 
 A document carries no labels and no presentation. A library call's
 `CalleeView::Library { id, name }` names the function by identity and by the
-name its `use` line gives it. `lash::helper_labels::labels()` reads the
-shipped helper labels, keyed by name, with no dialect or helper release;
-`helper_labels::title(&labels, &name)` answers the label, or the bare name for a
-helper this build does not know. Lash keeps no per-node host data: wording,
+name its `use` line gives it. Pass the selected `lash::package::PackageView`
+into `derive` and `derive_callable`. Its `display(package, member)` reads a
+canonical member's display facts, and `display_for_function(id)` joins a
+private or exported definition by identity. `packages.title(&id, &name)`
+answers the title, or the bare document name for a definition that set does
+not label. Display data never enters execution identity.
+Lash keeps no per-node host data: wording,
 icons, layout and step labels are the host's, keyed by site.
 
 ### Reading one

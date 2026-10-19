@@ -1,8 +1,5 @@
-//! A condition read as the comparison its dialect wrote. Which library
-//! functions compare is each library's declaration
-//! ([`lash_helper_labels::Library::comparisons`]); no dialect name appears here.
-
-use std::collections::BTreeMap;
+//! A condition read as the comparison its package declares.
+//! The supplied package view owns each declaration; no dialect name appears here.
 
 use lash_helper_labels::Comparison;
 use lash_kernel_check::{
@@ -10,6 +7,7 @@ use lash_kernel_check::{
     NodeKind, Reference, StmtNode,
 };
 use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Site};
+use lash_kernel_package::PackageView;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -99,7 +97,7 @@ pub(crate) struct Comparisons<'a> {
     graph: &'a Graph,
     functions: &'a FunctionDeclarations,
     bindings: &'a [BindingView],
-    table: BTreeMap<&'static str, Comparison>,
+    packages: &'a PackageView<'a>,
 }
 
 impl<'a> Comparisons<'a> {
@@ -107,12 +105,13 @@ impl<'a> Comparisons<'a> {
         graph: &'a Graph,
         functions: &'a FunctionDeclarations,
         bindings: &'a [BindingView],
+        packages: &'a PackageView<'a>,
     ) -> Self {
         Self {
             graph,
             functions,
             bindings,
-            table: lash_helper_labels::comparisons(),
+            packages,
         }
     }
 
@@ -150,7 +149,7 @@ impl<'a> Comparisons<'a> {
     fn comparison(&self, id: NodeId) -> Option<ComparisonView> {
         let (function, args) = self.call(id)?;
         let definition = self.functions.get(&function)?;
-        let comparison = *self.table.get(definition.name.as_str())?;
+        let comparison = self.packages.display_for_function(&function)?.comparison?;
         if args.len() != comparison.arity() || definition.signature.params.len() != args.len() {
             return None;
         }

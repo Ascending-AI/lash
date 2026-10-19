@@ -200,6 +200,8 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
     reason = "corpus tooling reads explicitly supplied fixture paths"
 )]
 pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
+    let packages = lash::package::lash_packages()?;
+    let package_view = packages.view(&packages.own())?;
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();
@@ -347,7 +349,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
             };
             for entry in selected {
                 let checked = WorkflowDocument::derive(shipped.clone(), entry, &held)?;
-                let view = lash_kernel_view::derive(&checked)?;
+                let view = lash_kernel_view::derive(&checked, &package_view)?;
                 writeln!(
                     kernel,
                     "\nunit {:?}: statements={} scopes={} sites={}",
@@ -356,7 +358,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
                     view.scopes.len(),
                     code_sites(document).len()
                 )?;
-                views.push_str(&readable::view(&checked, &view)?);
+                views.push_str(&readable::view(&checked, &view, &package_view)?);
                 views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);

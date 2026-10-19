@@ -63,7 +63,11 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
         function: k::Name::new(entry),
     };
     let functions = registry.export_declarations();
-    derive(&WorkflowDocument::derive(document, entry, &functions).expect("link")).expect("view")
+    derive(
+        &WorkflowDocument::derive(document, entry, &functions).expect("link"),
+        &super::test_packages(),
+    )
+    .expect("view")
 }
 
 fn binding(view: &WorkflowView, name: &str) -> usize {

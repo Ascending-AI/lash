@@ -216,7 +216,7 @@ async fn an_uncaught_error_ends_a_workflow_with_its_kind_message_and_site() {
         assert_eq!(tool["code"], "invalid_tool_args", "{language:?}: {tool}");
         assert_eq!(failure.message, tool["message"], "{language:?}");
         let document = publication_document(&core, &publication).await;
-        let performs: Vec<_> = view::derive(&document)
+        let performs: Vec<_> = view::derive(&document, &super::test_packages())
             .expect("the entry's view")
             .execution_sites
             .into_iter()
@@ -265,7 +265,7 @@ async fn a_library_call_has_no_activity_state_and_its_coverage_counts_it() {
             .await;
         let (_, raised) = uncaught(&failed(&core, &process).await);
         let document = publication_document(&core, &publication).await;
-        let view = view::derive(&document).expect("the entry's view");
+        let view = view::derive(&document, &super::test_packages()).expect("the entry's view");
         let library: Vec<Site> = view
             .dataflow
             .actions
@@ -411,7 +411,7 @@ async fn echo_states(
     };
     let succeeded = matches!(output.outcome, ToolCallOutcome::Success(_));
     let document = publication_document(core, &publication).await;
-    let view = view::derive(&document).expect("the entry's view");
+    let view = view::derive(&document, &super::test_packages()).expect("the entry's view");
     let performs: Vec<Site> = view
         .execution_sites
         .iter()

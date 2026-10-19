@@ -231,6 +231,7 @@ pub(crate) fn project(
     graph: &Graph,
     functions: &FunctionDeclarations,
     view: &mut WorkflowView,
+    packages: &lash_kernel_package::PackageView<'_>,
 ) {
     let (source, ranges) = lash_kernel_doc::print_document_with_ranges(document);
     view.canonical_source = source.clone();
@@ -250,7 +251,7 @@ pub(crate) fn project(
             block: scope.block.clone(),
         })
         .collect();
-    let comparisons = Comparisons::new(graph, functions, &view.dataflow.bindings);
+    let comparisons = Comparisons::new(graph, functions, &view.dataflow.bindings, packages);
     let mut projection = Projection {
         view,
         source: &source,

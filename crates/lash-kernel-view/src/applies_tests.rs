@@ -63,7 +63,7 @@ fn closure_calls(source: &str, typescript: bool, cell: bool, names: &[&str], tog
         wanted.push(closure);
     }
     wanted.sort();
-    let view = crate::derive(&holder).unwrap();
+    let view = crate::derive(&holder, &crate::test_packages()).unwrap();
     let actions: Vec<_> = view.dataflow.actions.iter().collect();
     for site in &wanted {
         assert!(
@@ -191,7 +191,7 @@ fn kernel_view(text: &str) -> crate::WorkflowView {
         &lash_kernel_doc::FunctionRegistry::default(),
     )
     .unwrap();
-    crate::derive(&holder).unwrap()
+    crate::derive(&holder, &crate::test_packages()).unwrap()
 }
 
 fn action_sites(view: &crate::WorkflowView, statement: u32) -> Vec<lash_kernel_doc::Site> {
@@ -286,11 +286,12 @@ main { finish null }
     let view = crate::derive_callable(
         &holder,
         &lash_kernel_doc::Unit::Function(Name::new("helper")),
+        &crate::test_packages(),
     )
     .unwrap();
     let wanted = [site("flow", &[0, 0]), site("flow", &[1, 0])];
     assert_eq!(view.dataflow.actions[0].applies, wanted);
-    let view = crate::derive(&holder).unwrap();
+    let view = crate::derive(&holder, &crate::test_packages()).unwrap();
     assert_eq!(action_sites(&view, 5), wanted);
     assert_eq!(action_sites(&view, 4), [site("helper", &[])]);
 }
@@ -351,7 +352,7 @@ main {{ finish null }}
         &library,
     )
     .unwrap();
-    let view = crate::derive(&holder).unwrap();
+    let view = crate::derive(&holder, &crate::test_packages()).unwrap();
     let left = site("flow", &[0, 0]);
     let right = site("flow", &[1, 0]);
     assert_eq!(action_sites(&view, 2), [left.clone(), right.clone()]);
@@ -382,7 +383,7 @@ fn aggregate_members_name_closures_at_their_starts_not_at_the_join() {
         ),
     ] {
         let holder = lowered_holder(source, typescript, false);
-        let view = crate::derive(&holder).unwrap();
+        let view = crate::derive(&holder, &crate::test_packages()).unwrap();
         let named = |name: &str| {
             view.dataflow.actions.iter().filter(|action| {
             matches!(&action.callee, Some(crate::CalleeView::Library { name: called, .. }) if called.as_str() == name)
@@ -427,7 +428,7 @@ main {
     )
     .unwrap();
     let holder = WorkflowDocument::new(document, Default::default()).unwrap();
-    let view = crate::derive(&holder).unwrap();
+    let view = crate::derive(&holder, &crate::test_packages()).unwrap();
     assert_eq!(
         view.dataflow.actions[0].applies,
         [lash_kernel_doc::Site::new(

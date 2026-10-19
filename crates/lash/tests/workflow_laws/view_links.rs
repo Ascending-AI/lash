@@ -56,7 +56,11 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     .into_document();
     let functions = registry.export_declarations();
     let view = |document, entry| {
-        derive(&WorkflowDocument::derive(document, entry, &functions).expect("link")).expect("view")
+        derive(
+            &WorkflowDocument::derive(document, entry, &functions).expect("link"),
+            &super::test_packages(),
+        )
+        .expect("view")
     };
     [
         (

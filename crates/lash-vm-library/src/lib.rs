@@ -89,7 +89,10 @@ pub fn built() -> Result<Vec<Package>, String> {
                 serde_json::from_str(built.header).map_err(|error| error.to_string())?;
             let image = lash_kernel_doc::ReleasedFunctions::read(built.image)
                 .map_err(|error| error.to_string())?;
-            Package::from_image(header, image).map_err(|error| error.to_string())
+            let package = Package::from_image(header, image).map_err(|error| error.to_string())?;
+            let display = lash_kernel_package::shipped_display::of(package.path())
+                .map_err(|error| error.to_string())?;
+            Ok(package.with_display(display))
         })
         .collect()
 }

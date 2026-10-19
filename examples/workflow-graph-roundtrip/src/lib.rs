@@ -57,6 +57,7 @@ pub struct AppState {
     host: Arc<display::HostTools>,
     catalog: Arc<catalog::Catalog>,
     function_labels: std::collections::BTreeMap<String, String>,
+    packages: Arc<lash::package::HeldPackages>,
 }
 
 /// The saved version: host revision state. The workflow itself is the
@@ -81,6 +82,7 @@ struct SavedWorkflow {
     review: Vec<Site>,
     dialect: Dialect,
     function_labels: std::collections::BTreeMap<String, String>,
+    packages: Arc<lash::package::HeldPackages>,
 }
 
 /// How a saved version came to be, which says what authored source and
@@ -149,7 +151,14 @@ impl SavedWorkflow {
         };
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (mut view, view_unavailable) = match lash::workflow::view::derive(derived) {
+                let (mut view, view_unavailable) = match self
+                    .packages
+                    .view(&self.packages.own())
+                    .map_err(|error| error.to_string())
+                    .and_then(|packages| {
+                        lash::workflow::view::derive(derived, &packages)
+                            .map_err(|error| error.to_string())
+                    }) {
                     Ok(view) => (Some(view), None),
                     Err(error) => (None, Some(error.to_string())),
                 };
@@ -297,6 +306,11 @@ impl AppState {
         let catalog = catalog::Catalog::load(&core, &environment)
             .await
             .map_err(|error| StartupError(error.to_string()))?;
+        let packages =
+            lash::package::lash_packages().map_err(|error| StartupError(error.to_string()))?;
+        let package_view = packages
+            .view(&packages.own())
+            .map_err(|error| StartupError(error.to_string()))?;
         let state = Self {
             store: Arc::new(Mutex::new(None)),
             publishing: Arc::new(tokio::sync::Mutex::new(())),
@@ -304,10 +318,18 @@ impl AppState {
             commands: runtime::CommandClient::new(core.clone()),
             core,
             catalog: Arc::new(catalog),
-            function_labels: lash::helper_labels::labels()
-                .map_err(|error| StartupError(error.to_string()))?
-                .into_iter()
-                .map(|(name, label)| (name.to_string(), label.title))
+            packages: Arc::clone(&packages),
+            function_labels: packages
+                .functions()
+                .iter()
+                .filter_map(|(id, function)| {
+                    package_view.display_for_function(id).map(|display| {
+                        (
+                            function.definition().name.to_string(),
+                            display.title.clone(),
+                        )
+                    })
+                })
                 .collect(),
         };
         let opening = state
@@ -411,6 +433,7 @@ impl AppState {
                 review,
                 dialect,
                 function_labels: self.function_labels.clone(),
+                packages: Arc::clone(&self.packages),
             };
             let superseded = store
                 .replace(saved.clone())
@@ -760,4 +783,11 @@ impl IntoResponse for ErrorResponse {
     fn into_response(self) -> Response {
         (self.status, Json(self.body)).into_response()
     }
+}
+
+#[cfg(test)]
+fn test_packages() -> lash::package::PackageView<'static> {
+    static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
+        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
+    HELD.view(&HELD.own()).unwrap()
 }

@@ -20,7 +20,7 @@ fn checked(text: &str, entry: &str) -> lash::workflow::WorkflowDocument {
     .unwrap()
 }
 fn project(text: &str) -> view::WorkflowView {
-    view::derive(&checked(text, "flow")).unwrap()
+    view::derive(&checked(text, "flow"), &super::test_packages()).unwrap()
 }
 fn site(path: &[u32]) -> Site {
     Site::new(Unit::Function(Name::new("flow")), path)
@@ -178,7 +178,7 @@ fn coarse_eval() {
             &FunctionRegistry::default(),
         )
         .unwrap();
-        let view = view::derive(&holder).unwrap();
+        let view = view::derive(&holder, &super::test_packages()).unwrap();
         let assignment = view
             .statements
             .iter()
@@ -231,7 +231,7 @@ fn coarse_eval() {
         &FunctionRegistry::default(),
     )
     .unwrap();
-    let view = view::derive(&holder).unwrap();
+    let view = view::derive(&holder, &super::test_packages()).unwrap();
     let names = |statement: usize| {
         view.statements[statement]
             .actions
@@ -336,6 +336,7 @@ fn coarse_call() {
     let callee = view::derive_callable(
         &checked(&text, "flow"),
         &Unit::Function(Name::new("recursive")),
+        &super::test_packages(),
     )
     .unwrap();
     assert_eq!(
@@ -414,7 +415,7 @@ fn coarse_spans() {
         ),
         "flow",
     );
-    let mut view = view::derive(&document).unwrap();
+    let mut view = view::derive(&document, &super::test_packages()).unwrap();
     let original = view.nodes.clone();
     view.readable = ReadableLens::Refused {
         name: "typescript".into(),
@@ -548,7 +549,7 @@ async fn coarse_counts() {
     )
     .await;
     assert_eq!(finished(&core, &process).await, serde_json::json!(7));
-    let view = view::derive(&document).unwrap();
+    let view = view::derive(&document, &super::test_packages()).unwrap();
     let counts = counts(&core, &process).await;
     let coverage = view.coverage(&counts);
     let runs = |site: &Site| {
@@ -673,7 +674,7 @@ async fn coarse_resume() {
     )
     .await;
     let due = timer_park_after(&first, &process, 0).await;
-    let view = view::derive(&document).unwrap();
+    let view = view::derive(&document, &super::test_packages()).unwrap();
     let actions = &view
         .statements
         .iter()

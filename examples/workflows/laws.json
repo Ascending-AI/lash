@@ -99,18 +99,17 @@
     ]
   },
   {
-    "target": "//crates/lash-helper-labels:lash-helper-labels__unit_test",
-    "selector": "tests::a_reader_without_dialects_reads_labels_and_unknown_names",
+    "target": "//crates/lash-kernel-view:lash-kernel-view__unit_test",
+    "selector": "display_tests::labels_are_keyed_by_package_and_member_in_the_selected_set",
     "rules": [
       "HELP-LABEL"
     ]
   },
   {
     "target": "//crates/lash-vm-releases:lash-vm-releases__unit_test",
-    "selector": "tests::helper_sets_and_labels_cover_every_release_write_set",
+    "selector": "tests::helper_sets_cover_every_release_write_set",
     "rules": [
-      "HELP-SET",
-      "HELP-LABEL"
+      "HELP-SET"
     ]
   },
   {
@@ -199,14 +198,6 @@
     ]
   },
   {
-    "target": "//crates/lash:workflow_laws__test",
-    "selector": "generated_source::a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declarations",
-    "rules": [
-      "HELP-LABEL",
-      "STORED-VIEW"
-    ]
-  },
-  {
     "target": "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_598ff3f7",
     "selector": "process::tests::a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses",
     "rules": [
@@ -247,6 +238,13 @@
     "selector": "a_retained_cell_draws_its_main_view_without_the_producing_engines_registry",
     "rules": [
       "DOC-CELL"
+    ]
+  },
+  {
+    "target": "//crates/lash-kernel-view:lash-kernel-view__unit_test",
+    "selector": "display_tests::comparisons_come_from_the_supplied_package_set",
+    "rules": [
+      "HELP-COMPARE"
     ]
   }
 ]
