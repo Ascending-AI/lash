@@ -10,6 +10,11 @@ export type WorkflowView = {
   "dataflow": Dataflow;
   "document": DocumentId;
   /**
+   * The callable the view opens: its declared signature and what a call
+   * of it can end with.
+   */
+  "entry": EntryView;
+  /**
    * Every action of the document a run can report an occurrence at, in
    * node order. An entry may call and spawn any declared function, so
    * these are the sites of every unit.
@@ -368,6 +373,54 @@ export type Closure = {
 };
 
 /**
+ * A condition that is one comparison of values a host can name. A binary
+ * comparison reads `left` then `right`; `contains` holds when `left`
+ * holds `right`, `starts_with` and `ends_with` when `left` begins or ends
+ * with `right`. Each holds under its dialect's own equality, order and
+ * truth: TypeScript's `===` and Python's `==` both read as `eq`.
+ */
+export type ComparisonView = ({
+  "left": ValueRef;
+  "op": "eq";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "ne";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "lt";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "le";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "gt";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "ge";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "contains";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "starts_with";
+  "right": ValueRef;
+} | {
+  "left": ValueRef;
+  "op": "ends_with";
+  "right": ValueRef;
+} | {
+  "op": "not";
+  "operand": ValueRef;
+});
+
+/**
  * A control retains empty arms and the distinction between body entries and
  * header actions. Header actions live under `header`, not before the control.
  */
@@ -378,6 +431,14 @@ export type ControlArm = {
 
 export type ControlHeader = {
   "actions": Array<Site>;
+  /**
+   * The comparison a condition decides, read through a variable the
+   * lowering bound to it in the statement right before the control and
+   * that nothing else reads or reassigns. Absent when the condition is
+   * not one comparison of parameters, literals, action results and
+   * their record fields; never a guess.
+   */
+  "comparison"?: (ComparisonView | null);
   "expression": Site;
   "role": HeaderRole;
 };
@@ -416,6 +477,53 @@ export type Dataflow = {
 export type DocumentId = string;
 
 export type EffectId = string;
+
+/**
+ * One declared parameter.
+ */
+export type EntryParamView = {
+  /**
+   * Its binding in `dataflow`.
+   */
+  "binding": number;
+  "name": Name;
+  /**
+   * A caller may leave it out.
+   */
+  "optional": boolean;
+  /**
+   * The type the signature declares, not the binding's facet: `any` for
+   * a function the document does not list as an entry.
+   */
+  "type": Type;
+};
+
+/**
+ * The callable a view opens.
+ */
+export type EntryView = {
+  /**
+   * The declared function; absent for the document's `main`.
+   */
+  "name"?: (Name | null);
+  /**
+   * Its parameters in order, as its signature declares them.
+   */
+  "params": Array<EntryParamView>;
+  /**
+   * The result type its signature declares; `any` when it declares none.
+   */
+  "result": Type;
+  /**
+   * What a call can end with: the union of the facets of the `return`s
+   * and `finish`es that end this callable, except those that only follow
+   * a statement that cannot complete, with `null` when the body can
+   * complete and fall off its end. A lowering that spells falling off as an
+   * explicit `return` (TypeScript's `return absent`) contributes that
+   * return's facet instead.
+   */
+  "result_facet": Type;
+};
 
 /**
  * One action and the coordinates it runs under.
@@ -1028,6 +1136,29 @@ export type Use = {
   "site": Site;
   "statement": Site;
 };
+
+/**
+ * A value a comparison reads: where it comes from, then the record fields
+ * read from it, outermost first.
+ */
+export type ValueRef = {
+  "fields"?: Array<string>;
+  "source": ValueSource;
+};
+
+/**
+ * Where a compared value comes from.
+ */
+export type ValueSource = ({
+  "binding": number;
+  "kind": "parameter";
+} | {
+  "kind": "literal";
+  "value": Literal;
+} | {
+  "kind": "result";
+  "site": Site;
+});
 
 /**
  * Statement starts, scope entries, action issues and while tests of one entry.

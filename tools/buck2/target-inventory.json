@@ -89665,6 +89665,7 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-helper-labels",
         "lash-kernel-check",
         "lash-kernel-doc",
         "lash-kernel-edit",

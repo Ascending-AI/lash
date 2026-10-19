@@ -1968,3 +1968,7 @@ mod cancelled_sleep;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/sleep_resume_at.rs"]
 mod sleep_resume_at;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/entry_comparison.rs"]
+mod entry_comparison;

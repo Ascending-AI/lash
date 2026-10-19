@@ -903,6 +903,218 @@
       ],
       "type": "object"
     },
+    "ComparisonView": {
+      "description": "A condition that is one comparison of values a host can name. A binary\ncomparison reads `left` then `right`; `contains` holds when `left`\nholds `right`, `starts_with` and `ends_with` when `left` begins or ends\nwith `right`. Each holds under its dialect's own equality, order and\ntruth: TypeScript's `===` and Python's `==` both read as `eq`.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "eq",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "ne",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "lt",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "le",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "gt",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "ge",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "contains",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "starts_with",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/ValueRef"
+            },
+            "op": {
+              "const": "ends_with",
+              "type": "string"
+            },
+            "right": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The condition holds when its operand is false (falsy, in a dialect\nwith truthiness).",
+          "properties": {
+            "op": {
+              "const": "not",
+              "type": "string"
+            },
+            "operand": {
+              "$ref": "#/$defs/ValueRef"
+            }
+          },
+          "required": [
+            "op",
+            "operand"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ControlArm": {
       "additionalProperties": false,
       "description": "A control retains empty arms and the distinction between body entries and\nheader actions. Header actions live under `header`, not before the control.",
@@ -928,6 +1140,17 @@
             "$ref": "#/$defs/Site"
           },
           "type": "array"
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComparisonView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The comparison a condition decides, read through a variable the\nlowering bound to it in the statement right before the control and\nthat nothing else reads or reassigns. Absent when the condition is\nnot one comparison of parameters, literals, action results and\ntheir record fields; never a guess."
         },
         "expression": {
           "$ref": "#/$defs/Site"
@@ -1009,6 +1232,74 @@
     "EffectId": {
       "pattern": "^e:([0-9a-f]{2})+$",
       "type": "string"
+    },
+    "EntryParamView": {
+      "additionalProperties": false,
+      "description": "One declared parameter.",
+      "properties": {
+        "binding": {
+          "description": "Its binding in `dataflow`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "optional": {
+          "description": "A caller may leave it out.",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/Type",
+          "description": "The type the signature declares, not the binding's facet: `any` for\na function the document does not list as an entry."
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "optional",
+        "binding"
+      ],
+      "type": "object"
+    },
+    "EntryView": {
+      "additionalProperties": false,
+      "description": "The callable a view opens.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The declared function; absent for the document's `main`."
+        },
+        "params": {
+          "description": "Its parameters in order, as its signature declares them.",
+          "items": {
+            "$ref": "#/$defs/EntryParamView"
+          },
+          "type": "array"
+        },
+        "result": {
+          "$ref": "#/$defs/Type",
+          "description": "The result type its signature declares; `any` when it declares none."
+        },
+        "result_facet": {
+          "$ref": "#/$defs/Type",
+          "description": "What a call can end with: the union of the facets of the `return`s\nand `finish`es that end this callable, except those that only follow\na statement that cannot complete, with `null` when the body can\ncomplete and fall off its end. A lowering that spells falling off as an\nexplicit `return` (TypeScript's `return absent`) contributes that\nreturn's facet instead."
+        }
+      },
+      "required": [
+        "params",
+        "result",
+        "result_facet"
+      ],
+      "type": "object"
     },
     "ExecutionSiteView": {
       "additionalProperties": false,
@@ -3111,6 +3402,85 @@
       ],
       "type": "object"
     },
+    "ValueRef": {
+      "additionalProperties": false,
+      "description": "A value a comparison reads: where it comes from, then the record fields\nread from it, outermost first.",
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/ValueSource"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "ValueSource": {
+      "description": "Where a compared value comes from.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A parameter nothing assigns, by its binding in `dataflow`.",
+          "properties": {
+            "binding": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "parameter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "binding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "literal",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Literal"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "What the action at `site` yielded, held by a variable nothing\nreassigns.",
+          "properties": {
+            "kind": {
+              "const": "result",
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "kind",
+            "site"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "WorkflowCoverage": {
       "additionalProperties": false,
       "description": "Statement starts, scope entries, action issues and while tests of one entry.",
@@ -3328,6 +3698,10 @@
     "document": {
       "$ref": "#/$defs/DocumentId"
     },
+    "entry": {
+      "$ref": "#/$defs/EntryView",
+      "description": "The callable the view opens: its declared signature and what a call\nof it can end with."
+    },
     "execution_sites": {
       "description": "Every action of the document a run can report an occurrence at, in\nnode order. An entry may call and spawn any declared function, so\nthese are the sites of every unit.",
       "items": {
@@ -3367,6 +3741,7 @@
   },
   "required": [
     "document",
+    "entry",
     "nodes",
     "callables",
     "flow",

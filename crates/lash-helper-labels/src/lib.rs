@@ -2,6 +2,9 @@
 //!
 //! Labels carry no execution semantics and are never part of a function's
 //! definition or identity. Reading them links no dialect or helper release.
+//! Beside its labels, each library declares which of its functions are
+//! comparisons ([`Library::comparisons`]), so a reader shows a condition as
+//! the comparison its dialect wrote with no table of dialect names of its own.
 
 use lash_kernel_doc::FunctionName;
 use std::collections::BTreeMap;
@@ -51,6 +54,108 @@ impl Library {
     pub fn labels(self) -> Result<FunctionLabels, LabelError> {
         read(self.data())
     }
+
+    /// This library's functions that decide one comparison of their
+    /// arguments, in parameter order: each one's [`Comparison`] holds for
+    /// exactly the arguments the function answers `true` for, under the
+    /// library's own meaning of equality, order or truth. A function that
+    /// takes its operands in another order, packs them, or also converts
+    /// them is not listed.
+    pub fn comparisons(self) -> &'static [(&'static str, Comparison)] {
+        use Comparison::{Contains, EndsWith, Eq, Ge, Gt, Le, Lt, Ne, Not, StartsWith};
+        match self {
+            Self::Kernel => &[
+                ("bool.not", Not),
+                ("eq", Eq),
+                ("float.eq", Eq),
+                ("float.ge", Ge),
+                ("float.gt", Gt),
+                ("float.le", Le),
+                ("float.lt", Lt),
+                ("ge", Ge),
+                ("gt", Gt),
+                ("int.eq", Eq),
+                ("int.ge", Ge),
+                ("int.gt", Gt),
+                ("int.le", Le),
+                ("int.lt", Lt),
+                ("le", Le),
+                ("list.contains", Contains),
+                ("lt", Lt),
+                ("map.contains", Contains),
+                ("num.eq", Eq),
+                ("num.ge", Ge),
+                ("num.gt", Gt),
+                ("num.le", Le),
+                ("num.lt", Lt),
+                ("record.contains", Contains),
+                ("set.contains", Contains),
+                ("text.ends_with", EndsWith),
+                ("text.starts_with", StartsWith),
+                ("tuple.contains", Contains),
+            ],
+            Self::TypeScript => &[
+                ("ts.ge", Ge),
+                ("ts.gt", Gt),
+                ("ts.le", Le),
+                ("ts.lt", Lt),
+                ("ts.not", Not),
+                ("ts.strict_equals", Eq),
+                ("ts.strict_not_equals", Ne),
+            ],
+            Self::Python => &[
+                ("py.contains", Contains),
+                ("py.method.endswith", EndsWith),
+                ("py.method.startswith", StartsWith),
+            ],
+            Self::Regex | Self::Date | Self::Url => &[],
+        }
+    }
+}
+
+/// What a comparison function decides. A binary comparison takes its left
+/// operand first: `Contains` holds when the first argument holds the
+/// second, `StartsWith` when the first begins with the second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Comparison {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// The negation of its one operand's truth.
+    Not,
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+impl Comparison {
+    /// How many arguments the comparison reads.
+    pub fn arity(self) -> usize {
+        match self {
+            Self::Not => 1,
+            Self::Eq
+            | Self::Ne
+            | Self::Lt
+            | Self::Le
+            | Self::Gt
+            | Self::Ge
+            | Self::Contains
+            | Self::StartsWith
+            | Self::EndsWith => 2,
+        }
+    }
+}
+
+/// Every shipped library's comparisons, by function name.
+pub fn comparisons() -> BTreeMap<&'static str, Comparison> {
+    Library::ALL
+        .into_iter()
+        .flat_map(Library::comparisons)
+        .copied()
+        .collect()
 }
 
 /// A malformed shipped side file: a build defect, never guest input.
@@ -135,6 +240,21 @@ mod tests {
         }
         let unknown = FunctionName::new("future.removed_helper").unwrap();
         assert_eq!(title(&labels, &unknown), "future.removed_helper");
+    }
+
+    /// HELP-COMPARE: a library declares comparisons only of functions it
+    /// labels, so a comparison name is never a dialect name of the reader's.
+    #[test]
+    fn a_library_declares_comparisons_only_of_its_labelled_functions() {
+        for library in Library::ALL {
+            let labels = library.labels().unwrap();
+            for (name, _) in library.comparisons() {
+                assert!(
+                    labels.contains_key(&FunctionName::new(*name).unwrap()),
+                    "{library:?} declares {name} a comparison but does not label it"
+                );
+            }
+        }
     }
 
     /// HELP-LABEL: duplicate names and empty titles never silently become an entry.

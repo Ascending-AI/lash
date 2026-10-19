@@ -5,10 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_check::{
     EdgeKind, ExprNode, Graph, MemberNode, NodeKind, PlaceNode, Reference, StmtNode, Target,
 };
-use lash_kernel_doc::{Document, Expr, Site, SourceMap, SourceMapRefusal, Span, Stmt};
+use lash_kernel_doc::{
+    Document, Expr, FunctionDeclarations, Site, SourceMap, SourceMapRefusal, Span, Stmt,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::comparison::{ComparisonView, Comparisons};
 use crate::{ScopeKind, StatementView, WorkflowView};
 
 /// A lexical callable is projected once, independently of its invocations.
@@ -57,6 +60,13 @@ pub struct ControlHeader {
     pub role: HeaderRole,
     pub expression: Site,
     pub actions: Vec<Site>,
+    /// The comparison a condition decides, read through a variable the
+    /// lowering bound to it in the statement right before the control and
+    /// that nothing else reads or reassigns. Absent when the condition is
+    /// not one comparison of parameters, literals, action results and
+    /// their record fields; never a guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparison: Option<ComparisonView>,
 }
 
 /// An expression alternative that guards an action's evaluation. These are
@@ -216,7 +226,12 @@ impl WorkflowView {
     }
 }
 
-pub(crate) fn project(document: &Document, graph: &Graph, view: &mut WorkflowView) {
+pub(crate) fn project(
+    document: &Document,
+    graph: &Graph,
+    functions: &FunctionDeclarations,
+    view: &mut WorkflowView,
+) {
     let (source, ranges) = lash_kernel_doc::print_document_with_ranges(document);
     view.canonical_source = source.clone();
     view.callables = view
@@ -235,6 +250,7 @@ pub(crate) fn project(document: &Document, graph: &Graph, view: &mut WorkflowVie
             block: scope.block.clone(),
         })
         .collect();
+    let comparisons = Comparisons::new(graph, functions, &view.dataflow.bindings);
     let mut projection = Projection {
         view,
         source: &source,
@@ -251,11 +267,19 @@ pub(crate) fn project(document: &Document, graph: &Graph, view: &mut WorkflowVie
                     StmtNode::If { condition, .. } | StmtNode::While { condition, .. },
                 ) => Some((
                     node.site.clone(),
-                    (HeaderRole::Condition, graph.node(*condition).site.clone()),
+                    (
+                        HeaderRole::Condition,
+                        graph.node(*condition).site.clone(),
+                        comparisons.condition(node.id, *condition),
+                    ),
                 )),
                 NodeKind::Stmt(StmtNode::For { iterable, .. }) => Some((
                     node.site.clone(),
-                    (HeaderRole::Iterable, graph.node(*iterable).site.clone()),
+                    (
+                        HeaderRole::Iterable,
+                        graph.node(*iterable).site.clone(),
+                        None,
+                    ),
                 )),
                 _ => None,
             })
@@ -348,7 +372,7 @@ struct Projection<'a> {
     writes: BTreeMap<Site, usize>,
     action_ordinals: BTreeMap<Site, u32>,
     condition_ordinals: BTreeMap<Site, u32>,
-    headers: BTreeMap<Site, (HeaderRole, Site)>,
+    headers: BTreeMap<Site, (HeaderRole, Site, Option<ComparisonView>)>,
 }
 
 impl Projection<'_> {
@@ -396,10 +420,11 @@ impl Projection<'_> {
                 node.header =
                     self.headers
                         .get(&statement.site)
-                        .map(|(role, expression)| ControlHeader {
+                        .map(|(role, expression, comparison)| ControlHeader {
                             role: *role,
                             expression: expression.clone(),
                             actions: statement.actions.clone(),
+                            comparison: comparison.clone(),
                         });
                 node.arms = arms.clone();
                 self.nodes.push(node);
@@ -413,7 +438,7 @@ impl Projection<'_> {
                 let region = self
                     .headers
                     .get(&statement.site)
-                    .map_or_else(|| block.clone(), |(_, expression)| expression.clone());
+                    .map_or_else(|| block.clone(), |(_, expression, _)| expression.clone());
                 let mut node = self.node(
                     WorkflowNodeKind::Action,
                     action.clone(),
@@ -651,7 +676,7 @@ fn terminal(statement: &Stmt) -> bool {
             | Stmt::Continue
     )
 }
-fn falls_through(statement: &Stmt) -> bool {
+pub(crate) fn falls_through(statement: &Stmt) -> bool {
     let block = |statements: &[Stmt]| statements.iter().all(falls_through);
     match statement {
         Stmt::If {

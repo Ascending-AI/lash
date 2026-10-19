@@ -3345,6 +3345,7 @@ dependencies = [
 name = "lash-kernel-view"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-helper-labels",
  "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-edit",

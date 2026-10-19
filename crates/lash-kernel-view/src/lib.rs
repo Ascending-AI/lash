@@ -25,8 +25,10 @@
 //! `$id`-relative references. Definition names are stable within a lash
 //! version, so hosts may splice the definitions into their own OpenAPI schemas.
 //!
-//! The crate depends on `lash-kernel-doc` and `lash-kernel-check` and on no
-//! other lash crate. It links no dialect, editor or runtime.
+//! The crate depends on `lash-kernel-doc`, `lash-kernel-check` and the
+//! dialect-neutral `lash-helper-labels`, whose libraries declare which of
+//! their functions compare, and on no other lash crate. It links no
+//! dialect, editor or runtime.
 
 use std::collections::BTreeMap;
 
@@ -36,10 +38,14 @@ pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefus
 mod captions;
 pub use captions::{ArmCaption, CallableCaption, CaptionView, CaptionViewRefusal, NodeCaption};
 mod coarse;
+mod comparison;
+pub use comparison::{ComparisonView, ValueRef, ValueSource};
+mod entry;
 pub use coarse::{
     CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,
     LineRange, ReadableLens, ReadableRefusal, WorkflowNode, WorkflowNodeKind,
 };
+pub use entry::{EntryParamView, EntryView};
 mod coverage;
 pub use coverage::{
     NodeCoverage, PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage,
@@ -90,6 +96,9 @@ pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.js
 #[serde(deny_unknown_fields)]
 pub struct WorkflowView {
     pub document: lash_kernel_doc::DocumentId,
+    /// The callable the view opens: its declared signature and what a call
+    /// of it can end with.
+    pub entry: EntryView,
     pub nodes: Vec<WorkflowNode>,
     pub callables: Vec<CallableView>,
     pub flow: Vec<FlowEdge>,
@@ -487,6 +496,12 @@ pub fn derive_callable(
         },
         view: WorkflowView {
             document: document.identity(),
+            entry: EntryView {
+                name: None,
+                params: Vec::new(),
+                result: Type::Any,
+                result_facet: Type::Any,
+            },
             nodes: Vec::new(),
             callables: Vec::new(),
             flow: Vec::new(),
@@ -546,7 +561,8 @@ pub fn derive_callable(
             }
         })
         .collect();
-    coarse::project(document, graph, &mut view);
+    view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
+    coarse::project(document, graph, functions, &mut view);
     Ok(view)
 }
 

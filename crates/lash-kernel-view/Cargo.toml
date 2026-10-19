@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-helper-labels = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }

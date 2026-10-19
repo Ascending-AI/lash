@@ -1497,6 +1497,7 @@ PACKAGE_DEPS = {
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
         },
         "normal": {
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "schemars": "//third-party/rust:p0309",

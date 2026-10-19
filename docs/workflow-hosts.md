@@ -151,6 +151,34 @@ and `applies` is empty. The
 projection matches every kernel statement and expression kind, so a new kind
 reaches every host through this one read.
 
+The view's `entry` states the callable it opens as a caller sees it: its
+`name` (absent for `main`), its `params` with the type, optionality and
+`dataflow` binding of each, and its declared `result`. A parameter's type
+is the signature's (`triage(title: string, …)` declares `text`), not its
+binding's facet, which is often `any`. `result_facet` is what a call can
+end with: the union of the facets of the returns and `finish`es that end
+the entry, leaving out dead ones after a statement that cannot complete,
+plus `null` when the body can fall off its end. A TypeScript entry with no
+annotation declares `any`; read its shape from `result_facet`. Do not
+recompute either from `dataflow`.
+
+A control node's `header.comparison` reads its condition as one comparison
+when it is one: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`,
+`starts_with` or `ends_with` with a `left` and a `right`, or `not` with one
+`operand`. Each operand is a `ValueRef`: a `source` (an unassigned
+`parameter` by binding, a `literal`, or the `result` of the action at a
+site, held by a variable nothing reassigns) and the record `fields` read
+from it. TypeScript's `if (priority === "high")` and Python's
+`if priority == "high":` both read as `eq` of the parameter `priority` and
+the literal `"high"`. The view follows a condition variable only when the
+statement right before the control binds it to the comparison and nothing
+else reads or reassigns it, as a lowering's temporary is. Which library
+functions compare is each library's declaration
+(`lash::helper_labels::Library::comparisons`), not a table of dialect names
+in the view or the host. Anything else, such as a reassigned variable, a
+call no library declares a comparison or a converted operand, has no
+`comparison`: show the condition's expression instead, never a guess.
+
 A host that vendors lash reads the schema's TypeScript declaration from
 `lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
 checked-in `v1.d.ts` — to check its own copy hermetically.
