@@ -480,6 +480,16 @@ impl<'a> ArenaSemantics<'a> {
         Ok(table(self.objects, handle)?.1)
     }
 
+    /// What `read` makes of `value`'s normal form, borrowed from the key
+    /// cache: `None` when it is no legal key.
+    pub(super) fn with_key<R>(
+        &self,
+        value: &Value,
+        read: impl FnOnce(Option<&NormalKey>) -> Result<R, NativeError>,
+    ) -> Result<R, NativeError> {
+        self.keys.with(self.objects, self.facts, value, read)
+    }
+
     /// A machine table read refuses an illegal key; native lookup instead
     /// answers absent for one. Both borrow the cached normal form.
     pub(super) fn table_get(

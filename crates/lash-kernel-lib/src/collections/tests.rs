@@ -229,6 +229,20 @@ fn k_col_005_membership_and_missing_values_are_distinct() {
         tuple(vec![Datum::Bool(true), int(0), Datum::Bool(false)])
     );
 }
+/// `K-KEY-002`: an inline scalar or short text is a legal key by its kind,
+/// which a lookup takes without building its normal form; absent is no key
+/// of any kind, and a lookup of it still raises.
+#[test]
+fn k_key_002_inline_keys_are_legal_by_their_kind() {
+    assert_eq!(
+        body(
+            "let s = set{} return (set.contains(s, null), set.contains(s, true), set.contains(s, 0), set.contains(s, -7), set.contains(s, 1.5), set.contains(s, nan), set.contains(s, \"k\"))"
+        ),
+        tuple(vec![Datum::Bool(false); 7])
+    );
+    assert_eq!(error("return set.contains(set{}, absent)"), "invalid_key");
+    assert_eq!(error("return map.get(map{}, \"k\")"), "key_missing");
+}
 #[test]
 fn k_col_006_views_follow_insertion_order() {
     assert_eq!(

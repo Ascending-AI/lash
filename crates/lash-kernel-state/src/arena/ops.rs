@@ -262,11 +262,22 @@ impl Arena {
         value: Value,
     ) -> Result<(), NativeError> {
         self.warm(handle)?;
-        let normal = self.key(&key)?;
-        if self.table_find(handle, &normal)?.is_none() {
-            self.resident = self.resident.saturating_add(2);
-        }
-        let seq = self.table_insert(handle, normal, key, value)?;
+        // The key's normal form is borrowed to find it, and kept only
+        // for a new entry.
+        let found = self.semantics().with_key(&key, |normal| {
+            let normal = normal.ok_or_else(invalid_key)?;
+            Ok(match self.table_find(handle, normal)? {
+                Some((place, _)) => Ok(place),
+                None => Err(normal.clone()),
+            })
+        })?;
+        let seq = match found {
+            Ok(place) => self.table_replace(handle, place, value)?,
+            Err(normal) => {
+                self.resident = self.resident.saturating_add(2);
+                self.table_append(handle, normal, key, value)?
+            }
+        };
         self.mark(handle, Some(seq / CARD))
     }
 

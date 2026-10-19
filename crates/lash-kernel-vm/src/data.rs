@@ -43,7 +43,9 @@ fn integer_of(arena: &Arena, value: &Value) -> Result<Option<Integer>, NativeErr
 /// A value's size (`K-CHG-004`), from what the arena knows of it.
 pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     let extent = match value {
-        Value::Int(_) | Value::BigInt(_) => {
+        // A word's magnitude takes at most one word; zero takes none.
+        Value::Int(word) => u64::from(*word != 0),
+        Value::BigInt(_) => {
             integer_of(arena, value)?.map_or(0, |integer| integer.bits().div_ceil(64))
         }
         Value::Text(short) => short.as_bytes().len() as u64,
@@ -159,6 +161,14 @@ pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError
         })?;
         Ok(total)
     }
+    // A value that holds no other is its own deep size, and an object
+    // whose members hold none meets no entity twice.
+    if holds_nothing(value) {
+        return size(arena, value);
+    }
+    if let Some(total) = flat_deep_size(arena, value)? {
+        return Ok(total);
+    }
     let mut seen = BTreeSet::new();
     let mut pending = Vec::new();
     let mut total = measure(arena, value, &mut seen, &mut pending)?;
@@ -184,7 +194,39 @@ pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError
     Ok(total)
 }
 
+/// The deep size of an object none of whose members holds another value:
+/// its size and its members' sizes, read in the order [`deep_size`] reads
+/// them. `None` where a member holds a value, or for an error.
+fn flat_deep_size(arena: &Arena, value: &Value) -> Result<Option<u64>, NativeError> {
+    let total = match value {
+        Value::Tuple(_) | Value::List(_) | Value::Set(_) | Value::Record(_) | Value::Map(_) => {
+            size(arena, value)?
+        }
+        _ => return Ok(None),
+    };
+    let (members, skip, step) = match value {
+        Value::Tuple(handle) | Value::List(handle) => (arena.sequence(*handle)?, 0, 1),
+        // A set's members are its keys; a record's fields their values.
+        Value::Set(handle) => (arena.entries(*handle)?, 0, 2),
+        Value::Record(handle) => (arena.entries(*handle)?, 1, 2),
+        Value::Map(handle) => (arena.entries(*handle)?, 0, 1),
+        _ => return Ok(None),
+    };
+    let mut members = members.iter().skip(skip).step_by(step);
+    if !members.clone().all(holds_nothing) {
+        return Ok(None);
+    }
+    members
+        .try_fold(total, |total, member| {
+            Ok(total.saturating_add(size(arena, member)?))
+        })
+        .map(Some)
+}
+
 pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    if !matches!(value, Value::Tuple(_) | Value::Error(_)) {
+        return Ok(0);
+    }
     let mut total = 0u64;
     immutable_members(arena, value, &mut |member| {
         let amount = match member {

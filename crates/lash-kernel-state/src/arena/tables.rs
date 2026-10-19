@@ -384,10 +384,30 @@ impl super::Arena {
         Ok((table_of(self.body(handle)?)?, index))
     }
 
-    /// Writes `value` under `key`, whose normal form is `normal`: an
-    /// existing key keeps its first spelling and position (`K-KEY-003`).
-    /// Gives the sequence of the entry written.
-    pub fn table_insert(
+    /// Writes `value` over the entry at `place`, where [`Self::table_find`]
+    /// found its key: the key keeps its first spelling and position
+    /// (`K-KEY-003`). Gives the entry's sequence.
+    pub fn table_replace(
+        &mut self,
+        handle: ArenaHandle,
+        place: Place,
+        value: Value,
+    ) -> Result<u64, NativeError> {
+        let (table, index) = self.table_parts(handle)?;
+        let seq = index.seqs[place.chunk][place.at];
+        let old = std::mem::replace(
+            &mut resident_mut(handle, table, place.chunk)?[place.at * 2 + 1],
+            value,
+        );
+        self.hold(&value);
+        self.unhold(&old);
+        Ok(seq)
+    }
+
+    /// Writes `value` under `key`, whose normal form is `normal` and which
+    /// the table does not hold, as its last entry. Gives the entry's
+    /// sequence.
+    pub fn table_append(
         &mut self,
         handle: ArenaHandle,
         normal: NormalKey,
@@ -395,16 +415,6 @@ impl super::Arena {
         value: Value,
     ) -> Result<u64, NativeError> {
         let (table, index) = self.table_parts(handle)?;
-        if let Some(place) = find(handle, table, index, &normal)? {
-            let seq = index.seqs[place.chunk][place.at];
-            let old = std::mem::replace(
-                &mut resident_mut(handle, table, place.chunk)?[place.at * 2 + 1],
-                value,
-            );
-            self.hold(&value);
-            self.unhold(&old);
-            return Ok(seq);
-        }
         let seq = index.next;
         let chunk = index.chunk_of(seq);
         if chunk >= table.chunks.len() {

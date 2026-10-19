@@ -558,6 +558,21 @@ fn position(value: Index, length: usize, clamp: bool) -> Result<usize, NativeErr
     ))
 }
 fn key(value: &Value, args: &Args<'_>) -> Result<(), NativeError> {
+    // An inline scalar or short text is a legal key by its kind: its
+    // normal form need not be built to be known.
+    if matches!(
+        value,
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
+            | Value::Timestamp(_)
+            | Value::Function(_)
+            | Value::TaskRef(_)
+    ) {
+        return Ok(());
+    }
     if matches!(value, Value::Tuple(_))
         && args.depth(value) as usize > args.limits().value_depth().min(128)
     {
