@@ -32,7 +32,7 @@
 mod compiled;
 mod entry;
 
-use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::heap::LogicalBytes;
 use lash_kernel_doc::{
     Args, KernelDataLimits, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter,
@@ -191,7 +191,8 @@ impl Scratch {
 struct Island<'a> {
     exe: &'a Executable,
     stream: &'a Stream,
-    arena: &'a Arena,
+    /// The run's arena: a closure whose code a call finds keeps it there.
+    arena: &'a mut Arena,
     /// The session overlay its binding reads take resident values from.
     session: &'a Session,
     tape: Option<&'a ChargeTape>,
@@ -480,7 +481,7 @@ impl Island<'_> {
         let LibRun::Native { native, .. } = &function.run else {
             return None;
         };
-        let arena = self.arena;
+        let arena = &*self.arena;
         let limit = match &function.limit {
             Some(limit) => Some(measured_formula(arena, limit, args, None)?),
             None => None,
@@ -617,8 +618,17 @@ impl Island<'_> {
     /// when one is given.
     #[inline(never)]
     fn resolve_cold(&mut self, site: Option<u32>, handle: ArenaHandle) -> Option<(u32, u32)> {
-        let (plan, cells) = closure_island(self.arena, self.exe, handle)?;
-        let captured = self.captured(plan, cells)?;
+        let plan = self
+            .exe
+            .island_of(found_code(self.arena, self.exe, handle)?)?;
+        let (_, cells, _) = self.arena.closure(handle).ok()?;
+        let captured = captured(
+            self.exe,
+            self.arena,
+            &mut self.scratch.captured,
+            plan,
+            cells,
+        )?;
         let Some(site) = site else {
             return Some((plan, captured));
         };
@@ -639,23 +649,14 @@ impl Island<'_> {
     /// and where its captured values start.
     fn with_cells(&mut self, code: CodeId, cells: &[ArenaHandle]) -> Option<(u32, u32)> {
         let plan = self.exe.island_of(code)?;
-        Some((plan, self.captured(plan, cells)?))
-    }
-
-    /// Reads the cells `cells` of a callee of plan `plan` into the captured
-    /// values: where they start.
-    fn captured(&mut self, plan: u32, cells: &[ArenaHandle]) -> Option<u32> {
-        let island = &self.exe.islands.plans[plan as usize];
-        island.compiled(self.exe)?;
-        if cells.len() != island.captures.len() {
-            return None;
-        }
-        let captured = self.scratch.captured.len() as u32;
-        for cell in cells {
-            let value = self.arena.cell(*cell).ok()?;
-            self.scratch.captured.push((value, *cell));
-        }
-        Some(captured)
+        let captured = captured(
+            self.exe,
+            self.arena,
+            &mut self.scratch.captured,
+            plan,
+            cells,
+        )?;
+        Some((plan, captured))
     }
 
     /// Runs plan `plan` on `args` as a new virtual frame, its captured
@@ -767,20 +768,46 @@ fn sizes(args: &[Value], result: &Value) -> u8 {
         })
 }
 
-/// The island of the closure `handle`'s code, with its captured cells:
-/// the code a call found for it in this executable, else the code its
-/// site names here, as the reference's call finds it.
-fn closure_island<'a>(
-    arena: &'a Arena,
+/// Reads the cells `cells` of a callee of plan `plan` into the captured
+/// values `values`: where they start.
+fn captured(
     exe: &Executable,
-    handle: ArenaHandle,
-) -> Option<(u32, &'a [ArenaHandle])> {
-    let (site, cells, code) = arena.closure(handle).ok()?;
-    let code = match code {
-        Some(code) if code.executable == exe.local() => CodeId(code.code),
-        _ => super::project::closure_code(exe, site).ok()?,
+    arena: &Arena,
+    values: &mut Vec<(Value, ArenaHandle)>,
+    plan: u32,
+    cells: &[ArenaHandle],
+) -> Option<u32> {
+    let island = &exe.islands.plans[plan as usize];
+    island.compiled(exe)?;
+    if cells.len() != island.captures.len() {
+        return None;
+    }
+    let captured = values.len() as u32;
+    for cell in cells {
+        values.push((arena.cell(*cell).ok()?, *cell));
+    }
+    Some(captured)
+}
+
+/// The code the closure `handle` runs in `exe`: the code a call found for
+/// it in this executable, else the code its site names here, as the
+/// reference's call finds it, which the closure keeps for its next calls.
+fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Option<CodeId> {
+    let executable = exe.local();
+    let found = match arena.closure(handle).ok()? {
+        (_, _, Some(code)) if code.executable == executable => return Some(CodeId(code.code)),
+        (site, ..) => super::project::closure_code(exe, site).ok()?,
     };
-    Some((exe.island_of(code)?, cells))
+    arena
+        .found_closure_code(
+            handle,
+            LocalCode {
+                executable,
+                code: found.0,
+            },
+        )
+        .ok()?;
+    Some(found)
 }
 
 /// Records the events of charge region `region` of `stream`, as

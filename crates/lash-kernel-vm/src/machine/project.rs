@@ -370,8 +370,16 @@ pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<Entit
     entity(arena, cell)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many closure sites [`closure_code`] projected on this thread.
+    pub(crate) static PROJECTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// The code a closure of `site` runs: its body is the site's first child.
 pub(crate) fn closure_code(exe: &Executable, site: &Site) -> Result<CodeId, HeapFault> {
+    #[cfg(test)]
+    PROJECTED.with(|projected| projected.set(projected.get() + 1));
     exe.code_at(&site.child(0))
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }

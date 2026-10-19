@@ -3,8 +3,10 @@
 //! and its statement units state it, and refuses each misstatement of a
 //! summary, of the body's tree and of a `for`'s head; and it admits an
 //! island plan only as its stream's charge regions and occurrences state it.
+//! A closure an island calls keeps the code it found by its site, as the
+//! reference's call keeps it (FIG-6844).
 
-use super::embedder::Embedder;
+use super::embedder::{Embedder, int, result, run};
 use crate::compile::expr::{self, Expr};
 use crate::compile::islands::{self, Kind};
 use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
@@ -278,4 +280,26 @@ fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
         } if closes.len() == 1 => &mut closes[0],
         _ => panic!("the island's test closes a region at its operator"),
     }
+}
+
+/// A loop region calling `tag` through its island, which calls `echo`
+/// through its own call site's cache: neither closure is ever called by
+/// the reference.
+const CLOSURES: &str = "fn count(n) { let echo = fn(v) { return v } \
+                        let tag = fn(v) { if num.lt(v, 0) { return 0 } do apply echo(v) return 1 } \
+                        let i = 0 let s = 0 \
+                        while num.lt(i, n) { set s = num.add(s, apply tag(num.add(i, -4))) set i = num.add(i, 1) } \
+                        return s }\n\
+                        main { let r = call count(12) finish r }";
+
+#[test]
+fn a_closure_an_island_calls_finds_its_code_by_its_site_once() {
+    let projected = || crate::machine::project::PROJECTED.with(std::cell::Cell::get);
+    let before = projected();
+    let (end, _) = run(CLOSURES);
+    assert_eq!(result(end), int(8));
+    // `tag` and `echo` each find their code once, on their first call:
+    // every later call, from the region and from inside the island, reads
+    // the code the closure kept.
+    assert_eq!(projected() - before, 2);
 }

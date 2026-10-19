@@ -13,19 +13,20 @@
 
 use std::rc::Rc;
 
-use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{KernelDataLimits, TaskId, Value};
 use lash_kernel_exec::{ActIx, RegRange, Weight};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::PhaseRecord;
 
 use super::super::ops::Flow;
-use super::super::project::closure_code;
 use super::super::session::Session;
 use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
-use super::{Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, held};
+use super::{
+    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, found_code, held,
+};
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
 };
@@ -205,7 +206,10 @@ impl KernelMachine {
         // before any guard is paid for.
         let plan = match target {
             Target::Declared(code) | Target::Code(code, _) => exe.island_of(code),
-            Target::Closure(handle) => self.closure_plan(exe, handle),
+            // A closure's first call enters its island too: it finds its
+            // code as the reference's call does, and keeps it.
+            Target::Closure(handle) => found_code(&mut self.arena.borrow_mut(), exe, handle)
+                .and_then(|code| exe.island_of(code)),
         };
         if plan.is_none_or(|plan| {
             given > exe.islands.plans[plan as usize].params.len()
@@ -268,7 +272,7 @@ impl KernelMachine {
         let mut scratch = std::mem::take(&mut self.islands);
         let arena = Rc::clone(&self.arena);
         let ran = {
-            let arena = arena.borrow();
+            let mut arena = arena.borrow_mut();
             let counters = &mut self
                 .tasks
                 .get_mut(task.0 as usize)?
@@ -276,7 +280,7 @@ impl KernelMachine {
                 .counters;
             let ground = Ground {
                 exe,
-                arena: &arena,
+                arena: &mut arena,
                 session: &self.session,
                 tape: recorder.filter(|_| charging),
                 recorder,
@@ -335,31 +339,6 @@ impl KernelMachine {
             None => Caller::Action,
         };
         self.convert(host, &running, caller, levels)
-    }
-
-    /// The island plan of the closure `handle`'s code. A closure no call
-    /// has found its code for yet finds it by its site, as the reference's
-    /// call does ([`Self::target`]), and keeps it for its next calls: a
-    /// closure's first call enters its island too.
-    fn closure_plan(&self, exe: &Executable, handle: ArenaHandle) -> Option<u32> {
-        let mut arena = self.arena.borrow_mut();
-        let found = match arena.closure(handle).ok()? {
-            (_, _, Some(code)) if code.executable == exe.local() => {
-                return exe.island_of(CodeId(code.code));
-            }
-            (site, ..) => closure_code(exe, site).ok()?,
-        };
-        let executable = exe.local();
-        arena
-            .found_closure_code(
-                handle,
-                LocalCode {
-                    executable,
-                    code: found.0,
-                },
-            )
-            .ok()?;
-        exe.island_of(found)
     }
 
     /// Converts the virtual frames an island left, `levels` innermost
@@ -511,7 +490,7 @@ impl KernelMachine {
 /// loop region whose statement makes the call.
 struct Ground<'a> {
     exe: &'a Executable,
-    arena: &'a Arena,
+    arena: &'a mut Arena,
     session: &'a Session,
     tape: Option<&'a ChargeTape>,
     recorder: Option<&'a ChargeTape>,
@@ -696,7 +675,7 @@ impl Guests for RegionGuests<'_> {
         }
         let ground = Ground {
             exe: self.exe,
-            arena: cx.arena,
+            arena: &mut *cx.arena,
             session: self.session,
             tape: self.tape,
             recorder: self.recorder,
