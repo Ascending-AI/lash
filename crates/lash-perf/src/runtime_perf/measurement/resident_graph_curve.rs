@@ -7,24 +7,28 @@ use lash_protocol_types::SessionId;
 /// magnitude and include the empty graph.
 const RESIDENT_GRAPH_SIZES: [usize; 4] = [0, 32, 128, 512];
 
-/// Per-resident-node allocation slope caps per phase, in bytes. A
-/// snapshot-forced copy of `Vec<Arc<SessionNodeRecord>>` is pointer-sized
-/// per node; construction, remap, and timestamp application touch only the
-/// appended tail, so their slopes should be near zero. Append additionally
-/// copies the node-pointer vector and the active-path index vec (two
-/// pointer-width copies plus vector growth slack), so its cap is wider.
-/// `builder` borrows the resident id index outright; `snapshot_append`
-/// pays the shared-cache detach (bounded id delta, index vec, node-pointer
-/// vec) plus the append itself.
-const MAX_SLOPE_BYTES_PER_RESIDENT_NODE: [(&str, f64); 8] = [
-    ("construct", 32.0),
-    ("cow", 32.0),
-    ("append", 96.0),
-    ("remap", 32.0),
-    ("timestamps", 32.0),
-    ("builder", 32.0),
-    ("snapshot_append", 48.0),
-    ("event_read", 64.0),
+/// A held snapshot detaches three persistent indexes: node positions,
+/// durable ids and child edges. Budget one full-width branch per index:
+/// 32 two-word entries, their copied buffer plus doubled growth buffer,
+/// and a six-word Arc/branch header. This is 4752 bytes on a 64-bit host,
+/// independent of resident size. Deeper, sparse branches fit within the
+/// existing per-node allowance over the curve's resident sizes (FIG-6889).
+const SNAPSHOT_INDEX_DETACH_BYTES: f64 =
+    (3 * (3 * 32 * 2 + 6) * std::mem::size_of::<usize>()) as f64;
+
+/// Per-phase allocation growth: (name, bytes per resident node, fixed bytes).
+/// Pointer-buffer growth keeps its existing slope cap; persistent-index path
+/// copying adds a bounded detach cost, rather than a larger linear slope.
+/// Construction, remap and timestamps still touch only the appended tail.
+const MAX_ALLOCATION_GROWTH: [(&str, f64, f64); 8] = [
+    ("construct", 32.0, 0.0),
+    ("cow", 32.0, 0.0),
+    ("append", 96.0, 0.0),
+    ("remap", 32.0, 0.0),
+    ("timestamps", 32.0, 0.0),
+    ("builder", 32.0, 0.0),
+    ("snapshot_append", 48.0, SNAPSHOT_INDEX_DETACH_BYTES),
+    ("event_read", 64.0, 0.0),
 ];
 
 struct ResidentGraphFixture {
@@ -347,15 +351,16 @@ fn assert_allocations_flat_in_resident_size(
             })?;
         Ok(phase.allocations.bytes_allocated as f64 / phase.samples as f64)
     };
-    for (operation, cap) in MAX_SLOPE_BYTES_PER_RESIDENT_NODE {
+    for (operation, slope_cap, fixed_cap) in MAX_ALLOCATION_GROWTH {
         let baseline = mean_bytes(RESIDENT_GRAPH_SIZES[0], operation)?;
         for resident_nodes in &RESIDENT_GRAPH_SIZES[1..] {
-            let slope =
-                (mean_bytes(*resident_nodes, operation)? - baseline) / *resident_nodes as f64;
-            if slope > cap {
+            let growth = mean_bytes(*resident_nodes, operation)? - baseline;
+            let cap = fixed_cap + slope_cap * *resident_nodes as f64;
+            if growth > cap {
                 anyhow::bail!(
-                    "{operation} allocation grew {slope:.1} bytes per resident node at size {resident_nodes} \
-                     (cap {cap}); a whole-resident clone or scan is back"
+                    "{operation} allocation grew {growth:.1} bytes at size {resident_nodes} \
+                     (cap {fixed_cap} + {slope_cap} * {resident_nodes} = {cap}); \
+                     a whole-resident clone or scan is back"
                 );
             }
         }
@@ -373,7 +378,7 @@ mod append_allocation_tests {
         let result = run_once_resident_graph_append_curve(1).await?;
         assert_eq!(
             result.metric_samples_ms.len(),
-            RESIDENT_GRAPH_SIZES.len() * MAX_SLOPE_BYTES_PER_RESIDENT_NODE.len()
+            RESIDENT_GRAPH_SIZES.len() * MAX_ALLOCATION_GROWTH.len()
         );
         assert!(
             result
@@ -381,6 +386,14 @@ mod append_allocation_tests {
                 .values()
                 .all(|samples| samples.len() == 1)
         );
+        // A whole-resident index copy still violates the counted contract:
+        // the bounded path-copy allowance cannot hide a linear id-map clone.
+        let mut copied_index = result.phase_profile.clone();
+        let phase = copied_index
+            .get_mut(&resident_graph_phase(512, "snapshot_append"))
+            .expect("the curve measured the largest held-snapshot append");
+        phase.allocations.bytes_allocated += 512 * 128;
+        assert!(assert_allocations_flat_in_resident_size(&copied_index).is_err());
         Ok(())
     }
 
@@ -389,9 +402,11 @@ mod append_allocation_tests {
     /// this law appends behind a held snapshot at every size between.
     #[test]
     fn a_held_snapshot_append_stays_within_its_cap_at_every_resident_size() {
-        let cap = MAX_SLOPE_BYTES_PER_RESIDENT_NODE
+        let (slope_cap, fixed_cap) = MAX_ALLOCATION_GROWTH
             .iter()
-            .find_map(|(operation, cap)| (*operation == "snapshot_append").then_some(*cap))
+            .find_map(|(operation, slope_cap, fixed_cap)| {
+                (*operation == "snapshot_append").then_some((*slope_cap, *fixed_cap))
+            })
             .expect("the curve caps the held-snapshot append");
         let message = |index: usize| {
             checkpoint_message(
@@ -414,11 +429,12 @@ mod append_allocation_tests {
             if resident_nodes == 0 {
                 baseline = bytes;
             } else if resident_nodes >= RESIDENT_GRAPH_SIZES[1] {
-                let slope = (bytes - baseline) / resident_nodes as f64;
+                let growth = bytes - baseline;
+                let cap = fixed_cap + slope_cap * resident_nodes as f64;
                 assert!(
-                    slope <= cap,
-                    "a held-snapshot append allocated {slope:.1} bytes per resident node at size \
-                     {resident_nodes} (cap {cap})"
+                    growth <= cap,
+                    "a held-snapshot append allocated {growth:.1} extra bytes at size \
+                     {resident_nodes} (cap {fixed_cap} + {slope_cap} * {resident_nodes} = {cap})"
                 );
             }
             graph.append_message(appended);
