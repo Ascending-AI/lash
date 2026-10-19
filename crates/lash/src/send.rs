@@ -39,7 +39,6 @@ use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
 };
-use lash_core::store::StallReason;
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
@@ -567,11 +566,6 @@ pub enum SendOutcome {
         parked: ParkedTurn,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
-    #[non_exhaustive]
-    Stalled {
-        stalled: StalledDelivery,
-        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
-    },
     /// The run ended with a typed refusal no retry could change, and no turn
     /// of it committed (ADR 0069 §6): the run's recorded terminal answer. A
     /// shift the engine refused before any run took the input answers its
@@ -639,33 +633,12 @@ pub enum TurnStatus {
     },
     Cancelled,
     Parked(ParkedTurn),
-    /// The input was accepted, but its delivery to the engine stalled (ADR
-    /// 0109 §3): no run took it, and none will until an operator re-arms
-    /// its obligation. Not terminal: the input stays durable, and a host
-    /// re-awaits it once re-armed.
-    Stalled(StalledDelivery),
     /// No input is recorded yet. This is provisional, not a final refusal:
     /// see [`SendOutcome::Unknown`].
     Unknown,
     /// The host forsook the id before any input was accepted under it, and
     /// none ever will be: see [`SendOutcome::Forsaken`].
     Forsaken,
-}
-
-/// An accepted input the engine was never handed: its ingress obligation
-/// stalled.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StalledDelivery {
-    pub session_id: SessionId,
-    pub input_id: InputId,
-    pub reason: StallReason,
-    /// Delivery attempts made before it stalled.
-    pub attempts: u32,
-    /// The last delivery failure, as the relay recorded it: its typed code
-    /// beside its message.
-    pub last_error: Option<lash_core::store::DeliveryError>,
-    /// When it stalled, in milliseconds since the Unix epoch.
-    pub stalled_at_ms: u64,
 }
 
 /// A run whose session parked with the run open (FIG-5367): durable and
@@ -698,7 +671,6 @@ impl SendOutcome {
             },
             Self::Settled { output, .. } => output.status(),
             Self::Parked { parked, .. } => TurnStatus::Parked(parked.clone()),
-            Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
             Self::Refused { .. } => TurnStatus::Failed { cause: None },
             Self::Withdrawn { .. } => TurnStatus::Cancelled,
             Self::Unknown { .. } => TurnStatus::Unknown,
@@ -711,10 +683,7 @@ impl SendOutcome {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
             Self::Refused { run, .. } => run.as_ref(),
-            Self::Stalled { .. }
-            | Self::Withdrawn { .. }
-            | Self::Unknown { .. }
-            | Self::Forsaken { .. } => None,
+            Self::Withdrawn { .. } | Self::Unknown { .. } | Self::Forsaken { .. } => None,
         }
     }
 
@@ -723,7 +692,6 @@ impl SendOutcome {
             Self::Settled { output, .. } => Some(output),
             Self::OperationSettled { .. }
             | Self::Parked { .. }
-            | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
             | Self::Unknown { .. }
@@ -738,7 +706,6 @@ impl SendOutcome {
             Self::OperationSettled { .. }
             | Self::Settled { .. }
             | Self::Parked { .. }
-            | Self::Stalled { .. }
             | Self::Withdrawn { .. }
             | Self::Unknown { .. }
             | Self::Forsaken { .. } => None,
@@ -750,7 +717,6 @@ impl SendOutcome {
             Self::Settled { output, .. } => Some(*output),
             Self::OperationSettled { .. }
             | Self::Parked { .. }
-            | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
             | Self::Unknown { .. }
@@ -765,7 +731,6 @@ impl SendOutcome {
             Self::OperationSettled { gaps, .. }
             | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
-            | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
             | Self::Unknown { gaps }
@@ -778,7 +743,6 @@ impl SendOutcome {
             Self::OperationSettled { gaps, .. }
             | Self::Settled { gaps, .. }
             | Self::Parked { gaps, .. }
-            | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
             | Self::Unknown { gaps }

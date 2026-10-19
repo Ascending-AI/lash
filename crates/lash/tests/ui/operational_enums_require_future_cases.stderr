@@ -1,26 +1,26 @@
 error[E0004]: non-exhaustive patterns: `_` not covered
-  --> tests/ui/operational_enums_require_future_cases.rs:2:11
-   |
- 2 |     match outcome {
-   |           ^^^^^^^ pattern `_` not covered
-   |
+ --> tests/ui/operational_enums_require_future_cases.rs:2:11
+  |
+2 |     match outcome {
+  |           ^^^^^^^ pattern `_` not covered
+  |
 note: `SendOutcome` defined here
-  --> src/send.rs
-   |
-   | pub enum SendOutcome {
-   | ^^^^^^^^^^^^^^^^^^^^
-   = note: the matched value is of type `SendOutcome`
-   = note: `SendOutcome` is marked as non-exhaustive, so a wildcard `_` is necessary to match exhaustively
+ --> src/send.rs
+  |
+  | pub enum SendOutcome {
+  | ^^^^^^^^^^^^^^^^^^^^
+  = note: the matched value is of type `SendOutcome`
+  = note: `SendOutcome` is marked as non-exhaustive, so a wildcard `_` is necessary to match exhaustively
 help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
-   |
- 9 ~         | lash::SendOutcome::Unknown { .. } => {},
-10 +         _ => todo!()
-   |
+  |
+8 ~         | lash::SendOutcome::Unknown { .. } => {},
+9 +         _ => todo!()
+  |
 
 error[E0004]: non-exhaustive patterns: `_` not covered
-  --> tests/ui/operational_enums_require_future_cases.rs:15:11
+  --> tests/ui/operational_enums_require_future_cases.rs:14:11
    |
-15 |     match error {
+14 |     match error {
    |           ^^^^^ pattern `_` not covered
    |
 note: `DurableBuildError` defined here
@@ -32,14 +32,14 @@ note: `DurableBuildError` defined here
    = note: `DurableBuildError` is marked as non-exhaustive, so a wildcard `_` is necessary to match exhaustively
 help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
    |
-21 ~         | DurableBuildError::SettingsOwnedByHost => {},
-22 +         _ => todo!()
+20 ~         | DurableBuildError::SettingsOwnedByHost => {},
+21 +         _ => todo!()
    |
 
 error[E0004]: non-exhaustive patterns: `_` not covered
-  --> tests/ui/operational_enums_require_future_cases.rs:27:11
+  --> tests/ui/operational_enums_require_future_cases.rs:26:11
    |
-27 |     match error {
+26 |     match error {
    |           ^^^^^ pattern `_` not covered
    |
 note: `DiagnosticError` defined here
@@ -51,6 +51,6 @@ note: `DiagnosticError` defined here
    = note: `DiagnosticError` is marked as non-exhaustive, so a wildcard `_` is necessary to match exhaustively
 help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
    |
-32 ~         | DiagnosticError::ActorKey(_) => {},
-33 +         _ => todo!()
+31 ~         | DiagnosticError::ActorKey(_) => {},
+32 +         _ => todo!()
    |

@@ -806,7 +806,6 @@ pub(crate) fn status_name(status: &lash::TurnStatus) -> String {
         lash::TurnStatus::Failed { .. } => "failed".to_string(),
         lash::TurnStatus::Cancelled => "cancelled".to_string(),
         lash::TurnStatus::Parked(_) => "parked".to_string(),
-        lash::TurnStatus::Stalled(_) => "stalled".to_string(),
         other => format!("{other:?}"),
     }
 }

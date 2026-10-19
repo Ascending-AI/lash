@@ -3,7 +3,6 @@ fn send(outcome: lash::SendOutcome) {
         lash::SendOutcome::OperationSettled { .. }
         | lash::SendOutcome::Settled { .. }
         | lash::SendOutcome::Parked { .. }
-        | lash::SendOutcome::Stalled { .. }
         | lash::SendOutcome::Refused { .. }
         | lash::SendOutcome::Withdrawn { .. }
         | lash::SendOutcome::Unknown { .. } => {}

@@ -69,9 +69,6 @@ fn inspect_send(outcome: lash::SendOutcome) {
         lash::SendOutcome::Parked { parked, gaps, .. } => {
             let _ = (parked, gaps);
         }
-        lash::SendOutcome::Stalled { stalled, gaps, .. } => {
-            let _ = (stalled, gaps);
-        }
         lash::SendOutcome::Refused {
             run, refusal, gaps, ..
         } => {
