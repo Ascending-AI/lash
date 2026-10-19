@@ -451,7 +451,7 @@ impl KernelMachine {
                 self.recycle(frame);
                 return Ok(Ok(None));
             }
-            Err(interrupt) => Err(*self.thrown_by(interrupt)?),
+            Err(interrupt) => Err(*self.thrown_by(task, interrupt)?),
         };
         self.left(task, host, exe, frame, result).map(Ok)
     }

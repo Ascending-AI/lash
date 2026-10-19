@@ -261,6 +261,10 @@ impl KernelMachine {
                 }
                 Completion::Break | Completion::Continue => {}
             }
+            if matches!(departure, Completion::Throw(_)) {
+                let at = super::raises::unwinding(self.frame(task)?, exe);
+                self.raise_unwinds(task, at);
+            }
             let frame = self.frame(task)?;
             // The statement the call stood in is left behind, with the
             // continuation it saved there.
@@ -307,10 +311,14 @@ impl KernelMachine {
                             ) {
                                 Ok((_, Ran::Depart(next))) => next,
                                 Ok(_) => return Err(fault("a return policy did not return")),
-                                Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
+                                Err(interrupt) => {
+                                    Completion::Throw(self.thrown_by(task, interrupt)?)
+                                }
                             };
                         }
-                        Err(interrupt) => departure = Completion::Throw(self.thrown_by(interrupt)?),
+                        Err(interrupt) => {
+                            departure = Completion::Throw(self.thrown_by(task, interrupt)?)
+                        }
                     }
                     continue;
                 }
@@ -320,6 +328,7 @@ impl KernelMachine {
                     _ => return Err(fault("a break or a continue left its function")),
                 };
                 if let Some(cleanup) = self.root_cleanup(task, exe)? {
+                    self.raise_held();
                     match self.clean_up(task, exe, cleanup, result)? {
                         Some(cleaned) => result = cleaned,
                         None => return Ok(()),
@@ -341,7 +350,7 @@ impl KernelMachine {
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
                             Ok(_) => Completion::Normal,
-                            Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
+                            Err(interrupt) => Completion::Throw(self.thrown_by(task, interrupt)?),
                         };
                     }
                     _ => {
@@ -359,11 +368,13 @@ impl KernelMachine {
                             *phase = TryPhase::Catch;
                             self.push_block(task, block)?;
                             self.bind(task, binding.at, binding.shared, value)?;
+                            self.raise_held();
                             departure = Completion::Normal;
                         }
                         (TryPhase::Body | TryPhase::Catch, _, Some(finally), _) => {
                             *phase = TryPhase::Finally(departure);
                             self.push_block(task, finally)?;
+                            self.raise_held();
                             departure = Completion::Normal;
                         }
                         // A `finally` that leaves by its own departure
@@ -415,7 +426,7 @@ impl KernelMachine {
                 Ok(self.frame(task)?.cleaning.take())
             }
             Err(interrupt) => {
-                let value = self.thrown_by(interrupt)?;
+                let value = self.thrown_by(task, interrupt)?;
                 self.frame(task)?.cleaning = None;
                 Ok(Some(Err(*value)))
             }
@@ -516,7 +527,7 @@ impl KernelMachine {
                 }) {
                 Ok(Some(Completion::Normal) | None) => None,
                 Ok(Some(completion)) => Some(completion),
-                Err(interrupt) => Some(Completion::Throw(self.thrown_by(interrupt)?)),
+                Err(interrupt) => Some(Completion::Throw(self.thrown_by(task, interrupt)?)),
             },
             Err(value) => Some(Completion::Throw(Box::new(value))),
         })

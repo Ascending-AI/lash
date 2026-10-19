@@ -1326,7 +1326,10 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
             data: lash_kernel_doc::Datum::Text(binding.to_owned()),
         }));
         let observation = crate::feedback::CellObservation::of_run_error(
-            lash_kernel_vm::RunError::Uncaught(value.clone()),
+            lash_kernel_vm::RunError::Uncaught {
+                error: value.clone(),
+                site: None,
+            },
             &dropped,
         );
         if expected {

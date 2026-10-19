@@ -211,7 +211,7 @@ impl ExpectedEnd {
             End::Finished(end) => Self::Finished(end.result),
             End::Failed(value) => Self::Failed(value),
             End::Cancelled => Self::Cancelled,
-            End::Error(RunError::Uncaught(value)) => Self::Uncaught(value),
+            End::Error(RunError::Uncaught { error: value, .. }) => Self::Uncaught(value),
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,

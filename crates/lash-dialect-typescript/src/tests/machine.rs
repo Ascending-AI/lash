@@ -183,11 +183,17 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
 fn ending(end: End) -> String {
     match end {
         End::Finished(_) => "ok".to_string(),
-        End::Error(RunError::Uncaught(Datum::Text(text))) => format!("error {text}"),
-        End::Error(RunError::Uncaught(Datum::Error(error))) => {
+        End::Error(RunError::Uncaught {
+            error: Datum::Text(text),
+            ..
+        }) => format!("error {text}"),
+        End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        }) => {
             format!("error {}: {}", error.kind, error.message)
         }
-        End::Error(RunError::Uncaught(other)) => format!("error {other:?}"),
+        End::Error(RunError::Uncaught { error: other, .. }) => format!("error {other:?}"),
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,
@@ -239,7 +245,10 @@ pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -
                         .unwrap_or_else(|| panic!("the cell ended without `finish`\n{text}")),
                 );
             }
-            Ok(Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error))))) => {
+            Ok(Step::Ended(End::Error(RunError::Uncaught {
+                error: Datum::Error(error),
+                ..
+            }))) => {
                 return Ended::Raised(error.kind);
             }
             other => panic!("{other:?}\n{text}"),

@@ -1948,3 +1948,7 @@ mod inline_starts;
 #[cfg(all(feature = "typescript", feature = "python"))]
 #[path = "workflow_laws/view_links.rs"]
 mod view_links;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/failures.rs"]
+mod failures;

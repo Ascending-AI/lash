@@ -430,7 +430,7 @@ fn invalid_lengths_raise_and_typed_sparse_reads_hide_holes() {
     for length in ["-1", "1.5", "Infinity", "4294967296"] {
         let source = format!("const a = [1, , 3]; a.length = {length}; await finish(true);");
         assert!(
-            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "RangeError"),
+            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "RangeError"),
             "{source}"
         );
     }
@@ -551,7 +551,7 @@ fn regexp_match_arrays_keep_the_callback_receiver_and_write_refusal() {
     "#);
     let end = run("const match = /a(.)/.exec('ab'); match.push('c'); await finish(true);");
     assert!(
-        matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
+        matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
     );
 }
 
@@ -577,7 +577,7 @@ fn declared_array_paths_accept_regexp_match_arrays() {
             append(/a(.)/.exec('ab')!); await finish(true);"
         ));
         assert!(
-            matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
+            matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
         );
     }
 }
@@ -589,7 +589,7 @@ fn non_index_array_writes_keep_the_existing_typed_refusal() {
     for key in ["-1", "1.5", "4294967295", "'extra'"] {
         let source = format!("const a = [1]; a[{key}] = 9; await finish(true);");
         assert!(
-            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED"),
+            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED"),
             "{source}"
         );
     }
@@ -601,7 +601,7 @@ fn non_index_array_writes_keep_the_existing_typed_refusal() {
 fn typed_array_alias_writes_are_checked_at_the_typed_use() {
     let source = "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1);";
     assert!(
-        matches!(run(source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "type_error")
+        matches!(run(source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error")
     );
     law(
         "const xs: any = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1 === 'a1');",
@@ -617,7 +617,7 @@ fn live_for_of_carries_declared_element_and_return_types() {
         "{source} await finish(total([{{price: 2}}, {{price: 3}}]) * 2 === 10);"
     ));
     assert!(
-        matches!(run(&format!("{source} await finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "type_error")
+        matches!(run(&format!("{source} await finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error")
     );
 }
 
@@ -650,7 +650,7 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
             "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; await finish(true);"
         );
         assert!(
-            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "RangeError"),
+            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "RangeError"),
             "{source}"
         );
     }

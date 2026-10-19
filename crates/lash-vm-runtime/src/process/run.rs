@@ -36,7 +36,7 @@ use super::state::{
 };
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
-    KernelRecordedSettings, failure,
+    KernelRecordedSettings, caused_failure, failure,
 };
 use crate::{HostBoundary, ProjectionCatalog};
 
@@ -835,6 +835,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
             ),
             Some(serde_json::json!({ "unfinished": unfinished, "unobserved": unobserved })),
         ),
+        End::Error(RunError::Uncaught { error, site }) => uncaught(error, site),
         End::Error(error) => failure(
             KernelProcessFailureCode::RuntimeError,
             error.to_string(),
@@ -846,6 +847,40 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
             )),
         ),
     }
+}
+
+/// The terminal of a run that ended in an error no `catch` took
+/// (FIG-6810): the error's kind and the site that raised it as the typed
+/// cause, its message as the failure's, its data as the raw value.
+fn uncaught(
+    error: Datum,
+    site: Option<lash_kernel_doc::Site>,
+) -> lash_execution_contracts::process::ProcessOutcome {
+    let json = |value: &Datum| {
+        datum_to_json(value)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+    };
+    let (error_kind, message, raw) = match error {
+        Datum::Error(error) => {
+            let raw = match &error.data {
+                Datum::Null => None,
+                data => json(data),
+            };
+            (Some(error.kind), error.message, raw)
+        }
+        value => (
+            None,
+            "the process ended with a raised value that is not an error".to_owned(),
+            json(&value),
+        ),
+    };
+    caused_failure(
+        KernelProcessFailureCode::RuntimeError,
+        message,
+        raw,
+        Some(lash_core::ToolFailureCause::UncaughtError { error_kind, site }),
+    )
 }
 
 impl KernelRecordedSettings {

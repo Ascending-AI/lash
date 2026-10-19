@@ -998,7 +998,7 @@ impl KernelMachine {
             }
             // What the new task raises before it has a frame is its error.
             Err(raised @ (Interrupt::Raise(_) | Interrupt::Refuse(_))) => {
-                let value = self.thrown_by(raised)?;
+                let value = self.thrown_by(child, raised)?;
                 self.end_task(child, Err(*value))?;
                 self.put(args, handle);
                 self.refresh_charging(task)?;

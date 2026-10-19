@@ -258,10 +258,13 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
 pub(super) fn ending(end: End) -> String {
     match end {
         End::Finished(_) => "ok".to_string(),
-        End::Error(RunError::Uncaught(Datum::Error(error))) => {
+        End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        }) => {
             format!("error {}: {}", error.kind, error.message)
         }
-        End::Error(RunError::Uncaught(other)) => format!("error {other:?}"),
+        End::Error(RunError::Uncaught { error: other, .. }) => format!("error {other:?}"),
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,

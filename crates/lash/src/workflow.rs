@@ -127,6 +127,14 @@
 //! no committed settlement. Lash stores no wall time in the overlay: map these
 //! sequences to `occurred_at_ms` using the process events you already hold.
 //!
+//! A run commits a fact for its effects and waits, never for a library
+//! call: a library call's coverage count is the only durable fact about it,
+//! and its overlay row, when the live feed reported one, is never settled
+//! (FIG-6810). A process whose body ends in an error no `catch` took fails
+//! with the `UncaughtError` cause: the error's kind, and the site that
+//! raised it, a wait action or the statement a library call raised in; the
+//! failure's message is the error's own and its raw value the error's data.
+//!
 //! Session cells and an effect's nested language execution have separate
 //! execution identities. Their richer provisional history remains a
 //! [`WorkflowExecutionOverlay`], built with

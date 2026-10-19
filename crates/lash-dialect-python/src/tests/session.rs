@@ -50,7 +50,11 @@ history[1]['missing']
         ],
         "{end:?}"
     );
-    let End::Error(RunError::Uncaught(Datum::Error(error))) = end else {
+    let End::Error(RunError::Uncaught {
+        error: Datum::Error(error),
+        ..
+    }) = end
+    else {
         panic!("a missing history key raises a typed error: {end:?}");
     };
     assert_eq!(error.kind, "KeyError");

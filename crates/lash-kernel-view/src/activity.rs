@@ -32,6 +32,15 @@ pub struct ActionObservation<T> {
 #[serde(deny_unknown_fields)]
 pub struct ActionActivity<T> {
     pub site: Site,
+    /// The state its occurrences give it, `None` with none. A run commits
+    /// occurrences for its effects and its waits only (FIG-6810): a library
+    /// call, and a `sleep` that never parked, has none, so its state is
+    /// `None` and its coverage count is the only durable fact about it. A
+    /// process's live feed may report one as entered, never as completed
+    /// or failed. A run that failed names the site that raised in its
+    /// terminal failure's `UncaughtError` cause: a wait action, or the
+    /// statement a library call raised in, whose actions are the nodes with
+    /// that `statement`.
     pub state: Option<ActionState>,
     pub occurrences: Vec<ActionObservation<T>>,
 }

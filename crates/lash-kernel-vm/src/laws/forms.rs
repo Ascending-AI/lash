@@ -1,10 +1,10 @@
 //! The forms, strict operations, the effect boundary, host reads, charges
 //! and sessions: one case per rule, in kernel text.
 
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Site, Timestamp, Unit};
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
-use crate::{CellStart, End, Machine, Step, Target};
+use crate::{CellStart, End, Layout, Machine, Step, Target};
 
 fn list<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::List(items.to_vec())
@@ -146,7 +146,7 @@ fn record_index_removals_reject_non_text() {
 #[test]
 fn an_uncaught_throw_carries_the_integer_unchanged() {
     let (end, _) = run("main { throw 7 }");
-    let End::Error(crate::RunError::Uncaught(raised)) = end else {
+    let End::Error(crate::RunError::Uncaught { error: raised, .. }) = end else {
         panic!("main must end in the uncaught value");
     };
     assert_eq!(raised, int(7));
@@ -162,7 +162,10 @@ fn an_uncaught_throw_preserves_collections_and_errors() {
     ]);
     assert_eq!(
         run(r#"main { throw ({a: [1]}, map{"key": 2}, set{3}) }"#).0,
-        End::Error(crate::RunError::Uncaught(expected)),
+        End::Error(crate::RunError::Uncaught {
+            error: expected,
+            site: Some(Site::new(Unit::Main, [0])),
+        }),
     );
     let error = Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
         kind: "boom".into(),
@@ -171,8 +174,70 @@ fn an_uncaught_throw_preserves_collections_and_errors() {
     }));
     assert_eq!(
         run(r#"main { do perform boom("bang") as Any }"#).0,
-        End::Error(crate::RunError::Uncaught(error)),
+        End::Error(crate::RunError::Uncaught {
+            error,
+            site: Some(Site::new(Unit::Main, [0, 0])),
+        }),
     );
+}
+
+/// FIG-6810: an uncaught raise names where it was raised in document code:
+/// the statement that raised, in the declared function that ran it rather
+/// than at main's call; a failed `perform`'s own site; and for a library
+/// call, its statement, whether the call answers in place or runs its
+/// kernel body in a frame. A `catch` ends a raise it takes, and a raise a
+/// `finally` held names its `try`.
+#[test]
+fn an_uncaught_raise_names_the_document_site_that_raised_it() {
+    let site = |body: &str, layout: Layout, native_twice: bool| {
+        let mut run = Embedder::with(
+            body,
+            Setup {
+                layout,
+                native_twice,
+                ..Setup::default()
+            },
+        );
+        match run.run_to_end(&[]) {
+            End::Error(crate::RunError::Uncaught { site, .. }) => site,
+            other => panic!("{body}: {other:?}"),
+        }
+    };
+    let main = |path: &[u32]| Some(Site::new(Unit::Main, path));
+    for (body, expected) in [
+        ("main { let a = 1 throw 7 }", main(&[1])),
+        (
+            "fn f() { let a = 1 throw 7 } main { let r = call f() return r }",
+            Some(Site::new(Unit::Function(Name::new("f")), [1])),
+        ),
+        (
+            r#"main { let a = 1 let b = perform boom("x") as Any return b }"#,
+            main(&[1, 0]),
+        ),
+        ("main { try { throw 1 } catch e { } throw 2 }", main(&[1])),
+        (
+            "main { let a = 1 try { throw 1 } finally { let b = 2 } }",
+            main(&[1]),
+        ),
+        (
+            r#"main { let a = 1 let b = pair.twice("x") return b }"#,
+            main(&[1]),
+        ),
+        (
+            r#"main { let a = 1 let b = invoke pair.twice("x") return b }"#,
+            main(&[1]),
+        ),
+    ] {
+        for layout in [Layout(0), Layout(1)] {
+            for native_twice in [true, false] {
+                assert_eq!(
+                    site(body, layout, native_twice),
+                    expected,
+                    "{body} in {layout:?}, native {native_twice}"
+                );
+            }
+        }
+    }
 }
 
 /// `K-EFF-002`: an uncaught value that cannot leave the run reports the
@@ -550,7 +615,11 @@ fn operations_raise_typed_errors_outside_their_operand_kinds() {
 fn a_declared_function_is_closed() {
     let (end, _) =
         run("fn peek() { return secret } main { let secret = 1 let r = call peek() return r }");
-    let End::Error(crate::RunError::Uncaught(Datum::Error(error))) = end else {
+    let End::Error(crate::RunError::Uncaught {
+        error: Datum::Error(error),
+        ..
+    }) = end
+    else {
         panic!("the function read main's variable");
     };
     assert_eq!(error.kind, "unbound_variable");

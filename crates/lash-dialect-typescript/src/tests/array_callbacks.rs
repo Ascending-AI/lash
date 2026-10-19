@@ -395,7 +395,7 @@ fn throwing_and_waiting_callbacks_match_their_replaced_definitions() {
         );
         let observed = same_on_both(&source);
         assert!(
-            matches!(&observed.end, End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TypeError"),
+            matches!(&observed.end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TypeError"),
             "{helper}: {:?}",
             observed.end
         );

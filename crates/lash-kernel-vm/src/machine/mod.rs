@@ -26,6 +26,7 @@ mod plan_regions;
 mod plans;
 pub(crate) mod project;
 mod queue;
+mod raises;
 mod refine;
 mod regions;
 pub(crate) mod registers;
@@ -463,6 +464,9 @@ pub struct KernelMachine {
     observer: Option<Box<Observer>>,
     /// Statement starts in this run segment, never captured in parked state.
     ran: Vec<u64>,
+    /// The task whose raise the running step carries, and where it
+    /// stands (`raises`): never saved.
+    raised: Option<(TaskId, raises::Coordinate)>,
     /// What a law has the run do at each statement boundary (FIG-6318).
     #[cfg(test)]
     pub(crate) boundary: Option<Box<dyn FnMut(u64) -> Boundary>>,
@@ -784,13 +788,19 @@ impl KernelMachine {
         Box::new(arena.error(&refusal.kind, &refusal.message, data))
     }
 
-    /// The value an interrupt raises, or the halt it is.
-    pub(super) fn thrown_by(&mut self, interrupt: Interrupt) -> Result<Box<Value>, Halt> {
-        match interrupt {
-            Interrupt::Raise(value) => Ok(value),
-            Interrupt::Refuse(refusal) => Ok(self.thrown(*refusal)),
-            Interrupt::Halt(halt) => Err(*halt),
-        }
+    /// The value an interrupt `task` meets raises, or the halt it is.
+    pub(super) fn thrown_by(
+        &mut self,
+        task: TaskId,
+        interrupt: Interrupt,
+    ) -> Result<Box<Value>, Halt> {
+        let value = match interrupt {
+            Interrupt::Raise(value) => value,
+            Interrupt::Refuse(refusal) => self.thrown(*refusal),
+            Interrupt::Halt(halt) => return Err(*halt),
+        };
+        self.raise_born(task)?;
+        Ok(value)
     }
 
     /// The arena value of page form `page`.
@@ -993,6 +1003,7 @@ impl KernelMachine {
         // the installed roots are stale, and a write that needs a
         // refinement refuses rather than trace them (FIG-6318).
         self.heap.execution_roots_moved();
+        self.raised = None;
         if let Some(observer) = self.observer.as_deref() {
             #[cfg(any(test, feature = "perf-witness"))]
             if observer.work_witness {
@@ -1043,7 +1054,7 @@ impl KernelMachine {
             // Most statements complete normally: nothing departs.
             Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
-            Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
+            Err(interrupt) => Completion::Throw(self.thrown_by(task, interrupt)?),
         };
         self.complete(task, host, exe, completion)
     }
@@ -1074,14 +1085,18 @@ impl KernelMachine {
         if self.current == Some(task) {
             self.current = None;
         }
+        let site = self.raise_ended(task);
         if task == TaskId::MAIN {
             self.end = Some(match outcome {
                 Ok(value) => self.conclude(None, Ending::Returned(value))?,
-                Err(value) => End::Error(RunError::Uncaught(match self.copy_datum(&value) {
-                    Ok(value) => value,
-                    Err(CopyError::Raised(error)) => error.into_datum(),
-                    Err(CopyError::Heap(error)) => return Err(error.into()),
-                })),
+                Err(value) => End::Error(RunError::Uncaught {
+                    error: match self.copy_datum(&value) {
+                        Ok(value) => value,
+                        Err(CopyError::Raised(error)) => error.into_datum(),
+                        Err(CopyError::Heap(error)) => return Err(error.into()),
+                    },
+                    site,
+                }),
             });
             return Ok(());
         }
@@ -1170,9 +1185,10 @@ impl KernelMachine {
         Ok(match ending {
             Ending::Returned(value) => match self.copy_datum(&value) {
                 Ok(result) => End::Finished(Box::new(self.finished(result, false)?)),
-                Err(CopyError::Raised(raised)) => {
-                    End::Error(RunError::Uncaught(raised.into_datum()))
-                }
+                Err(CopyError::Raised(raised)) => End::Error(RunError::Uncaught {
+                    error: raised.into_datum(),
+                    site: None,
+                }),
                 Err(CopyError::Heap(fault)) => return Err(fault.into()),
             },
             Ending::Finished(result) => End::Finished(Box::new(self.finished(result, true)?)),

@@ -822,7 +822,7 @@ main { let h = spawn call ends() do join h }"#);
     let mut raised = Embedder::new(&format!(
         "{WORKER} main {{ do spawn call worker(\"w\") throw \"plain\" }}"
     ));
-    let End::Error(RunError::Uncaught(error)) = raised.run_to_end(&[]) else {
+    let End::Error(RunError::Uncaught { error, .. }) = raised.run_to_end(&[]) else {
         panic!("main raised");
     };
     assert_eq!(error, text("plain"));

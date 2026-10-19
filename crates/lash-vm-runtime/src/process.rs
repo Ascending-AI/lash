@@ -125,12 +125,23 @@ pub(crate) fn failure(
     message: impl Into<String>,
     raw: Option<serde_json::Value>,
 ) -> lash_execution_contracts::process::ProcessAwaitOutput {
+    caused_failure(code, message, raw, None)
+}
+
+/// [`failure`] with its typed cause.
+pub(crate) fn caused_failure(
+    code: KernelProcessFailureCode,
+    message: impl Into<String>,
+    raw: Option<serde_json::Value>,
+    cause: Option<lash_core::ToolFailureCause>,
+) -> lash_execution_contracts::process::ProcessAwaitOutput {
     let mut failure = lash_core::ToolFailure::runtime(
         lash_core::ToolFailureClass::Execution,
         code.as_str(),
         message,
     );
     failure.raw = raw.map(lash_core::ToolValue::untrusted_json);
+    failure.cause = cause.map(Box::new);
     lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::failure(failure),
     )

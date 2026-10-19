@@ -125,7 +125,10 @@ fn run(
     let mut console = Console::default();
     let end = match machine.run(&mut console, u64::MAX).unwrap() {
         Step::Ended(End::Finished(result)) => format!("ok {:?}", result.result),
-        Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error)))) => {
+        Step::Ended(End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        })) => {
             format!("error {}: {}", error.kind, error.message)
         }
         other => panic!("unexpected end: {other:?}"),

@@ -118,7 +118,10 @@ fn tuple(items: Vec<Datum>) -> Datum {
 }
 fn error(source: &str) -> String {
     match run(&format!("main {{ {source} }}")) {
-        End::Error(RunError::Uncaught(Datum::Error(error))) => error.kind,
+        End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        }) => error.kind,
         other => panic!("expected uncaught error: {other:?}"),
     }
 }
@@ -1110,7 +1113,13 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
                 (End::Finished(finished), Ok(value)) => {
                     assert_eq!(&finished.result, value, "{name} {temperature}")
                 }
-                (End::Error(RunError::Uncaught(Datum::Error(error))), Err(kind)) => {
+                (
+                    End::Error(RunError::Uncaught {
+                        error: Datum::Error(error),
+                        ..
+                    }),
+                    Err(kind),
+                ) => {
                     assert_eq!(&error.kind, kind, "{name} {temperature}")
                 }
                 (end, expected) => panic!("{name} {temperature}: {end:?} != {expected:?}"),

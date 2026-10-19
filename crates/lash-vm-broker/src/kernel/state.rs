@@ -263,9 +263,10 @@ pub fn checkpoint_header(id: NodeId, bytes: &[u8]) -> Result<CheckpointHeader, G
 }
 
 /// How a run that parked ended, as its CellEnd records it: every detail
-/// the machine reported, each datum a FrozenValue child. A cancelled run
-/// records no end; a finished cell's carry is the session descriptor its
-/// CellEnd names beside it.
+/// the machine reported, each datum a FrozenValue child, but an uncaught
+/// error's site, which a cell's feedback does not report and a recorded
+/// end reads back as `None`. A cancelled run records no end; a finished
+/// cell's carry is the session descriptor its CellEnd names beside it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EndRecord {
     Finished {
@@ -437,7 +438,7 @@ impl EndRecord {
                 not_carried: finished.not_carried.clone(),
             },
             End::Failed(reason) => Self::Failed(freeze(reason)?),
-            End::Error(RunError::Uncaught(error)) => Self::Uncaught(freeze(error)?),
+            End::Error(RunError::Uncaught { error, .. }) => Self::Uncaught(freeze(error)?),
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
@@ -479,7 +480,10 @@ impl EndRecord {
                 not_carried: not_carried.clone(),
             })),
             Self::Failed(reason) => End::Failed(thaw(decoder, *reason)?),
-            Self::Uncaught(error) => End::Error(RunError::Uncaught(thaw(decoder, *error)?)),
+            Self::Uncaught(error) => End::Error(RunError::Uncaught {
+                error: thaw(decoder, *error)?,
+                site: None,
+            }),
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,
@@ -530,7 +534,10 @@ mod tests {
     /// records, the thrown value unchanged even when it is not an error.
     #[test]
     fn a_recorded_uncaught_end_keeps_the_thrown_value() {
-        let end = End::Error(RunError::Uncaught(Datum::Int(7.into())));
+        let end = End::Error(RunError::Uncaught {
+            error: Datum::Int(7.into()),
+            site: None,
+        });
         let mut staging = staging(u64::MAX);
         let record = EndRecord::stage(&end, &mut staging)
             .expect("an uncaught end stages")

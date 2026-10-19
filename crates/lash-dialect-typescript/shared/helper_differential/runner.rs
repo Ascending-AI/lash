@@ -227,10 +227,13 @@ impl Runner {
                 Step::Ended(End::Finished(_)) => {
                     break json!({"type":"observations", "value":values});
                 }
-                Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error)))) => {
+                Step::Ended(End::Error(RunError::Uncaught {
+                    error: Datum::Error(error),
+                    ..
+                })) => {
                     break json!({"type":"throw", "value":error_class(&error.kind)});
                 }
-                Step::Ended(End::Error(RunError::Uncaught(value))) => {
+                Step::Ended(End::Error(RunError::Uncaught { error: value, .. })) => {
                     break json!({"type":"throw_value", "value":tag(&value)});
                 }
                 Step::Ended(other) => return Err(format!("unexpected end: {other:?}")),

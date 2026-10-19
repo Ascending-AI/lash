@@ -100,6 +100,26 @@ pub enum ToolFailureCause {
     /// A call beside this control call in its round failed or was
     /// cancelled, so the turn does not end on it. The body did not run.
     ControlSiblingFailed,
+    /// A workflow's body ended in an error no `catch` took (FIG-6810). The
+    /// failure's message is the error's own message, and its raw value the
+    /// error's data: for a failed tool call, the tool's failure.
+    UncaughtError {
+        /// The error's kind as the body raised it (`type_error`,
+        /// `tool_failed`), or `None` when the body threw a value that is
+        /// not an error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_kind: Option<String>,
+        /// Where the run's main task raised it, in the document the process
+        /// runs: the `perform`, `sleep` or `join` whose outcome raised, else
+        /// the statement whose evaluation raised, a library call's included.
+        /// An error out of library code, an `await` of a failed task's among
+        /// them, names the first document statement it unwinds into, and one
+        /// a `finally` held names its `try` statement. `None` when a run-root
+        /// cleanup held it (a Python entry that started tasks), or no
+        /// document statement was left to name it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<crate::Site>,
+    },
     /// A value retained out of history was asked for whole, and the
     /// attachment that held it is no longer stored: its shape is all history
     /// keeps of it (FIG-1439).

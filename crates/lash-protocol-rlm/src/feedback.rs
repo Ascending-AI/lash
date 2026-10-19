@@ -277,7 +277,7 @@ impl CellObservation {
     /// refusal.
     pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, String>) -> Self {
         match error {
-            RunError::Uncaught(value) => {
+            RunError::Uncaught { error: value, .. } => {
                 if let Datum::Error(error) = &value
                     && error.kind == "unbound_variable"
                     && let Datum::Text(binding) = &error.data

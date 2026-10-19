@@ -358,7 +358,7 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
         };
     }
     match (end, &meta.negative) {
-        (End::Error(RunError::Uncaught(error)), Some(negative))
+        (End::Error(RunError::Uncaught { error, .. }), Some(negative))
             if thrown_name(&error).as_deref() == Some(negative.error_type.as_str()) =>
         {
             Observed::Pass
@@ -659,7 +659,7 @@ fn uri_codecs_preserve_reserved_escape_spelling() {
 fn uri_decode_refuses_surrogate_utf8() {
     let result = execute("await finish(decodeURIComponent('%ED%A0%80'));");
     assert!(
-        matches!(result, End::Error(RunError::Uncaught(error)) if thrown_name(&error).as_deref() == Some("URIError"))
+        matches!(result, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("URIError"))
     );
 }
 
@@ -963,7 +963,7 @@ fn lone_surrogate_literals_and_results_have_typed_refusals() {
     );
     let end = execute("await finish(String.fromCharCode(0xD800));");
     assert!(
-        matches!(end, End::Error(RunError::Uncaught(error)) if thrown_name(&error).as_deref() == Some("TS_LONE_SURROGATE_UNSUPPORTED"))
+        matches!(end, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("TS_LONE_SURROGATE_UNSUPPORTED"))
     );
 }
 

@@ -355,7 +355,13 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
         let (whole, total) = ends(&programs[0].0, programs[0].1, ROOMY.charge_limit);
         match (&whole, completes) {
             (End::Finished(_), true) => {}
-            (End::Error(RunError::Uncaught(Datum::Error(error))), false) => {
+            (
+                End::Error(RunError::Uncaught {
+                    error: Datum::Error(error),
+                    ..
+                }),
+                false,
+            ) => {
                 assert_eq!(error.kind, "unbound_variable", "{expression}");
             }
             other => panic!("{expression}: {other:?}"),

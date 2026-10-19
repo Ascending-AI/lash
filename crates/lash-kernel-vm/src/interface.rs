@@ -436,8 +436,18 @@ pub enum End {
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum RunError {
     /// A value no `catch` took ended `main`, copied out unchanged.
-    #[error("uncaught {0:?}")]
-    Uncaught(Datum),
+    #[error("uncaught {}", uncaught_text(.error))]
+    Uncaught {
+        error: Datum,
+        /// Where `main` raised it, in document code: the wait action
+        /// (`perform`, `sleep`, `join`) whose outcome raised, else the
+        /// statement whose evaluation raised, a library call's included.
+        /// A raise out of library code names the first document statement
+        /// it unwinds into, and one a `finally` held names its `try`
+        /// statement. `None` when a run-root cleanup held it, or no
+        /// document statement was left to name it.
+        site: Option<lash_kernel_doc::Site>,
+    },
     /// The run reached its end with tasks that were unfinished, or that
     /// ended in an error no `join` observed.
     #[error("the run ended with {} unfinished task(s) and {} unobserved task error(s)", .unfinished.len(), .unobserved.len())]
@@ -455,6 +465,15 @@ pub enum RunError {
     Deadlock { waiting: Vec<TaskLabel> },
     #[error(transparent)]
     Bound(#[from] BoundExceeded),
+}
+
+/// An uncaught value as plain text: an error's kind and message, never a
+/// debug dump of the value.
+fn uncaught_text(error: &Datum) -> String {
+    match error {
+        Datum::Error(error) => format!("{}: {}", error.kind, error.message),
+        _ => "a value that is not an error".to_owned(),
+    }
 }
 
 /// A program or a start the machine refuses.

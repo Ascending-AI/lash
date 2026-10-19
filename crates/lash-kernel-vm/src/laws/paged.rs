@@ -379,8 +379,10 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
             .all(|page| page.tokens.len() <= 65_536)
     );
     embedder.deliver("echo");
-    let crate::End::Error(crate::RunError::Uncaught(lash_kernel_doc::Datum::Error(error))) =
-        embedder.run_to_end(&[])
+    let crate::End::Error(crate::RunError::Uncaught {
+        error: lash_kernel_doc::Datum::Error(error),
+        ..
+    }) = embedder.run_to_end(&[])
     else {
         panic!("native error")
     };

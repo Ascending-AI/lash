@@ -689,7 +689,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     assert!(
                         matches!(
                             end,
-                            lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Uncaught(_))
+                            lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Uncaught { .. })
                         ),
                         "{end:?}"
                     );

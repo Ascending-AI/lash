@@ -548,7 +548,10 @@ pub enum EndWire {
         not_carried: Vec<(Name, String)>,
     },
     Failed(Datum),
-    Uncaught(Datum),
+    Uncaught {
+        error: Datum,
+        site: Option<lash_kernel_doc::Site>,
+    },
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
@@ -585,7 +588,7 @@ impl EndWire {
                 }
             }
             End::Failed(reason) => Self::Failed(reason),
-            End::Error(RunError::Uncaught(error)) => Self::Uncaught(error),
+            End::Error(RunError::Uncaught { error, site }) => Self::Uncaught { error, site },
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
@@ -638,7 +641,7 @@ impl EndWire {
                 not_carried,
             })),
             Self::Failed(reason) => End::Failed(reason),
-            Self::Uncaught(error) => End::Error(RunError::Uncaught(error)),
+            Self::Uncaught { error, site } => End::Error(RunError::Uncaught { error, site }),
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,

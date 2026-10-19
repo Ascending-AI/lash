@@ -175,7 +175,10 @@ fn run(entry: &str, case: &Case) -> Ran {
         .unwrap_or_else(|error| panic!("{error}"));
     let end = match step {
         Step::Ended(End::Finished(finished)) => format!("ok {:?}", finished.result),
-        Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error)))) => {
+        Step::Ended(End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        })) => {
             format!("error {}: {}", error.kind, error.message)
         }
         other => format!("{other:?}"),

@@ -388,7 +388,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The state its occurrences give it, `None` with none. A run commits\noccurrences for its effects and its waits only (FIG-6810): a library\ncall, and a `sleep` that never parked, has none, so its state is\n`None` and its coverage count is the only durable fact about it. A\nprocess's live feed may report one as entered, never as completed\nor failed. A run that failed names the site that raised in its\nterminal failure's `UncaughtError` cause: a wait action, or the\nstatement a library call raised in, whose actions are the nodes with\nthat `statement`."
         }
       },
       "required": [
