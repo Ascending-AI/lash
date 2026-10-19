@@ -345,6 +345,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-durable-test:first_party_tools__test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-durable-test:frame_switch_crash_proof__test": {"cpu_count": 3, "memory_kb": 524288},
     "//crates/lash-durable-test:frame_switch_laws__test": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-durable-test:idle_owner_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:kernel_step_crash_laws__test": {"cpu_count": 3, "memory_kb": 1310720},
     "//crates/lash-durable-test:lash-durable-test__unit_test": {"cpu_count": 3, "memory_kb": 262144},
     "//crates/lash-durable-test:live_fault_park__test": {"cpu_count": 1, "memory_kb": 524288},

@@ -423,6 +423,11 @@
         "tests/frame_switch_laws.rs",
         "tests/support/served.rs"
       ],
+      "idle_owner_laws": [
+        "tests/idle_owner_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "kernel_step_crash_laws": [
         "tests/kernel_step_crash_laws.rs",
         "tests/support/matrix.rs",

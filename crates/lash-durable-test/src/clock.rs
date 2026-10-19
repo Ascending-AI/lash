@@ -50,6 +50,7 @@ pub struct SimClock {
     holds: AtomicUsize,
     released: tokio::sync::Notify,
     waited_out: Mutex<Vec<WaitedOut>>,
+    woken: AtomicUsize,
 }
 
 /// Work the clock waits out.
@@ -86,6 +87,7 @@ impl SimClock {
             holds: AtomicUsize::new(0),
             released: tokio::sync::Notify::new(),
             waited_out: Mutex::new(Vec::new()),
+            woken: AtomicUsize::new(0),
         })
     }
 
@@ -145,6 +147,12 @@ impl SimClock {
         self.logical_ms.load(Ordering::SeqCst)
     }
 
+    /// How many live sleepers the clock's moves have woken so far: every
+    /// timer that fired on virtual time.
+    pub fn woken(&self) -> usize {
+        self.woken.load(Ordering::SeqCst)
+    }
+
     /// The wall-clock epoch milliseconds the store records for `logical_ms`.
     pub fn timestamp_ms_at(logical_ms: u64) -> u64 {
         SIM_EPOCH_MS.saturating_add(logical_ms)
@@ -173,7 +181,9 @@ impl SimClock {
                 (next, waiters)
             };
             for waiter in waiters {
-                let _ = waiter.send(());
+                if waiter.send(()).is_ok() {
+                    self.woken.fetch_add(1, Ordering::SeqCst);
+                }
             }
             if next < target_ms {
                 settle().await;

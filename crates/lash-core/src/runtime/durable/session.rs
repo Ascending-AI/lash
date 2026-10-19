@@ -618,7 +618,8 @@ impl Activation for SessionActivation {
         }
         witness_claim(owned.claimed_on());
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
-        // reading its mailbox at every hint or poll, then releases it.
+        // reading its mailbox at every hint or idle poll, then releases it;
+        // it releases at once when a claim takes its slot (FIG-6890).
         let idle_evict = self.backend.config().settings().idle_evict;
         // What ended the owner's last wait, until the pass after it.
         let mut woke = None;
@@ -634,9 +635,10 @@ impl Activation for SessionActivation {
         let budget = self.backend.config().settings().activation_loop_budget;
         let mut failed_passes = 0_u32;
         loop {
-            let release = idle_since.is_some_and(|since: std::time::Instant| {
-                owned.clock().now().saturating_duration_since(since) >= idle_evict
-            });
+            let release = woke == Some(lash_durable::runner::Wake::Yield)
+                || idle_since.is_some_and(|since: std::time::Instant| {
+                    owned.clock().now().saturating_duration_since(since) >= idle_evict
+                });
             // A draining node starts no pass: every commit before this one
             // is a committed phase the next build resumes from.
             let pass = if owned.draining() {
@@ -655,8 +657,8 @@ impl Activation for SessionActivation {
                     // Keep the actor hot, but not its decoded head: idle
                     // sessions with no readers reload on their next mail.
                     heads.evict();
-                    idle_since.get_or_insert_with(|| owned.clock().now());
-                    woke = Some(owned.wait_for_mail().await);
+                    let since = *idle_since.get_or_insert_with(|| owned.clock().now());
+                    woke = Some(owned.wait_idle(since).await);
                 }
                 Ok(Pass::Released | Pass::Lost)
                 | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return Exit::Released,

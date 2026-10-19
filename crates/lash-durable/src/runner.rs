@@ -51,13 +51,21 @@
 //! its node's commits woke, coalesced, after those commits; and it watches
 //! the other boots' liveness locks, reaping a boot whose lock it saw held
 //! and then free. A readied unowned actor wakes one node: this one when it
-//! has a free slot, or else the live peer its key hashes to among the
-//! peers its last liveness probe saw. None of it is needed for correctness:
-//! the claim poll, each owner's mail poll and the lease reap find every
-//! piece of work.
+//! has room, or else the live peer its key hashes to among the
+//! peers its last liveness probe saw, or else this one anyway, whose claim
+//! loop owes the claim until room opens. None of it is needed for
+//! correctness: the claim poll, each owner's mail poll and the lease reap
+//! find every piece of work.
+//!
+//! An owner with nothing to do keeps its actor hot ([`Owned::wait_idle`]),
+//! but its slot is room: a claim may take actors in its place and asks it
+//! to yield, and its mail poll backs off with its idle time (FIG-6890).
 
+mod hints;
 mod lease;
 
+pub use hints::{Hints, LogFollowers, WakeAttachment, WakeSink};
+use hints::{IdleWait, Running};
 pub use lease::NodeRegistration;
 use lease::Renewal;
 
@@ -66,16 +74,13 @@ use crate::durable_config::{DurableConfig, RetirementSettings};
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
-use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
-use crate::port::{
-    ActorCommit, ActorState, ClaimCause, Claimed, DurableStore, MailCommit, NodeLease, NodeSpec,
-    Owner, Woken,
-};
+use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes};
+use crate::port::{ActorCommit, ClaimCause, Claimed, DurableStore, NodeLease, NodeSpec, Owner};
 use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 use tokio::sync::{Notify, watch};
@@ -92,7 +97,9 @@ pub struct RunnerConfig {
     pub serves: Vec<String>,
     /// The node-lease timings.
     pub lease: LeaseConfig,
-    /// How many actors the node runs at once; claims never take more.
+    /// How many actors the node keeps at once. An owner with nothing to
+    /// do is room: a claim past the free slots asks idle owners to yield,
+    /// and each releases its actor at once (FIG-6890).
     pub max_active: usize,
     /// The most actors one claim takes.
     pub claim_batch: usize,
@@ -348,6 +355,7 @@ pub struct Owned {
     claimed: Claimed,
     claimed_on: Wake,
     hint: Arc<Notify>,
+    hints: Hints,
     poll: std::time::Duration,
     drain: Drain,
     liveness: Liveness,
@@ -456,6 +464,26 @@ impl Owned {
         self.mail_waker().wait().await
     }
 
+    /// Wait, as an owner with nothing to do since `since`, until mail may
+    /// have arrived or the node needs the owner's slot. The mail poll backs
+    /// off with the idle time ([`idle_poll`]), so an idle owner's backstop
+    /// costs a bounded number of passes however long it stays hot. While
+    /// it waits its slot is room for a claim; [`Wake::Yield`] answers that
+    /// a claim took the slot, and the owner releases its actor if it still
+    /// has nothing to do. The request stands until the activation ends: a
+    /// yielding owner that found work answers it at its next idle wait.
+    pub async fn wait_idle(&self, since: Instant) -> Wake {
+        let Some(idle) = IdleWait::enter(&self.hints, &self.claimed.actor, since) else {
+            return Wake::Yield;
+        };
+        let waker = MailWaker {
+            poll: idle_poll(self.poll, self.clock.now().saturating_duration_since(since)),
+            ..self.mail_waker()
+        };
+        let woke = waker.wait().await;
+        idle.leave(woke)
+    }
+
     /// What [`Owned::wait_for_mail`] waits on, for the activation's context
     /// to wait on while it runs: a wake hint, the drain's start, or one
     /// claim-poll interval.
@@ -481,6 +509,17 @@ impl Owned {
     pub fn store(&self) -> &Arc<dyn DurableStore> {
         &self.store
     }
+}
+
+/// How many claim polls an idle owner's mail poll backs off to.
+const IDLE_POLL_CEILING: u32 = 16;
+
+/// How long an owner idle for `idle` waits for mail before it reads its
+/// mailbox again: as long as it has been idle, from one claim poll `poll`
+/// up to [`IDLE_POLL_CEILING`] of them. A hint ends the wait at once
+/// whatever its length; the poll is the backstop for one that never came.
+fn idle_poll(poll: std::time::Duration, idle: std::time::Duration) -> std::time::Duration {
+    idle.clamp(poll, poll.saturating_mul(IDLE_POLL_CEILING))
 }
 
 /// Waits until mail may have arrived for one owned actor: a wake hint, or
@@ -536,358 +575,9 @@ pub enum Wake {
     /// One poll interval passed with no hint: the backstop for a hint that
     /// never came.
     Poll,
-}
-
-/// Where a store set's producer commits hand what they woke, after the
-/// commit: the session work a host writes beside the session's wake (ADR
-/// 0132 §12) outside any mailbox transaction, such as an accepted send.
-/// Each node this process serves over the store set attaches its [`Hints`]
-/// while it serves. A woken actor goes to the node that owns it, hinted in
-/// process; any other goes to one serving node, which publishes it to its
-/// owner's node or rings a claim as [`Hints::wake`] does. With no node
-/// attached the wake is dropped, and the polls find the work.
-#[derive(Clone, Default)]
-pub struct WakeSink {
-    inner: Arc<WakeSinkInner>,
-}
-
-#[derive(Default)]
-struct WakeSinkInner {
-    /// The attached nodes' hints, by attachment.
-    nodes: Mutex<Vec<(u64, Hints)>>,
-    next: AtomicU64,
-}
-
-impl WakeSink {
-    /// Hand `hints` what this sink is handed, until the answer drops.
-    #[must_use = "the node hears the sink's wakes only while the attachment lives"]
-    pub fn attach(&self, hints: &Hints) -> WakeAttachment {
-        let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
-        self.nodes().push((id, hints.clone()));
-        WakeAttachment {
-            sink: Arc::clone(&self.inner),
-            id,
-        }
-    }
-
-    /// Deliver one actor a committed producer transaction woke.
-    pub fn wake(&self, woken: &Woken) {
-        let hints = {
-            let nodes = self.nodes();
-            let owner = woken
-                .owner
-                .as_ref()
-                .and_then(|owner| nodes.iter().find(|(_, hints)| hints.is_mine(owner)));
-            owner
-                .or_else(|| nodes.first())
-                .map(|(_, hints)| hints.clone())
-        };
-        if let Some(hints) = hints {
-            hints.wake(woken);
-        }
-    }
-
-    /// Plan transaction-local remote hints without notifying a listener or
-    /// reserving a claim slot. With no attached runner, route readiness among
-    /// the live nodes the transaction read; an owned actor names its owner.
-    #[must_use]
-    pub fn plan(&self, woken: &Woken, peers: &[NodeId]) -> WakeBatch {
-        let nodes = self.nodes();
-        let hints = woken
-            .owner
-            .as_ref()
-            .and_then(|owner| nodes.iter().find(|(_, hints)| hints.is_mine(owner)))
-            .or_else(|| nodes.first())
-            .map(|(_, hints)| hints);
-        let mut batch = WakeBatch::default();
-        match &woken.owner {
-            Some(owner) if hints.is_some_and(|hints| hints.is_mine(owner)) => {}
-            Some(owner) => {
-                batch
-                    .owned
-                    .entry(owner.node.clone())
-                    .or_default()
-                    .insert(woken.actor.clone());
-            }
-            None if woken.state == ActorState::Ready => {
-                let peer = match hints {
-                    Some(hints) if hints.inner.room.load(Ordering::Acquire) > 0 => None,
-                    Some(hints) => hints.peer_for(&woken.actor),
-                    None => peers
-                        .iter()
-                        .max_by_key(|peer| rendezvous(&woken.actor, peer))
-                        .cloned(),
-                };
-                batch.ready.extend(peer);
-            }
-            None => {}
-        }
-        batch
-    }
-
-    fn nodes(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Hints)>> {
-        self.inner
-            .nodes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-impl std::fmt::Debug for WakeSink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WakeSink")
-            .field("nodes", &self.nodes().len())
-            .finish()
-    }
-}
-
-/// A node's attachment to a [`WakeSink`]: dropping it detaches the node.
-pub struct WakeAttachment {
-    sink: Arc<WakeSinkInner>,
-    id: u64,
-}
-
-impl Drop for WakeAttachment {
-    fn drop(&mut self) {
-        self.sink
-            .nodes
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .retain(|(id, _)| *id != self.id);
-    }
-}
-
-impl std::fmt::Debug for WakeAttachment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WakeAttachment").finish_non_exhaustive()
-    }
-}
-
-#[derive(Default)]
-struct HintsInner {
-    running: Mutex<HashMap<ActorKey, Arc<Notify>>>,
-    claim: Notify,
-    /// This node's boot, once registered: the owner a local hint serves.
-    boot: Mutex<Option<Owner>>,
-    /// Whether woken actors owned elsewhere, or readied, are published.
-    publishing: AtomicBool,
-    /// The slots this node offers readied actors until its next claim: its
-    /// free capacity, none while it drains. Each readied actor hinted to
-    /// this node's own claim loop takes one.
-    room: AtomicUsize,
-    /// The other nodes whose listeners this node's last liveness probe saw
-    /// live, sorted: where a readied actor goes when this node has no room.
-    peers: Mutex<Vec<NodeId>>,
-    /// What the next flush publishes.
-    pending: Mutex<WakeBatch>,
-    /// Who hears of the logs other nodes appended to.
-    followers: Mutex<Option<Arc<dyn LogFollowers>>>,
-    /// Rings the publisher.
-    flush: Notify,
-}
-
-/// A node's followers of actor event logs: what its listener heard of logs
-/// that grew on any node. A latency aid only: a follower still re-reads its
-/// log on its own cadence.
-pub trait LogFollowers: Send + Sync + 'static {
-    /// These actors' logs grew.
-    fn appended(&self, actors: &[ActorKey]);
-
-    /// The listener lost hints: any followed log may have grown.
-    fn resubscribed(&self);
-}
-
-/// A wake's delivery: a mailbox writer on this node hands the runner what
-/// its commit woke, after the commit. An actor this boot runs is hinted in
-/// process and nothing is published; a readied unowned actor rings one
-/// claim loop: this node's while it has a free slot, or else, with
-/// [`NodeWakes`], the one live peer its key hashes to; an actor another node
-/// owns is published to that node alone. Publishes coalesce until the
-/// publisher's next flush.
-#[derive(Clone, Default)]
-pub struct Hints {
-    inner: Arc<HintsInner>,
-}
-
-impl Hints {
-    /// Deliver everything `commit` woke.
-    pub fn woke(&self, commit: &MailCommit) {
-        for woken in &commit.woken {
-            self.wake(woken);
-        }
-    }
-
-    /// Deliver one woken actor.
-    pub fn wake(&self, woken: &Woken) {
-        match &woken.owner {
-            Some(owner) if self.is_mine(owner) => {
-                if !self.hint_running(&woken.actor) {
-                    self.inner.claim.notify_one();
-                }
-            }
-            Some(owner) => self.queue(|batch| {
-                batch
-                    .owned
-                    .entry(owner.node.clone())
-                    .or_default()
-                    .insert(woken.actor.clone());
-            }),
-            None if woken.state == ActorState::Ready => {
-                if self.take_room() {
-                    self.inner.claim.notify_one();
-                } else if let Some(peer) = self.peer_for(&woken.actor) {
-                    self.queue(|batch| {
-                        batch.ready.insert(peer);
-                    });
-                }
-            }
-            None => {}
-        }
-    }
-
-    /// Tell every listening node that a commit grew `actor`'s event log.
-    /// Called after the commit; nothing is published without node wakes.
-    pub fn appended(&self, actor: ActorKey) {
-        self.queue(|batch| {
-            batch.appended.insert(actor);
-        });
-    }
-
-    /// Hand what this node's listener hears of appended logs to
-    /// `followers`.
-    pub fn follow(&self, followers: Arc<dyn LogFollowers>) {
-        *self
-            .inner
-            .followers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(followers);
-    }
-
-    fn followers(&self) -> Option<Arc<dyn LogFollowers>> {
-        self.inner
-            .followers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    fn is_mine(&self, owner: &Owner) -> bool {
-        self.inner
-            .boot
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            == Some(owner)
-    }
-
-    /// Take one of the slots this node offers readied actors, if any is
-    /// left.
-    fn take_room(&self) -> bool {
-        self.inner
-            .room
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |room| {
-                room.checked_sub(1)
-            })
-            .is_ok()
-    }
-
-    fn offer_room(&self, room: usize) {
-        self.inner.room.store(room, Ordering::Release);
-    }
-
-    /// The live peer `actor` hashes to: the highest rendezvous score, so a
-    /// peer joining or leaving moves only the actors that hash to it.
-    fn peer_for(&self, actor: &ActorKey) -> Option<NodeId> {
-        self.inner
-            .peers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .max_by_key(|peer| rendezvous(actor, peer))
-            .cloned()
-    }
-
-    fn see_peers(&self, peers: Vec<NodeId>) {
-        *self
-            .inner
-            .peers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = peers;
-    }
-
-    fn hint_running(&self, actor: &ActorKey) -> bool {
-        let running = self
-            .inner
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(actor)
-            .cloned();
-        running.is_some_and(|hint| {
-            hint.notify_one();
-            true
-        })
-    }
-
-    fn hint_all_running(&self) {
-        for hint in self
-            .inner
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-        {
-            hint.notify_one();
-        }
-    }
-
-    fn queue(&self, add: impl FnOnce(&mut WakeBatch)) {
-        if !self.inner.publishing.load(Ordering::Acquire) {
-            return;
-        }
-        add(&mut self
-            .inner
-            .pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner));
-        self.inner.flush.notify_one();
-    }
-
-    fn take_pending(&self) -> WakeBatch {
-        std::mem::take(
-            &mut *self
-                .inner
-                .pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner),
-        )
-    }
-
-    fn start(&self, actor: ActorKey) -> Arc<Notify> {
-        let hint = Arc::new(Notify::new());
-        self.inner
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(actor, Arc::clone(&hint));
-        hint
-    }
-
-    fn end(&self, actor: &ActorKey) {
-        self.inner
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(actor);
-    }
-
-    fn running(&self, actor: &ActorKey) -> bool {
-        self.inner
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(actor)
-    }
+    /// A claim took the idle owner's slot ([`Owned::wait_idle`]): the
+    /// owner releases its actor if it still has nothing to do.
+    Yield,
 }
 
 /// One node's serving loop.
@@ -1033,12 +723,7 @@ impl Runner {
         // The stored lease cannot start before this send, so the local
         // deadline is never later than the stored one.
         let started_by = registering + settings.startup;
-        *self
-            .hints
-            .inner
-            .boot
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(lease.owner.clone());
+        self.hints.serve_as(lease.owner.clone());
         self.liveness.renew(registering + settings.self_stop_after);
         // Renewal runs before the listener opens, so a slow listener never
         // ages the lease. Dropping the set on any return cancels it.
@@ -1156,7 +841,7 @@ impl Runner {
             self.hints.offer_room(if self.drain.started() || held_back {
                 0
             } else {
-                self.config.max_active.saturating_sub(active.len())
+                self.hints.room(self.config.max_active)
             });
             let mut next = next_reap.min(next_claim);
             // What woke this turn of the loop: a claim it makes is on a hint,
@@ -1282,6 +967,9 @@ impl Runner {
                     continue;
                 }
                 next_claim = now + settings.claim_poll;
+                // The room this claim may fill; an adoption takes what this
+                // boot already owns, whatever the room.
+                let mut room = 0;
                 let claimed = if adopt {
                     match self
                         .bounded(&mut stop, &ended, self.store.owned(&lease))
@@ -1296,10 +984,12 @@ impl Runner {
                         Err(stopped) => break stopped,
                     }
                 } else {
-                    let room = self
-                        .config
-                        .max_active
-                        .saturating_sub(active.len())
+                    // Idle owners' slots are room: the claim asks them to
+                    // yield below. With no room the claim is owed, and the
+                    // next room that opens rings it.
+                    room = self
+                        .hints
+                        .claim_room(self.config.max_active)
                         .min(self.config.claim_batch);
                     if room == 0 {
                         continue;
@@ -1323,9 +1013,15 @@ impl Runner {
                         };
                         next_claim = now + claim_delay;
                         adopt = false;
+                        // A claim that filled its room may have left readied
+                        // actors behind.
+                        if room > 0 && claimed.len() >= room {
+                            self.hints.owe_claim();
+                        }
                         for claimed in claimed {
                             self.activate(&mut active, &mut claims, claimed, woke);
                         }
+                        self.hints.make_room(self.config.max_active);
                     }
                     Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
                     // A claim whose reply is lost may have taken actors:
@@ -1433,6 +1129,7 @@ impl Runner {
             store: Arc::clone(&self.store),
             clock: Arc::clone(&self.clock),
             hint: self.hints.start(actor.clone()),
+            hints: self.hints.clone(),
             claimed,
             claimed_on,
             poll: self.config.lease.settings().claim_poll,
@@ -1487,24 +1184,6 @@ fn live_peers(lease: &NodeLease, boots: &[crate::node_wakes::BootLiveness]) -> V
     peers
 }
 
-/// `actor`'s rendezvous score on `peer`: FNV-1a over both, then mixed so
-/// names that differ in one byte score far apart. Stable across builds and
-/// processes, so every producer that sees one live set picks one peer.
-fn rendezvous(actor: &ActorKey, peer: &NodeId) -> u64 {
-    let hash = actor
-        .as_str()
-        .bytes()
-        .chain([0xff])
-        .chain(peer.as_str().bytes())
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    // The 64-bit finalizer of MurmurHash3.
-    let hash = (hash ^ (hash >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
-    let hash = (hash ^ (hash >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    hash ^ (hash >> 33)
-}
-
 /// Fold one liveness probe into `seen_held`, answering each boot this node
 /// saw holding its lock under listener session `session` and now sees free:
 /// a boot that died. A boot seen free without having been seen held is
@@ -1530,17 +1209,4 @@ fn released_boots(
     }
     seen_held.retain(|boot, _| registered.contains(boot));
     released
-}
-
-/// Ends an activation's hint registration however its task ends: returned,
-/// panicked or aborted.
-struct Running {
-    hints: Hints,
-    actor: ActorKey,
-}
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        self.hints.end(&self.actor);
-    }
 }
