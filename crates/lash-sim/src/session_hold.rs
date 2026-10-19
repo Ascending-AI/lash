@@ -215,10 +215,6 @@ impl lash_execution_contracts::backend::StoreSet for HoldingStoreSet {
         lash_execution_contracts::backend::StoreSet::module_artifacts(self.inner.as_ref())
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
-        lash_execution_contracts::backend::StoreSet::recovery_leader(self.inner.as_ref())
-    }
-
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,

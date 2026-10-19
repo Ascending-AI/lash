@@ -1,6 +1,5 @@
-//! The recovery leader lease's cadence and the attempt budget of an
-//! obligation delivery: host levers (ADR 0014) the remaining obligation
-//! relays and the recovery leader read.
+//! The attempt budget of an obligation delivery: a host lever (ADR 0014)
+//! the obligation relays read.
 
 /// How a deployment's recovery pass bounds its obligation deliveries (ADR
 /// 0109 §1.8). Host levers (ADR 0014): lash implements the mechanics, the
@@ -38,73 +37,5 @@ impl RecoveryPassBudget {
     #[must_use]
     pub fn attempt_ms(&self) -> u64 {
         u64::try_from(self.attempt.as_millis()).unwrap_or(u64::MAX)
-    }
-}
-
-/// The recovery leader lease's cadence (ADR 0109 §1.6). Host levers
-/// (ADR 0014).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RecoveryLeaseTimings {
-    /// How long a renew keeps the lease.
-    pub ttl: std::time::Duration,
-    /// How often a leader renews.
-    pub renew_every: std::time::Duration,
-    /// How long one acquire or renew may take before it counts as failed.
-    pub renew_timeout: std::time::Duration,
-    /// How far before the TTL a leader stops trusting its lease.
-    pub trust_margin: std::time::Duration,
-    /// How often a follower tries to acquire.
-    pub follower_retry: std::time::Duration,
-    /// The most random delay added to a follower's retry.
-    pub follower_jitter: std::time::Duration,
-    /// How long a holder leads before a higher rank may preempt it.
-    pub min_tenure: std::time::Duration,
-}
-
-impl RecoveryLeaseTimings {
-    /// Standard lease preset: TTL 15s, renew every 5s with a 2.5s timeout,
-    /// trust margin 2s, follower retry 5s plus up to 500ms jitter, minimum
-    /// tenure 30s. These historical values have no workload measurements.
-    pub fn standard() -> Self {
-        Self {
-            ttl: std::time::Duration::from_secs(15),
-            renew_every: std::time::Duration::from_secs(5),
-            renew_timeout: std::time::Duration::from_millis(2_500),
-            trust_margin: std::time::Duration::from_secs(2),
-            follower_retry: std::time::Duration::from_secs(5),
-            follower_jitter: std::time::Duration::from_millis(500),
-            min_tenure: std::time::Duration::from_secs(30),
-        }
-    }
-}
-
-impl Default for RecoveryLeaseTimings {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
-
-/// How this deployment competes for the recovery leader lease (ADR 0109
-/// §1.6).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RecoveryLeaseConfig {
-    /// This build's rank: a higher rank preempts a lower-ranked leader once
-    /// that leader has held the lease for
-    /// [`min_tenure`](RecoveryLeaseTimings::min_tenure). A rolling deploy
-    /// gives each new build a higher rank than the last, so the newest
-    /// build leads recovery. Defaults to 0.
-    pub generation_rank: i64,
-    /// The lease's cadence.
-    pub timings: RecoveryLeaseTimings,
-}
-
-impl RecoveryLeaseConfig {
-    /// Standard recovery seat: no rank preference (0), with the documented
-    /// [`RecoveryLeaseTimings::standard`] cadence.
-    pub fn standard() -> Self {
-        Self {
-            generation_rank: 0,
-            timings: RecoveryLeaseTimings::standard(),
-        }
     }
 }

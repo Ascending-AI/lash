@@ -11,7 +11,7 @@ use lash::durable::{DurableStore, NodeWakes};
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
     ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessEnvStore,
-    ProcessRegistry, RecoveryLeaderStore, ToolMaterialStore, TurnPreludeStore,
+    ProcessRegistry, ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
 use lash::{ObligationKind, StoreBindingId, StoreSet};
@@ -88,10 +88,6 @@ impl StoreSet for IntegratorStores {
 
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         self.substrate.module_artifacts()
-    }
-
-    fn recovery_leader(&self) -> Arc<dyn RecoveryLeaderStore> {
-        self.substrate.recovery_leader()
     }
 
     fn obligation_ledger(&self, kind: ObligationKind) -> Arc<dyn ObligationLedger> {

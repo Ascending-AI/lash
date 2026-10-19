@@ -707,9 +707,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //         session_revisions: lash::Retention::HeadOnly,
     //         ..lash::DataRetention::standard()
     //     })
-    //     .recovery_lease(lash::RecoveryLeaseConfig {
-    //         generation_rank: 1, ..Default::default()
-    //     })
     //     .recovery_pass_budget(lash::RecoveryPassBudget {
     //         attempt: Duration::from_secs(30),
     //     })

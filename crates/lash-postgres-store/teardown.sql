@@ -28,8 +28,6 @@ DROP TABLE IF EXISTS lash_session_head CASCADE;
 
 DROP TABLE IF EXISTS lash_pins CASCADE;
 
-DROP TABLE IF EXISTS lash_recovery_leader CASCADE;
-
 DROP TABLE IF EXISTS lash_deleted_sessions CASCADE;
 
 DROP TABLE IF EXISTS lash_graph_nodes CASCADE;

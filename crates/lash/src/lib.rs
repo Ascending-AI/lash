@@ -272,9 +272,9 @@ pub use crate::turn::{ToolCallRead, TurnActivityFanout, TurnOutput, TurnToolCall
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
-/// Store→engine delivery obligations (ADR 0109): what a stalled obligation
-/// reports, and how this deployment competes for the recovery leader lease.
-pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
+/// Store→engine delivery obligations (ADR 0109): the budget of each
+/// obligation delivery attempt.
+pub use lash_core::engine::RecoveryPassBudget;
 /// Why a session's actor parked, read by
 /// [`DurableSession::park_reason`], and the state of its unfinished turn a
 /// build refused to decode.

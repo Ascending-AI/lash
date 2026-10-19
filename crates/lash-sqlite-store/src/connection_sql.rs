@@ -1,7 +1,7 @@
 //! The SQLite SQL that names no lash table.
 //!
-//! Pragmas and the reads of SQLite's own catalog (`sqlite_master`) and clock
-//! are statements issued against a production database that no table owns,
+//! Pragmas and the reads of SQLite's own catalog (`sqlite_master`) are
+//! statements issued against a production database that no table owns,
 //! because they are about the *connection* rather than about any row. Before
 //! FIG-3387 they sat at scattered call sites, some written twice.
 //!
@@ -47,9 +47,3 @@ pub(crate) fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
 /// failure: it records no release because no build that stamps has written it.
 pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'release_stamp'";
-
-/// The database clock, in epoch milliseconds: what the recovery leader lease
-/// compares against (ADR 0109 §1.6), so hosts with skewed clocks agree on a
-/// lease's expiry.
-pub(crate) const SELECT_DATABASE_EPOCH_MS: &str =
-    "SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)";

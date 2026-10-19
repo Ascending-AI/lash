@@ -291,10 +291,6 @@ impl lash::StoreSet for LedgerStores {
         self.inner.module_artifacts()
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash::persistence::RecoveryLeaderStore> {
-        self.inner.recovery_leader()
-    }
-
     fn obligation_ledger(
         &self,
         kind: lash::ObligationKind,

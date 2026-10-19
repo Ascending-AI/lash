@@ -1,19 +1,15 @@
-//! Obligation ledgers and the recovery leader lease (ADR 0109 §1) compared
-//! across the three backends: one scripted sequence of arm, claim, settle,
-//! re-arm and listing calls on the `artifact_cleanup` ledger, and of acquire,
-//! renew and resign calls on one lease, must read back identically.
+//! Obligation ledgers (ADR 0109 §1) compared across the three backends: one
+//! scripted sequence of arm, claim, settle, re-arm and listing calls on the
+//! `artifact_cleanup` ledger must read back identically.
 //!
 //! The Postgres database is shared with every other case and every earlier
 //! run, so each backend's rows carry the run nonce and every read is filtered
-//! to them; ids, tokens and database-clock instants are normalized away, and
-//! the ledger's own instants come from the script, not a clock.
+//! to them; ids and tokens are normalized away, and the ledger's own instants
+//! come from the script, not a clock.
 
 use std::num::NonZeroUsize;
 
-use lash_core::store::{
-    HolderId, LeaseAnswer, LeaseClaim, LeaseName, ObligationId, ObligationKind,
-    ObligationSettlement, StallReason,
-};
+use lash_core::store::{ObligationId, ObligationKind, ObligationSettlement, StallReason};
 use lash_execution_contracts::backend::StoreSet;
 
 use super::*;
@@ -205,85 +201,6 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     out
 }
 
-fn lease_line(step: &str, answer: &LeaseAnswer, holders: &[(&str, &HolderId)]) -> String {
-    let holder = answer.row.as_ref().map(|row| {
-        holders
-            .iter()
-            .find(|(_, holder)| **holder == row.holder)
-            .map_or("?", |(alias, _)| *alias)
-    });
-    format!(
-        "{step} -> leader={} holder={holder:?} rank={:?} term={:?}",
-        answer.leader,
-        answer.row.as_ref().map(|row| row.generation_rank),
-        answer.row.as_ref().map(|row| row.term)
-    )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: a backend that cannot answer panics the harness with its name by design"
-)]
-async fn lease_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
-    let lease = stores.recovery_leader();
-    let name = LeaseName::new(format!("recovery:{prefix}"));
-    let claim = |holder: &str, rank: i64| LeaseClaim {
-        name: name.clone(),
-        holder: HolderId::new(format!("{prefix}:{holder}")),
-        generation_rank: rank,
-        ttl_ms: 60_000,
-        min_tenure_ms: 60_000,
-    };
-    let (one, two, three) = (claim("one", 0), claim("two", 0), claim("three", 5));
-    let holders = [
-        ("one", &one.holder),
-        ("two", &two.holder),
-        ("three", &three.holder),
-    ];
-    let mut out = vec![
-        lease_line(
-            "acquire one",
-            &lease.acquire(&one).await.expect("acquire"),
-            &holders,
-        ),
-        lease_line(
-            "acquire two",
-            &lease.acquire(&two).await.expect("acquire"),
-            &holders,
-        ),
-        lease_line(
-            "acquire three within tenure",
-            &lease.acquire(&three).await.expect("acquire"),
-            &holders,
-        ),
-        lease_line(
-            "renew one",
-            &lease.renew(&one, 1).await.expect("renew"),
-            &holders,
-        ),
-        lease_line(
-            "renew two",
-            &lease.renew(&two, 1).await.expect("renew"),
-            &holders,
-        ),
-    ];
-    let resigned = lease.resign(&name, &two.holder, 1).await.expect("resign");
-    out.push(format!("resign two -> {resigned}"));
-    let resigned = lease.resign(&name, &one.holder, 1).await.expect("resign");
-    out.push(format!("resign one -> {resigned}"));
-    out.push(lease_line(
-        "acquire two after resign",
-        &lease.acquire(&two).await.expect("acquire"),
-        &holders,
-    ));
-    out.push(lease_line(
-        "renew one after resign",
-        &lease.renew(&one, 1).await.expect("renew"),
-        &holders,
-    ));
-    out
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: a backend that cannot open panics the harness with its name by design"
@@ -322,24 +239,17 @@ pub(super) async fn compare_obligation_ledgers(
     for (name, stores) in backends {
         let prefix = format!("fig-3850-{nonce}-{name}");
         let ledger = ledger_transcript(stores, &prefix).await;
-        let lease = lease_transcript(stores, &prefix).await;
-        observations.push((name, ledger, lease));
+        observations.push((name, ledger));
     }
     for pair in observations.windows(2) {
-        let ((left, left_ledger, left_lease), (right, right_ledger, right_lease)) =
-            (&pair[0], &pair[1]);
+        let ((left, left_ledger), (right, right_ledger)) = (&pair[0], &pair[1]);
         assert_eq!(
             left_ledger, right_ledger,
             "obligation ledger answers differ between {left} and {right}"
         );
-        assert_eq!(
-            left_lease, right_lease,
-            "recovery leader answers differ between {left} and {right}"
-        );
     }
     eprintln!(
-        "PASS obligation_ledgers_and_recovery_lease: backends=3 ledger_steps={} lease_steps={}",
-        observations[0].1.len(),
-        observations[0].2.len()
+        "PASS obligation_ledgers: backends=3 ledger_steps={}",
+        observations[0].1.len()
     );
 }

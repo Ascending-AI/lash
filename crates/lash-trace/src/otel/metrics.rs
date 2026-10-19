@@ -40,7 +40,6 @@ mod enabled {
     const PARKED_WORK_REASON_ATTRIBUTE: &str = AttributeKey::ParkReason.definition().key;
     const OBLIGATION_KIND_ATTRIBUTE: &str = AttributeKey::ObligationKind.definition().key;
     const OBLIGATION_OUTCOME_ATTRIBUTE: &str = AttributeKey::ObligationOutcome.definition().key;
-    const RECOVERY_LEASE_ATTRIBUTE: &str = AttributeKey::RecoveryLease.definition().key;
 
     /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
     #[derive(Clone, Debug)]
@@ -232,14 +231,11 @@ mod enabled {
         }
     }
 
-    /// Store→engine delivery obligations and the recovery leader lease
-    /// (ADR 0109 §1.5).
+    /// Store→engine delivery obligations (ADR 0109 §1.5).
     #[derive(Clone)]
     pub struct ObligationMetrics {
         attempts: Counter<u64>,
         stalled: Gauge<u64>,
-        leading: Gauge<u64>,
-        term: Gauge<u64>,
     }
 
     impl ObligationMetrics {
@@ -247,8 +243,6 @@ mod enabled {
             Self {
                 attempts: counter(&meter, Metric::ObligationAttempts),
                 stalled: gauge(&meter, Metric::ObligationsStalled),
-                leading: gauge(&meter, Metric::RecoveryLeader),
-                term: gauge(&meter, Metric::RecoveryTerm),
             }
         }
 
@@ -267,13 +261,6 @@ mod enabled {
         pub fn record_stalled(&self, kind: &'static str, count: u64) {
             self.stalled
                 .record(count, &[KeyValue::new(OBLIGATION_KIND_ATTRIBUTE, kind)]);
-        }
-
-        /// Report whether this process leads lease `name`, and its term.
-        pub fn record_leadership(&self, name: &str, leading: bool, term: u64) {
-            let attributes = [KeyValue::new(RECOVERY_LEASE_ATTRIBUTE, name.to_owned())];
-            self.leading.record(u64::from(leading), &attributes);
-            self.term.record(term, &attributes);
         }
     }
 
@@ -352,9 +339,6 @@ mod disabled {
         }
         pub fn record_stalled(&self, kind: &'static str, count: u64) {
             let _ = (kind, count);
-        }
-        pub fn record_leadership(&self, name: &str, leading: bool, term: u64) {
-            let _ = (name, leading, term);
         }
     }
 }
@@ -471,7 +455,6 @@ mod tests {
             .record_refused("cancel_process", "closed");
         metrics.obligations.record_attempt("turn", "success");
         metrics.obligations.record_stalled("turn", 1);
-        metrics.obligations.record_leadership("recovery", true, 1);
         // Neither a different injected provider nor the default may receive these observations.
         other_metrics.tool_intent.record_executed("other_provider");
         TelemetryMetrics::default()
@@ -507,7 +490,7 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 19);
+        assert_eq!(actual.len(), 17);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()

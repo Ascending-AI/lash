@@ -197,7 +197,7 @@ on SQLite
 
 ### Clean shutdown
 
-`LashCore::shutdown` resigns the core's recovery leadership, stops its node,
+`LashCore::shutdown` stops the core's artifact-cleanup pass, stops its node,
 then shuts down its plugin factories. A node stops with one of the runner's
 reasons (`lash::durable::runner::Stopped`):
 

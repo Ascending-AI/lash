@@ -423,10 +423,6 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.definition_store)
     }
 
-    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
-        self.inner.recovery_leader()
-    }
-
     fn obligation_ledger(
         &self,
         kind: crate::store::ObligationKind,

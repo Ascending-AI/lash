@@ -682,11 +682,6 @@ impl Backend {
         self.inner.stores.module_artifacts()
     }
 
-    /// The recovery leader lease over the store set's storage.
-    pub fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
-        self.inner.stores.recovery_leader()
-    }
-
     /// The store set's obligation ledger of `kind`.
     pub fn obligation_ledger(
         &self,
@@ -772,9 +767,6 @@ pub trait StoreSet: Send + Sync {
 
     /// The Lash VM module-artifact store.
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
-
-    /// The recovery leader lease over this storage (ADR 0109 §1.6).
-    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore>;
 
     /// The obligation ledger of `kind` (ADR 0109 §1.3).
     fn obligation_ledger(

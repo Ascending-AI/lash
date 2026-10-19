@@ -27,11 +27,9 @@ const ATTACHMENT_REFERRERS_SOURCE: &str =
 /// none is excluded.
 const CONTROL_INTENT_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/control_intent.rs");
-/// The obligation ledgers and the recovery leader lease (ADR 0109 §1): every
-/// method is executed by `obligation_cases`, none is excluded.
+/// The obligation ledgers (ADR 0109 §1): every method is executed by
+/// `obligation_cases`, none is excluded.
 const OBLIGATION_SOURCE: &str = include_str!("../../../lash-core-store/src/store/obligation.rs");
-const RECOVERY_LEADER_SOURCE: &str =
-    include_str!("../../../lash-core-store/src/store/recovery_leader.rs");
 /// The persistent-heap page store (FIG-6191, S6): every method is executed
 /// by `page_store_cases`, none is excluded.
 const PAGE_STORE_SOURCE: &str = include_str!("../../../lash-durable/src/domain/pages.rs");
@@ -336,7 +334,6 @@ async fn store_trait_surface_is_fully_gated() {
 
     for (source, trait_name) in [
         (OBLIGATION_SOURCE, "ObligationLedger"),
-        (RECOVERY_LEADER_SOURCE, "RecoveryLeaderStore"),
         (PAGE_STORE_SOURCE, "PageStore"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {

@@ -28,7 +28,7 @@ use lash::persistence::ProcessRegistry;
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
     ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessEnvStore,
-    RecoveryLeaderStore, ToolMaterialStore, TurnPreludeStore,
+    ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
 use lash::{ObligationKind, ProcessId, SessionId, StoreBindingId, StoreSet, TurnId};
@@ -588,10 +588,6 @@ impl StoreSet for RecordedStores {
 
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         self.inner.module_artifacts()
-    }
-
-    fn recovery_leader(&self) -> Arc<dyn RecoveryLeaderStore> {
-        self.inner.recovery_leader()
     }
 
     fn obligation_ledger(&self, kind: ObligationKind) -> Arc<dyn ObligationLedger> {

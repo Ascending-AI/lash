@@ -199,13 +199,6 @@ impl lash_execution_contracts::backend::StoreSet for PostgresStoreSet {
         PostgresStoreSet::process_env_store(self)
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash_core_store::store::RecoveryLeaderStore> {
-        Arc::new(crate::recovery_leader::PostgresRecoveryLeader::new(
-            self.inner.storage.pool().clone(),
-            self.inner.storage.fence.clone(),
-        ))
-    }
-
     fn obligation_ledger(
         &self,
         kind: lash_core_store::store::ObligationKind,

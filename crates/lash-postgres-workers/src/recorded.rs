@@ -600,10 +600,6 @@ impl StoreSet for RecordedStores {
         self.inner.module_artifacts()
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
-        self.inner.recovery_leader()
-    }
-
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,

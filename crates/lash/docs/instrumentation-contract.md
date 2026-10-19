@@ -137,7 +137,6 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.parked_work.reason` | String | Provenance | metrics only |
 | `lash.obligation.kind` | String | Provenance | metrics only |
 | `lash.obligation.outcome` | String | Provenance | metrics only |
-| `lash.recovery_leader.name` | String | Provenance | metrics only |
 | `gen_ai.tool.type` | String | Refinable | tool, cell |
 | `gen_ai.provider.name` | String | Refinable | model, extension |
 | `error.type` | String | Refinable | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
@@ -190,7 +189,5 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.tool_intent.refused` | Counter | `` | Transition |
 | `lash.obligation.attempts` | Counter | `` | Transition |
 | `lash.obligations.stalled` | Gauge | `` | Gauge |
-| `lash.recovery_leader` | Gauge | `` | Physical |
-| `lash.recovery_leader.term` | Gauge | `` | Physical |
 
 GenAI histograms supply advisory semconv boundaries. Durations in seconds: `[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]`. Token and call counts: `[1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0]`. Host meter-provider views take precedence.

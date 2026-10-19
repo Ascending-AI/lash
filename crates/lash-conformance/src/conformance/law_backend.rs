@@ -194,10 +194,6 @@ impl crate::StoreSet for StoreLawStores {
         Arc::new(UnavailableProcessDefinitions)
     }
 
-    fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
-        Self::no_second_substrate("recovery leader lease")
-    }
-
     fn obligation_ledger(
         &self,
         _kind: crate::store::ObligationKind,

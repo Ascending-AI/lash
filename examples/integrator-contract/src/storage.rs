@@ -628,24 +628,6 @@ impl ObligationLedger for Integrator {
 }
 
 #[lash::async_trait]
-impl RecoveryLeaderStore for Integrator {
-    async fn acquire(&self, claim: &LeaseClaim) -> Result<LeaseAnswer, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn renew(&self, claim: &LeaseClaim, term: i64) -> Result<LeaseAnswer, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn resign(
-        &self,
-        name: &LeaseName,
-        holder: &HolderId,
-        term: i64,
-    ) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
-}
-
-#[lash::async_trait]
 impl StorePreflight for Integrator {
     fn backend(&self) -> StoreBackend {
         unreachable!("external signature witness")

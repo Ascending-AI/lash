@@ -407,14 +407,6 @@ table lash_queued_work_batches
   unique (batch_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
-table lash_recovery_leader
-  column elected_at_ms bigint not-null
-  column expires_at_ms bigint not-null
-  column generation_rank bigint not-null
-  column holder_id text not-null
-  column name text not-null
-  column term bigint not-null
-  primary-key (name)
 table lash_referrer_fences
   column ended_at_ms bigint not-null
   column referrer_id text not-null

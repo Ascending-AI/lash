@@ -131,7 +131,6 @@ struct StoreParts {
     process_registry: Arc<SqliteProcessRegistry>,
     process_env_store: Arc<SqliteStore>,
     attachment_store: Arc<SqliteAttachmentStore>,
-    recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
     /// A file store set's node wakes; a memory store set has none.
     node_wakes: Option<Arc<crate::durable::SqliteNodeWakes>>,
 }
@@ -277,9 +276,6 @@ impl SqliteStoreSet {
             .with_process_id_mint_for_testing(options.process_id_mint.clone()),
         );
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
-        let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
-            process_env_store.conn.clone(),
-        ));
         let node_wakes = match &location {
             SqliteLocation::File { path } => {
                 let store = crate::SqliteDurableStore::new(
@@ -308,7 +304,6 @@ impl SqliteStoreSet {
                 process_registry,
                 process_env_store,
                 attachment_store,
-                recovery_leader,
                 node_wakes,
             }),
         })
@@ -461,10 +456,6 @@ impl lash_execution_contracts::backend::StoreSet for SqliteStoreSet {
         &self,
     ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         SqliteStoreSet::process_env_store(self)
-    }
-
-    fn recovery_leader(&self) -> Arc<dyn lash_core_store::store::RecoveryLeaderStore> {
-        self.inner.recovery_leader.clone()
     }
 
     fn obligation_ledger(

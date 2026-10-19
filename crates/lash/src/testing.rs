@@ -340,7 +340,7 @@ pub struct ArtifactCleanupFence {
 /// Relay delivery ends the upload hold; it deletes no blob bytes. Other holders
 /// continue to protect the blob until they end.
 pub async fn quiesce_artifact_cleanup(core: &crate::LashCore) -> ArtifactCleanupFence {
-    let guard = core.recovery.quiesce_cleanup().await;
+    let guard = core.cleanup.quiesce_cleanup().await;
     ArtifactCleanupFence {
         _guard: guard,
         relay: lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(

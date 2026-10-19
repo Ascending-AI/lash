@@ -126,12 +126,6 @@ impl StoreObserver {
                 .record_durable_commit(label, outcome, cost);
         }
     }
-
-    pub fn recovery_leadership(&self, name: &str, leading: bool, term: u64) {
-        if let Some(metrics) = &self.metrics {
-            record_recovery_leadership(metrics, name, leading, term);
-        }
-    }
 }
 
 /// Live observation for `lash.provider.retries`.
@@ -212,18 +206,6 @@ pub fn record_obligations_stalled(metrics: &TelemetryMetrics, kind: &'static str
     #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.obligations.stalled");
     metrics.obligations.record_stalled(kind, count);
-}
-
-/// Physical lease observation for `lash.recovery_leader`.
-pub fn record_recovery_leadership(
-    metrics: &TelemetryMetrics,
-    name: &str,
-    leading: bool,
-    term: u64,
-) {
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.recovery_leader");
-    metrics.obligations.record_leadership(name, leading, term);
 }
 
 /// Live observation for `lash.runtime_commit.budgeted_size`.
@@ -373,21 +355,16 @@ mod tests {
         let disabled = StoreObserver::default();
         assert!(!disabled.is_observed());
         disabled.pool_acquire_wait(Duration::from_millis(1), "success");
-        disabled.recovery_leadership("recovery:fixture", false, 0);
         assert_eq!(
             observed.histogram_count("lash.store.pool.acquire_wait.duration"),
             0
         );
-        assert_eq!(observed.counter_value("lash.recovery_leader"), 0);
         let observer = StoreObserver::new(TelemetryMetrics::default());
         observer.pool_acquire_wait(Duration::from_millis(2), "success");
         observer.pool_acquire_wait(Duration::from_millis(3), "error");
-        observer.recovery_leadership("recovery:fixture", true, 1);
-        observer.recovery_leadership("recovery:fixture", false, 0);
         assert_eq!(
             observed.histogram_count("lash.store.pool.acquire_wait.duration"),
             2
         );
-        assert_eq!(observed.counter_value("lash.recovery_leader"), 2);
     }
 }

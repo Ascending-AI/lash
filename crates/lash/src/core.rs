@@ -59,9 +59,9 @@ pub struct LashCore {
     pub(crate) host_process_engines: lash_core::ProcessEngineRegistry,
     /// Shared across core clones so the work ports are resolved at most once.
     pub(crate) substrate_slot: Arc<CoreWorkSlot>,
-    /// This core's seat in the recovery leader election (ADR 0109 §1.6);
-    /// the core resigns it at shutdown.
-    pub(crate) recovery: Arc<recovery::RecoverySlot>,
+    /// The core's artifact-cleanup due pass (ADR 0132 §12); it stops at
+    /// shutdown.
+    pub(crate) cleanup: Arc<recovery::CleanupPass>,
     /// The node the backend's session actors run on (ADR 0132 §3).
     pub(crate) node: Arc<node::NodeSlot>,
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
@@ -360,9 +360,7 @@ impl LashCore {
     /// built from [`Self::durable_process_worker_config`] shares these
     /// factories.
     pub async fn shutdown(&self) -> Result<()> {
-        // A stopping deployment hands recovery leadership over now rather
-        // than after the lease's TTL (ADR 0109 §1.6).
-        self.recovery.resign().await;
+        self.cleanup.stop();
         // The node stops before the plugins its turns run go.
         self.node.stop().await;
         self.language_observation_publisher.shutdown().await;
@@ -763,7 +761,6 @@ pub struct LashCoreBuilder {
     /// The session config-change observers the deployment uninstalled for
     /// good, each by its exact identity (FIG-6164).
     retired_config_observers: Vec<lash_core::plugin::PluginCallbackIdentity>,
-    recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
@@ -840,7 +837,6 @@ impl LashCoreBuilder {
             process_component_refusal: None,
             retired_session_plugins: Default::default(),
             retired_config_observers: Vec::new(),
-            recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
             tool_live_policy: lash_core::ToolLivePolicy::default(),
@@ -1076,16 +1072,6 @@ impl LashCoreBuilder {
     /// 50 ms frames of at most 8 KiB, with an immediate first delta.
     pub fn delta_coalescing(mut self, coalescing: crate::DeltaCoalescing) -> Self {
         self.delta_coalescing = Some(coalescing);
-        self
-    }
-
-    /// Configure how this deployment competes for the recovery leader lease
-    /// (ADR 0109 §1.6): its build rank — a higher rank preempts a
-    /// lower-ranked leader after the minimum tenure, so a rolling deploy that
-    /// raises the rank per build hands recovery to the newest build — and the
-    /// lease's cadence. Defaults to rank 0 on a 15 s TTL renewed every 5 s.
-    pub fn recovery_lease(mut self, config: lash_core::engine::RecoveryLeaseConfig) -> Self {
-        self.recovery_lease = Some(config);
         self
     }
 
@@ -1346,14 +1332,10 @@ impl LashCoreBuilder {
             .with_plugin_host(Arc::clone(&default_plugin_host))
             .with_process_work(process_work.clone())
             .build();
-        let recovery = Arc::new(recovery::RecoverySlot::new(
-            &env,
-            self.recovery_lease
-                .unwrap_or_else(lash_core::engine::RecoveryLeaseConfig::standard),
-        ));
+        let cleanup = Arc::new(recovery::CleanupPass::new(Arc::clone(&env.core.clock)));
         // The artifact-cleanup outbox's due pass (ADR 0132 §12): a cleanup
         // whose producer died before its immediate attempt is delivered here.
-        recovery.start_cleanup(
+        cleanup.start(
             Arc::new(
                 lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
                     &backend,
@@ -1393,7 +1375,7 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             host_process_engines,
             substrate_slot,
-            recovery,
+            cleanup,
             node: Arc::new(if self.serves_sessions {
                 node::NodeSlot::new()
             } else {

@@ -131,18 +131,6 @@ CREATE TABLE IF NOT EXISTS lash_pins (
     CONSTRAINT ck_pins_target_kind CHECK (target_kind IN ('input', 'turn', 'revision'))
 );
 
--- The recovery leader lease (ADR 0109 §1.6): one row per engine authority
--- naming the deployment that runs the leader-only recovery duties. Load
--- control, never a fence; every comparison runs on the database clock.
-CREATE TABLE IF NOT EXISTS lash_recovery_leader (
-    name TEXT PRIMARY KEY,
-    holder_id TEXT NOT NULL,
-    generation_rank BIGINT NOT NULL,
-    term BIGINT NOT NULL,
-    elected_at_ms BIGINT NOT NULL,
-    expires_at_ms BIGINT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
     session_id TEXT PRIMARY KEY,
     created_at_ms BIGINT NOT NULL,

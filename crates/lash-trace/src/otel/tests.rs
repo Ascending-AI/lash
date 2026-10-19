@@ -461,13 +461,10 @@ fn a_producer_joins_its_callers_trace_or_roots_a_linked_one() {
 
 #[test]
 fn emitted_domain_shape_matches_registry() {
-    for metric in [
-        registry::Metric::PoolAcquireWait,
-        registry::Metric::RecoveryLeader,
-        registry::Metric::RecoveryTerm,
-    ] {
-        assert_eq!(metric.definition().ownership, registry::Ownership::Physical);
-    }
+    assert_eq!(
+        registry::Metric::PoolAcquireWait.definition().ownership,
+        registry::Ownership::Physical
+    );
     let (provider, meter, exporter, metrics) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     adapter.append(&completed()).unwrap();
@@ -576,10 +573,6 @@ fn emitted_domain_shape_matches_registry() {
         .obligations
         .record_attempt("input", "delivered");
     adapter.metrics.obligations.record_stalled("input", 0);
-    adapter
-        .metrics
-        .obligations
-        .record_leadership("recovery", true, 1);
     metrics::emit_remaining_metrics(&adapter);
     meter.force_flush().unwrap();
     let spans = exporter.get_finished_spans().unwrap();

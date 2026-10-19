@@ -173,9 +173,6 @@ impl StoreSet for LawStores {
     ) -> Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore> {
         self.inner.module_artifacts()
     }
-    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
-        self.inner.recovery_leader()
-    }
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,

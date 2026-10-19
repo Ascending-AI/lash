@@ -1,6 +1,5 @@
-//! Store→engine delivery obligations and the recovery leader lease (ADR 0109
-//! §1): the laws every store set owes over its obligation ledgers and its
-//! lease, whatever engine delivers.
+//! Store→engine delivery obligations (ADR 0109 §1): the laws every store set
+//! owes over its obligation ledgers, whatever engine delivers.
 //!
 //! The relay laws run the kernel's relay ([`relay_due`], [`deliver_now`]) over
 //! a backend's artifact-cleanup ledger — an ended host pin's cleanup row the
@@ -9,15 +8,10 @@
 //! a retryable failure backs off, the ceiling stalls, a refused or
 //! undecodable delivery stalls at once without failing the page, and only
 //! an explicit re-arm puts a stalled obligation back.
-//!
-//! The lease laws run on the database clock with short durations: a single
-//! holder, failover after expiry, preemption by a higher rank only after the
-//! holder's minimum tenure, and resignation.
 
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use lash_core::ClockWallTime as _;
 use lash_core::runtime::artifact_cleanup::{
@@ -28,9 +22,8 @@ use lash_core::runtime::obligations::relay::{
     relay_due,
 };
 use lash_core::store::{
-    ClaimToken, HolderId, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind,
-    ObligationLedger, ObligationSettlement, ObligationState, RecoveryLeaderStore, SettleOutcome,
-    StallReason,
+    ClaimToken, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    ObligationSettlement, ObligationState, SettleOutcome, StallReason,
 };
 use lash_core::testing::TestClock;
 
@@ -1015,194 +1008,4 @@ pub async fn immediate_delivery_takes_only_a_due_obligation(fixture: ObligationL
         RelayVerdict::NotDue
     );
     assert_eq!(relay.attempts_for(&key), 1);
-}
-
-/// What one lease law runs over: a backend's lease store, and a lease name
-/// no other law uses.
-pub struct LeaseLawFixture {
-    pub store: Arc<dyn RecoveryLeaderStore>,
-    pub name: String,
-}
-
-fn claim(
-    fixture: &LeaseLawFixture,
-    holder: &str,
-    rank: i64,
-    ttl_ms: u64,
-    tenure_ms: u64,
-) -> LeaseClaim {
-    LeaseClaim {
-        name: LeaseName::new(fixture.name.clone()),
-        holder: HolderId::new(format!("{}:{holder}", fixture.name)),
-        generation_rank: rank,
-        ttl_ms,
-        min_tenure_ms: tenure_ms,
-    }
-}
-
-/// One holder leads at a time: a second claimant is refused while the lease
-/// is live, and only the holder renews its term.
-#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn the_lease_has_a_single_holder(fixture: LeaseLawFixture) {
-    let a = claim(&fixture, "a", 0, 60_000, 0);
-    let b = claim(&fixture, "b", 0, 60_000, 0);
-    let first = fixture.store.acquire(&a).await.expect("a acquires");
-    assert!(first.leader);
-    let term = first.row.as_ref().expect("the elected row").term;
-    let second = fixture.store.acquire(&b).await.expect("b tries");
-    assert!(!second.leader, "a live lease has one holder");
-    assert_eq!(second.row.as_ref().map(|row| &row.holder), Some(&a.holder));
-    assert!(
-        fixture
-            .store
-            .renew(&a, term)
-            .await
-            .expect("a renews")
-            .leader,
-        "the holder renews"
-    );
-    assert!(
-        !fixture
-            .store
-            .renew(&b, term)
-            .await
-            .expect("b renews")
-            .leader,
-        "only the holder renews"
-    );
-    assert!(
-        !fixture
-            .store
-            .renew(&a, term + 1)
-            .await
-            .expect("a renews a term it never held")
-            .leader,
-        "a renew names the term it holds"
-    );
-    assert!(
-        fixture
-            .store
-            .acquire(&a)
-            .await
-            .expect("a acquires again")
-            .leader
-    );
-}
-
-/// An expired lease fails over: the next claimant takes it with the term
-/// bumped, and the old holder's renew is refused.
-#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn an_expired_lease_fails_over(fixture: LeaseLawFixture) {
-    let a = claim(&fixture, "a", 0, 200, 0);
-    let b = claim(&fixture, "b", 0, 60_000, 0);
-    let first = fixture.store.acquire(&a).await.expect("a acquires");
-    assert!(first.leader);
-    let term = first.row.expect("a's row").term;
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    let taken = fixture.store.acquire(&b).await.expect("b takes over");
-    assert!(taken.leader, "an expired lease fails over");
-    assert_eq!(taken.row.as_ref().expect("b's row").term, term + 1);
-    assert!(
-        !fixture
-            .store
-            .renew(&a, term)
-            .await
-            .expect("a renews late")
-            .leader,
-        "the expired holder's renew is refused"
-    );
-}
-
-/// A higher rank preempts a live holder only after the holder's minimum
-/// tenure; an equal or lower rank never does.
-#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn a_newer_generation_preempts_after_the_minimum_tenure(fixture: LeaseLawFixture) {
-    let old = claim(&fixture, "old", 1, 60_000, 400);
-    let peer = claim(&fixture, "peer", 1, 60_000, 400);
-    let new = claim(&fixture, "new", 2, 60_000, 400);
-    let elected = fixture.store.acquire(&old).await.expect("old acquires");
-    assert!(elected.leader);
-    let term = elected.row.expect("old's row").term;
-    assert!(
-        !fixture
-            .store
-            .acquire(&new)
-            .await
-            .expect("new, too early")
-            .leader,
-        "a higher rank waits for the holder's minimum tenure"
-    );
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(
-        !fixture.store.acquire(&peer).await.expect("peer").leader,
-        "an equal rank never preempts a live holder"
-    );
-    let preempted = fixture.store.acquire(&new).await.expect("new preempts");
-    assert!(preempted.leader, "a higher rank preempts after the tenure");
-    let row = preempted.row.expect("new's row");
-    assert_eq!(row.generation_rank, 2);
-    assert_eq!(row.term, term + 1);
-    assert!(
-        !fixture
-            .store
-            .renew(&old, term)
-            .await
-            .expect("old renews")
-            .leader,
-        "the preempted holder learns it lost at its next renew"
-    );
-}
-
-/// A holder that resigns hands the lease over at once with the term bumped;
-/// a resign that does not hold the lease changes nothing.
-#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn a_resigned_lease_is_taken_at_once(fixture: LeaseLawFixture) {
-    let a = claim(&fixture, "a", 0, 60_000, 0);
-    let b = claim(&fixture, "b", 0, 60_000, 0);
-    let term = fixture
-        .store
-        .acquire(&a)
-        .await
-        .expect("a acquires")
-        .row
-        .expect("a's row")
-        .term;
-    assert!(
-        !fixture
-            .store
-            .resign(&b.name, &b.holder, term)
-            .await
-            .expect("b resigns a lease it does not hold"),
-        "only the holder resigns"
-    );
-    assert!(
-        fixture
-            .store
-            .resign(&a.name, &a.holder, term)
-            .await
-            .expect("a resigns")
-    );
-    assert!(
-        !fixture
-            .store
-            .resign(&a.name, &a.holder, term)
-            .await
-            .expect("a resigns again")
-    );
-    let taken = fixture.store.acquire(&b).await.expect("b acquires");
-    assert!(taken.leader, "a resigned lease is free at once");
-    assert_eq!(
-        taken.row.expect("b's row").term,
-        term + 1,
-        "a resignation keeps the term monotone"
-    );
-    assert!(
-        !fixture
-            .store
-            .renew(&a, term)
-            .await
-            .expect("a renews")
-            .leader,
-        "a resigned holder cannot renew"
-    );
 }

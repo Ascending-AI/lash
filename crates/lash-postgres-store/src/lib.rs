@@ -926,8 +926,6 @@ mod process_registry;
 mod process_sql;
 #[path = "postgres/queued_work.rs"]
 mod queued_work;
-#[path = "postgres/recovery_leader.rs"]
-mod recovery_leader;
 #[path = "postgres/release_stamp.rs"]
 mod release_stamp;
 #[cfg(test)]

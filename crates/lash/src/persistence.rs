@@ -131,13 +131,11 @@ pub use lash_core::store::ArtifactCleanupLedger;
 pub use lash_core::store::ObligationStanding;
 /// Head and usage values returned by custom session stores.
 pub use lash_core::store::SessionHeadRef;
-/// The store halves a storage integrator's [`StoreSet`](crate::StoreSet)
-/// supplies: the obligation ledgers and the recovery leader lease
-/// (ADR 0109 §1.3, §1.6).
+/// The store half a storage integrator's [`StoreSet`](crate::StoreSet)
+/// supplies: the obligation ledgers (ADR 0109 §1.3).
 pub use lash_core::store::{
-    ClaimToken, ClaimedObligation, HolderId, KeyColumn, KeyColumnType, LeaseAnswer, LeaseClaim,
-    LeaseName, LeaseRow, ObligationLedger, ObligationSettlement, RecoveryLeaderStore,
-    SettleOutcome,
+    ClaimToken, ClaimedObligation, KeyColumn, KeyColumnType, ObligationLedger,
+    ObligationSettlement, SettleOutcome,
 };
 pub use lash_core::store::{StoreTransition, TurnTraceReceipt};
 /// Artifact ownership supplied to protocol engines and effect controllers.

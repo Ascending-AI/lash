@@ -16,4 +16,4 @@ pub use commands::{GatedObservationSink, NullObservationSink, ObservationCursor,
 pub use context::{ObservedEvent, ReplayKey, ShiftObservation, activity_projection};
 pub use contracts::UpgradePolicy;
 pub use control::{EngineRefusal, RefusalClass};
-pub use recovery::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
+pub use recovery::RecoveryPassBudget;

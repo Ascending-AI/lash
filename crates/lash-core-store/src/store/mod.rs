@@ -53,7 +53,6 @@ mod synthetic_next_versions;
 pub use physical_turn::PhysicalTurn;
 mod control_intent;
 mod realization;
-pub mod recovery_leader;
 mod retention;
 mod run;
 mod session_head;
@@ -152,7 +151,6 @@ pub use preflight::{
 };
 pub use queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey};
 pub use realization::{admit_runtime_commit_budget, commit_runtime_state_verified};
-pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
     AdmittedHead, AdmittedInputIds, AdmittedTurnRows, CheckpointAdmission,

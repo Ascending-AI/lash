@@ -79,7 +79,6 @@ pub mod attachment;
 pub mod durable;
 pub mod obligation;
 pub mod process;
-pub mod recovery_leader;
 pub mod session;
 pub mod session_ingress;
 pub mod session_runs;
@@ -142,7 +141,6 @@ pub const TABLES: &[&str] = &[
     process::parent_end_plans::TABLE,
     process::processes::TABLE,
     process::tombstones::TABLE,
-    recovery_leader::TABLE,
     turn_ingress::cancel_requests::TABLE,
     turn_ingress::forsaken_inputs::TABLE,
     turn_ingress::pending_inputs::TABLE,
@@ -217,7 +215,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
     );
-    statements.extend_from_slice(recovery_leader::RecoveryLeaderStatements::NEUTRAL);
     statements.extend_from_slice(durable::NodeStatements::NEUTRAL);
     statements.extend_from_slice(durable::ActorStatements::NEUTRAL);
     statements.extend_from_slice(durable::MailStatements::NEUTRAL);

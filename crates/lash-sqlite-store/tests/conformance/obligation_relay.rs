@@ -1,9 +1,6 @@
-//! The obligation relay and recovery leader lease laws (ADR 0109 §1) on
-//! SQLite.
+//! The obligation relay laws (ADR 0109 §1) on SQLite.
 
 use std::sync::Arc;
-
-use lash_execution_contracts::backend::StoreSet as _;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
@@ -16,18 +13,6 @@ lash_conformance::obligation_relay_tests!({
         lash_conformance::ObligationLawFixture {
             stores,
             prefix: "sqlite".to_owned(),
-        },
-    )
-});
-
-lash_conformance::recovery_leader_tests!(|label| {
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.recovery_leader();
-    (
-        backend,
-        lash_conformance::LeaseLawFixture {
-            store,
-            name: format!("recovery:{label}"),
         },
     )
 });

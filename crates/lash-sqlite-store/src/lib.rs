@@ -158,7 +158,6 @@ mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
-mod recovery_leader;
 mod release_stamp;
 mod schema;
 mod schema_fragments;

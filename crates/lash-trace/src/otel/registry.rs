@@ -246,7 +246,6 @@ attributes! {
         ParkReason => ("lash.parked_work.reason", String, NONE),
         ObligationKind => ("lash.obligation.kind", String, NONE),
         ObligationOutcome => ("lash.obligation.outcome", String, NONE),
-        RecoveryLease => ("lash.recovery_leader.name", String, NONE),
     }
     refinable: {
         ToolType => ("gen_ai.tool.type", String, TraceSpanKindSet::of(&[K::Tool, K::Cell])),
@@ -383,8 +382,6 @@ metrics! {
     IntentRefused => ("lash.tool_intent.refused", Counter, "", Transition),
     ObligationAttempts => ("lash.obligation.attempts", Counter, "", Transition),
     ObligationsStalled => ("lash.obligations.stalled", Gauge, "", Gauge),
-    RecoveryLeader => ("lash.recovery_leader", Gauge, "", Physical),
-    RecoveryTerm => ("lash.recovery_leader.term", Gauge, "", Physical),
 }
 
 /// L6 writes this generated contract into the public reference and checks equality.
