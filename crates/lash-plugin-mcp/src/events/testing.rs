@@ -158,6 +158,7 @@ for line in sys.stdin:
             result['nextCursor'] = str(page + 1)
         if pages > 1:
             send({'jsonrpc': '2.0', 'id': request_id, 'result': result})
+            log(line)
             continue
         send({'jsonrpc': '2.0', 'id': request_id, 'result': {'events': [{
             'name': 'ticket.created', 'description': 'A ticket was created.',

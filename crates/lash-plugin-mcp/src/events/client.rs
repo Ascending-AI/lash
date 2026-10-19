@@ -6,6 +6,7 @@ use super::wire::{
     StreamPosition,
 };
 use super::{McpEventTransportPolicy, McpServerEvents};
+use crate::config::McpDataLimits;
 use crate::pool::McpConnectionPool;
 use lash_protocol_types::sync::MutexExt as _;
 use rmcp::ServiceError;
@@ -191,20 +192,25 @@ impl EventStreams {
         inner.orphans.retain(|(orphan, _, _)| *orphan != key);
     }
 }
-fn events_peer(
-    pool: &McpConnectionPool,
-    server: &str,
-) -> Result<(Peer<RoleClient>, crate::host::LashMcpClientHandler), McpEventsCallError> {
-    let (events, _, service) =
+/// One pool entry's enabled policy, data limits and live connection, admitted
+/// together. An operation captures it once and runs on it to the end.
+struct EventsConnection {
+    policy: McpEventTransportPolicy,
+    limits: McpDataLimits,
+    peer: Peer<RoleClient>,
+    handler: crate::host::LashMcpClientHandler,
+}
+fn admit(pool: &McpConnectionPool, server: &str) -> Result<EventsConnection, McpEventsCallError> {
+    let (events, limits, service) =
         pool.events_connection(server)
             .ok_or_else(|| McpEventsCallError::UnknownServer {
                 server: server.to_owned(),
             })?;
-    if matches!(events, McpServerEvents::Disabled) {
+    let McpServerEvents::Enabled(policy) = events else {
         return Err(McpEventsCallError::Disabled {
             server: server.to_owned(),
         });
-    }
+    };
     let (peer, handler) = service.ok_or_else(|| McpEventsCallError::Disconnected {
         server: server.to_owned(),
     })?;
@@ -218,30 +224,54 @@ fn events_peer(
             server: server.to_owned(),
         });
     }
-    Ok((peer, handler))
+    Ok(EventsConnection {
+        policy,
+        limits,
+        peer,
+        handler,
+    })
 }
 
 /// Host-callable event transport over the plugin's shared connections.
+///
+/// Each operation runs on the connection it admitted. When that connection
+/// closes, even because the server was replaced, the operation fails with its
+/// typed transport error and never continues on the replacement; the host's
+/// next operation admits the new connection.
 #[derive(Clone)]
 pub struct McpEventClient {
     pool: Arc<McpConnectionPool>,
+    #[cfg(test)]
+    between_pages: Option<Arc<tests::PageHook>>,
 }
 impl McpEventClient {
     pub fn new(pool: Arc<McpConnectionPool>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            #[cfg(test)]
+            between_pages: None,
+        }
     }
+
+    #[cfg(test)]
+    async fn pause_between_pages(&self) {
+        if let Some(hook) = &self.between_pages {
+            hook.reached.notify_one();
+            hook.release.notified().await;
+        }
+    }
+
+    #[cfg(not(test))]
+    async fn pause_between_pages(&self) {}
+
     /// Discover all event descriptors within this server's shared catalog limits.
     pub async fn list(
         &self,
         server: &str,
         timeout: Duration,
     ) -> Result<Vec<McpEventDescriptor>, McpEventsCallError> {
-        events_peer(&self.pool, server)?;
-        let (_, limits, _) = self.pool.events_connection(server).ok_or_else(|| {
-            McpEventsCallError::UnknownServer {
-                server: server.to_owned(),
-            }
-        })?;
+        let connection = admit(&self.pool, server)?;
+        let limits = connection.limits;
         let refuse = |limit, bound| McpEventsCallError::ListingLimit {
             server: server.to_owned(),
             limit,
@@ -256,7 +286,7 @@ impl McpEventClient {
                 || serde_json::json!({}),
                 |c| serde_json::json!({"cursor":c}),
             );
-            let value = call(&self.pool, server, wire::LIST_METHOD, params, timeout).await?;
+            let value = call(&connection.peer, server, wire::LIST_METHOD, params, timeout).await?;
             bytes = bytes.saturating_add(value.to_string().len());
             if bytes > limits.catalog_bytes {
                 return Err(refuse(McpEventListingLimit::Bytes, limits.catalog_bytes));
@@ -268,7 +298,10 @@ impl McpEventClient {
             events.extend(page.events);
             match page.next_cursor {
                 None => return Ok(events),
-                Some(next) if seen.insert(next.clone()) => cursor = Some(next),
+                Some(next) if seen.insert(next.clone()) => {
+                    cursor = Some(next);
+                    self.pause_between_pages().await;
+                }
                 Some(_) => {
                     return Err(McpEventsCallError::Decode {
                         server: server.to_owned(),
@@ -291,7 +324,7 @@ impl McpEventClient {
             server,
             wire::POLL_METHOD,
             call(
-                &self.pool,
+                &admit(&self.pool, server)?.peer,
                 server,
                 wire::POLL_METHOD,
                 input.params(),
@@ -307,15 +340,12 @@ impl McpEventClient {
         server: &str,
         input: &McpEventRequest,
     ) -> Result<McpEventStream, McpEventsCallError> {
-        let (peer, handler) = events_peer(&self.pool, server)?;
-        let (config, _, _) = self.pool.events_connection(server).ok_or_else(|| {
-            McpEventsCallError::UnknownServer {
-                server: server.to_owned(),
-            }
-        })?;
-        let settle = config
-            .enabled()
-            .map_or(0, |policy| policy.reorder_settle_ms);
+        let EventsConnection {
+            policy,
+            peer,
+            handler,
+            ..
+        } = admit(&self.pool, server)?;
         let handle = peer
             .send_request_with_option(
                 request(wire::STREAM_METHOD, input.params()),
@@ -341,7 +371,7 @@ impl McpEventClient {
             streams,
             handle: Some(handle),
             notifications,
-            settle: Duration::from_millis(settle),
+            settle: Duration::from_millis(policy.reorder_settle_ms),
             answered: false,
         })
     }
@@ -486,13 +516,12 @@ fn result_value(result: ServerResult) -> Result<Value, String> {
 }
 
 async fn call(
-    pool: &McpConnectionPool,
+    peer: &Peer<RoleClient>,
     server: &str,
     method: &str,
     params: Value,
     timeout: Duration,
 ) -> Result<Value, McpEventsCallError> {
-    let (peer, _) = events_peer(pool, server)?;
     let result = peer
         .send_request_with_option(
             request(method, params),
@@ -840,6 +869,65 @@ mod tests {
         pool.shutdown_all().await;
     }
 
+    #[derive(Default)]
+    pub(super) struct PageHook {
+        pub(super) reached: tokio::sync::Notify,
+        pub(super) release: tokio::sync::Notify,
+    }
+
+    /// EVENT-OPERATION-PEER: one listing runs on the connection it admitted.
+    /// A replacement installed between pages never receives the old peer's
+    /// cursor, and the listing fails instead of joining two catalogs.
+    #[tokio::test]
+    async fn a_replacement_between_list_pages_never_receives_the_old_cursor() {
+        let (old_world, new_world) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (old, new) = (
+            McpEventsFixture::new(old_world.path()),
+            McpEventsFixture::new(new_world.path()),
+        );
+        old.control(serde_json::json!({"list_pages": 2}));
+        new.control(serde_json::json!({"list_pages": 2}));
+        let pool = McpConnectionPool::connect(BTreeMap::from([(
+            "tickets".to_owned(),
+            old.server(McpEventTransportPolicy::default()),
+        )]))
+        .await
+        .unwrap();
+        let hook = Arc::new(PageHook::default());
+        let mut client = McpEventClient::new(Arc::clone(&pool));
+        client.between_pages = Some(Arc::clone(&hook));
+        let listing =
+            tokio::spawn(async move { client.list("tickets", Duration::from_secs(5)).await });
+        hook.reached.notified().await;
+        pool.attach(
+            "tickets".to_owned(),
+            new.server(McpEventTransportPolicy::default()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            pool.events_connection("tickets")
+                .is_some_and(|(_, _, service)| service.is_some()),
+            "the replacement is connected before the listing resumes"
+        );
+        hook.release.notify_one();
+        let result = tokio::time::timeout(Duration::from_secs(10), listing)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            new.requests_of(wire::LIST_METHOD),
+            Vec::<Value>::new(),
+            "the replacement received no part of the old listing"
+        );
+        assert!(
+            matches!(result, Err(McpEventsCallError::Transport { ref server, ref method, .. })
+                if server == "tickets" && method == wire::LIST_METHOD),
+            "the listing fails on its own closed connection: {result:?}"
+        );
+        pool.shutdown_all().await;
+    }
+
     fn window_request() -> McpEventRequest {
         McpEventRequest {
             name: "ticket.created".to_owned(),
@@ -857,7 +945,7 @@ mod tests {
 
     async fn release_notifications(pool: &McpConnectionPool, notifications: Vec<Value>) {
         call(
-            pool,
+            &admit(pool, "tickets").unwrap().peer,
             "tickets",
             "fixture/notifications",
             serde_json::json!({"notifications":notifications}),
