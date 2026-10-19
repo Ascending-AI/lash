@@ -54,3 +54,15 @@ pub(crate) fn mark(phases: Option<&StartPhaseClock>, phase: ProcessStartPhase) {
         phases.mark(phase);
     }
 }
+
+/// Attribute an operation even when it returns a refusal. Callers decide
+/// what to do with its result after its timing is captured.
+pub(crate) async fn timed<T>(
+    phases: Option<&StartPhaseClock>,
+    phase: ProcessStartPhase,
+    operation: impl std::future::Future<Output = T>,
+) -> T {
+    let result = operation.await;
+    mark(phases, phase);
+    result
+}

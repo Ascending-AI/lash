@@ -464,8 +464,20 @@ pub enum ProcessStartPhase {
     /// Staging the execution environment under the start's claim and
     /// reading it back.
     Environment,
-    /// Reading, holding and verifying a started definition, or realizing a
-    /// function the start carries inline.
+    /// Reading and decoding the stored definition descriptor.
+    DefinitionLoad,
+    /// The engine deriving the definition's signature, including reading
+    /// its document and any cache lookup or decode that read needs.
+    DefinitionResolve,
+    /// Acquiring the definition's artifact closure under the start's
+    /// claim, including store transactions and their lock waits.
+    DefinitionAcquire,
+    /// Verifying the host's signature claim against the stored definition,
+    /// including the engine's independent derivation.
+    DefinitionVerify,
+    /// Building the definition's start payload, or realizing a function
+    /// the start carries inline. The named definition operations above
+    /// have their own disjoint timings.
     Definition,
     /// The engine's admission of the payload and of its sealed settings.
     Admit,

@@ -8,7 +8,7 @@ Openers carry no content: `LlmCallStarted` always carries an omitted request; ho
 
 `ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).
 
-`lash.model.attempt.response_metadata.keys` names the response-metadata keys the provider leaf captured for the attempt, such as `header:x-opper-cost`, and never their values. A host process start's `lash.process.start` producer carries one `lash.process.start.<phase>_us` attribute per phase the start reached; the phases run back to back from the producer's opening.
+`lash.model.attempt.response_metadata.keys` names the response-metadata keys the provider leaf captured for the attempt, such as `header:x-opper-cost`, and never their values. A host process start's `lash.process.start` producer carries one `lash.process.start.<phase>_us` attribute per phase the start reached; the phases run back to back from the producer's opening. Definition starts split descriptor loading (`definition_load`), engine derivation (`definition_resolve`), closure acquisition and its store waits (`definition_acquire`), and a supplied signature claim's verification (`definition_verify`); `definition` holds the remaining payload construction or inline realization. Sum all five for the former coarse definition total.
 
 Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
 
@@ -94,6 +94,10 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.process.start.dispatch_us` | Integer | Provenance | producer |
 | `lash.process.start.admission_us` | Integer | Provenance | producer |
 | `lash.process.start.environment_us` | Integer | Provenance | producer |
+| `lash.process.start.definition_load_us` | Integer | Provenance | producer |
+| `lash.process.start.definition_resolve_us` | Integer | Provenance | producer |
+| `lash.process.start.definition_acquire_us` | Integer | Provenance | producer |
+| `lash.process.start.definition_verify_us` | Integer | Provenance | producer |
 | `lash.process.start.definition_us` | Integer | Provenance | producer |
 | `lash.process.start.admit_us` | Integer | Provenance | producer |
 | `lash.process.start.artifacts_us` | Integer | Provenance | producer |
@@ -143,7 +147,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 
 | Span kind | Attribute reserve |
 |---|---|
-| `producer` | 32 |
+| `producer` | 36 |
 | `agent` | 25 |
 | `model` | 47 |
 | `model_attempt` | 30 |

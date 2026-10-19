@@ -1,6 +1,8 @@
+use super::start_phases::{StartPhaseClock, timed};
 use super::*;
 use crate::*;
 use lash_execution_contracts::process::definition_store::definition_refused;
+use lash_trace::ProcessStartPhase as Phase;
 impl ArtifactReferrerPorts {
     /// Publish `draft` under `claim`, answering its definition with the
     /// signature its engine derives.
@@ -78,28 +80,46 @@ impl ArtifactReferrerPorts {
         claim: &ReferrerClaim,
         id: &ProcessDefinitionId,
     ) -> Result<DefinitionAcquisition, lash_execution_contracts::plugin_error::PluginError> {
-        let Some(resolved) = self.resolve_stored_definition(engines, id).await? else {
+        self.acquire_definition_timed(engines, claim, id, None)
+            .await
+    }
+
+    /// The same acquisition, attributing each awaited operation to its
+    /// host start. Untimed readers use this same implementation.
+    pub(crate) async fn acquire_definition_timed(
+        &self,
+        engines: &ProcessEngineRegistry,
+        claim: &ReferrerClaim,
+        id: &ProcessDefinitionId,
+        phases: Option<&StartPhaseClock>,
+    ) -> Result<DefinitionAcquisition, lash_execution_contracts::plugin_error::PluginError> {
+        let Some(resolved) = self.resolve_stored_definition(engines, id, phases).await? else {
             return Err(definition_missing(id));
         };
-        let (store_set, engine_names) = partition_manifest(&resolved.draft)?;
-        if !engine_names.is_empty()
-            && self.acquire(engines, claim, &engine_names).await? == ReferrerAcquisition::Ended
-        {
-            return Ok(DefinitionAcquisition::Ended);
-        }
-        match self
-            .definitions()
-            .acquire_process_definition(claim, id, &store_set)
-            .await
-        {
-            Ok(()) => Ok(DefinitionAcquisition::Held(resolved)),
-            Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == claim.referrer() => {
-                Ok(DefinitionAcquisition::Ended)
+        timed(phases, Phase::DefinitionAcquire, async {
+            let (store_set, engine_names) = partition_manifest(&resolved.draft)?;
+            if !engine_names.is_empty()
+                && self.acquire(engines, claim, &engine_names).await? == ReferrerAcquisition::Ended
+            {
+                return Ok(DefinitionAcquisition::Ended);
             }
-            // Reclaimed after the read: the last holder let go first.
-            Err(ArtifactStoreError::ArtifactMissing { .. }) => Err(definition_missing(id)),
-            Err(error) => Err(error.into()),
-        }
+            match self
+                .definitions()
+                .acquire_process_definition(claim, id, &store_set)
+                .await
+            {
+                Ok(()) => Ok(DefinitionAcquisition::Held(resolved)),
+                Err(ArtifactStoreError::ReferrerEnded { referrer })
+                    if referrer == claim.referrer() =>
+                {
+                    Ok(DefinitionAcquisition::Ended)
+                }
+                // Reclaimed after the read: the last holder let go first.
+                Err(ArtifactStoreError::ArtifactMissing { .. }) => Err(definition_missing(id)),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
 
     /// The descriptor stored under `id`, checked against the id and asked of
@@ -137,22 +157,34 @@ impl ArtifactReferrerPorts {
         Option<ResolvedProcessDefinition>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        self.resolve_stored_definition(engines, id).await
+        self.resolve_stored_definition(engines, id, None).await
     }
 
     /// The definition stored under `id`, checked by its engine.
-    async fn resolve_stored_definition(
+    pub(super) async fn resolve_stored_definition(
         &self,
         engines: &ProcessEngineRegistry,
         id: &ProcessDefinitionId,
+        phases: Option<&StartPhaseClock>,
     ) -> Result<
         Option<ResolvedProcessDefinition>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        let Some(draft) = self.read_definition_draft(id).await? else {
+        let Some(draft) = timed(
+            phases,
+            Phase::DefinitionLoad,
+            self.read_definition_draft(id),
+        )
+        .await?
+        else {
             return Ok(None);
         };
-        let resolution = engines.resolve_definition(&draft).await?;
+        let resolution = timed(
+            phases,
+            Phase::DefinitionResolve,
+            engines.resolve_definition(&draft),
+        )
+        .await?;
         let definition = ProcessDefinition::new(draft.id(), resolution.signature);
         Ok(Some(ResolvedProcessDefinition { draft, definition }))
     }

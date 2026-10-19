@@ -35,7 +35,7 @@ use super::ProcessEnvPorts;
 use super::ProcessEnvRef;
 use super::ProcessEnvSelection;
 use super::SessionId;
-use super::start_phases::{StartPhaseClock, mark};
+use super::start_phases::{StartPhaseClock, mark, timed};
 use crate::ArtifactCleanup;
 use crate::ArtifactName;
 use crate::ArtifactReferrer;
@@ -1470,30 +1470,36 @@ async fn stage_definition<'a>(
     let engines = stores.engines;
     let ports = definition_ports(stores, definition_id)?;
     let (resolved, staged) = match ports
-        .acquire_definition(engines, claim, definition_id)
+        .acquire_definition_timed(engines, claim, definition_id, stores.phases)
         .await?
     {
         lash_execution_contracts::process::DefinitionAcquisition::Held(resolved) => {
             (resolved, true)
         }
         lash_execution_contracts::process::DefinitionAcquisition::Ended => {
-            let Some(resolved) = ports.read_definition(engines, definition_id).await? else {
+            let Some(resolved) = ports
+                .resolve_stored_definition(engines, definition_id, stores.phases)
+                .await?
+            else {
                 return Err(definition_missing(definition_id));
             };
             (resolved, false)
         }
     };
     if let Some(signature) = signature_claim {
-        engines
-            .verify_definition_claim(
+        timed(
+            stores.phases,
+            Phase::DefinitionVerify,
+            engines.verify_definition_claim(
                 &resolved.draft,
                 &lash_execution_contracts::process::ProcessDefinition::new(
                     definition_id.clone(),
                     signature.clone(),
                 ),
-            )
-            .await
-            .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
+            ),
+        )
+        .await
+        .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
     }
     let registration =
         definition_registration(stores, registration, &resolved, args, launch).await?;

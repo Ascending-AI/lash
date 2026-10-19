@@ -463,6 +463,33 @@ the first attempt at; other bytes, arguments or launch under it are a
 `StartKeyConflict`. To keep the function for later starts, publish
 `value.document` at `value.entry` instead.
 
+A host-observed start exports disjoint `lash.process.start.<phase>_us`
+attributes on its `lash.process.start` producer. For a published definition:
+
+| Phase | Work and waits included |
+| --- | --- |
+| `definition_load` | Store read and decoding of the definition descriptor. |
+| `definition_resolve` | Engine signature derivation; the kernel reads the retained document, checks its helper manifest and entry, and may wait for its document cache or decode a cache miss. |
+| `definition_acquire` | Acquiring the descriptor and its artifact closure under the start claim, including store transactions and their lock waits. |
+| `definition_verify` | Checking a supplied signature claim, including the engine's independent derivation and document read. Absent when no claim was supplied. |
+| `definition` | Constructing the definition's start payload, or realizing a function supplied inline. |
+
+These are elapsed times, including scheduling and store waits, rather than CPU
+measurements. They do not include worker checkout, helper-release preparation,
+compilation or the first segment: registration does none of those. Retrying an
+already-fenced start can read and resolve again; each field sums its repeated
+operations. A failed operation also records its time before propagating its
+refusal. A host diagnosing a long start should inspect the subphase that grew;
+publication or a warm worker does not bypass the start's retention transactions.
+
+Hosts that previously treated `definition_us` as the complete definition cost
+must now sum it with `definition_load_us`, `definition_resolve_us`,
+`definition_acquire_us` and `definition_verify_us` (when present). The trace
+record's `ProcessStartPhase` vocabulary includes `DefinitionLoad`,
+`DefinitionResolve`, `DefinitionAcquire` and `DefinitionVerify`; exhaustive
+matches must handle them. Trace schema v37 is updated in place for the 1.0
+baseline.
+
 Draft storage, revision names, undo, collaboration and the decision to start
 a run are yours. Lash stores definitions, not drafts.
 

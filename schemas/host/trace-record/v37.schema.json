@@ -1428,8 +1428,28 @@
           "type": "string"
         },
         {
+          "const": "definition_load",
+          "description": "Reading and decoding the stored definition descriptor.",
+          "type": "string"
+        },
+        {
+          "const": "definition_resolve",
+          "description": "The engine deriving the definition's signature, including reading\nits document and any cache lookup or decode that read needs.",
+          "type": "string"
+        },
+        {
+          "const": "definition_acquire",
+          "description": "Acquiring the definition's artifact closure under the start's\nclaim, including store transactions and their lock waits.",
+          "type": "string"
+        },
+        {
+          "const": "definition_verify",
+          "description": "Verifying the host's signature claim against the stored definition,\nincluding the engine's independent derivation.",
+          "type": "string"
+        },
+        {
           "const": "definition",
-          "description": "Reading, holding and verifying a started definition, or realizing a\nfunction the start carries inline.",
+          "description": "Building the definition's start payload, or realizing a function\nthe start carries inline. The named definition operations above\nhave their own disjoint timings.",
           "type": "string"
         },
         {

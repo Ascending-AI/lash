@@ -309,3 +309,97 @@ async fn the_registered_node_decision_wins_over_the_closing_owners_policy() {
     assert_five_occurrences(&nodes, &every);
     second.shutdown().await.expect("shutdown");
 }
+
+/// DEFINITION-WAITS: a definition start names each store and engine operation it waits on.
+#[tokio::test]
+async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_verification() {
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite"),
+    );
+    let (core, exported) = traced_core(stores, "definition-probe", TraceDetail::Standard).await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let env = environment(false);
+    let source = "export async function run(name: string) { const values = [name, name.toUpperCase()]; return values.join(\",\"); }";
+    let lash::workflow::WorkflowImport::Imported { document, .. } = artifacts
+        .import_workflow(
+            lash::workflow::document::SourceLanguage::TypeScript,
+            source,
+            &env,
+            None,
+        )
+        .await
+        .expect("import")
+    else {
+        panic!("import refused")
+    };
+    let publication = published(
+        artifacts
+            .publish_workflow(&pin, &document, &Name::new("run"), &env, None)
+            .await
+            .expect("publish"),
+    );
+    let env_ref = artifacts
+        .publish_process_env(&pin, &linking(&env, &[]))
+        .await
+        .expect("env");
+    let process = start(
+        &core,
+        &env_ref,
+        &publication.definition,
+        "definition-timings",
+        "operator",
+    )
+    .await;
+    let starts = exported.spans("lash.process.start");
+    let phases: Vec<_> = starts
+        .last()
+        .expect("start span")
+        .attributes
+        .iter()
+        .filter(|a| a.key.as_str().starts_with("lash.process.start."))
+        .collect();
+    for step in [
+        "definition_load",
+        "definition_resolve",
+        "definition_acquire",
+        "definition_verify",
+    ] {
+        let key = format!("lash.process.start.{step}_us");
+        assert!(
+            phases.iter().any(|a| a.key.as_str() == key),
+            "missing {key}: {phases:?}"
+        );
+    }
+    let spent: i64 = phases
+        .iter()
+        .map(|attribute| {
+            let lash::tracing::otel::Value::I64(value) = attribute.value else {
+                panic!("phase duration is an integer: {attribute:?}")
+            };
+            assert!(value >= 0, "phase duration is nonnegative");
+            value
+        })
+        .sum();
+    let span = starts.last().expect("the start span");
+    let span_us = i64::try_from(
+        span.end_time
+            .duration_since(span.start_time)
+            .expect("span duration")
+            .as_micros(),
+    )
+    .expect("short span");
+    // Exported span clocks have whole-millisecond resolution. These are
+    // disjoint phases, so their sum must fit in the containing start.
+    assert!(
+        spent <= span_us + 1_000,
+        "phase sum {spent} exceeds start {span_us}"
+    );
+    assert_eq!(
+        finished(&core, &process).await,
+        serde_json::json!("operator,OPERATOR")
+    );
+    core.shutdown().await.expect("shutdown");
+}

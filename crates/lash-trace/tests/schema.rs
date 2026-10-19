@@ -249,10 +249,16 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::ProducerSettled {
             producer: lash_trace::ProducerKind::ProcessStart,
             outcome: lash_trace::ProducerOutcome::Selected,
-            phases: vec![lash_trace::ProcessStartPhaseTime {
-                phase: lash_trace::ProcessStartPhase::LinkCheck,
+            phases: [
+                lash_trace::ProcessStartPhase::DefinitionLoad,
+                lash_trace::ProcessStartPhase::DefinitionResolve,
+                lash_trace::ProcessStartPhase::DefinitionAcquire,
+                lash_trace::ProcessStartPhase::DefinitionVerify,
+                lash_trace::ProcessStartPhase::LinkCheck,
+            ].into_iter().map(|phase| lash_trace::ProcessStartPhaseTime {
+                phase,
                 elapsed_us: 1_250,
-            }],
+            }).collect(),
         },
         TraceEvent::PromptBuilt {
             prompt_hash: "h".to_string(),
