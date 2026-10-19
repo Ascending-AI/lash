@@ -21,127 +21,127 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in the order the helpers are registered.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &PY_TEXT_WHITESPACE,
-    &PY_TEXT_PRINTABLE,
-    &PY_TEXT_DECIMAL,
-    &PY_EXC_NAME,
-    &PY_EXC_ARGS,
-    &PY_FLOAT_TEXT,
-    &PY_TEXT_REPR,
-    &PY_REPR,
-    &PY_STR,
-    &PY_TYPE,
-    &PY_FAIL,
-    &PY_EXC_CHECK_CAUSE,
-    &PY_EXC_NEW,
-    &PY_EXC_CAUSE,
-    &PY_EXC_WITH_CAUSE,
-    &PY_EXC_MATCHES,
-    &PY_EXC_IS_EXCEPTION,
-    &PY_EXC_RERAISE,
-    &PY_EXC_THROW,
-    &PY_NAME_CHECK,
-    &PY_ARG_MISSING,
-    &PY_IS_NUMBER,
-    &PY_OPERAND_ERROR,
-    &PY_TRUTH,
-    &PY_ADD,
-    &PY_TO_LIST,
-    &PY_IADD,
-    &PY_SUB,
-    &PY_MUL,
-    &PY_TRUEDIV,
-    &PY_FLOORDIV,
-    &PY_MOD,
-    &PY_POW,
-    &PY_NEG,
-    &PY_POS,
-    &PY_SET_OP,
-    &PY_CONTAINS,
-    &PY_INDEX,
-    &PY_GETITEM,
-    &PY_SETITEM,
-    &PY_DELITEM,
-    &PY_SLICE,
-    &PY_LENGTH,
-    &PY_FOR_IN_OPEN,
-    &PY_FOR_IN_CHECK,
-    &PY_TO_TUPLE,
-    &PY_TO_SET,
-    &PY_TO_DICT,
-    &PY_REPLY,
-    &PY_UNPACK,
-    &PY_SHOW,
-    &PY_NUMBER_TEXT,
-    &PY_NUMBER_UNDERSCORES,
-    &PY_INT,
-    &PY_FLOAT,
-    &PY_ABS,
-    &PY_EXTREME,
-    &PY_SUM,
-    &PY_SORTED,
-    &COLLECTION_RANGE,
-    &PY_RANGE,
-    &PY_ENUMERATE,
-    &PY_ZIP,
-    &PY_REVERSED,
-    &PY_ANY,
-    &PY_ALL,
-    &PY_ROUND,
-    &PY_ISINSTANCE,
-    &PY_ORD,
-    &PY_CHR,
-    &PY_DIVMOD,
-    &PY_NO_ATTRIBUTE,
-    &PY_TEXT_OF,
-    &PY_METHOD_APPEND,
-    &PY_METHOD_EXTEND,
-    &LIST_INSERT,
-    &PY_METHOD_INSERT,
-    &PY_METHOD_POP,
-    &PY_METHOD_REMOVE,
-    &PY_METHOD_INDEX,
-    &PY_METHOD_COUNT,
-    &PY_METHOD_SORT,
-    &PY_METHOD_REVERSE,
-    &PY_METHOD_COPY,
-    &LIST_CLEAR,
-    &SET_CLEAR,
-    &MAP_CLEAR,
-    &PY_METHOD_CLEAR,
-    &PY_METHOD_GET,
-    &PY_METHOD_KEYS,
-    &PY_METHOD_VALUES,
-    &PY_METHOD_ITEMS,
-    &PY_FOR_IN_KEYS,
-    &PY_FOR_IN_VALUES,
-    &PY_FOR_IN_ITEMS,
-    &PY_FOR_IN_VALUE,
-    &PY_FOR_IN_ITEM,
-    &PY_METHOD_SETDEFAULT,
-    &PY_METHOD_UPDATE,
-    &PY_METHOD_ADD,
-    &PY_METHOD_DISCARD,
-    &PY_METHOD_UNION,
-    &PY_METHOD_INTERSECTION,
-    &PY_METHOD_DIFFERENCE,
-    &PY_METHOD_JOIN,
-    &PY_METHOD_SPLIT,
-    &PY_METHOD_STRIP,
-    &PY_METHOD_LSTRIP,
-    &PY_METHOD_RSTRIP,
-    &PY_METHOD_UPPER,
-    &PY_METHOD_LOWER,
-    &PY_METHOD_STARTSWITH,
-    &PY_METHOD_ENDSWITH,
-    &PY_METHOD_REPLACE,
-    &PY_METHOD_FIND,
-    &PY_FORMAT_GROUP,
-    &PY_FORMAT_EXPONENT,
-    &PY_FORMAT,
+    &PY_TEXT_WHITESPACE_PLAN,
+    &PY_TEXT_PRINTABLE_PLAN,
+    &PY_TEXT_DECIMAL_PLAN,
+    &PY_EXC_NAME_PLAN,
+    &PY_EXC_ARGS_PLAN,
+    &PY_FLOAT_TEXT_PLAN,
+    &PY_TEXT_REPR_PLAN,
+    &PY_REPR_PLAN,
+    &PY_STR_PLAN,
+    &PY_TYPE_PLAN,
+    &PY_FAIL_PLAN,
+    &PY_EXC_CHECK_CAUSE_PLAN,
+    &PY_EXC_NEW_PLAN,
+    &PY_EXC_CAUSE_PLAN,
+    &PY_EXC_WITH_CAUSE_PLAN,
+    &PY_EXC_MATCHES_PLAN,
+    &PY_EXC_IS_EXCEPTION_PLAN,
+    &PY_EXC_RERAISE_PLAN,
+    &PY_EXC_THROW_PLAN,
+    &PY_NAME_CHECK_PLAN,
+    &PY_ARG_MISSING_PLAN,
+    &PY_IS_NUMBER_PLAN,
+    &PY_OPERAND_ERROR_PLAN,
+    &PY_TRUTH_PLAN,
+    &PY_ADD_PLAN,
+    &PY_TO_LIST_PLAN,
+    &PY_IADD_PLAN,
+    &PY_SUB_PLAN,
+    &PY_MUL_PLAN,
+    &PY_TRUEDIV_PLAN,
+    &PY_FLOORDIV_PLAN,
+    &PY_MOD_PLAN,
+    &PY_POW_PLAN,
+    &PY_NEG_PLAN,
+    &PY_POS_PLAN,
+    &PY_SET_OP_PLAN,
+    &PY_CONTAINS_PLAN,
+    &PY_INDEX_PLAN,
+    &PY_GETITEM_PLAN,
+    &PY_SETITEM_PLAN,
+    &PY_DELITEM_PLAN,
+    &PY_SLICE_PLAN,
+    &PY_LENGTH_PLAN,
+    &PY_FOR_IN_OPEN_PLAN,
+    &PY_FOR_IN_CHECK_PLAN,
+    &PY_TO_TUPLE_PLAN,
+    &PY_TO_SET_PLAN,
+    &PY_TO_DICT_PLAN,
+    &PY_REPLY_PLAN,
+    &PY_UNPACK_PLAN,
+    &PY_SHOW_PLAN,
+    &PY_NUMBER_TEXT_PLAN,
+    &PY_NUMBER_UNDERSCORES_PLAN,
+    &PY_INT_PLAN,
+    &PY_FLOAT_PLAN,
+    &PY_ABS_PLAN,
+    &PY_EXTREME_PLAN,
+    &PY_SUM_PLAN,
+    &PY_SORTED_PLAN,
+    &COLLECTION_RANGE_PLAN,
+    &PY_RANGE_PLAN,
+    &PY_ENUMERATE_PLAN,
+    &PY_ZIP_PLAN,
+    &PY_REVERSED_PLAN,
+    &PY_ANY_PLAN,
+    &PY_ALL_PLAN,
+    &PY_ROUND_PLAN,
+    &PY_ISINSTANCE_PLAN,
+    &PY_ORD_PLAN,
+    &PY_CHR_PLAN,
+    &PY_DIVMOD_PLAN,
+    &PY_NO_ATTRIBUTE_PLAN,
+    &PY_TEXT_OF_PLAN,
+    &PY_METHOD_APPEND_PLAN,
+    &PY_METHOD_EXTEND_PLAN,
+    &LIST_INSERT_PLAN,
+    &PY_METHOD_INSERT_PLAN,
+    &PY_METHOD_POP_PLAN,
+    &PY_METHOD_REMOVE_PLAN,
+    &PY_METHOD_INDEX_PLAN,
+    &PY_METHOD_COUNT_PLAN,
+    &PY_METHOD_SORT_PLAN,
+    &PY_METHOD_REVERSE_PLAN,
+    &PY_METHOD_COPY_PLAN,
+    &LIST_CLEAR_PLAN,
+    &SET_CLEAR_PLAN,
+    &MAP_CLEAR_PLAN,
+    &PY_METHOD_CLEAR_PLAN,
+    &PY_METHOD_GET_PLAN,
+    &PY_METHOD_KEYS_PLAN,
+    &PY_METHOD_VALUES_PLAN,
+    &PY_METHOD_ITEMS_PLAN,
+    &PY_FOR_IN_KEYS_PLAN,
+    &PY_FOR_IN_VALUES_PLAN,
+    &PY_FOR_IN_ITEMS_PLAN,
+    &PY_FOR_IN_VALUE_PLAN,
+    &PY_FOR_IN_ITEM_PLAN,
+    &PY_METHOD_SETDEFAULT_PLAN,
+    &PY_METHOD_UPDATE_PLAN,
+    &PY_METHOD_ADD_PLAN,
+    &PY_METHOD_DISCARD_PLAN,
+    &PY_METHOD_UNION_PLAN,
+    &PY_METHOD_INTERSECTION_PLAN,
+    &PY_METHOD_DIFFERENCE_PLAN,
+    &PY_METHOD_JOIN_PLAN,
+    &PY_METHOD_SPLIT_PLAN,
+    &PY_METHOD_STRIP_PLAN,
+    &PY_METHOD_LSTRIP_PLAN,
+    &PY_METHOD_RSTRIP_PLAN,
+    &PY_METHOD_UPPER_PLAN,
+    &PY_METHOD_LOWER_PLAN,
+    &PY_METHOD_STARTSWITH_PLAN,
+    &PY_METHOD_ENDSWITH_PLAN,
+    &PY_METHOD_REPLACE_PLAN,
+    &PY_METHOD_FIND_PLAN,
+    &PY_FORMAT_GROUP_PLAN,
+    &PY_FORMAT_EXPONENT_PLAN,
+    &PY_FORMAT_PLAN,
 ];
 
-const PY_TEXT_WHITESPACE: p::HelperPlan = p::HelperPlan {
+const PY_TEXT_WHITESPACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.whitespace",
     function: p::function("016f24027420918b7eb44fe87bfa48abbcdf9932c9a2e620821fdcb2e0ea94ca"),
     callees: &[
@@ -290,7 +290,7 @@ fn py_text_whitespace(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-const PY_TEXT_PRINTABLE: p::HelperPlan = p::HelperPlan {
+const PY_TEXT_PRINTABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.printable",
     function: p::function("711d1aec4057e194c48310299a9b34a8d5dc8f8bb5e6452d437cc69196e6c6de"),
     callees: &[
@@ -3753,7 +3753,7 @@ fn py_text_printable_template(args: &[Value], natives: &[lash_kernel_doc::Prepar
     }
 }
 
-const PY_TEXT_DECIMAL: p::HelperPlan = p::HelperPlan {
+const PY_TEXT_DECIMAL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text.decimal",
     function: p::function("6053264efbf62fe2b82be7c4384733bc853950357a5c5ae918118051d17d6a44"),
     callees: &[
@@ -3956,7 +3956,7 @@ fn py_text_decimal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_EXC_NAME: p::HelperPlan = p::HelperPlan {
+const PY_EXC_NAME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.name",
     function: p::function("01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1"),
     callees: &[
@@ -4139,7 +4139,7 @@ fn py_exc_name_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     }
 }
 
-const PY_EXC_ARGS: p::HelperPlan = p::HelperPlan {
+const PY_EXC_ARGS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.args",
     function: p::function("0c324b55f60d7ca736dd443b52948cedeedf99941596e480fdb6628b6b027cf8"),
     callees: &[
@@ -4209,7 +4209,7 @@ fn py_exc_args(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-const PY_FLOAT_TEXT: p::HelperPlan = p::HelperPlan {
+const PY_FLOAT_TEXT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.float_text",
     function: p::function("6969aff90755003d65ee43d90645aa4fba5ed3c364c1e52555d4ed9641185229"),
     callees: &[
@@ -4468,7 +4468,7 @@ fn py_float_text(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-const PY_TEXT_REPR: p::HelperPlan = p::HelperPlan {
+const PY_TEXT_REPR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text_repr",
     function: p::function("1475159c83989aa624b02296b831c8181413d61443fcb85183d6fffd53d9be82"),
     callees: &[
@@ -4723,7 +4723,7 @@ fn py_text_repr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-const PY_REPR: p::HelperPlan = p::HelperPlan {
+const PY_REPR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.repr",
     function: p::function("a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf"),
     callees: &[],
@@ -4788,7 +4788,7 @@ fn py_repr(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
-const PY_STR: p::HelperPlan = p::HelperPlan {
+const PY_STR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.str",
     function: p::function("62ceb57b7a906742e3d80c8f84373e5df1deabdb2a0f48d1a74d15755d302431"),
     callees: &[
@@ -5001,7 +5001,7 @@ fn py_str_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_TYPE: p::HelperPlan = p::HelperPlan {
+const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.type",
     function: p::function("a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b"),
     callees: &[
@@ -5198,7 +5198,7 @@ fn py_type_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_
     }
 }
 
-const PY_FAIL: p::HelperPlan = p::HelperPlan {
+const PY_FAIL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.fail",
     function: p::function("3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef"),
     callees: &[
@@ -5236,7 +5236,7 @@ fn py_fail(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-const PY_EXC_CHECK_CAUSE: p::HelperPlan = p::HelperPlan {
+const PY_EXC_CHECK_CAUSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.check_cause",
     function: p::function("a054b750476f5e55fa51236f2b773f46c4d4e40f8d24955bbdba72fadd8ff9ae"),
     callees: &[
@@ -5327,7 +5327,7 @@ fn py_exc_check_cause_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     }
 }
 
-const PY_EXC_NEW: p::HelperPlan = p::HelperPlan {
+const PY_EXC_NEW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.new",
     function: p::function("5dfa4cc08ab042a82f7fae7013d1a4414fde86b36732aca507cb648bac8ab0eb"),
     callees: &[
@@ -5487,7 +5487,7 @@ fn py_exc_new(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-const PY_EXC_CAUSE: p::HelperPlan = p::HelperPlan {
+const PY_EXC_CAUSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.cause",
     function: p::function("389dc5e831f2af227bbb93909df31bce956fef2583e0067e160f08bdc19196b6"),
     callees: &[
@@ -5557,7 +5557,7 @@ fn py_exc_cause(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-const PY_EXC_WITH_CAUSE: p::HelperPlan = p::HelperPlan {
+const PY_EXC_WITH_CAUSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.with_cause",
     function: p::function("aa38ae905df68ff9171a98d0c78e170e1e8b43cef90640c98d3c9a7828053b15"),
     callees: &[
@@ -5624,7 +5624,7 @@ fn py_exc_with_cause(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-const PY_EXC_MATCHES: p::HelperPlan = p::HelperPlan {
+const PY_EXC_MATCHES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.matches",
     function: p::function("970eccd13df97c9a0c1e0ed679f9e252e831fd2026c3de1c597c8e85e7e56391"),
     callees: &[
@@ -5678,7 +5678,7 @@ fn py_exc_matches_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_EXC_IS_EXCEPTION: p::HelperPlan = p::HelperPlan {
+const PY_EXC_IS_EXCEPTION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.is_exception",
     function: p::function("ce14341b9991890a40cfa78553f20bfc311d3beb76b520102917c864680684be"),
     callees: &[
@@ -5754,7 +5754,7 @@ fn py_exc_is_exception_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nati
     }
 }
 
-const PY_EXC_RERAISE: p::HelperPlan = p::HelperPlan {
+const PY_EXC_RERAISE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.reraise",
     function: p::function("f4e5c108dc946ff18e0ee17fd2337d277d55fb84d43556290456c26def4a24ff"),
     callees: &[
@@ -5797,7 +5797,7 @@ fn py_exc_reraise(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-const PY_EXC_THROW: p::HelperPlan = p::HelperPlan {
+const PY_EXC_THROW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.throw",
     function: p::function("2f59beddce7b59942dc06a29cd89972f50aebbc577b8d72c0c6e5936049019d2"),
     callees: &[
@@ -5846,7 +5846,7 @@ fn py_exc_throw(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-const PY_NAME_CHECK: p::HelperPlan = p::HelperPlan {
+const PY_NAME_CHECK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.name_check",
     function: p::function("1e1b1a086db0ee71ab3ae88e424c90d78baf0c7b9e0e4c63ccb4069254dfac37"),
     callees: &[
@@ -5975,7 +5975,7 @@ fn py_name_check_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     }
 }
 
-const PY_ARG_MISSING: p::HelperPlan = p::HelperPlan {
+const PY_ARG_MISSING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.arg_missing",
     function: p::function("556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a"),
     callees: &[
@@ -6018,7 +6018,7 @@ fn py_arg_missing(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-const PY_IS_NUMBER: p::HelperPlan = p::HelperPlan {
+const PY_IS_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.is_number",
     function: p::function("0bb85273ed4f4e1e4901b9fc053cf2e5df06fea458122507a209646ce552f75b"),
     callees: &[
@@ -6123,7 +6123,7 @@ fn py_is_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
     }
 }
 
-const PY_OPERAND_ERROR: p::HelperPlan = p::HelperPlan {
+const PY_OPERAND_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.operand_error",
     function: p::function("345683ebd3c4ad42f77224d7f22299131f9d33e9fe6b95072fbfd3cf1fb5fa44"),
     callees: &[
@@ -6192,7 +6192,7 @@ fn py_operand_error(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-const PY_TRUTH: p::HelperPlan = p::HelperPlan {
+const PY_TRUTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truth",
     function: p::function("19a7c0612a690d923a706cca39c8490672da28b6d5b3ca899df448b8167b3807"),
     callees: &[
@@ -6449,7 +6449,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
     }
 }
 
-const PY_ADD: p::HelperPlan = p::HelperPlan {
+const PY_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.add",
     function: p::function("ad2d969650d98bd8572c9c6b16d7f43e0ca883c5e6e30c26475d6f8706645448"),
     callees: &[
@@ -6649,7 +6649,7 @@ fn py_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_TO_LIST: p::HelperPlan = p::HelperPlan {
+const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_list",
     function: p::function("8ffcaa1d78c1a1b9e8601233a6422fc5a2c1b8991ff6622a20f5caa38ccf025e"),
     callees: &[
@@ -6824,7 +6824,7 @@ fn py_to_list_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_IADD: p::HelperPlan = p::HelperPlan {
+const PY_IADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.iadd",
     function: p::function("5a5bc331200fc6fa28f575a7d1b3da8bceb402e6c09c08ea7566f293ff78521b"),
     callees: &[
@@ -7052,7 +7052,7 @@ fn py_iadd_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_
     }
 }
 
-const PY_SUB: p::HelperPlan = p::HelperPlan {
+const PY_SUB_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sub",
     function: p::function("7a69ab235be13d0faab84f69c2556f5e24977e0cb1ee27c3ed5c080c53d57e22"),
     callees: &[
@@ -7224,7 +7224,7 @@ fn py_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
     }
 }
 
-const PY_MUL: p::HelperPlan = p::HelperPlan {
+const PY_MUL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mul",
     function: p::function("a48b0aa29caa60dac106ca70d243e74cb6a8241f30aa6bc98d85ab33fb243f63"),
     callees: &[
@@ -7642,7 +7642,7 @@ fn py_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_TRUEDIV: p::HelperPlan = p::HelperPlan {
+const PY_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
     function: p::function("2ba7734c59763edd1e50af17641aa8af06a80a541ae5072819909823ac851567"),
     callees: &[
@@ -7843,7 +7843,7 @@ fn py_truediv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_FLOORDIV: p::HelperPlan = p::HelperPlan {
+const PY_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.floordiv",
     function: p::function("24ecab4bb4d7e69233917388894ed06516f1fdecbe6368445b14f4f4da69e386"),
     callees: &[
@@ -8044,7 +8044,7 @@ fn py_floordiv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     }
 }
 
-const PY_MOD: p::HelperPlan = p::HelperPlan {
+const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mod",
     function: p::function("9ddeabe5b05a73f4dced2b43054f9bdf49f5f7883f3162fb54b2f22dc2e8b345"),
     callees: &[
@@ -8245,7 +8245,7 @@ fn py_mod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_POW: p::HelperPlan = p::HelperPlan {
+const PY_POW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pow",
     function: p::function("67a0762e9320f9ae14b4d8a5d6e5d59976dc743edefd5c93ee84a6c68d2f5b0e"),
     callees: &[
@@ -8402,7 +8402,7 @@ fn py_pow(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_NEG: p::HelperPlan = p::HelperPlan {
+const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.neg",
     function: p::function("4bd81935b218a1c62bcea3cd01462360619739d0a0c5eb4a71e1bf816485737f"),
     callees: &[
@@ -8501,7 +8501,7 @@ fn py_neg_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_POS: p::HelperPlan = p::HelperPlan {
+const PY_POS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pos",
     function: p::function("0083a86870927d3bec4578864e38d0e9abb5909ae95354a3355b56dd020276e0"),
     callees: &[
@@ -8596,7 +8596,7 @@ fn py_pos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_SET_OP: p::HelperPlan = p::HelperPlan {
+const PY_SET_OP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.set_op",
     function: p::function("3f213860fea5919e82388afd49d9222db298e5a21269910593318fc7a9175e8d"),
     callees: &[
@@ -8806,7 +8806,7 @@ fn py_set_op(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-const PY_CONTAINS: p::HelperPlan = p::HelperPlan {
+const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.contains",
     function: p::function("e842aa699eb6254bfc9633a3ec23f47078c191eaa0f9e515c13bf383de91c3e5"),
     callees: &[
@@ -9040,7 +9040,7 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     }
 }
 
-const PY_INDEX: p::HelperPlan = p::HelperPlan {
+const PY_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.index",
     function: p::function("fa6dfe50f424011ef3491844fd47be845cdc45dd2443c56eabe6ad35e69291d6"),
     callees: &[
@@ -9291,7 +9291,7 @@ fn py_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
     }
 }
 
-const PY_GETITEM: p::HelperPlan = p::HelperPlan {
+const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getitem",
     function: p::function("26c8c7ea0ba70b04026bd1b1973303f00e213edd08112c572df8492a2de37f07"),
     callees: &[
@@ -9627,7 +9627,7 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_SETITEM: p::HelperPlan = p::HelperPlan {
+const PY_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.setitem",
     function: p::function("7b144bcf99bf01d87605735e6c2153c74ec332ce28977305bd1ab70ebe5eb61b"),
     callees: &[
@@ -9768,7 +9768,7 @@ fn py_setitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_DELITEM: p::HelperPlan = p::HelperPlan {
+const PY_DELITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.delitem",
     function: p::function("23a294a21376939e4797a6b558ad01da4eabbd45e0831d572184aa412e48f909"),
     callees: &[
@@ -9937,7 +9937,7 @@ fn py_delitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-const PY_SLICE: p::HelperPlan = p::HelperPlan {
+const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.slice",
     function: p::function("32a4ec519b21da247d9491590b0a8f96154648c4b5791e2afe72bdeb875ed612"),
     callees: &[
@@ -10392,7 +10392,7 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     Ok(ctx.take(0))
 }
 
-const PY_LENGTH: p::HelperPlan = p::HelperPlan {
+const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.length",
     function: p::function("402a4e443f68fc863d4a6beafb716554a05a97e3b16a8a93a346a569b664bbf9"),
     callees: &[
@@ -10567,7 +10567,7 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
     }
 }
 
-const PY_FOR_IN_OPEN: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.open",
     function: p::function("1632d55bad34977c6fc220e9c70e6551d7d48fa4106ae7b54db830aa831c3c4c"),
     callees: &[
@@ -10688,7 +10688,7 @@ fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_FOR_IN_CHECK: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_CHECK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.check",
     function: p::function("c85c33d14ac1847f1c08b7354b0227e0fcdceb1b53426309b174b0251c05a7c3"),
     callees: &[
@@ -10828,7 +10828,7 @@ fn py_for_in_check_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_TO_TUPLE: p::HelperPlan = p::HelperPlan {
+const PY_TO_TUPLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_tuple",
     function: p::function("b827a2c3c5ed1d384081d813f79221488b02746c927fc6f3d0e18867806f696f"),
     callees: &[
@@ -10900,7 +10900,7 @@ fn py_to_tuple(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-const PY_TO_SET: p::HelperPlan = p::HelperPlan {
+const PY_TO_SET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_set",
     function: p::function("baab499d6282e9a1389bd28bda2a16d69e1f946f385d1e87760c18b79881ffde"),
     callees: &[
@@ -10974,7 +10974,7 @@ fn py_to_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-const PY_TO_DICT: p::HelperPlan = p::HelperPlan {
+const PY_TO_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_dict",
     function: p::function("227b675ca9c54caa20bf67cafa644392783d3d4beb077c7b6d2abbd015dcabf2"),
     callees: &[
@@ -11091,7 +11091,7 @@ fn py_to_dict_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_REPLY: p::HelperPlan = p::HelperPlan {
+const PY_REPLY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.reply",
     function: p::function("09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd"),
     callees: &[],
@@ -11156,7 +11156,7 @@ fn py_reply(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
     Ok(Value::Null)
 }
 
-const PY_UNPACK: p::HelperPlan = p::HelperPlan {
+const PY_UNPACK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.unpack",
     function: p::function("bafb3552cd76e71cc1d796b6ba145efc45ff10a6c2fb0319d18cae3cdada7add"),
     callees: &[
@@ -11458,7 +11458,7 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
     }
 }
 
-const PY_SHOW: p::HelperPlan = p::HelperPlan {
+const PY_SHOW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.show",
     function: p::function("935487d0336527dcd2b3e1e3447a3f03c9f99bc7ec017b3d9a7450abbad3ebbb"),
     callees: &[
@@ -11547,7 +11547,7 @@ fn py_show(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
-const PY_NUMBER_TEXT: p::HelperPlan = p::HelperPlan {
+const PY_NUMBER_TEXT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.number_text",
     function: p::function("f3bb7eff92d6abcdf0deb8f37e46017836cb753a92b8c19657a8f3751a757689"),
     callees: &[
@@ -11656,7 +11656,7 @@ fn py_number_text(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-const PY_NUMBER_UNDERSCORES: p::HelperPlan = p::HelperPlan {
+const PY_NUMBER_UNDERSCORES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.number_underscores",
     function: p::function("d4bd46f7e8001689270659e73fd5acac169317a0fce2cf428e927e1d653b842f"),
     callees: &[
@@ -11831,7 +11831,7 @@ fn py_number_underscores(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-const PY_INT: p::HelperPlan = p::HelperPlan {
+const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.int",
     function: p::function("a57819a6dcb850f5b85498ef9f6e0b80de3f1fc4246f29a110cbf9d455c5d28e"),
     callees: &[
@@ -12591,7 +12591,7 @@ fn py_int_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_FLOAT: p::HelperPlan = p::HelperPlan {
+const PY_FLOAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.float",
     function: p::function("7e4403b4680779b174db0b88e112ca8d77d7cf4e5c41e46a573707a7308bc216"),
     callees: &[
@@ -13022,7 +13022,7 @@ fn py_float_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]
     }
 }
 
-const PY_ABS: p::HelperPlan = p::HelperPlan {
+const PY_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.abs",
     function: p::function("431d7c66bf4f61735231ee2ed3042976e11af283e98acad6f74dc65b9a96da69"),
     callees: &[
@@ -13203,7 +13203,7 @@ fn py_abs_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_EXTREME: p::HelperPlan = p::HelperPlan {
+const PY_EXTREME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.extreme",
     function: p::function("a6f4e04841dcf8f7c2d1f0eef75ad7064e9a26ac3da807c3e482e6e185a9d9a6"),
     callees: &[
@@ -13350,7 +13350,7 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-const PY_SUM: p::HelperPlan = p::HelperPlan {
+const PY_SUM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sum",
     function: p::function("82bb75745974ce3d788ba064bef208d2c7dc85ded5ce201c4e9f27673f5da443"),
     callees: &[
@@ -13424,7 +13424,7 @@ fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_SORTED: p::HelperPlan = p::HelperPlan {
+const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sorted",
     function: p::function("567414aae860816c3ea975cb4a7b12aaaebca7ddb91fa467942e1d5a7e95e66e"),
     callees: &[
@@ -13641,7 +13641,7 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     Ok(Value::Null)
 }
 
-const COLLECTION_RANGE: p::HelperPlan = p::HelperPlan {
+const COLLECTION_RANGE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "collection.range",
     function: p::function("415c2e292b3d92d430c2d45093ced467eb1753e255ee1fe0b668296f84153d4b"),
     callees: &[
@@ -13768,7 +13768,7 @@ fn collection_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-const PY_RANGE: p::HelperPlan = p::HelperPlan {
+const PY_RANGE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.range",
     function: p::function("bfa1a2450157b5454b0426dea95595bfb9d9f876c17cf425d3ffe2f33c49dc82"),
     callees: &[
@@ -13910,7 +13910,7 @@ fn py_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     Ok(ctx.take(0))
 }
 
-const PY_ENUMERATE: p::HelperPlan = p::HelperPlan {
+const PY_ENUMERATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.enumerate",
     function: p::function("1de49ea81aff57fcf4bc8a03f43a943ac5a082d8c3d60edfde47f3d4c4cf4f18"),
     callees: &[
@@ -13999,7 +13999,7 @@ fn py_enumerate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-const PY_ZIP: p::HelperPlan = p::HelperPlan {
+const PY_ZIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.zip",
     function: p::function("21f07038f87df9c3268bb20ac1e1d187b20c5e009d7a0f94b86455408b2fcf01"),
     callees: &[
@@ -14158,7 +14158,7 @@ fn py_zip(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_REVERSED: p::HelperPlan = p::HelperPlan {
+const PY_REVERSED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.reversed",
     function: p::function("e670bd817b6cefb3dd7470fe487e13577463e4c626478eed68938ae70b71b1f5"),
     callees: &[
@@ -14232,7 +14232,7 @@ fn py_reversed(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-const PY_ANY: p::HelperPlan = p::HelperPlan {
+const PY_ANY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.any",
     function: p::function("2ac4f16f711695cbb7cc99847be0abf2ea0cb917658141662f2301523e50d41e"),
     callees: &[
@@ -14296,7 +14296,7 @@ fn py_any(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_ALL: p::HelperPlan = p::HelperPlan {
+const PY_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.all",
     function: p::function("cee33bf6e90e2dcefea6dfa8ec317617fdbeb5fc33a9c87475012c99dded6d3d"),
     callees: &[
@@ -14362,7 +14362,7 @@ fn py_all(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_ROUND: p::HelperPlan = p::HelperPlan {
+const PY_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.round",
     function: p::function("6e855902bff349776940f5c1641f7bace0d126b8e11de52cff1a6781cbe3eb2b"),
     callees: &[
@@ -14916,7 +14916,7 @@ fn py_round_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
     }
 }
 
-const PY_ISINSTANCE: p::HelperPlan = p::HelperPlan {
+const PY_ISINSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.isinstance",
     function: p::function("83dd010611c22781bd37914cc6a65000a8d41b2a8ecc2f89e3e94739ae2c9f9a"),
     callees: &[
@@ -14978,7 +14978,7 @@ fn py_isinstance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-const PY_ORD: p::HelperPlan = p::HelperPlan {
+const PY_ORD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.ord",
     function: p::function("abb2bfaebabf9882ef8963b68b62dce5ba3b0267d780880288c01288d7222b2e"),
     callees: &[
@@ -15103,7 +15103,7 @@ fn py_ord_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
     }
 }
 
-const PY_CHR: p::HelperPlan = p::HelperPlan {
+const PY_CHR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.chr",
     function: p::function("599edda7a88d3bb03944491eba320102601d6def211ad99cc787c71d97f704f0"),
     callees: &[
@@ -15228,7 +15228,7 @@ fn py_chr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-const PY_DIVMOD: p::HelperPlan = p::HelperPlan {
+const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.divmod",
     function: p::function("b56aa7e0edfe60360ffb593445e8e05199779487d55d676ca692b678882825f0"),
     callees: &[
@@ -15291,7 +15291,7 @@ fn py_divmod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
     }
 }
 
-const PY_NO_ATTRIBUTE: p::HelperPlan = p::HelperPlan {
+const PY_NO_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.no_attribute",
     function: p::function("cc460bdde925d3a4a0a89b496f25b152d4d5b2b9c0c65e0cf7ea9a533080ab26"),
     callees: &[
@@ -15349,7 +15349,7 @@ fn py_no_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_TEXT_OF: p::HelperPlan = p::HelperPlan {
+const PY_TEXT_OF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text_of",
     function: p::function("623418b0e4b10f4d93319363df18dfaadbbc269e311291e7b245e90aead6a66a"),
     callees: &[
@@ -15440,7 +15440,7 @@ fn py_text_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
     }
 }
 
-const PY_METHOD_APPEND: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.append",
     function: p::function("d8fa186a8c5784053d9e47d83b231e2bae49e435d560e60788186a51b79fda9c"),
     callees: &[
@@ -15512,7 +15512,7 @@ fn py_method_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     }
 }
 
-const PY_METHOD_EXTEND: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.extend",
     function: p::function("191b4ab641cd018d2978ac62f65793ef1d6de32e39361f98170fa18f8f5d75d2"),
     callees: &[
@@ -15590,7 +15590,7 @@ fn py_method_extend(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-const LIST_INSERT: p::HelperPlan = p::HelperPlan {
+const LIST_INSERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "list.insert",
     function: p::function("5a0d3fe6f74c55499875a896627ad3f436dfce898ba80f6a592ad6abd4224193"),
     callees: &[
@@ -15721,7 +15721,7 @@ fn list_insert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
     }
 }
 
-const PY_METHOD_INSERT: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_INSERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.insert",
     function: p::function("542592a2123339e2660adf9d6c1d38e656df34d5bd857c1c6690d4177118da84"),
     callees: &[
@@ -15858,7 +15858,7 @@ fn py_method_insert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_POP: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.pop",
     function: p::function("8aaa99b70ecb88aed81e20bdd6ce35bf3dad1d5200bf4063603148660cdc71e2"),
     callees: &[
@@ -16232,7 +16232,7 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     }
 }
 
-const PY_METHOD_REMOVE: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.remove",
     function: p::function("9e353af06cab8c661de706bd17a64c7710ae8b613d6b12f04a5db30605c7729e"),
     callees: &[
@@ -16384,7 +16384,7 @@ fn py_method_remove(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-const PY_METHOD_INDEX: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.index",
     function: p::function("d9a2747829ce914a42d94450ff4ea60378549a5333028bd9c8ffad4f473d7bc2"),
     callees: &[
@@ -16615,7 +16615,7 @@ fn py_method_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_METHOD_COUNT: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.count",
     function: p::function("e495fc8d3619334722227bc170c6936f21eca799404e70c92464f112bdbbfe55"),
     callees: &[
@@ -16756,7 +16756,7 @@ fn py_method_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_SORT: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.sort",
     function: p::function("7f348fc8b070b9485a03e841b52bfceefa75bcb30d23bed2e22fca1d4b56755d"),
     callees: &[
@@ -16885,7 +16885,7 @@ fn py_method_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-const PY_METHOD_REVERSE: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.reverse",
     function: p::function("f69089761e00d70b3a3b2185a047f5655c5e5616d6064a7d56abbb4e80b7018f"),
     callees: &[
@@ -16981,7 +16981,7 @@ fn py_method_reverse(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_COPY: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_COPY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.copy",
     function: p::function("fe9c064f3103b290740c50f10befb3e09c5523f7df21c734fb7fd4296221a66c"),
     callees: &[
@@ -17083,7 +17083,7 @@ fn py_method_copy_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const LIST_CLEAR: p::HelperPlan = p::HelperPlan {
+const LIST_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "list.clear",
     function: p::function("60cfea808c1d6121cea1f0605e928b4418db7d358e8d47f0ea09427c4580c0ea"),
     callees: &[
@@ -17139,7 +17139,7 @@ fn list_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-const SET_CLEAR: p::HelperPlan = p::HelperPlan {
+const SET_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "set.clear",
     function: p::function("6d4225498b59acfc8fe9b3bf66fd8317e7fda53c22e280ebe56e7588a51f2b2c"),
     callees: &[
@@ -17191,7 +17191,7 @@ fn set_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-const MAP_CLEAR: p::HelperPlan = p::HelperPlan {
+const MAP_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "map.clear",
     function: p::function("b6b4a4935fb30716ed7d17317c7ac62b39f870b12b2bf48f0448d50cf6c05edb"),
     callees: &[
@@ -17243,7 +17243,7 @@ fn map_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_CLEAR: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.clear",
     function: p::function("2a3ccd5da97a7ff4e95ea0ead1c01ede9741f32eceb9a7a9a057e64ca64ffaa2"),
     callees: &[
@@ -17327,7 +17327,7 @@ fn py_method_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_GET: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.get",
     function: p::function("13c0ba23ee431a4f0803a6735f8303d9886afd7e08a015db4d6ef08588e0f602"),
     callees: &[
@@ -17781,7 +17781,7 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
     }
 }
 
-const PY_METHOD_KEYS: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.keys",
     function: p::function("787768a4dcc1a2d4ccbddfa7492910ad6f22e49ef1754a3c76a0de0da4ab1c6f"),
     callees: &[
@@ -17864,7 +17864,7 @@ fn py_method_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_METHOD_VALUES: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.values",
     function: p::function("7fd285df5db5323157d64877467cecb2f16ff48e4f69cbf7ca8884747d818311"),
     callees: &[
@@ -17927,7 +17927,7 @@ fn py_method_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     }
 }
 
-const PY_METHOD_ITEMS: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.items",
     function: p::function("a1d420c5f427234e8738d5404bd374d9a89d9b0526940f39d8c397e91ad3eb49"),
     callees: &[
@@ -17990,7 +17990,7 @@ fn py_method_items_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_FOR_IN_KEYS: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.keys",
     function: p::function("cf933c161cde0e7ad0b0c6f9637febd1bf98baeaac7de435ae5cf4bd99493f9d"),
     callees: &[
@@ -18058,7 +18058,7 @@ fn py_for_in_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_FOR_IN_VALUES: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.values",
     function: p::function("f8e9b82f9348c9e1dc0a4a4cef6b539b0927fae5da33d2d3b966ea6494b20478"),
     callees: &[
@@ -18126,7 +18126,7 @@ fn py_for_in_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     }
 }
 
-const PY_FOR_IN_ITEMS: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.items",
     function: p::function("c984a7d29b8719605018682097cebc9c69af3a6b0ce3475194de9eabf2aa247e"),
     callees: &[
@@ -18194,7 +18194,7 @@ fn py_for_in_items_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_FOR_IN_VALUE: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.value",
     function: p::function("82bfd635099d53c20ad70e5d1032ab102faf36457277cb5149e5b7e783cd5363"),
     callees: &[
@@ -18270,7 +18270,7 @@ fn py_for_in_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_FOR_IN_ITEM: p::HelperPlan = p::HelperPlan {
+const PY_FOR_IN_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.item",
     function: p::function("ec1a80b011725bb62968c390285f109ce1a6289602c874bba80846fb8edb2352"),
     callees: &[
@@ -18349,7 +18349,7 @@ fn py_for_in_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_METHOD_SETDEFAULT: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_SETDEFAULT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.setdefault",
     function: p::function("4d962b7f208d84005791ef23edc4d98020b1e296ed6b9a1f028446b854e3a11e"),
     callees: &[
@@ -18544,7 +18544,7 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     }
 }
 
-const PY_METHOD_UPDATE: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.update",
     function: p::function("2327d356e44be651fc601e735d7d3dc15ccc0db83d378b9962d2eba43a92734c"),
     callees: &[
@@ -18663,7 +18663,7 @@ fn py_method_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_ADD: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.add",
     function: p::function("a4210ae7214dd7e1778edec4b035d6d34e45e588a2883b40ae3a18d609909441"),
     callees: &[
@@ -18720,7 +18720,7 @@ fn py_method_add(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_DISCARD: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_DISCARD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.discard",
     function: p::function("ee9fc27bec7be7129999b191f93e38caba50f20e6ab9c96830814dfa86300691"),
     callees: &[
@@ -18774,7 +18774,7 @@ fn py_method_discard(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_UNION: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_UNION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.union",
     function: p::function("23ba44cca7fd3effdc81a431329f6eec872461ee550207297d8f6a2209342796"),
     callees: &[
@@ -18839,7 +18839,7 @@ fn py_method_union(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_INTERSECTION: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_INTERSECTION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.intersection",
     function: p::function("8c2e2739fbe8457d6095a94a93ad96b8a443f992d475aa261b793135a14db48e"),
     callees: &[
@@ -18904,7 +18904,7 @@ fn py_method_intersection(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_DIFFERENCE: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.difference",
     function: p::function("9bc52133b2ec4f9dbc187e1e05c6778ae989c0170aa6e3b8708169611af77fd1"),
     callees: &[
@@ -18994,7 +18994,7 @@ fn py_method_difference(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_JOIN: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.join",
     function: p::function("3add86fa7cdf5df58d5f36350860de713fbd49c92f3763fb73e22d2a4eb263ff"),
     callees: &[
@@ -19102,7 +19102,7 @@ fn py_method_join(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_SPLIT: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.split",
     function: p::function("8acf70adeeae45b8a7999057e57b6bcdb546f9b9f76cc7cbde3ad9c2b892e378"),
     callees: &[
@@ -19281,7 +19281,7 @@ fn py_method_split(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_METHOD_STRIP: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_STRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.strip",
     function: p::function("a7db344ee768ee3a91ec7203b7124785f677dc9d8b72b10b561560e71e4b3967"),
     callees: &[
@@ -19344,7 +19344,7 @@ fn py_method_strip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_METHOD_LSTRIP: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_LSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lstrip",
     function: p::function("08c92ff21aa5b22803e4fa4f34039414b04ad9d93175c11c8d64294512989c8e"),
     callees: &[
@@ -19407,7 +19407,7 @@ fn py_method_lstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     }
 }
 
-const PY_METHOD_RSTRIP: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_RSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rstrip",
     function: p::function("f4ead657ae2709babc78442c5e46b3a720443819d397cf62f69da9cba8d3ea50"),
     callees: &[
@@ -19470,7 +19470,7 @@ fn py_method_rstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
     }
 }
 
-const PY_METHOD_UPPER: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_UPPER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.upper",
     function: p::function("d40ed644b1e23d70d0cb29a040f224b13c3ef71bd02805fd4be91b6aa90ea60a"),
     callees: &[
@@ -19533,7 +19533,7 @@ fn py_method_upper_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_METHOD_LOWER: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_LOWER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lower",
     function: p::function("c14ca9aa6a583abaffaf80c75d400b5579c6d2e75b67c91504b00700b35831cd"),
     callees: &[
@@ -19596,7 +19596,7 @@ fn py_method_lower_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
     }
 }
 
-const PY_METHOD_STARTSWITH: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.startswith",
     function: p::function("9fc428cf2e68ae498970cd7ff687790d7d1956dd3f903fb4884ee74133e91e7b"),
     callees: &[
@@ -19672,7 +19672,7 @@ fn py_method_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
     }
 }
 
-const PY_METHOD_ENDSWITH: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.endswith",
     function: p::function("a1c753281f06447a82dbfd03c54ba64f92d594cd3c5f52ed181332276d09b5a9"),
     callees: &[
@@ -19748,7 +19748,7 @@ fn py_method_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     }
 }
 
-const PY_METHOD_REPLACE: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.replace",
     function: p::function("38c98eb7fee8cb54b060f3177249db832369238592b7da4c6469b7daeee0ed80"),
     callees: &[
@@ -19835,7 +19835,7 @@ fn py_method_replace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
     }
 }
 
-const PY_METHOD_FIND: p::HelperPlan = p::HelperPlan {
+const PY_METHOD_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.find",
     function: p::function("0dc27a7f5aa712714e3d18089dcb5735e0b2a70a3bc01d6e9a1b2251076c99ff"),
     callees: &[
@@ -19912,7 +19912,7 @@ fn py_method_find_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     }
 }
 
-const PY_FORMAT_GROUP: p::HelperPlan = p::HelperPlan {
+const PY_FORMAT_GROUP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format.group",
     function: p::function("9d79836c47f60eb7508bb6940eefe0ebe17440c0d0367d8bb31475ac3d2b7a4a"),
     callees: &[
@@ -20000,7 +20000,7 @@ fn py_format_group(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-const PY_FORMAT_EXPONENT: p::HelperPlan = p::HelperPlan {
+const PY_FORMAT_EXPONENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format.exponent",
     function: p::function("e0c384de6f3c69eb2b70927638cfa6680839116e46862634b83d71e5e3ebb384"),
     callees: &[
@@ -20128,7 +20128,7 @@ fn py_format_exponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
     }
 }
 
-const PY_FORMAT: p::HelperPlan = p::HelperPlan {
+const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format",
     function: p::function("aa649eda9a025e7ae09ebdad744771cd0536bd66b8993c62c9bbcf4f625c5b1e"),
     callees: &[

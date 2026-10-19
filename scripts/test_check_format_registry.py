@@ -570,6 +570,21 @@ class RealRepositoryTests(unittest.TestCase):
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn(f"{path}:{constant} is a version-shaped constant", problems[0])
 
+    def test_generated_helper_plans_declare_no_version_shaped_constant(self) -> None:
+        # FIG-6884: the plan of Python's `format` helper was emitted as
+        # `PY_FORMAT`, which discovery read as an unknown format version.
+        from discover_version_surfaces import _inspect_file
+
+        for path in (
+            "crates/lash-ext-py-core/src/generated/plans.rs",
+            "crates/lash-ext-ts-core/src/generated/plans.rs",
+        ):
+            with self.subTest(path=path):
+                source = (gate.ROOT / path).read_text(encoding="utf-8")
+                rows, problems, _ = _inspect_file(path, source, frozenset())
+                self.assertEqual(rows, ())
+                self.assertEqual(problems, ())
+
     def test_the_repository_registry_is_exhaustive(self) -> None:
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         manifest = (gate.ROOT / gate.MANIFEST).read_text(encoding="utf-8")

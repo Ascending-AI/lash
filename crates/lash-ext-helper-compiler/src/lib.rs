@@ -64,6 +64,13 @@ fn ident(name: &str, taken: &mut BTreeSet<String>) -> String {
     ident
 }
 
+/// The Rust constant holding the plan whose code is named `ident`. The fixed
+/// `_PLAN` suffix keeps a helper such as Python's `format` from reading as a
+/// stored-format version constant (FIG-6884).
+fn plan_const(ident: &str) -> String {
+    format!("{}_PLAN", ident.to_uppercase())
+}
+
 /// Compiles `dialect`'s helpers.
 ///
 /// # Errors
@@ -184,7 +191,7 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     rust.push_str("/// Every plan, in the order the helpers are registered.\n");
     rust.push_str("pub const PLANS: &[&p::HelperPlan] = &[\n");
     for (ident, _) in &plans {
-        let _ = writeln!(rust, "    &{},", ident.to_uppercase());
+        let _ = writeln!(rust, "    &{},", plan_const(ident));
     }
     rust.push_str("];\n");
     for (_, plan) in &plans {

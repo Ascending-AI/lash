@@ -108,9 +108,12 @@ pub fn emit(
         emitter.line("Ok(Value::Null)");
     }
     let registers = emitter.used.max(1);
-    let upper = ident.to_uppercase();
     let mut item = String::new();
-    let _ = writeln!(item, "const {upper}: p::HelperPlan = p::HelperPlan {{");
+    let _ = writeln!(
+        item,
+        "const {}: p::HelperPlan = p::HelperPlan {{",
+        crate::plan_const(ident)
+    );
     let _ = writeln!(item, "    name: {:?},", definition.name.as_str());
     let _ = writeln!(
         item,
