@@ -1,9 +1,8 @@
-use super::host_commands::{SubmittedCommand, unsettled_command_error};
+use super::host_commands::unsettled_command_error;
 use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{
     Arc, EmbedError, LashRuntime, PluginMessage, Result, RuntimeSessionState, SessionStateService,
 };
-use lash_protocol_types::SessionId;
 
 #[derive(Clone)]
 /// Facade handle for session state administration.
@@ -63,50 +62,37 @@ impl SessionStateAdmin {
         &self,
         request: lash_core::AppendSessionNodesRequest,
     ) -> Result<AdminMutation<lash_core::AppendSessionNodesOutcome>> {
-        let submitted = self
+        let idempotency_key = request.operation_id.clone();
+        let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
-                if runtime.is_store_backed() {
-                    let idempotency_key = request.operation_id.clone();
-                    return Box::pin(runtime.submit_session_command(
-                        lash_core::facade_support::SessionCommand::AppendSessionNodes {
-                            request: Box::new(request),
-                        },
-                        idempotency_key,
-                        None,
-                    ))
-                    .await
-                    .map(SubmittedCommand::Queued)
-                    .map_err(EmbedError::Runtime);
-                }
-                Box::pin(runtime.append_storeless_session_nodes(request))
-                    .await
-                    .map(SubmittedCommand::Applied)
-                    .map_err(Into::into)
+                Box::pin(runtime.submit_session_command(
+                    lash_core::facade_support::SessionCommand::AppendSessionNodes {
+                        request: Box::new(request),
+                    },
+                    idempotency_key,
+                    None,
+                ))
+                .await
+                .map_err(EmbedError::Runtime)
             })
             .await?;
-        match submitted {
-            SubmittedCommand::Applied(outcome) => Ok(AdminMutation::Applied(outcome)),
-            SubmittedCommand::Queued(receipt) => {
-                match Box::pin(
-                    SessionCommandAdmin {
-                        context: self.context.clone(),
-                    }
-                    .status(receipt),
-                )
-                .await?
-                {
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
-                        ..
-                    } => Ok(AdminMutation::Applied(outcome)),
-                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-                        Ok(AdminMutation::Pending(receipt))
-                    }
-                    settlement => Err(unsettled_command_error(settlement)),
-                }
+        match Box::pin(
+            SessionCommandAdmin {
+                context: self.context.clone(),
             }
+            .status(receipt),
+        )
+        .await?
+        {
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome: lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
+                ..
+            } => Ok(AdminMutation::Applied(outcome)),
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                Ok(AdminMutation::Pending(receipt))
+            }
+            settlement => Err(unsettled_command_error(settlement)),
         }
     }
 
@@ -121,62 +107,48 @@ impl SessionStateAdmin {
         idempotency_key: impl Into<String>,
     ) -> Result<AdminMutation<lash_core::OpenAgentFrameOutcome>> {
         let idempotency_key = idempotency_key.into();
-        let submitted = self
+        let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
-                if runtime.is_store_backed() {
-                    return Box::pin(runtime.submit_session_command(
-                        lash_core::facade_support::SessionCommand::OpenAgentFrame {
-                            request: Box::new(request),
-                        },
-                        idempotency_key,
-                        None,
-                    ))
-                    .await
-                    .map(SubmittedCommand::Queued)
-                    .map_err(EmbedError::Runtime);
-                }
-                Box::pin(runtime.open_storeless_agent_frame(request))
-                    .await
-                    .map(SubmittedCommand::Applied)
-                    .map_err(EmbedError::Runtime)
+                Box::pin(runtime.submit_session_command(
+                    lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                        request: Box::new(request),
+                    },
+                    idempotency_key,
+                    None,
+                ))
+                .await
+                .map_err(EmbedError::Runtime)
             })
             .await?;
-        match submitted {
-            SubmittedCommand::Applied(outcome) => Ok(AdminMutation::Applied(outcome)),
-            SubmittedCommand::Queued(receipt) => {
-                match Box::pin(
-                    SessionCommandAdmin {
-                        context: self.context.clone(),
-                    }
-                    .status(receipt),
-                )
-                .await?
-                {
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
-                                outcome:
-                                    lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome },
-                            },
-                        ..
-                    } => Ok(AdminMutation::Applied(outcome)),
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
-                                outcome:
-                                    lash_core::runtime::OpenAgentFrameCommandOutcome::Refused {
-                                        refusal,
-                                    },
-                            },
-                        ..
-                    } => Err(EmbedError::Runtime(refusal.into())),
-                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-                        Ok(AdminMutation::Pending(receipt))
-                    }
-                    settlement => Err(unsettled_command_error(settlement)),
-                }
+        match Box::pin(
+            SessionCommandAdmin {
+                context: self.context.clone(),
             }
+            .status(receipt),
+        )
+        .await?
+        {
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
+                        outcome:
+                            lash_core::runtime::OpenAgentFrameCommandOutcome::Opened { outcome },
+                    },
+                ..
+            } => Ok(AdminMutation::Applied(outcome)),
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::OpenAgentFrame {
+                        outcome:
+                            lash_core::runtime::OpenAgentFrameCommandOutcome::Refused { refusal },
+                    },
+                ..
+            } => Err(EmbedError::Runtime(refusal.into())),
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                Ok(AdminMutation::Pending(receipt))
+            }
+            settlement => Err(unsettled_command_error(settlement)),
         }
     }
 
@@ -249,54 +221,34 @@ impl SessionStateAdmin {
         idempotency_key: impl Into<String>,
     ) -> Result<AdminMutation<bool>> {
         let idempotency_key = idempotency_key.into();
-        let submitted = self
+        let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
-                if runtime.is_store_backed() {
-                    return Box::pin(runtime.submit_session_command(
-                        lash_core::facade_support::SessionCommand::CompactContext { instructions },
-                        idempotency_key,
-                        None,
-                    ))
-                    .await
-                    .map(SubmittedCommand::Queued)
-                    .map_err(EmbedError::Runtime);
-                }
-                let host = runtime.effect_host();
-                let controller = host
-                    .scoped(lash_core::AdmittedScope::session_operation(
-                        SessionId::from(runtime.session_id()),
-                        idempotency_key,
-                    ))
-                    .map_err(EmbedError::Runtime)?;
-                Box::pin(runtime.compact_storeless_context(instructions, controller))
-                    .await
-                    .map(SubmittedCommand::Applied)
-                    .map_err(EmbedError::Runtime)
+                Box::pin(runtime.submit_session_command(
+                    lash_core::facade_support::SessionCommand::CompactContext { instructions },
+                    idempotency_key,
+                    None,
+                ))
+                .await
+                .map_err(EmbedError::Runtime)
             })
             .await?;
-        let outcome = match submitted {
-            SubmittedCommand::Applied(outcome) => outcome,
-            SubmittedCommand::Queued(receipt) => {
-                match Box::pin(
-                    SessionCommandAdmin {
-                        context: self.context.clone(),
-                    }
-                    .status(receipt),
-                )
-                .await?
-                {
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::CompactContext { outcome },
-                        ..
-                    } => outcome,
-                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-                        return Ok(AdminMutation::Pending(receipt));
-                    }
-                    settlement => return Err(unsettled_command_error(settlement)),
-                }
+        let outcome = match Box::pin(
+            SessionCommandAdmin {
+                context: self.context.clone(),
             }
+            .status(receipt),
+        )
+        .await?
+        {
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome: lash_core::runtime::SessionCommandOutcome::CompactContext { outcome },
+                ..
+            } => outcome,
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                return Ok(AdminMutation::Pending(receipt));
+            }
+            settlement => return Err(unsettled_command_error(settlement)),
         };
         match outcome {
             lash_core::runtime::CompactContextOutcome::Opened { .. } => {

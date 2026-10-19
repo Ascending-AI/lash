@@ -1,6 +1,6 @@
 //! Keyed plugin commands, queries and task-run submission.
 
-use super::host_commands::{SubmittedCommand, unsettled_command_error};
+use super::host_commands::unsettled_command_error;
 use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
 use lash_protocol_types::SessionId;
@@ -168,138 +168,104 @@ impl PluginOperations {
     {
         let idempotency_key = idempotency_key.into();
         let session_id = SessionId::from(self.context.runtime.observe().session_id());
-        // The invocation's producer opens here, before the first await; a
-        // storeless command admits no durable work and opens none.
-        let mut producer = self
-            .context
-            .runtime
-            .observe()
-            .queue_store
-            .is_some()
-            .then(|| {
-                self.context.target.open_producer(
-                    lash_core::ProducerKind::PluginInvoke,
-                    &self.trace,
-                    lash_core::TraceIds {
-                        session: Some(session_id.clone()),
-                        ..Default::default()
-                    },
-                )
-            });
-        let parent = producer.as_ref().and_then(lash_core::ProducerSpan::parent);
+        // The invocation's producer opens here, before the first await.
+        let producer = self.context.target.open_producer(
+            lash_core::ProducerKind::PluginInvoke,
+            &self.trace,
+            lash_core::TraceIds {
+                session: Some(session_id),
+                ..Default::default()
+            },
+        );
+        let parent = producer.parent();
         let submitted = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
-                if runtime.is_store_backed() {
-                    let command = lash_core::facade_support::SessionCommand::RunPluginCommand {
-                        name: name.to_string(),
-                        args,
-                    };
-                    return Box::pin(runtime.submit_session_command(
-                        command,
-                        idempotency_key,
-                        parent,
-                    ))
+                let command = lash_core::facade_support::SessionCommand::RunPluginCommand {
+                    name: name.to_string(),
+                    args,
+                };
+                Box::pin(runtime.submit_session_command(command, idempotency_key, parent))
                     .await
-                    .map(SubmittedCommand::Queued)
-                    .map_err(EmbedError::Runtime);
-                }
-                let receipt = runtime
-                    .run_storeless_plugin_command(name, args, Some(session_id.clone()))
-                    .await;
-                receipt.map(SubmittedCommand::Applied).map_err(Into::into)
+                    .map_err(EmbedError::Runtime)
             })
             .await;
-        let submitted = match submitted {
-            Ok(submitted) => submitted,
+        let receipt = match submitted {
+            Ok(receipt) => receipt,
             Err(error) => {
-                if let Some(producer) = producer.take() {
-                    producer.settle(crate::tracing::refused(&error));
-                }
+                producer.settle(crate::tracing::refused(&error));
                 return Err(error);
             }
         };
-        if let (Some(producer), SubmittedCommand::Queued(_)) = (producer.take(), &submitted) {
-            producer.settle(lash_core::ProducerOutcome::Selected);
-        }
-        let receipt = match submitted {
-            SubmittedCommand::Applied(receipt) => receipt,
-            SubmittedCommand::Queued(receipt) => {
-                match Box::pin(
-                    SessionCommandAdmin {
-                        context: self.context.clone(),
-                    }
-                    .status(receipt),
-                )
-                .await?
-                {
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
-                                outcome:
-                                    lash_core::runtime::PluginOperationCommandOutcome::Completed {
-                                        plugin_id,
-                                        output,
-                                        events,
-                                        pending_turn_inputs,
-                                    },
-                            },
-                        ..
-                    } => lash_core::facade_support::PluginOperationReceipt {
-                        output,
-                        events: events
-                            .into_iter()
-                            .map(
-                                |value| lash_execution_contracts::session_types::PluginOwned {
-                                    plugin_id: plugin_id.clone(),
-                                    value,
-                                },
-                            )
-                            .collect(),
-                        pending_turn_inputs,
-                    },
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
-                                outcome:
-                                    lash_core::runtime::PluginOperationCommandOutcome::Failed {
-                                        failure,
-                                    },
-                            },
-                        ..
-                    } => {
-                        return Err(EmbedError::Control(
-                            lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
-                        ));
-                    }
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
-                                outcome:
-                                    lash_core::runtime::PluginOperationCommandOutcome::Refused {
-                                        refusal,
-                                    },
-                            },
-                        ..
-                    } => return Err(EmbedError::Runtime(refusal.into())),
-                    lash_core::runtime::SessionCommandSettlement::Applied {
-                        receipt,
-                        outcome:
-                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
-                                outcome:
-                                    lash_core::runtime::PluginOperationCommandOutcome::Cancelled,
-                            },
-                    } => {
-                        return Err(EmbedError::Session(SessionError::SessionCommandCancelled(
-                            receipt,
-                        )));
-                    }
-                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
-                        return Ok(AdminMutation::Pending(receipt));
-                    }
-                    settlement => return Err(unsettled_command_error(settlement)),
-                }
+        producer.settle(lash_core::ProducerOutcome::Selected);
+        let receipt = match Box::pin(
+            SessionCommandAdmin {
+                context: self.context.clone(),
             }
+            .status(receipt),
+        )
+        .await?
+        {
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                        outcome:
+                            lash_core::runtime::PluginOperationCommandOutcome::Completed {
+                                plugin_id,
+                                output,
+                                events,
+                                pending_turn_inputs,
+                            },
+                    },
+                ..
+            } => lash_core::facade_support::PluginOperationReceipt {
+                output,
+                events: events
+                    .into_iter()
+                    .map(
+                        |value| lash_execution_contracts::session_types::PluginOwned {
+                            plugin_id: plugin_id.clone(),
+                            value,
+                        },
+                    )
+                    .collect(),
+                pending_turn_inputs,
+            },
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                        outcome:
+                            lash_core::runtime::PluginOperationCommandOutcome::Failed { failure },
+                    },
+                ..
+            } => {
+                return Err(EmbedError::Control(
+                    lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                ));
+            }
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                        outcome:
+                            lash_core::runtime::PluginOperationCommandOutcome::Refused { refusal },
+                    },
+                ..
+            } => return Err(EmbedError::Runtime(refusal.into())),
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                receipt,
+                outcome:
+                    lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                        outcome: lash_core::runtime::PluginOperationCommandOutcome::Cancelled,
+                    },
+            } => {
+                return Err(EmbedError::Session(SessionError::SessionCommandCancelled(
+                    receipt,
+                )));
+            }
+            lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                return Ok(AdminMutation::Pending(receipt));
+            }
+            settlement => return Err(unsettled_command_error(settlement)),
         };
         self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs)
             .await;

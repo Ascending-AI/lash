@@ -3,15 +3,13 @@
 //! the core owner or an installed plugin, written against the config revision
 //! the caller read.
 //!
-//! On a store-backed session the transaction is a session command: the
-//! writer is held only to submit it, and the shift applies it once no run
-//! owns the head, so a running or parked run finishes under the config it
-//! was admitted with and the next run executes under the transaction's. A
-//! storeless session resolves and publishes it directly under the writer.
+//! The transaction is a session command: the writer is held only to submit
+//! it, and the shift applies it once no run owns the head, so a running or
+//! parked run finishes under the config it was admitted with and the next
+//! run executes under the transaction's.
 
 use super::{AdminContext, SessionCommandAdmin, host_commands};
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
-use host_commands::SubmittedCommand;
 
 /// What a config transaction is written against: the caller's stable id for
 /// it, which a resubmission reuses, and the config revision the caller read.
@@ -128,9 +126,7 @@ impl SessionConfigAdmin {
     }
 
     /// Submit `transaction` under `write`, and return once it is durable:
-    /// [`ConfigSettlement::Pending`] with its receipt on a store-backed
-    /// session, [`ConfigSettlement::Settled`] on a storeless one, which
-    /// applies it at once.
+    /// [`ConfigSettlement::Pending`] with its receipt.
     ///
     /// A transaction that names an owner or command no installed plugin
     /// registers, or arguments that do not decode, is refused
@@ -141,33 +137,19 @@ impl SessionConfigAdmin {
         write: ConfigWrite,
         transaction: lash_core::ConfigTransaction,
     ) -> Result<ConfigSettlement> {
-        let submitted = self
+        let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
-                if runtime.is_store_backed() {
-                    return Box::pin(runtime.submit_config_transaction(
-                        write.id,
-                        write.expected_revision,
-                        &transaction,
-                    ))
-                    .await
-                    .map(SubmittedCommand::Queued)
-                    .map_err(EmbedError::from);
-                }
-                Box::pin(runtime.apply_storeless_config_transaction(
+                Box::pin(runtime.submit_config_transaction(
                     write.id,
                     write.expected_revision,
                     &transaction,
                 ))
                 .await
-                .map(SubmittedCommand::Applied)
                 .map_err(EmbedError::from)
             })
             .await?;
-        Ok(match submitted {
-            SubmittedCommand::Applied(outcome) => ConfigSettlement::Settled(outcome),
-            SubmittedCommand::Queued(receipt) => ConfigSettlement::Pending(receipt),
-        })
+        Ok(ConfigSettlement::Pending(receipt))
     }
 
     /// Wait for the transaction `receipt` names to settle, and read how it

@@ -184,14 +184,6 @@ pub enum SessionCommandWithdrawal {
     AlreadyAdmitted,
 }
 
-/// A host head write as its submission left it (FIG-4201, FIG-4202):
-/// queued on a store-backed session's command lane, or applied directly on
-/// a storeless one, with what it applied as.
-pub(super) enum SubmittedCommand<T> {
-    Queued(lash_core::runtime::SessionCommandReceipt),
-    Applied(T),
-}
-
 /// The error a command's caller answers when its settlement is not one its
 /// command applies with: withdrawn, rejected before
 /// acceptance, or another command's settlement shape.
