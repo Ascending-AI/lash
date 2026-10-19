@@ -389,7 +389,7 @@
               "type": "null"
             }
           ],
-          "description": "The state its occurrences give it, `None` with none. A run commits\noccurrences for its effects and its waits only (FIG-6810): a library\ncall, and a `sleep` that never parked, has none, so its state is\n`None` and its coverage count is the only durable fact about it. A\nprocess's live feed may report one as entered, never as completed\nor failed. A run that failed names the site that raised in its\nterminal failure's `UncaughtError` cause: a wait action, or the\nstatement a library call raised in, whose actions are the nodes with\nthat `statement`."
+          "description": "The state its occurrences give it, `None` with none. A run commits\noccurrences for its effects and its waits only (FIG-6810). A library\ncall receives its body's effects through their authored `origin`; the\noccurrences keep their library identities. A pure call, and a `sleep`\nthat never parked, has no occurrence of its own. A\nprocess's live feed may report one as entered, never as completed\nor failed. A run that failed names the site that raised in its\nterminal failure's `UncaughtError` cause: a wait action, or the\nstatement a library call raised in, whose actions are the nodes with\nthat `statement`."
         }
       },
       "required": [
@@ -405,6 +405,10 @@
         "identity": {
           "$ref": "#/$defs/EffectId"
         },
+        "origin": {
+          "$ref": "#/$defs/Site",
+          "description": "The authored statement supplied by the effect request. This is display\nattribution; `identity` keeps the actual performing unit and occurrence."
+        },
         "outcome": true,
         "state": {
           "$ref": "#/$defs/ActionState"
@@ -412,6 +416,7 @@
       },
       "required": [
         "identity",
+        "origin",
         "state"
       ],
       "type": "object"
@@ -512,6 +517,13 @@
         "kind": {
           "$ref": "#/$defs/SiteKind"
         },
+        "performs": {
+          "description": "Every canonical effect this action reaches, including calls through\nlibrary bodies and statically known declared callees. Derived from the\nchecker's effect derivation, in canonical order with duplicates removed.",
+          "items": {
+            "$ref": "#/$defs/QualifiedName"
+          },
+          "type": "array"
+        },
         "result_type": {
           "$ref": "#/$defs/Type",
           "description": "A `perform`'s declared result, else the checker's facet."
@@ -533,6 +545,7 @@
         "role",
         "statement",
         "block",
+        "performs",
         "args",
         "result_type",
         "available"
@@ -819,13 +832,21 @@
                 "id": {
                   "$ref": "#/$defs/FunctionId"
                 },
+                "member": {
+                  "description": "Every installed surface member backed by this identity in the\ncell's package set. A private definition has no members.",
+                  "items": {
+                    "$ref": "#/$defs/PackageMemberView"
+                  },
+                  "type": "array"
+                },
                 "name": {
                   "$ref": "#/$defs/QualifiedName"
                 }
               },
               "required": [
                 "id",
-                "name"
+                "name",
+                "member"
               ],
               "type": "object"
             }
@@ -2014,6 +2035,10 @@
         }
       ]
     },
+    "MemberPath": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*)?$",
+      "type": "string"
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
@@ -2054,6 +2079,27 @@
         "arms"
       ],
       "type": "object"
+    },
+    "PackageMemberView": {
+      "additionalProperties": false,
+      "description": "One installed name of a library definition. Package and member stay paired:\none definition may implement several members, including across packages.",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/MemberPath"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        }
+      },
+      "required": [
+        "package",
+        "member"
+      ],
+      "type": "object"
+    },
+    "PackagePath": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*)*$",
+      "type": "string"
     },
     "Param": {
       "additionalProperties": false,

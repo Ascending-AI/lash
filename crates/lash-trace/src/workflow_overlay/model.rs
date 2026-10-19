@@ -43,14 +43,39 @@ impl WorkflowOverlayDocument {
     /// execution site. An entry may call and spawn any declared function, so
     /// the sites of every unit are the document's.
     pub fn of(document: &lash_kernel_check::WorkflowDocument) -> Self {
-        Self::new(
-            document.reference().clone(),
-            document
-                .graph()
-                .execution_sites()
-                .iter()
-                .map(|site| site.site.clone()),
-        )
+        let mut sites: Vec<_> = document
+            .graph()
+            .execution_sites()
+            .iter()
+            .map(|site| site.site.clone())
+            .collect();
+        // Library effect identities stay in their library unit. Index their
+        // exact action sites from the same structural child inventory.
+        for (id, definition) in document.declarations() {
+            if let Some(body) = definition.body() {
+                let mut pending = vec![(lash_kernel_doc::Node::Block(&body.block), Vec::new())];
+                while let Some((node, path)) = pending.pop() {
+                    if matches!(
+                        node,
+                        lash_kernel_doc::Node::Action(_)
+                            | lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(_))
+                    ) {
+                        sites.push(lash_kernel_doc::Site::new(
+                            lash_kernel_doc::Unit::Library(*id),
+                            path.clone(),
+                        ));
+                    }
+                    pending.extend(node.children().into_iter().enumerate().map(
+                        |(index, child)| {
+                            let mut path = path.clone();
+                            path.push(index as u32);
+                            (child, path)
+                        },
+                    ));
+                }
+            }
+        }
+        Self::new(document.reference().clone(), sites)
     }
 
     pub fn reference(&self) -> &WorkflowDocumentRef {
@@ -193,6 +218,7 @@ pub enum WorkflowOverlayExecutionTransition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowOverlayNodeTransition {
+    Origin,
     Started,
     /// The occurrence's `ordinal`-th retained wait, from 1, in time order.
     Waiting {
@@ -574,6 +600,10 @@ pub struct WorkflowOverlaySite {
 /// What a site's occurrences fold to.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySiteState {
+    /// The authored statement of this occurrence, reported by its request.
+    /// Absent when no origin observation was retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<lash_kernel_doc::Site>,
     /// Which arm a branch site last took. Absent on every other site, and on
     /// a branch whose selection has not been observed. The arms themselves
     /// are the document's: a host reads which nodes an unselected arm holds

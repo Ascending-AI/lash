@@ -1522,3 +1522,54 @@ fn cell_counts_sum_segments_with_duplicate_and_shuffled_reports() {
     assert_eq!(off.ran_counts().observation, Some(RunObservation::Off));
     assert!(off.ran_counts().ran.is_empty());
 }
+
+/// VIEW-ORIGIN: a request's attribution survives replay and folding without
+/// becoming an effect identity, a timed transition, or a later visit's origin.
+#[test]
+fn origin_is_projected_per_occurrence_without_starting_or_retiming_it() {
+    let source = WorkflowTaskSite {
+        site: Site::new(
+            Unit::Library(lash_kernel_doc::FunctionId::from_bytes([9; 32])),
+            vec![0],
+        )
+        .position(),
+        task: lash_kernel_doc::testkit::root_task(),
+    };
+    let origin = Site::new(Unit::Main, vec![3]);
+    let reported = |key: &str| {
+        language(
+            key,
+            TraceLanguageExecutionPayload::Node {
+                subject: subject(),
+                at: occurrence_at(&source, 0),
+                fact: TraceNodeFact::Origin {
+                    origin: origin.clone(),
+                },
+            },
+        )
+    };
+    let records = [
+        record_at(started_at("start", &source, 0), 10),
+        record_at(reported("origin"), 20),
+        record_at(reported("again"), 30),
+        record_at(completed_at("end", &source, 0), 40),
+    ];
+    let overlay = fold(None, &records).unwrap();
+    let shown = state(&overlay, &source);
+    assert_eq!(shown.origin, Some(origin.clone()));
+    assert_eq!(shown.summary.started_count, 1);
+    assert_eq!(shown.occurrence.start(), Some(at(10)));
+    assert!(overlay.conflicts.is_empty());
+    let replayed = fold(Some(&overlay), &[]).unwrap();
+    assert_eq!(state(&replayed, &source).origin, Some(origin));
+    let later = fold(
+        Some(&replayed),
+        &[record_at(started_at("next", &source, 1), 50)],
+    )
+    .unwrap();
+    assert_eq!(state(&later, &source).origin, None);
+    assert_eq!(
+        state(&later, &source).occurrence.occurrence(),
+        Some(VISIT_1)
+    );
+}

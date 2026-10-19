@@ -431,7 +431,12 @@ async fn kernel_run(
                         Request::Sleep(sleep) => sleep.wait,
                     })
                 })
-                .map(|request| issue(&boundary, run.now.0, request))
+                .map(|request| {
+                    if let (Some(trace), Request::Effect(effect)) = (&trace, &request) {
+                        trace.origin(&effect.identity, &effect.origin);
+                    }
+                    issue(&boundary, run.now.0, request)
+                })
                 .collect::<Vec<_>>();
             if let Some(trace) = &trace {
                 for issued in &issued {

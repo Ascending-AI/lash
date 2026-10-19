@@ -139,6 +139,7 @@ impl WorkflowOverlaySiteState {
             },
         };
         let ended = match fact {
+            TraceNodeFact::Origin { .. } => return,
             TraceNodeFact::Started { .. } => {
                 let earliest = Some(started.map_or(timestamp, |start| start.min(timestamp)));
                 match &mut self.occurrence {

@@ -1175,3 +1175,140 @@ main { finish null }
         "disagreeing writes contribute both possible callees",
     );
 }
+
+/// FIG-6925, origin projection: a library effect is drawn at its authored
+/// statement without rewriting the effect's library-site identity. A nested
+/// sibling keeps its own occurrence and cannot inherit the library's outcome.
+#[test]
+fn a_library_effects_origin_places_its_occurrence_on_the_authored_statement() {
+    let document = parse_document(
+        "kernel 1\nnumbers float\neffect mail.send(value: Any) -> Any\nentry demo() -> Any\nfn demo() { let sent = perform mail.send(perform mail.send(null) as Any) as Any return sent }\nmain { finish null }",
+    )
+    .expect("workflow");
+    let view = view_of(&document, "demo");
+    let carrier = view
+        .nodes
+        .iter()
+        .find(|node| node.members.contains(&site("demo", &[0])))
+        .unwrap();
+    let sibling = view
+        .dataflow
+        .actions
+        .iter()
+        .find(|action| action.site != carrier.site)
+        .unwrap();
+    let library_site = Site::new(
+        Unit::Library(lash_kernel_doc::FunctionId::from_bytes([0xab; 32])),
+        vec![0],
+    );
+    let identity = lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::root_task(),
+        library_site,
+        2,
+        Vec::new(),
+    );
+    let observation: crate::ActionObservation<String> = serde_json::from_value(serde_json::json!({
+        "identity": identity,
+        "origin": site("demo", &[0]),
+        "state": "completed",
+        "outcome": "rows",
+    }))
+    .expect("an effect observation carries its authored origin");
+    let activity = view
+        .activity(view.document, &[observation])
+        .expect("library origin is in this entry");
+    let drawn = activity
+        .iter()
+        .find(|action| action.site == carrier.site)
+        .unwrap();
+    assert_eq!(drawn.state, Some(crate::ActionState::Completed));
+    assert_eq!(drawn.occurrences[0].identity, identity);
+    assert_eq!(drawn.occurrences[0].outcome.as_deref(), Some("rows"));
+    let unrelated = activity
+        .iter()
+        .find(|action| action.site == sibling.site)
+        .unwrap();
+    assert_eq!(unrelated.state, None);
+    assert!(unrelated.occurrences.is_empty());
+}
+
+/// VIEW-PERFORMS: direct performs and declared callees use the checker's
+/// transitive effect derivation, deduplicated in canonical order.
+#[test]
+fn an_actions_performs_include_the_effects_of_its_declared_callee() {
+    let document = parse_document(
+        "kernel 1\nnumbers float\neffect dataframe.run() -> Any\neffect dataframe.read() -> Any\nentry demo() -> Any\nfn demo() { let collected = call collect() return collected }\nfn collect() { let rows = call load_rows() do perform dataframe.run() as Any return rows }\nfn load_rows() { return perform dataframe.read() as Any }\nmain { finish null }",
+    ).expect("workflow");
+    let view = view_of(&document, "demo");
+    assert_eq!(view.dataflow.actions.len(), 1);
+    assert_eq!(
+        view.dataflow.actions[0].performs,
+        ["dataframe.read", "dataframe.run"].map(|name| EffectName::new(name).unwrap())
+    );
+}
+
+/// VIEW-PERFORMS and VIEW-MEMBER (G1): the installed collect definition
+/// performs dataframe.run through its body and backs both exported names.
+#[test]
+fn an_installed_collect_lists_its_performs_and_every_surface_member() {
+    use lash_kernel_package::{HeldPackages, Package, PackageSources};
+    let sources = PackageSources {
+        kernel: "effect dataframe.run(plan: Any) -> List(Any) contract \"dataframe.run/1\"\nfunction dataframe.collect(plan: Any) -> List(Any)\nkernel 1\ncharge 1\nbody { let rows = perform dataframe.run(plan) as List(Any) return rows }\n",
+        surface: "async function collect(plan: Any) -> List(Any) = dataframe.collect\nasync function collect_rows(plan: Any) -> List(Any) = dataframe.collect\noperation run(plan: Any) -> List(Any) contract \"dataframe.run/1\"\n",
+        labels: "",
+    };
+    let package = Package::build("dataframe", "1.0", &sources, &[]).unwrap();
+    let held = HeldPackages::install([package]).unwrap();
+    let packages = held.view(&held.own()).unwrap();
+    let id = *held
+        .functions()
+        .iter()
+        .find(|(_, registered)| registered.definition().name.as_str() == "dataframe.collect")
+        .unwrap()
+        .0;
+    let document = parse_document(&format!(
+        "kernel 1\nnumbers float\nuse dataframe.collect = @{id}\neffect dataframe.run(plan: Any) -> List(Any) contract \"dataframe.run/1\"\nentry demo() -> Any\nfn demo() {{ let rows = invoke dataframe.collect(null) return rows }}\nmain {{ finish null }}"
+    )).unwrap();
+    let checked = checked(&document, "demo", held.functions().as_ref());
+    let before = checked.declarations()[&id].identity();
+    let view = derive(&checked, &packages).unwrap();
+    assert_eq!(
+        view.dataflow.actions[0].performs,
+        [EffectName::new("dataframe.run").unwrap()]
+    );
+    let Some(CalleeView::Library { member, .. }) = &view.dataflow.actions[0].callee else {
+        panic!("library call")
+    };
+    assert_eq!(member.len(), 2);
+    assert_eq!(
+        member
+            .iter()
+            .map(|m| (m.package.to_string(), m.member.export.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("dataframe".into(), "collect"),
+            ("dataframe".into(), "collect_rows")
+        ]
+    );
+    let private = derive(&checked, &crate::test_packages()).unwrap();
+    let Some(CalleeView::Library { member, .. }) = &private.dataflow.actions[0].callee else {
+        panic!("library call")
+    };
+    assert!(member.is_empty());
+    assert_eq!(checked.declarations()[&id].identity(), before);
+}
+
+/// VIEW-PERFORMS: a statically known callback contributes its own body's
+/// effects; an unrelated closure in the same unit contributes none.
+#[test]
+fn performs_follow_an_applied_closure_without_other_closures_in_its_unit() {
+    let document = parse_document("kernel 1\nnumbers float\neffect dataframe.run() -> Any\neffect dataframe.explain() -> Any\nentry demo() -> Any\nfn demo() { let callback = fn() { return perform dataframe.run() as Any } let unrelated = fn() { return perform dataframe.explain() as Any } let rows = apply callback() return rows }\nmain { finish null }").unwrap();
+    let view = view_of(&document, "demo");
+    let action = view
+        .dataflow
+        .actions
+        .iter()
+        .find(|action| action.statement == site("demo", &[2]))
+        .unwrap();
+    assert_eq!(action.performs, [EffectName::new("dataframe.run").unwrap()]);
+}

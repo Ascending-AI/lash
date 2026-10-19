@@ -3273,6 +3273,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
  "lash-kernel-state",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

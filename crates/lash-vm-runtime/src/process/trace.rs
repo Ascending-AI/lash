@@ -85,6 +85,15 @@ impl ProcessTrace {
         });
     }
 
+    pub(super) fn origin(&self, at: &EffectId, origin: &lash_kernel_doc::Site) {
+        self.node(
+            at,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+    }
+
     pub(super) fn node(&self, at: &EffectId, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
             subject: self.subject(),
@@ -185,6 +194,7 @@ impl ProcessTrace {
                 let transition = match fact {
                     TraceNodeFact::BranchSelected { .. } => "branch",
                     TraceNodeFact::ChildStarted { .. } => "child",
+                    TraceNodeFact::Origin { .. } => "origin",
                     TraceNodeFact::Started { .. } => "started",
                     TraceNodeFact::Completed { .. } => "completed",
                     TraceNodeFact::Failed { .. } => "failed",

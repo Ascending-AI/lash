@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+schemars = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-state = { workspace = true }
 serde = { workspace = true }

@@ -1002,6 +1002,10 @@
     "FailureCode": {
       "type": "string"
     },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "GenerationOptionOutcome": {
       "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a\ntyped failure; nothing is silently dropped. The receipt therefore names only\nthe two deliberate non-send dispositions besides `Applied`: a cap reduced to\nthe model's capacity, and stop sequences a protocol owns. `Applied` means\nlash put the value on the wire, never that the provider complied.",
       "oneOf": [
@@ -2067,6 +2071,27 @@
           "type": "object"
         }
       ]
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
     },
     "SpanRole": {
       "description": "What a record is to the span it names.",
@@ -3903,6 +3928,23 @@
       "description": "What happened to the occurrence a\n[`TraceLanguageExecutionPayload::Node`] names.",
       "oneOf": [
         {
+          "description": "Display attribution from an effect request. This does not start an\noccurrence or change its identity, admission, counts or outcome.",
+          "properties": {
+            "kind": {
+              "const": "origin",
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "kind",
+            "origin"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "call_id": {
               "type": [
@@ -5691,6 +5733,42 @@
           "required": [
             "type",
             "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
           ],
           "type": "object"
         }

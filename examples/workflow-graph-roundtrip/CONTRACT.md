@@ -84,7 +84,7 @@ A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 
 `view` is lash's wire shape, not this example's: its schema is
 `schemas/host/kernel-workflow-view`, and every host that serves
-`lash::workflow::view::derive(&document)` serves the same JSON. The checked
+`lash::workflow::view::derive(&document, &packages)` serves the same JSON. The checked
 document holds the declarations it was linked against, which supply the
 parameter names that document `use` lines do not carry; a remote reader can
 decode `FunctionRegistry::export_declarations()` as `FunctionDeclarations`

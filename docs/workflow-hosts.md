@@ -121,7 +121,7 @@ Read the graph; do not write it. It is recomputed from the document, and
 there is no edit that writes an edge. `Graph` has no serialized form.
 
 A host that serves a canvas enables `workflow-view` and serves
-`lash::workflow::view::derive(&document)`: a `WorkflowView`, lash's wire
+`lash::workflow::view::derive(&document, &packages)`: a `WorkflowView`, lash's wire
 shape (schema `schemas/host/kernel-workflow-view`). The feature links the
 kernel's document, checker and view crates and the label data, and no
 dialect, editor or runtime: a viewer draws TypeScript and Python workflows
@@ -195,8 +195,13 @@ A host that vendors lash reads the schema's TypeScript declaration from
 checked-in `v1.d.ts` — to check its own copy hermetically.
 
 A document carries no labels and no presentation. A library call's
-`CalleeView::Library { id, name }` names the function by identity and by the
-name its `use` line gives it. Pass the selected `lash::package::PackageView`
+`CalleeView::Library { id, name, member }` names the function by identity and
+by the name its `use` line gives it. `member` lists every installed
+`{package, member}` mapping in the selected set; the two canonical dotted
+paths stay paired. Each action's `performs` lists the canonical operations
+it reaches through checked bodies. An `ActionObservation` carries the
+request's authored `origin` alongside its unchanged effect identity, so
+library effects can be drawn at their calling statement. Pass the selected `lash::package::PackageView`
 into `derive` and `derive_callable`. Its `display(package, member)` reads a
 canonical member's display facts, and `display_for_function(id)` joins a
 private or exported definition by identity. `packages.title(&id, &name)`

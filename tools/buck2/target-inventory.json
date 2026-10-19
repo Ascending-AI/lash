@@ -91839,6 +91839,7 @@
       "dependencies": [
         "lash-kernel-doc",
         "lash-kernel-state",
+        "schemars",
         "serde",
         "serde_json",
         "thiserror"

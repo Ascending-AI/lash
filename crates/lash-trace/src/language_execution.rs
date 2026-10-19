@@ -196,6 +196,9 @@ impl TraceLanguageExecutionPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceNodeFact {
+    /// Display attribution from an effect request. This does not start an
+    /// occurrence or change its identity, admission, counts or outcome.
+    Origin { origin: lash_kernel_doc::Site },
     Started {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<lash_protocol_types::ToolCallId>,

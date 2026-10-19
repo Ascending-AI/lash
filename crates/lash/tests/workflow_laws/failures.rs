@@ -293,6 +293,7 @@ async fn a_library_call_has_no_activity_state_and_its_coverage_counts_it() {
             .nodes()
             .flat_map(|node| node.occurrences.iter())
             .map(|occurrence| view::ActionObservation {
+                origin: occurrence.at.position().site().clone(),
                 identity: occurrence.at.clone(),
                 state: match occurrence.outcome_class {
                     lash::process::ProcessEffectOutcomeClass::Success => {
@@ -444,6 +445,7 @@ async fn echo_states(
     let observations: Vec<_> = rows
         .iter()
         .map(|row| view::ActionObservation {
+            origin: row.at.position().site().clone(),
             identity: row.at.clone(),
             state: match row.state {
                 ProcessWorkflowSiteState::Failed => view::ActionState::Failed,

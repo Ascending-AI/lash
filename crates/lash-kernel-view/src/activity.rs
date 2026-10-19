@@ -1,7 +1,7 @@
 //! Exact occurrence attribution. The observer owns evidence; the view owns its
 //! placement and the live badge's precedence across concurrent tasks.
 
-use lash_kernel_doc::{DocumentId, EffectId, Site};
+use lash_kernel_doc::{DocumentId, EffectId, PositionLabel, Site, Unit};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,9 @@ pub enum ActionState {
 #[serde(deny_unknown_fields)]
 pub struct ActionObservation<T> {
     pub identity: EffectId,
+    /// The authored statement supplied by the effect request. This is display
+    /// attribution; `identity` keeps the actual performing unit and occurrence.
+    pub origin: Site,
     pub state: ActionState,
     pub outcome: Option<T>,
 }
@@ -37,9 +40,10 @@ pub struct ActionObservation<T> {
 pub struct ActionActivity<T> {
     pub site: Site,
     /// The state its occurrences give it, `None` with none. A run commits
-    /// occurrences for its effects and its waits only (FIG-6810): a library
-    /// call, and a `sleep` that never parked, has none, so its state is
-    /// `None` and its coverage count is the only durable fact about it. A
+    /// occurrences for its effects and its waits only (FIG-6810). A library
+    /// call receives its body's effects through their authored `origin`; the
+    /// occurrences keep their library identities. A pure call, and a `sleep`
+    /// that never parked, has no occurrence of its own. A
     /// process's live feed may report one as entered, never as completed
     /// or failed. A run that failed names the site that raised in its
     /// terminal failure's `UncaughtError` cause: a wait action, or the
@@ -60,6 +64,21 @@ pub enum ActivityRefusal {
 }
 
 impl WorkflowView {
+    /// The canonical carrier of an authored statement owns effects issued by
+    /// its library call. Nested sibling actions retain their exact evidence.
+    fn origin_node(&self, origin: &Site) -> Option<&crate::WorkflowNode> {
+        self.nodes
+            .iter()
+            .find(|node| node.kind == WorkflowNodeKind::Action && node.members.contains(origin))
+            .or_else(|| {
+                self.nodes.iter().find(|node| {
+                    node.kind == WorkflowNodeKind::Action
+                        && node.statement == *origin
+                        && node.within.is_none()
+                })
+            })
+    }
+
     /// Attribute a snapshot of occurrence evidence for this document. A wait
     /// wins over completed occurrences, and a failure over a recovered
     /// one; no sibling or enclosing action inherits its state. Declared
@@ -72,17 +91,35 @@ impl WorkflowView {
         if document != self.document {
             return Err(ActivityRefusal::Document);
         }
-        for observation in observations {
-            if !self
-                .execution_sites
-                .iter()
-                .any(|site| site.site == observation.identity.position())
-            {
-                return Err(ActivityRefusal::Action {
-                    site: observation.identity.position(),
-                });
-            }
-        }
+        let attributed = observations
+            .iter()
+            .map(|observation| {
+                let position = observation.identity.position();
+                if matches!(position.site().unit, Unit::Library(_)) {
+                    if !self
+                        .execution_sites
+                        .iter()
+                        .any(|site| site.statement == observation.origin)
+                    {
+                        return Err(ActivityRefusal::Action {
+                            site: observation.origin.position(),
+                        });
+                    }
+                    Ok(self.origin_node(&observation.origin).map_or_else(
+                        || observation.origin.position(),
+                        |node| node.site.position(),
+                    ))
+                } else if self
+                    .execution_sites
+                    .iter()
+                    .any(|site| site.site == position)
+                {
+                    Ok(position)
+                } else {
+                    Err(ActivityRefusal::Action { site: position })
+                }
+            })
+            .collect::<Result<Vec<PositionLabel>, ActivityRefusal>>()?;
         Ok(self
             .nodes
             .iter()
@@ -90,8 +127,9 @@ impl WorkflowView {
             .map(|node| {
                 let occurrences: Vec<_> = observations
                     .iter()
-                    .filter(|observation| observation.identity.position() == node.site)
-                    .cloned()
+                    .zip(&attributed)
+                    .filter(|(_, site)| **site == node.site)
+                    .map(|(observation, _)| observation.clone())
                     .collect();
                 let state = occurrences
                     .iter()

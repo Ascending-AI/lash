@@ -25,11 +25,14 @@
 //! `$id`-relative references. Definition names are stable within a lash
 //! version, so hosts may splice the definitions into their own OpenAPI schemas.
 //!
-//! Package display data declares which functions compare or receive replies.
+//! The caller supplies a [`PackageView`] of the cell's installed set for
+//! surface membership and display facts, including comparison and reply markers.
 //! Reading a view links no dialect implementation, editor or runtime.
 
 use std::collections::BTreeMap;
 
+use lash_kernel_check::library_performs;
+use lash_kernel_package::{MemberPath, PackagePath, PackageView};
 mod activity;
 mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
@@ -64,7 +67,6 @@ use lash_kernel_doc::{
     FunctionDeclarations, FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type,
     Unit,
 };
-use lash_kernel_package::PackageView;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -305,6 +307,10 @@ pub struct ActionView {
     /// that start their members name the closures, not the aggregate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applies: Vec<Site>,
+    /// Every canonical effect this action reaches, including calls through
+    /// library bodies and statically known declared callees. Derived from the
+    /// checker's effect derivation, in canonical order with duplicates removed.
+    pub performs: Vec<EffectName>,
     pub args: Vec<ArgumentView>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
@@ -317,9 +323,24 @@ pub struct ActionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CalleeView {
-    Library { id: FunctionId, name: FunctionName },
+    Library {
+        id: FunctionId,
+        name: FunctionName,
+        /// Every installed surface member backed by this identity in the
+        /// cell's package set. A private definition has no members.
+        member: Vec<PackageMemberView>,
+    },
     Declared(Name),
     Effect(EffectName),
+}
+
+/// One installed name of a library definition. Package and member stay paired:
+/// one definition may implement several members, including across packages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackageMemberView {
+    pub package: PackagePath,
+    pub member: MemberPath,
 }
 
 /// One argument of an action.
@@ -457,8 +478,8 @@ pub enum ViewError {
 
 /// The view of `document` at the entry it is entered at, read from the
 /// graph the checker derived from it and the library declarations it linked
-/// against, with display facts from the caller's selected package set. No
-/// engine or native code is needed.
+/// against, with display and membership facts from the caller's selected
+/// package set. No engine or native code is needed.
 ///
 /// # Errors
 ///
@@ -503,6 +524,7 @@ pub fn derive_callable(
         Unit::Main | Unit::Library(_) => None,
     };
     let mut walk = Walk {
+        packages,
         ordinals: document.site_ordinals(),
         document,
         graph,
@@ -633,6 +655,7 @@ struct Context {
 }
 
 struct Walk<'a> {
+    packages: &'a PackageView<'a>,
     ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
@@ -884,6 +907,12 @@ impl<'a> Walk<'a> {
                 (
                     Some(CalleeView::Library {
                         id: *function,
+                        member: self
+                            .packages
+                            .members(function)
+                            .into_iter()
+                            .map(|(package, member)| PackageMemberView { package, member })
+                            .collect(),
                         name: self
                             .document
                             .manifest
@@ -1044,6 +1073,22 @@ impl<'a> Walk<'a> {
             }
         };
         let applies = self.links.applies(self.graph, self.functions, derived);
+        let mut performs = match &callee {
+            Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([effect.clone()]),
+            Some(CalleeView::Library { id, .. }) => library_performs(self.functions, id),
+            Some(CalleeView::Declared(name)) => self
+                .graph
+                .unit(&Unit::Function(name.clone()))
+                .map(|unit| unit.effects.effects.clone())
+                .unwrap_or_default(),
+            None => std::collections::BTreeSet::new(),
+        };
+        performs.extend(applied_performs(
+            self.graph,
+            self.functions,
+            &mut self.links,
+            &applies,
+        ));
         self.view.dataflow.actions.push(ActionView {
             site: node.site.clone(),
             kind,
@@ -1053,12 +1098,93 @@ impl<'a> Walk<'a> {
             destination: at.assigns.clone(),
             callee,
             applies,
+            performs: performs.into_iter().collect(),
             args,
             result_type,
             available: available(self.graph, node),
         });
         Ok(())
     }
+}
+
+/// Project reached callback bodies without attributing unrelated closures in
+/// their containing unit. Library and declared recursion remain the checker's
+/// derivation; the view only follows the callable sites `applies` has resolved.
+fn applied_performs(
+    graph: &Graph,
+    functions: &FunctionDeclarations,
+    links: &mut applies::Links,
+    callables: &[Site],
+) -> std::collections::BTreeSet<EffectName> {
+    use std::collections::BTreeSet;
+    let mut effects = BTreeSet::new();
+    let mut callables = callables.to_vec();
+    let mut seen = BTreeSet::new();
+    while let Some(site) = callables.pop() {
+        if !seen.insert(site.clone()) {
+            continue;
+        }
+        if site.path.is_empty() {
+            if let Some(unit) = graph.unit(&site.unit) {
+                effects.extend(unit.effects.effects.iter().cloned());
+            }
+            continue;
+        }
+        let Some(root) = graph.node_at(&site) else {
+            continue;
+        };
+        let mut pending = root.children();
+        while let Some(id) = pending.pop() {
+            let node = graph.node(id);
+            if matches!(node.kind, NodeKind::Expr(ExprNode::Closure { .. })) {
+                continue;
+            }
+            let action = match &node.kind {
+                NodeKind::Action(action) => Some(Derived::Statement(action)),
+                NodeKind::Expr(ExprNode::Act { kind, args }) => Some(Derived::Nested(kind, args)),
+                _ => None,
+            };
+            let callee = match action {
+                Some(Derived::Statement(ActionNode::Perform { effect, .. }))
+                | Some(Derived::Nested(ActNode::Perform { effect, .. }, _)) => {
+                    effects.insert(effect.clone());
+                    None
+                }
+                Some(Derived::Statement(
+                    ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. },
+                ))
+                | Some(Derived::Nested(ActNode::Call(callee) | ActNode::Spawn(callee), _)) => {
+                    Some(callee.clone())
+                }
+                Some(Derived::Statement(ActionNode::Await { policy, .. }))
+                | Some(Derived::Nested(ActNode::Await(policy), _)) => {
+                    Some(CalleeNode::Library(*policy))
+                }
+                _ => None,
+            };
+            match callee {
+                Some(CalleeNode::Library(id)) => effects.extend(library_performs(functions, &id)),
+                Some(CalleeNode::Declared(name)) => {
+                    if let Some(unit) = graph.unit(&Unit::Function(name)) {
+                        effects.extend(unit.effects.effects.iter().cloned());
+                    }
+                }
+                _ => {}
+            }
+            if let Some(action) = action {
+                callables.extend(links.applies(graph, functions, action));
+            }
+            match &node.kind {
+                NodeKind::Expr(ExprNode::Call { function, .. })
+                | NodeKind::Stmt(StmtNode::ReturnVia {
+                    policy: function, ..
+                }) => effects.extend(library_performs(functions, function)),
+                _ => {}
+            }
+            pending.extend(node.children());
+        }
+    }
+    effects
 }
 
 /// An action as the checker derived it.

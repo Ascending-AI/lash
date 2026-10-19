@@ -726,16 +726,19 @@ async fn coarse_resume() {
     };
     let observations = [
         ActionObservation {
+            origin: sleeping_tasks[0].position().site().clone(),
             identity: sleeping_tasks[0].clone(),
             state: ActionState::Completed,
             outcome: Some("sleep delivered"),
         },
         ActionObservation {
+            origin: sleeping_tasks[1].position().site().clone(),
             identity: sleeping_tasks[1].clone(),
             state: ActionState::Waiting,
             outcome: None,
         },
         ActionObservation {
+            origin: actions[1].clone(),
             identity: identity(
                 actions[1].clone(),
                 lash::workflow::document::testkit::root_task(),

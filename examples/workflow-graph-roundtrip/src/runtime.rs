@@ -243,9 +243,10 @@ pub(crate) async fn observe(
                     output: record.output.value_for_projection(),
                 });
                 if let Some(identity) = event.occurrence.clone()
-                    && overlay.view.action_node(&identity.position()).is_some()
+                    && let Some(origin) = overlay.origin(&identity)
                 {
                     let evidence = ActionObservation {
+                        origin,
                         identity: identity.clone(),
                         state: if record.output.is_success() {
                             ActionState::Completed
@@ -258,7 +259,16 @@ pub(crate) async fn observe(
                         .view
                         .activity(overlay.view.document, &[evidence])?
                         .into_iter()
-                        .find(|activity| activity.site == identity.position());
+                        .find(|activity| {
+                            activity
+                                .occurrences
+                                .iter()
+                                .any(|occurrence| occurrence.identity == identity)
+                        });
+                    event.site = event
+                        .activity
+                        .as_ref()
+                        .map(|activity| activity.site.clone());
                 }
             }
             if event.coverage.is_some()
@@ -439,6 +449,27 @@ struct Overlay {
 }
 
 impl Overlay {
+    fn origin(&self, identity: &EffectId) -> Option<Site> {
+        if let Some(origin) = self.accumulator.snapshot().and_then(|overlay| {
+            overlay
+                .sites
+                .iter()
+                .find(|row| {
+                    row.site.site == identity.position()
+                        && row.site.task == identity.task()
+                        && row.state.occurrence.occurrence() == Some(identity.visit())
+                })
+                .and_then(|row| row.state.origin.clone())
+        }) {
+            return Some(origin);
+        }
+        self.view
+            .execution_sites
+            .iter()
+            .find(|site| site.site == identity.position())
+            .map(|site| site.statement.clone())
+    }
+
     fn new(
         document: &WorkflowDocument,
         process: lash::ProcessId,
@@ -543,7 +574,11 @@ impl Overlay {
     }
 
     fn remember(&mut self, at: &EffectId) {
-        if self.view.action_node(&at.position()).is_none() {
+        if !matches!(
+            at.position().site().unit,
+            lash::workflow::document::Unit::Library(_)
+        ) && self.view.action_node(&at.position()).is_none()
+        {
             return;
         }
         let key = (at.position(), at.task());
@@ -597,6 +632,13 @@ impl Overlay {
                     WorkflowOverlayOccurrence::Incomplete { .. } => (ActionState::Incomplete, None),
                 };
                 Some(ActionObservation {
+                    origin: site.state.origin.clone().or_else(|| {
+                        (!matches!(
+                            site.site.site.site().unit,
+                            lash::workflow::document::Unit::Library(_)
+                        ))
+                        .then(|| site.site.site.site().clone())
+                    })?,
                     identity: self
                         .identities
                         .get(&(site.site.site.clone(), site.site.task.clone()))

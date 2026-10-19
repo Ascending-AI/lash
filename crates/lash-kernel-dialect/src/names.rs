@@ -257,3 +257,28 @@ impl QualifiedOperation {
         })
     }
 }
+
+// The serialized forms are canonical dotted strings, including PackagePath's
+// specialized Vec1 serialization. Keep their schemas at the name owner.
+macro_rules! name_schema {
+    ($ty:ty, $name:literal, $pattern:expr) => {
+        impl schemars::JsonSchema for $ty {
+            fn schema_name() -> std::borrow::Cow<'static, str> { $name.into() }
+            fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({ "type": "string", "pattern": $pattern })
+            }
+        }
+    };
+}
+const SEGMENT_PATTERN: &str = "[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*";
+name_schema!(Segment, "Segment", format!("^{SEGMENT_PATTERN}$"));
+name_schema!(
+    PackagePath,
+    "PackagePath",
+    format!("^{SEGMENT_PATTERN}(\\.{SEGMENT_PATTERN})*$")
+);
+name_schema!(
+    MemberPath,
+    "MemberPath",
+    format!("^{SEGMENT_PATTERN}(\\.{SEGMENT_PATTERN})?$")
+);

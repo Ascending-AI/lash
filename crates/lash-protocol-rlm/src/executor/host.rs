@@ -484,6 +484,7 @@ impl KernelEffects for CellHost<'_> {
             .map_err(|error| ParentFault(error.to_string()))?;
         let now_ms = u64::try_from(now_ms.0).unwrap_or(0);
         if let Some(trace) = &self.trace {
+            trace.origin(&request.identity, &request.origin);
             trace.call_started(&request.identity, &invocation.id);
             self.sites
                 .lock_recover()

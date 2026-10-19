@@ -1427,6 +1427,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"

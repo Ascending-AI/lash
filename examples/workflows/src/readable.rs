@@ -145,7 +145,7 @@ pub(super) fn view(
             write!(text, " applies={callable}")?;
         }
         match &action.callee {
-            Some(CalleeView::Library { id, name }) => writeln!(
+            Some(CalleeView::Library { id, name, .. }) => writeln!(
                 text,
                 " library id={id} name={name} label={:?}",
                 packages.title(id, name)

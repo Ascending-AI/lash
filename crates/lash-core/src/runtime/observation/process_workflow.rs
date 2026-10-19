@@ -98,6 +98,9 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 /// not one attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowSite {
+    /// The authored statement from the effect request, when observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<lash_kernel_doc::Site>,
     pub at: EffectId,
     /// A display label supplied by the engine, independent of the opaque token.
     pub label: String,
@@ -203,7 +206,8 @@ struct Site {
     value: ProcessWorkflowSite,
     /// A committed outcome wins over late provisional facts of that occurrence.
     durable_terminal: bool,
-    timestamp: u64,
+    /// Origin metadata does not establish transition ordering.
+    timestamp: Option<u64>,
 }
 
 /// The single process workflow reducer. Feed stored events to `committed`,
@@ -312,6 +316,7 @@ impl ProcessWorkflowOverlayAccumulator {
         };
         let held = self.sites.entry(key).or_insert_with(|| Site {
             value: ProcessWorkflowSite {
+                origin: None,
                 at: at.clone(),
                 label: at.to_string(),
                 occurrences: lash_protocol_types::ObservationReader::counts(at).starts,
@@ -320,18 +325,23 @@ impl ProcessWorkflowOverlayAccumulator {
                 last_settled: None,
             },
             durable_terminal,
-            timestamp,
+            timestamp: Some(timestamp),
         });
         if at.visit() > held.value.at.visit()
             || (at.visit() == held.value.at.visit()
-                && (durable_terminal || (!held.durable_terminal && timestamp >= held.timestamp)))
+                && (durable_terminal
+                    || (!held.durable_terminal
+                        && held.timestamp.is_none_or(|held| timestamp >= held))))
         {
+            if held.value.at != *at {
+                held.value.origin = None;
+            }
             held.value.at = at.clone();
             held.value.label = at.to_string();
             held.value.occurrences = lash_protocol_types::ObservationReader::counts(at).starts;
             held.value.state = state;
             held.durable_terminal = durable_terminal;
-            held.timestamp = timestamp;
+            held.timestamp = Some(timestamp);
         }
         // Committed history belongs to the site across all its occurrences,
         // even when a newer live occurrence already owns the displayed state.
@@ -526,6 +536,35 @@ impl ProcessWorkflowOverlayAccumulator {
                     }
                 }
                 if let TraceLanguageExecutionPayload::Node { at, fact, .. } = &execution.payload {
+                    if let TraceNodeFact::Origin { origin } = fact {
+                        let key = lash_trace::WorkflowTaskSite::of(at);
+                        if self
+                            .sites
+                            .get(&key)
+                            .is_none_or(|held| at.visit() > held.value.at.visit())
+                        {
+                            self.site(
+                                at,
+                                observation.observed_at_ms,
+                                if self.ended {
+                                    ProcessWorkflowSiteState::TerminalUnobserved
+                                } else {
+                                    ProcessWorkflowSiteState::Running
+                                },
+                                false,
+                                None,
+                            );
+                            if let Some(held) = self.sites.get_mut(&key) {
+                                held.timestamp = None;
+                            }
+                        }
+                        if let Some(held) = self.sites.get_mut(&key)
+                            && held.value.at == *at
+                        {
+                            held.value.origin = Some(origin.clone());
+                        }
+                        return Ok(());
+                    }
                     let state = match fact {
                         TraceNodeFact::Started { .. } => {
                             self.enter_live(at);
@@ -1086,5 +1125,124 @@ mod tests {
             )
             .expect("an effect's nested execution is legal on its process feed");
         assert_eq!(overlay.snapshot(), before);
+    }
+    /// VIEW-ORIGIN: request attribution is keyed by effect identity, survives
+    /// completion, and neither leaks to another visit nor reopens a terminal.
+    #[test]
+    fn request_origins_stay_with_their_occurrence_after_completion_and_reentry() {
+        let process = ProcessId::fixture("origins");
+        let document = WorkflowDocumentRef {
+            document: lash_kernel_doc::DocumentId::from_bytes([3; 32]),
+            entry: WorkflowDocumentEntry::Main,
+        };
+        let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        let at = lash_protocol_types::effect_identity_fixture("effect", 0);
+        let origin = lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![4]);
+        let clock = std::cell::Cell::new(100_u64);
+        let observe = |overlay: &mut ProcessWorkflowOverlayAccumulator, at: &EffectId, fact| {
+            overlay
+                .observe(
+                    &document,
+                    &ProcessObservationEventPayload::LanguageExecution(
+                        LanguageExecutionObservation {
+                            language: None,
+                            observed_at_ms: clock.get(),
+                            execution: TraceLanguageExecution {
+                                event_key: "origin-law".into(),
+                                identity: TraceLanguageExecutionIdentity {
+                                    scope: TraceRuntimeScope::none(),
+                                    document: document.clone(),
+                                    entry_name: "main".into(),
+                                    engine_execution_id: None,
+                                    generation: None,
+                                },
+                                payload: TraceLanguageExecutionPayload::Node {
+                                    subject: TraceRuntimeSubject::Process {
+                                        process_id: process.clone(),
+                                    },
+                                    at: at.clone(),
+                                    fact,
+                                },
+                            },
+                        },
+                    ),
+                )
+                .unwrap();
+        };
+        observe(&mut overlay, &at, TraceNodeFact::Started { call_id: None });
+        observe(
+            &mut overlay,
+            &at,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+        observe(
+            &mut overlay,
+            &at,
+            TraceNodeFact::Completed { call_id: None },
+        );
+        clock.set(200);
+        observe(
+            &mut overlay,
+            &at,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+        assert_eq!(
+            overlay.snapshot().sites[0].state,
+            ProcessWorkflowSiteState::Completed
+        );
+        assert_eq!(overlay.snapshot().sites[0].origin, Some(origin.clone()));
+        let next = lash_protocol_types::workflow_testkit::with_visit(&at, 1);
+        observe(
+            &mut overlay,
+            &next,
+            TraceNodeFact::Started { call_id: None },
+        );
+        observe(
+            &mut overlay,
+            &at,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+        assert_eq!(overlay.snapshot().sites[0].origin, None);
+        overlay.finish();
+        observe(
+            &mut overlay,
+            &next,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+        let shown = overlay.snapshot();
+        assert_eq!(shown.sites[0].origin, Some(origin.clone()));
+        assert_eq!(
+            shown.sites[0].state,
+            ProcessWorkflowSiteState::TerminalUnobserved
+        );
+        // Attribution has no transition timestamp: an origin retained without
+        // a start cannot suppress a subsequently supplied outcome.
+        let mut metadata_first = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        clock.set(200);
+        observe(
+            &mut metadata_first,
+            &at,
+            TraceNodeFact::Origin {
+                origin: origin.clone(),
+            },
+        );
+        clock.set(50);
+        observe(
+            &mut metadata_first,
+            &at,
+            TraceNodeFact::Completed { call_id: None },
+        );
+        assert_eq!(
+            metadata_first.snapshot().sites[0].state,
+            ProcessWorkflowSiteState::Completed
+        );
     }
 }

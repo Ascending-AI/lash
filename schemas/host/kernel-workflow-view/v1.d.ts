@@ -132,9 +132,10 @@ export type ActionActivity = {
   "site": Site;
   /**
    * The state its occurrences give it, `None` with none. A run commits
-   * occurrences for its effects and its waits only (FIG-6810): a library
-   * call, and a `sleep` that never parked, has none, so its state is
-   * `None` and its coverage count is the only durable fact about it. A
+   * occurrences for its effects and its waits only (FIG-6810). A library
+   * call receives its body's effects through their authored `origin`; the
+   * occurrences keep their library identities. A pure call, and a `sleep`
+   * that never parked, has no occurrence of its own. A
    * process's live feed may report one as entered, never as completed
    * or failed. A run that failed names the site that raised in its
    * terminal failure's `UncaughtError` cause: a wait action, or the
@@ -150,6 +151,11 @@ export type ActionActivity = {
  */
 export type ActionObservation = {
   "identity": EffectId;
+  /**
+   * The authored statement supplied by the effect request. This is display
+   * attribution; `identity` keeps the actual performing unit and occurrence.
+   */
+  "origin": Site;
   "outcome"?: unknown;
   "state": ActionState;
 };
@@ -200,6 +206,12 @@ export type ActionView = {
    */
   "destination"?: (Place | null);
   "kind": SiteKind;
+  /**
+   * Every canonical effect this action reaches, including calls through
+   * library bodies and statically known declared callees. Derived from the
+   * checker's effect derivation, in canonical order with duplicates removed.
+   */
+  "performs": Array<QualifiedName>;
   /**
    * A `perform`'s declared result, else the checker's facet.
    */
@@ -350,6 +362,11 @@ export type Callee = ({
 export type CalleeView = ({
   "library": {
     "id": FunctionId;
+    /**
+     * Every installed surface member backed by this identity in the
+     * cell's package set. A private definition has no members.
+     */
+    "member": Array<PackageMemberView>;
     "name": QualifiedName;
     [key: string]: unknown;
   };
@@ -725,6 +742,8 @@ export type Member = ({
   };
 });
 
+export type MemberPath = string;
+
 /**
  * A variable, parameter or declared-function name.
  *
@@ -745,6 +764,17 @@ export type NodeCoverage = {
   "runs"?: (number | null);
   "site": Site;
 };
+
+/**
+ * One installed name of a library definition. Package and member stay paired:
+ * one definition may implement several members, including across packages.
+ */
+export type PackageMemberView = {
+  "member": MemberPath;
+  "package": PackagePath;
+};
+
+export type PackagePath = string;
 
 export type Param = {
   "name": Name;

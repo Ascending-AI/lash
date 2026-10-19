@@ -234,7 +234,7 @@ pub mod vm;
 /// [`package::HeldPackages`] from which the parent's admission and every
 /// worker's registry are derived. A host builds its package against lash's
 /// (`Package::build(path, release, &sources, &[kernel])`, with `kernel`
-/// from [`package::lash_packages`]), installs both, and gives its workers
+/// from `package::lash_packages` when code mode is enabled), installs both, and gives its workers
 /// natives only, by function identity.
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {

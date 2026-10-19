@@ -480,7 +480,8 @@ impl TraceEvent {
                             text(C::DiagnosticsText, "diagnostics.node", message, f)
                         }
                     },
-                    TraceNodeFact::Started { .. }
+                    TraceNodeFact::Origin { .. }
+                    | TraceNodeFact::Started { .. }
                     | TraceNodeFact::Waiting { .. }
                     | TraceNodeFact::Resumed { .. }
                     | TraceNodeFact::Cancelled

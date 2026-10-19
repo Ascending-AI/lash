@@ -60,6 +60,23 @@ impl Held {
         {
             return;
         }
+        // An origin is attribution, not a timed transition. Re-reporting a
+        // parked request repeats the same fact, without a conflict or a start.
+        if self.observation.fact == candidate.fact
+            && matches!(
+                candidate.fact.language(),
+                Some((
+                    _,
+                    TraceLanguageExecutionPayload::Node {
+                        fact: TraceNodeFact::Origin { .. },
+                        ..
+                    }
+                ))
+            )
+        {
+            self.observation.timestamp = self.observation.timestamp.min(candidate.timestamp);
+            return;
+        }
         let (held, offered) = (self.observation.variant(), candidate.variant());
         let ends = |observation: &Observation| {
             observation
@@ -210,6 +227,7 @@ impl ExecutionHistory {
 /// their published ordinals are their ranks in that order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Transition {
+    Origin,
     Started,
     StepBody(u32),
     Waiting(DateTime<Utc>),
@@ -249,6 +267,7 @@ impl Placement {
                 Payload::Node { at, fact, .. } => (
                     at,
                     match fact {
+                        TraceNodeFact::Origin { .. } => Transition::Origin,
                         TraceNodeFact::Started { .. } => Transition::Started,
                         TraceNodeFact::Waiting { .. } => Transition::Waiting(observation.timestamp),
                         TraceNodeFact::Resumed { .. } => Transition::Resumed(observation.timestamp),
@@ -302,6 +321,7 @@ impl OccurrenceHistory {
                             attempt: *attempt,
                         });
                     }
+                    Transition::Origin => Node::Origin,
                     Transition::Started => Node::Started,
                     Transition::Waiting(_) => {
                         waits += 1;
@@ -363,6 +383,7 @@ impl OccurrenceHistory {
                 Some(Transition::StepBody(*attempt))
             }
             WorkflowOverlayEventIdentity::Node { transition, .. } => match transition {
+                Node::Origin => Some(Transition::Origin),
                 Node::Started => Some(Transition::Started),
                 Node::Waiting { ordinal } => nth(*ordinal, true),
                 Node::Resumed { ordinal } => nth(*ordinal, false),
@@ -382,7 +403,7 @@ impl OccurrenceHistory {
         let mut folded = OccurrenceFold::default();
         for (transition, observation) in self.iter() {
             let timestamp = observation.timestamp;
-            folded.counted |= *transition != Transition::ChildStarted;
+            folded.counted |= !matches!(transition, Transition::ChildStarted | Transition::Origin);
             match &observation.fact {
                 WorkflowOverlayFact::StepBodyStarted { step } => {
                     folded.started(timestamp);
@@ -390,6 +411,7 @@ impl OccurrenceHistory {
                 }
                 WorkflowOverlayFact::Language { payload, .. } => match payload.node_fact() {
                     None => {}
+                    Some(TraceNodeFact::Origin { origin }) => folded.origin = Some(origin),
                     Some(TraceNodeFact::Started { call_id }) => {
                         folded.started(timestamp);
                         folded.repeat_call(call_id.as_ref());
@@ -429,6 +451,7 @@ impl OccurrenceHistory {
 
 #[derive(Default)]
 struct OccurrenceFold<'a> {
+    origin: Option<&'a lash_kernel_doc::Site>,
     /// Whether anything but a child link was observed: a child link is a
     /// fact about the site, not a transition of one of its occurrences.
     counted: bool,
@@ -601,6 +624,7 @@ impl WorkflowOverlaySiteState {
         }
         if let Some((occurrence, folded)) = latest {
             self.occurrence = folded.state(occurrence, cancelled_at);
+            self.origin = folded.origin.cloned();
         }
     }
 }
