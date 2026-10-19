@@ -118,17 +118,36 @@ impl Links {
         }
     }
 
-    /// What a variable holds whenever a call applies it. `seen` cuts a
-    /// cycle of variables written from one another.
-    fn binding(&self, graph: &Graph, binding: BindingId, seen: &mut BTreeSet<BindingId>) -> Held {
+    /// What a variable holds whenever a call applies it. `resolving` holds
+    /// the variables whose writes are being folded on the way here, so one
+    /// written from itself, directly or through others, is a cycle; a
+    /// variable resolved and left is not, however often it is reached again.
+    fn binding(
+        &self,
+        graph: &Graph,
+        binding: BindingId,
+        resolving: &mut BTreeSet<BindingId>,
+    ) -> Held {
         if graph.binding(binding).kind != lash_kernel_check::BindingKind::Let
-            || !seen.insert(binding)
+            || !resolving.insert(binding)
         {
             return Held::Unknown;
         }
+        let held = self.writes_of(graph, binding, resolving);
+        resolving.remove(&binding);
+        held
+    }
+
+    /// The callable every write of `binding` agrees on.
+    fn writes_of(
+        &self,
+        graph: &Graph,
+        binding: BindingId,
+        resolving: &mut BTreeSet<BindingId>,
+    ) -> Held {
         let mut held = Held::Inert;
         for value in self.writes.get(&binding).into_iter().flatten() {
-            held = match (held, self.value(graph, *value, seen)) {
+            held = match (held, self.value(graph, *value, resolving)) {
                 (Held::Unknown, _) | (_, Held::Unknown) => return Held::Unknown,
                 (held, Held::Inert) => held,
                 (Held::Inert, callable) => callable,
@@ -142,13 +161,13 @@ impl Links {
     }
 
     /// What the value of an expression is, as a callee.
-    fn value(&self, graph: &Graph, value: NodeId, seen: &mut BTreeSet<BindingId>) -> Held {
+    fn value(&self, graph: &Graph, value: NodeId, resolving: &mut BTreeSet<BindingId>) -> Held {
         let node = graph.node(value);
         match &node.kind {
             NodeKind::Expr(ExprNode::Closure { .. }) => Held::Callable(node.site.clone()),
             NodeKind::Expr(ExprNode::Literal(literal)) => literal_held(literal),
             NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding))) => {
-                self.binding(graph, *binding, seen)
+                self.binding(graph, *binding, resolving)
             }
             _ => Held::Unknown,
         }

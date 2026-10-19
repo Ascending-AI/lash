@@ -336,10 +336,13 @@ impl AmbientFrame {
     /// Enters this frame on the current thread until the guard drops: lash's
     /// part, then the host's scope.
     pub fn enter(self: &Arc<Self>) -> FrameGuard {
-        let previous = CURRENT_FRAME.with(|current| current.replace(Some(Arc::clone(self))));
+        // Owned before the host's code runs: a host scope that panics on
+        // entry unwinds through it and restores the prior frame.
+        let restore =
+            RestoreFrame(CURRENT_FRAME.with(|current| current.replace(Some(Arc::clone(self)))));
         FrameGuard {
-            host: self.scope.as_ref().map(|scope| scope.enter()),
-            previous: Some(previous),
+            _host: self.scope.as_ref().map(|scope| scope.enter()),
+            _restore: restore,
         }
     }
 }
@@ -356,16 +359,21 @@ impl std::fmt::Debug for AmbientFrame {
 /// frame, restoring the one entered before it.
 #[must_use = "the frame is left when the guard is dropped"]
 pub struct FrameGuard {
-    host: Option<AmbientGuard>,
-    previous: Option<Option<Arc<AmbientFrame>>>,
+    // Fields drop in declaration order: the host's scope is left first, and
+    // lash's frame is restored even when leaving the host's scope unwinds.
+    _host: Option<AmbientGuard>,
+    _restore: RestoreFrame,
 }
 
-impl Drop for FrameGuard {
+/// Restores the frame entered before one [`AmbientFrame::enter`] when
+/// dropped.
+struct RestoreFrame(Option<Arc<AmbientFrame>>);
+
+impl Drop for RestoreFrame {
     fn drop(&mut self) {
-        drop(self.host.take());
-        if let Some(previous) = self.previous.take() {
-            CURRENT_FRAME.with(|current| *current.borrow_mut() = previous);
-        }
+        let previous = self.0.take();
+        // The left frame drops after the slot's borrow ends.
+        let _left = CURRENT_FRAME.with(|current| current.replace(previous));
     }
 }
 

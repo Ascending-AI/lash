@@ -1043,3 +1043,56 @@ main { finish null }
         Err(crate::CaptionViewRefusal::Workflow { .. })
     ));
 }
+
+/// A variable whose every write agrees on one callable names it, however
+/// many writes reach that callable: through one alias written twice, and
+/// through a diamond of aliases converging on it. Cycle detection follows
+/// only the variables still being resolved, so a completed dependency is
+/// never mistaken for a back-edge; a real cycle and disagreeing writes stay
+/// unknown.
+#[test]
+fn agreeing_writes_of_one_alias_resolve_to_its_callee() {
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+entry flow() -> Any
+fn flow() {
+  let work = fn() { return null }
+  let alias = work
+  set alias = work
+  let twice = apply alias()
+  let left = work
+  let right = work
+  let joined = left
+  set joined = right
+  let diamond = apply joined()
+  let ring = work
+  let back = ring
+  set ring = back
+  let cycled = apply ring()
+  let other = fn() { return null }
+  let mixed = work
+  set mixed = other
+  let conflicted = apply mixed()
+  return null
+}
+main { finish null }
+"#,
+    )
+    .expect("alias workflow");
+    let view = view_of(&document, "flow");
+    let applies = |statement: u32| {
+        &view
+            .dataflow
+            .actions
+            .iter()
+            .find(|action| action.statement == site("flow", &[statement]))
+            .expect("the apply")
+            .applies
+    };
+    let work = site("flow", &[0, 0]);
+    assert_eq!(applies(3), &vec![work.clone()], "one alias written twice");
+    assert_eq!(applies(8), &vec![work], "a diamond of aliases");
+    assert!(applies(12).is_empty(), "a cycle of aliases");
+    assert!(applies(16).is_empty(), "disagreeing writes");
+}

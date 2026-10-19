@@ -276,6 +276,72 @@ fn event_is_failed_identifies_all_failure_outcomes() {
     }
 }
 
+/// A frame's guard restores the frame entered before it whatever the host
+/// does: when the host's scope panics on entry, when the host's guard panics
+/// on leaving, and on an ordinary nested exit, the prior frame (or no frame)
+/// is current again after the one unwind is caught.
+#[test]
+fn a_panicking_host_scope_leaves_the_prior_frame_installed() {
+    struct PanicsOnLeave;
+    impl Drop for PanicsOnLeave {
+        fn drop(&mut self) {
+            panic!("host guard panics on leave");
+        }
+    }
+    struct Host {
+        panics_on_enter: bool,
+    }
+    impl AmbientScope for Host {
+        fn enter(&self) -> AmbientGuard {
+            if self.panics_on_enter {
+                panic!("host scope panics on enter");
+            }
+            AmbientGuard::new(PanicsOnLeave)
+        }
+    }
+    fn frame(scope: Option<Host>) -> std::sync::Arc<AmbientFrame> {
+        AmbientFrame::new(
+            scope.map(|scope| std::sync::Arc::new(scope) as std::sync::Arc<dyn AmbientScope>),
+            std::sync::Arc::new(()),
+        )
+    }
+    fn is_current(expected: Option<&std::sync::Arc<AmbientFrame>>) -> bool {
+        match (AmbientFrame::current(), expected) {
+            (None, None) => true,
+            (Some(current), Some(expected)) => std::sync::Arc::ptr_eq(&current, expected),
+            _ => false,
+        }
+    }
+    std::thread::spawn(|| {
+        let outer = frame(None);
+        for prior in [None, Some(&outer)] {
+            let _prior = prior.map(|prior| prior.enter());
+            assert!(is_current(prior));
+            for panics_on_enter in [true, false] {
+                let failing = frame(Some(Host { panics_on_enter }));
+                let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _entered = failing.enter();
+                }));
+                assert!(unwound.is_err(), "the host panics once");
+                assert!(
+                    is_current(prior),
+                    "the prior frame is current after a host panic on {}",
+                    if panics_on_enter { "enter" } else { "leave" }
+                );
+            }
+            let inner = frame(None);
+            {
+                let _inner = inner.enter();
+                assert!(is_current(Some(&inner)));
+            }
+            assert!(is_current(prior), "a nested exit restores the prior frame");
+        }
+        assert!(is_current(None));
+    })
+    .join()
+    .expect("the law's thread");
+}
+
 #[cfg(test)]
 fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> crate::TraceRecord {
     crate::TraceRecord {
