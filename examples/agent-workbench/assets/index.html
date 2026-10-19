@@ -2865,9 +2865,33 @@
 
   <script src="/assets/timeline.js"></script>
   <script>
-    let scopedSessionId = new URLSearchParams(window.location.search).get("session_id");
+    /* The session this shell shows, and the lifetime of showing it. A null id
+       is the workbench's current session. */
+    let sessionView = {
+      sessionId: new URLSearchParams(window.location.search).get("session_id"),
+      epoch: 0
+    };
+    // BEGIN WORKBENCH_SESSION_VIEW
+    /* The shell switches sessions in place, so an answer can arrive after
+       the view that asked for it is gone (FIG-6860). Selecting, resetting to
+       or adopting a session enters a new view, even one naming a session
+       shown before (A→B→A). A request captures the view it was made for, and
+       every effect after its awaits, failures included, applies only while
+       that view is still shown. A stale answer is dropped, not cancelled:
+       the server may have admitted it, and the next snapshot of its session
+       shows what it did. */
+    function enterSessionView(sessionId) {
+      sessionView = { sessionId, epoch: sessionView.epoch + 1 };
+      return sessionView;
+    }
+
+    function sessionViewIsShown(view) {
+      return view.epoch === sessionView.epoch;
+    }
+    // END WORKBENCH_SESSION_VIEW
     const nativeFetch = window.fetch.bind(window);
     function scopedApiUrl(input) {
+      const scopedSessionId = sessionView.sessionId;
       if (!scopedSessionId || typeof input !== "string") return input;
       const url = new URL(input, window.location.href);
       if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return input;
@@ -3052,7 +3076,7 @@
 
     /* The session this tab shows: its pinned id, else the workbench's current. */
     function shownSessionId(listing = lastSessionListing) {
-      return scopedSessionId || listing?.current_session_id || knownSessionLabel || null;
+      return sessionView.sessionId || listing?.current_session_id || knownSessionLabel || null;
     }
 
     function sessionHref(sessionId) {
@@ -3159,7 +3183,7 @@
         if (!response.ok) return;
         const listing = await response.json();
         if (
-          !scopedSessionId &&
+          !sessionView.sessionId &&
           knownSessionLabel &&
           listing?.current_session_id &&
           listing.current_session_id !== knownSessionLabel
@@ -3207,7 +3231,6 @@
 
     async function showSessionInPlace(sessionId) {
       toolCatalog.open = false;
-      ++toolCatalogGeneration;
       toolCatalogSignature = "";
       toolCatalogList.replaceChildren();
       /* A shell already parked on a refused, terminal or retiring session has
@@ -3227,12 +3250,11 @@
         controller.abort();
         controller = null;
       }
-      scopedSessionId = sessionId;
+      const view = enterSessionView(sessionId);
       window.history.replaceState(null, "", sessionHref(sessionId) + window.location.hash);
       /* a snapshot or stream answer for the previous session still in flight
          lands as superseded */
       projectionState.recoveryGeneration += 1;
-      workRefreshGeneration += 1;
       clearTranscript();
       clearExecutionState();
       clearAttachment();
@@ -3241,10 +3263,13 @@
       const snapshotSequence = beginStateSnapshotRequest(projectionState);
       try {
         const state = await fetchStateSnapshot();
+        /* a later switch owns the shell from here */
+        if (!sessionViewIsShown(view)) return;
         applyStateSnapshot(state, snapshotSequence);
         markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
+        if (!sessionViewIsShown(view)) return;
         if (!handleSessionRetirementFailure(error)) scheduleStateRetry();
       }
       restartEventStreams();
@@ -3855,7 +3880,7 @@
 
     function openPendingInputEditor(receipt) {
       if (pendingInputMutation || pendingInputDraft) return;
-      pendingInputDraft = { inputId: receipt.input_id, sessionId: projectionState.sessionId, cancelled: false, attachment: null };
+      pendingInputDraft = { inputId: receipt.input_id, view: sessionView, cancelled: false, attachment: null };
       pendingInputText.value = receipt.text || "";
       pendingInputStatus.textContent = "";
       pendingInputSubmit.hidden = false;
@@ -3882,13 +3907,18 @@
     }
 
     async function cancelPendingInput(inputId) {
-      const sessionId = projectionState.sessionId;
-      const response = await fetch("/api/turn/input/" + encodeURIComponent(inputId), { method: "DELETE" });
-      if (!response.ok) throw new Error("Input cancellation failed. Try again.");
-      const receipt = await response.json();
-      if (sessionId !== projectionState.sessionId) return;
-      showInputWithdrawal(receipt.outcome);
-      if (receipt.outcome.outcome !== "cancelled") renderNote(inputWithdrawalMessage(receipt.outcome.outcome));
+      const view = sessionView;
+      try {
+        const response = await fetch("/api/turn/input/" + encodeURIComponent(inputId), { method: "DELETE" });
+        if (!response.ok) throw new Error("Input cancellation failed. Try again.");
+        const receipt = await response.json();
+        if (!sessionViewIsShown(view)) return;
+        showInputWithdrawal(receipt.outcome);
+        if (receipt.outcome.outcome !== "cancelled") renderNote(inputWithdrawalMessage(receipt.outcome.outcome));
+      } catch (error) {
+        /* the receipt row reports the failure, in the view it belongs to */
+        if (sessionViewIsShown(view)) throw error;
+      }
     }
 
     pendingInputClose.addEventListener("click", () => {
@@ -3907,7 +3937,7 @@
           const response = await fetch("/api/turn/input/" + encodeURIComponent(draft.inputId) + "/edit", { method: "POST" });
           if (!response.ok) throw new Error("Could not withdraw the queue. Your edit is still here; try again.");
           const receipt = await response.json();
-          if (draft !== pendingInputDraft || draft.sessionId !== projectionState.sessionId) return;
+          if (draft !== pendingInputDraft || !sessionViewIsShown(draft.view)) return;
           const outcomes = receipt.data?.outcomes || [];
           for (const outcome of outcomes) showInputWithdrawal(outcome);
           const anchor = outcomes.find(outcome => outcome.data?.input_id === draft.inputId || outcome.data?.input?.input_id === draft.inputId);
@@ -3937,9 +3967,10 @@
           pendingInputSubmit.hidden = true;
           throw new Error(draft.withdrawal + " Resubmission outcome is unknown. Refresh the session before sending again; copy your edited draft if needed.");
         }
-        if (draft !== pendingInputDraft || draft.sessionId !== projectionState.sessionId) return;
+        if (draft !== pendingInputDraft || !sessionViewIsShown(draft.view)) return;
         if (!response.ok) throw new Error(draft.withdrawal + " Resubmission failed. Your edited draft is still here; retry resubmission.");
         const accepted = await response.json();
+        if (draft !== pendingInputDraft || !sessionViewIsShown(draft.view)) return;
         if (accepted.queued_input) conversation.showReceipt(accepted.queued_input);
         renderNote(draft.withdrawal + " Edited input resubmitted as a new turn.");
         closePendingInputEditor();
@@ -3961,7 +3992,6 @@
     let selectedAttachment = null;
     let attachmentUploadInFlight = false;
     let workStale = false;
-    let workRefreshGeneration = 0;
     let selectedWorkKey = null;
     let activeExecutionGraphKey = null;
     let currentExecutionExport = null;
@@ -4126,6 +4156,7 @@
         renderNote("turn already running");
         return null;
       }
+      const view = sessionView;
       const nonce = crypto.randomUUID();
       lastRequest = { payload, attachments };
       sendInFlight = true;
@@ -4142,6 +4173,7 @@
         });
         if (!response.ok) {
           await response.text();
+          if (!sessionViewIsShown(view)) return null;
           conversation.sendFailed(nonce);
           renderError("request could not be completed", { retry: true });
           return null;
@@ -4153,10 +4185,13 @@
           accepted = (await response.json()) || {};
         } catch (_) { /* acceptance is the status */ }
         sendInFlight = false;
+        if (!sessionViewIsShown(view)) return null;
         conversation.sendAccepted(nonce, accepted);
         return accepted;
       } catch (error) {
         sendInFlight = false;
+        /* leaving the view aborts its send; the next view is not told */
+        if (!sessionViewIsShown(view)) return null;
         conversation.sendFailed(nonce);
         if (error.name === "AbortError") {
           if (!resetInFlight) renderNote("turn stopped");
@@ -4421,10 +4456,12 @@
       mode = mode === "abort" ? "abort" : "stop";
       if (mode === "abort" && controller) controller.abort();
       armStopEscalation(mode);
+      const view = sessionView;
       fetch("/api/turn/cancel?mode=" + mode, { method: "POST" })
         .then(async response => {
           if (!response.ok) throw new Error("stop request failed (" + response.status + ")");
           const receipt = await response.json();
+          if (!sessionViewIsShown(view)) return;
           const cancellations = receipt.cancellations || [];
           const committed = cancellations.find(item => item.terminal?.status === "committed");
           const evidence = committed?.terminal?.stop?.cancelled?.evidence;
@@ -4438,7 +4475,9 @@
           else if (unresolved) renderNote(mode === "stop" ? "stop recorded · waiting for the step boundary" : "abort recorded · waiting for the turn to end");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
-        .catch(() => renderError("the turn could not be stopped"));
+        .catch(() => {
+          if (sessionViewIsShown(view)) renderError("the turn could not be stopped");
+        });
     }
     // END WORKBENCH_STOP_TURN
     stopButton.addEventListener("click", () => stopTurn("stop"));
@@ -4492,15 +4531,18 @@
         controller = null;
       }
       const snapshotSequence = beginStateSnapshotRequest(projectionState);
-      workRefreshGeneration += 1;
+      const view = sessionView;
       try {
         const response = await fetch("/api/reset", { method: "POST" });
         const state = await response.json().catch(() => null);
+        /* the reset was for a session no longer shown; the roster shows its
+           replacement */
+        if (!sessionViewIsShown(view)) return;
         if (!response.ok) {
           /* a reset refused because this session is already retiring or
              retired is the hand-off, not a failure: the replacement exists or
              is about to, and the page's job is to move to it */
-          const refusal = sessionRetirementRefusal(response.status, state, scopedSessionId);
+          const refusal = sessionRetirementRefusal(response.status, state, view.sessionId);
           if (scopedSessionRefusalIsFinal(refusal)) {
             refuseScopedSession(
               refusal,
@@ -4525,9 +4567,9 @@
         }
         const applied = applyStateSnapshot(state, snapshotSequence);
         if (!applied) return;
-        scopedSessionId = state.settings.session_id;
+        const replacement = enterSessionView(state.settings.session_id);
         const replacementUrl = new URL(window.location.href);
-        replacementUrl.searchParams.set("session_id", scopedSessionId);
+        replacementUrl.searchParams.set("session_id", replacement.sessionId);
         window.history.replaceState(
           null,
           "",
@@ -4543,6 +4585,7 @@
         markShellChannel(shellAvailability, "state", true);
         restartEventStreams(true);
       } catch (error) {
+        if (!sessionViewIsShown(view)) return;
         renderError(
           error instanceof Error ? error.message : "the conversation could not be reset"
         );
@@ -4618,15 +4661,6 @@
       if (accepted) loadSessions();
     });
 
-    function clearAttachment() {
-      selectedAttachment = null;
-      attachmentInput.value = "";
-      attachButton.classList.remove("ready", "uploading");
-      attachButton.textContent = "attach png";
-      attachButton.title = "Upload one PNG and reference it in the next turn";
-      syncCommandAvailability();
-    }
-
     function fileBase64(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -4634,6 +4668,19 @@
         reader.addEventListener("error", () => reject(reader.error || new Error("could not read file")));
         reader.readAsDataURL(file);
       });
+    }
+
+    // BEGIN WORKBENCH_ATTACHMENT_UPLOAD
+    /* A clear also ends any upload in flight: its answer is no longer this
+       composer's. */
+    function clearAttachment() {
+      selectedAttachment = null;
+      attachmentUploadInFlight = false;
+      attachmentInput.value = "";
+      attachButton.classList.remove("ready", "uploading");
+      attachButton.textContent = "attach png";
+      attachButton.title = "Upload one PNG and reference it in the next turn";
+      syncCommandAvailability();
     }
 
     async function uploadAttachment(file) {
@@ -4650,6 +4697,7 @@
         clearAttachment();
         return;
       }
+      const view = sessionView;
       attachmentUploadInFlight = true;
       selectedAttachment = null;
       attachButton.classList.remove("ready");
@@ -4657,17 +4705,21 @@
       attachButton.textContent = "uploading…";
       syncCommandAvailability();
       try {
+        const dataBase64 = await fileBase64(file);
+        /* the upload is scoped to the shown session when it is sent */
+        if (!sessionViewIsShown(view)) return;
         const response = await fetch("/api/attachments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: file.name,
             mime: file.type,
-            data_base64: await fileBase64(file)
+            data_base64: dataBase64
           })
         });
         if (!response.ok) throw new Error("attachment upload failed");
         const uploaded = await response.json();
+        if (!sessionViewIsShown(view)) return;
         selectedAttachment = { ...uploaded.attachment, retrieve_url: uploaded.retrieve_url };
         attachButton.classList.remove("uploading");
         attachButton.classList.add("ready");
@@ -4675,21 +4727,27 @@
         attachButton.title = file.name + " · " + uploaded.attachment.byte_len + " bytes · id "
           + uploaded.attachment.id + " · click to replace";
       } catch (_) {
+        if (!sessionViewIsShown(view)) return;
         renderError("the PNG could not be attached");
         clearAttachment();
       } finally {
-        attachmentUploadInFlight = false;
-        syncCommandAvailability();
+        if (sessionViewIsShown(view)) {
+          attachmentUploadInFlight = false;
+          syncCommandAvailability();
+        }
       }
     }
+    // END WORKBENCH_ATTACHMENT_UPLOAD
 
     attachButton.addEventListener("click", () => attachmentInput.click());
     attachmentInput.addEventListener("change", () => uploadAttachment(attachmentInput.files?.[0]));
 
+    // BEGIN WORKBENCH_RUNNING_INPUT
     async function submitRunningInput(ingress) {
       const text = promptInput.value.trim();
       if (!text) { promptInput.focus(); return; }
       if (modelEmpty()) { validateModel(); openModelMenu(); return; }
+      const view = sessionView;
       try {
         const response = await fetch("/api/turn/input", {
           method: "POST",
@@ -4698,16 +4756,19 @@
         });
         if (!response.ok) {
           await response.text();
-          renderError("the input could not be submitted");
+          if (sessionViewIsShown(view)) renderError("the input could not be submitted");
           return;
         }
-        conversation.showReceipt(await response.json());
+        const receipt = await response.json();
+        if (!sessionViewIsShown(view)) return;
+        conversation.showReceipt(receipt);
         lastUserText = text;
         promptInput.value = "";
       } catch (_) {
-        renderError("the input could not be submitted");
+        if (sessionViewIsShown(view)) renderError("the input could not be submitted");
       }
     }
+    // END WORKBENCH_RUNNING_INPUT
 
     injectNowButton.addEventListener("click", () => submitRunningInput("active_turn"));
     queueNextButton.addEventListener("click", () => submitRunningInput("next_turn"));
@@ -4727,17 +4788,21 @@
 
     let lastTriggerSignature = "";
 
+    // BEGIN WORKBENCH_TRIGGER_LOAD
     async function loadTriggers() {
+      const view = sessionView;
       try {
         const response = await fetch("/api/triggers");
         if (!response.ok) return;
         const registrations = await response.json();
+        if (!sessionViewIsShown(view)) return;
         const signature = JSON.stringify(registrations);
         if (signature === lastTriggerSignature) return;
         lastTriggerSignature = signature;
         renderTriggers(registrations);
       } catch (_) { /* polling retries */ }
     }
+    // END WORKBENCH_TRIGGER_LOAD
 
     // BEGIN WORKBENCH_TRIGGER_REGISTRATION_RENDERING
     /* What a registration watches, in a few words. */
@@ -4807,11 +4872,11 @@
         }, 4000);
         return;
       }
+      const view = sessionView;
       const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionId), { method: "DELETE" });
-      if (!response.ok) {
-        await response.text();
-        renderError("the trigger could not be deleted");
-      }
+      if (!response.ok) await response.text();
+      if (!sessionViewIsShown(view)) return;
+      if (!response.ok) renderError("the trigger could not be deleted");
       lastTriggerSignature = "";
       await loadTriggers();
     }
@@ -5271,6 +5336,9 @@
       if (!admitSnapshotSequence(projectionState, snapshotSequence)) return false;
       const snapshotSessionId = state?.settings?.session_id || null;
       if (projectionState.sessionId !== null && projectionState.sessionId !== snapshotSessionId) {
+        /* an unscoped page following the workbench's current session, which
+           an out-of-band reset moved, shows a new session */
+        if (!sessionView.sessionId) enterSessionView(null);
         clearTranscript();
       }
       applyProjectionSnapshot(projectionState, state);
@@ -5329,7 +5397,7 @@
           if (typeof body?.error === "string" && body.error.trim()) message = body.error;
         } catch (_) { /* retain the status-bearing fallback */ }
         const error = new StateSnapshotHttpError(response.status, message);
-        error.retirement = sessionRetirementRefusal(response.status, body, scopedSessionId);
+        error.retirement = sessionRetirementRefusal(response.status, body, sessionView.sessionId);
         throw error;
       }
       return await response.json();
@@ -5419,7 +5487,7 @@
        to ask. Say what the workbench said, and stop. */
     function scopedSessionRefusalIsFinal(refusal) {
       if (!refusal) return false;
-      return !retirementIsHandOff(scopedSessionId, shellAvailability.established.state);
+      return !retirementIsHandOff(sessionView.sessionId, shellAvailability.established.state);
     }
 
     function refuseScopedSession(refusal, message) {
@@ -5571,10 +5639,10 @@
         }
         /* nothing to adopt yet: the retry ladder brings us back */
         if (!replacement) return;
-        if (scopedSessionId) {
+        if (sessionView.sessionId) {
           /* a tab pinned to an id follows the replacement without touching
              the workbench's current, which other tabs are reading */
-          scopedSessionId = replacement;
+          enterSessionView(replacement);
           const replacementUrl = new URL(window.location.href);
           replacementUrl.searchParams.set("session_id", replacement);
           window.history.replaceState(
@@ -5582,14 +5650,17 @@
             "",
             replacementUrl.pathname + replacementUrl.search + replacementUrl.hash
           );
-        } else if (created) {
+        } else {
           /* an unscoped page reads whatever the workbench resolves a
              query-less call to, so the new session has to become that */
-          await nativeFetch("/api/sessions/select", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ session_id: replacement })
-          });
+          if (created) {
+            await nativeFetch("/api/sessions/select", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ session_id: replacement })
+            });
+          }
+          enterSessionView(null);
         }
         clearSessionRetirement(sessionRetirement);
         clearShellReplacing(shellAvailability);
@@ -5651,19 +5722,23 @@
       } catch (_) { /* polling retries */ }
     }
 
+    // BEGIN WORKBENCH_QUEUED_WORK
     async function refreshQueuedWork() {
+      const view = sessionView;
       try {
         const response = await fetch("/api/queued-work");
         if (!response.ok) throw new Error("queued-work request failed");
         const batches = await response.json();
+        if (!sessionViewIsShown(view)) return;
         const signature = JSON.stringify(batches);
         if (signature === lastQueuedWorkSignature) return;
         lastQueuedWorkSignature = signature;
         conversation.setQueuedWork(batches);
       } catch (_) {
-        lastQueuedWorkSignature = "";
+        if (sessionViewIsShown(view)) lastQueuedWorkSignature = "";
       }
     }
+    // END WORKBENCH_QUEUED_WORK
 
     function renderWork(items) {
       lastWorkItems = items;
@@ -6766,15 +6841,15 @@
 
     async function refreshExecutionGraph(graphKey) {
       if (!graphKey || executionExplorer.hidden) return;
-      const generation = workRefreshGeneration;
+      const view = sessionView;
       try {
         const response = await fetch("/api/lash-vm-graph/" + encodeURIComponent(graphKey));
         if (!response.ok) throw new Error("graph unavailable");
         const graph = await response.json();
-        if (generation !== workRefreshGeneration || activeExecutionGraphKey !== graphKey) return;
+        if (!sessionViewIsShown(view) || activeExecutionGraphKey !== graphKey) return;
         renderExecutionGraph(graph);
       } catch (_) {
-        if (generation !== workRefreshGeneration || activeExecutionGraphKey !== graphKey) return;
+        if (!sessionViewIsShown(view) || activeExecutionGraphKey !== graphKey) return;
         executionStatus.textContent = "unavailable";
         executionMeta.textContent = "id " + shortId(graphKey);
       setExecutionIdentity(graphKey);
@@ -6783,7 +6858,7 @@
     }
 
     async function refreshWork() {
-      const generation = workRefreshGeneration;
+      const view = sessionView;
       try {
         const [workResponse, graphResponse] = await Promise.all([
           fetch("/api/work"),
@@ -6793,7 +6868,7 @@
         if (!graphResponse.ok) throw new Error("graph index request failed");
         const items = await workResponse.json();
         const nextGraphIndex = await graphResponse.json();
-        if (generation !== workRefreshGeneration) return;
+        if (!sessionViewIsShown(view)) return;
         graphIndex = nextGraphIndex;
         graphIndexByKey = new Map((graphIndex.graphs || []).map(graph => [graph.graph_key, graph]));
         const signature = JSON.stringify(items) + "|" + JSON.stringify(nextGraphIndex);
@@ -6808,7 +6883,7 @@
           refreshExecutionGraph(activeExecutionGraphKey);
         }
       } catch (_) {
-        if (generation !== workRefreshGeneration) return;
+        if (!sessionViewIsShown(view)) return;
         if (!workStale) {
           workStale = true;
           lastWorkSignature = "";
@@ -6899,13 +6974,14 @@
 
     async function loadToolCatalog() {
       if (!toolCatalog.open || toolCatalogWriting) return;
+      const view = sessionView;
       const sessionId = shownSessionId();
       if (!sessionId) return;
       const generation = ++toolCatalogGeneration;
       try {
         const response = await fetch("/api/tools?session_id=" + encodeURIComponent(sessionId));
         const body = await response.json();
-        if (generation !== toolCatalogGeneration || sessionId !== shownSessionId()) return;
+        if (generation !== toolCatalogGeneration || !sessionViewIsShown(view)) return;
         if (!response.ok) throw new Error(body.error || "Could not load tools. Refresh to try again.");
         if (body.session_id !== sessionId) return;
         toolCatalogStatus.textContent = body.tools.length
@@ -6926,11 +7002,11 @@
           const name = document.createElement("span");
           name.textContent = tool.name;
           label.append(input, name);
-          input.addEventListener("change", () => changeToolSelection(sessionId, tool, input.checked));
+          input.addEventListener("change", () => changeToolSelection(view, sessionId, tool, input.checked));
           toolCatalogList.append(label);
         }
       } catch (error) {
-        if (generation === toolCatalogGeneration && sessionId === shownSessionId()) {
+        if (generation === toolCatalogGeneration && sessionViewIsShown(view)) {
           toolCatalogList.replaceChildren();
           toolCatalogSignature = "";
           showToolCatalogError(error.message || "Could not load tools. Refresh to try again.");
@@ -6938,8 +7014,8 @@
       }
     }
 
-    async function changeToolSelection(sessionId, tool, offered) {
-      if (sessionId !== shownSessionId() || toolCatalogWriting) return;
+    async function changeToolSelection(view, sessionId, tool, offered) {
+      if (!sessionViewIsShown(view) || toolCatalogWriting) return;
       toolCatalogWriting = true;
       ++toolCatalogGeneration;
       showToolCatalogError("");
@@ -6953,7 +7029,7 @@
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || "Could not save the selection. Refresh before trying again.");
       } catch (error) {
-        if (sessionId === shownSessionId()) showToolCatalogError(error.message || "Could not confirm the selection. Refresh before trying again.");
+        if (sessionViewIsShown(view)) showToolCatalogError(error.message || "Could not confirm the selection. Refresh before trying again.");
       } finally {
         toolCatalogWriting = false;
         toolCatalogSignature = "";

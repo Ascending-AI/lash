@@ -65,7 +65,9 @@ test("a committed Stop adds no local duplicate of the shared stop row", async ()
   };
 
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_STOP_TURN", "WORKBENCH_STOP_TURN")}
+    `${markedSource("WORKBENCH_SESSION_VIEW", "WORKBENCH_SESSION_VIEW")}
+     let sessionView = { sessionId: "workbench-a", epoch: 0 };
+     ${markedSource("WORKBENCH_STOP_TURN", "WORKBENCH_STOP_TURN")}
      this.stopTurn = stopTurn;`,
     stopContext,
   );
@@ -441,7 +443,7 @@ test("a terminal /api/state refusal renders its canonical error and stops retryi
      function restartEventStreams() {}
      ${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
      const sessionRetirement = createSessionRetirement();
-     const scopedSessionId = null;
+     const sessionView = { sessionId: null, epoch: 0 };
      let adoptions = 0;
      async function adoptReplacementSession() { adoptions += 1; }
      ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
@@ -502,7 +504,7 @@ test("a retirement refusal hands the page over instead of rendering a dead end",
      markShellChannel(shellAvailability, "state", true);
      const sessionRetirement = createSessionRetirement();
      const scopedSessionRefusal = createScopedSessionRefusal();
-     const scopedSessionId = ${JSON.stringify(scoped)};
+     const sessionView = { sessionId: ${JSON.stringify(scoped)}, epoch: 0 };
      let streamGeneration = 0;
      let retirement = "retiring";
      let adoptions = 0;
@@ -520,8 +522,8 @@ test("a retirement refusal hands the page over instead of rendering a dead end",
          status: 409,
          async json() {
            return {
-             error: "session \`" + scopedSessionId + "\` is being deleted",
-             session_id: scopedSessionId,
+             error: "session \`" + sessionView.sessionId + "\` is being deleted",
+             session_id: sessionView.sessionId,
              session_retirement: retirement,
            };
          },
@@ -605,7 +607,7 @@ test("a retired id named in the URL is refused on screen, never swapped for a li
      const scopedSessionRefusal = createScopedSessionRefusal();
      /* the page has never been answered for this id: it is the one the URL
         named and the first snapshot is the refusal */
-     const scopedSessionId = ${JSON.stringify(retired)};
+     const sessionView = { sessionId: ${JSON.stringify(retired)}, epoch: 0 };
      let streamGeneration = 0;
      let adoptions = 0;
      let retryTimers = 0;
@@ -627,7 +629,7 @@ test("a retired id named in the URL is refused on screen, never swapped for a li
          async json() {
            return {
              error: ${JSON.stringify(canonical)},
-             session_id: scopedSessionId,
+             session_id: sessionView.sessionId,
              session_retirement: "retired",
            };
          },
@@ -1434,4 +1436,235 @@ test("the session sidebar titles, orders and highlights chats", () => {
   assert.equal(context.sessionAge(now - 5 * 60 * 1000, now), "5m");
   assert.equal(context.sessionAge(now - 3 * 3600 * 1000, now), "3h");
   assert.equal(context.sessionAge(now - 2 * 24 * 3600 * 1000, now), "2d");
+});
+
+// FIG-6860: an awaited answer belongs to the session view that asked for it.
+// The shell switches sessions in place, so input, rail and attachment requests
+// for A used to land in whatever the page showed when they resolved: A's
+// receipt in B's conversation, B's draft cleared, A's queue in B's rail. A
+// return to A is a new view too, which comparing session names cannot see.
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((ok, fail) => {
+    resolve = ok;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+function sessionViewHarness(blocks, context) {
+  const requests = [];
+  Object.assign(context, {
+    JSON,
+    sessionView: { sessionId: "workbench-a", epoch: 0 },
+    fetch(url, options) {
+      const answer = deferred();
+      requests.push({ url, options, ...answer });
+      return answer.promise;
+    },
+  });
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SESSION_VIEW", "WORKBENCH_SESSION_VIEW")}
+     ${blocks.map(block => markedSource(block, block)).join("\n")}
+     this.enterSessionView = enterSessionView;`,
+    context,
+  );
+  return requests;
+}
+
+function runningInputHarness() {
+  const context = {
+    receipts: [],
+    errors: [],
+    lastUserText: "",
+    promptInput: { value: "", focus() {} },
+    modelEmpty: () => false,
+    renderError(message) { context.errors.push(message); },
+    conversation: { showReceipt(receipt) { context.receipts.push(receipt); } },
+  };
+  const requests = sessionViewHarness(["WORKBENCH_RUNNING_INPUT"], context);
+  vm.runInNewContext("this.submitRunningInput = submitRunningInput;", context);
+  return { context, requests };
+}
+
+const acceptedInput = inputId => ({
+  ok: true,
+  async json() { return { input_id: inputId, state: "pending" }; },
+});
+
+test("a late input answer for one session neither lands in the next session nor clears its draft", async () => {
+  const { context, requests } = runningInputHarness();
+  context.promptInput.value = "queued for a";
+  context.submitRunningInput("next_turn");
+  context.promptInput.value = "queued for a again";
+  context.submitRunningInput("next_turn");
+  context.promptInput.value = "refused for a";
+  context.submitRunningInput("active_turn");
+  assert.deepEqual(requests.map(request => request.url), [
+    "/api/turn/input",
+    "/api/turn/input",
+    "/api/turn/input",
+  ]);
+
+  context.enterSessionView("workbench-b");
+  context.promptInput.value = "b's unsent draft";
+  requests[0].resolve(acceptedInput("input-a"));
+  requests[1].reject(new Error("connection reset"));
+  requests[2].resolve({ ok: false, async text() { return "refused"; } });
+  await settle();
+
+  assert.deepEqual(context.receipts, [], "a's receipt must not enter b's conversation");
+  assert.equal(context.promptInput.value, "b's unsent draft", "a's answer must not clear b's draft");
+  assert.equal(context.lastUserText, "", "a's text must not become b's recall");
+  assert.deepEqual(context.errors, [], "a's failures must not be reported in b");
+});
+
+test("returning to a session is a new view that an older answer for it cannot reach", async () => {
+  const { context, requests } = runningInputHarness();
+  context.promptInput.value = "queued for a";
+  context.submitRunningInput("next_turn");
+
+  context.enterSessionView("workbench-b");
+  context.enterSessionView("workbench-a");
+  context.promptInput.value = "a's new draft";
+  requests[0].resolve(acceptedInput("input-a"));
+  await settle();
+
+  assert.deepEqual(context.receipts, [], "the later snapshot of a shows the input, not the stale answer");
+  assert.equal(context.promptInput.value, "a's new draft");
+
+  context.promptInput.value = "queued in this view";
+  context.submitRunningInput("next_turn");
+  requests[1].resolve(acceptedInput("input-a-2"));
+  await settle();
+  assert.deepEqual(context.receipts.map(receipt => receipt.input_id), ["input-a-2"]);
+  assert.equal(context.promptInput.value, "", "an answer for the shown view still clears its draft");
+});
+
+test("a late queue or trigger read for one session leaves the next session's rails alone", async () => {
+  const context = {
+    queued: [],
+    triggers: [],
+    lastQueuedWorkSignature: "",
+    lastTriggerSignature: "",
+    conversation: { setQueuedWork(batches) { context.queued.push(batches); } },
+    renderTriggers(registrations) { context.triggers.push(registrations); },
+  };
+  const requests = sessionViewHarness(["WORKBENCH_QUEUED_WORK", "WORKBENCH_TRIGGER_LOAD"], context);
+  vm.runInNewContext(
+    "this.refreshQueuedWork = refreshQueuedWork; this.loadTriggers = loadTriggers;",
+    context,
+  );
+  const answer = body => ({ ok: true, async json() { return body; } });
+
+  context.refreshQueuedWork();
+  context.refreshQueuedWork();
+  context.loadTriggers();
+  context.enterSessionView("workbench-b");
+  context.refreshQueuedWork();
+  context.loadTriggers();
+  assert.deepEqual(requests.map(request => request.url), [
+    "/api/queued-work",
+    "/api/queued-work",
+    "/api/triggers",
+    "/api/queued-work",
+    "/api/triggers",
+  ]);
+
+  requests[3].resolve(answer([{ batch_id: "batch-b" }]));
+  requests[4].resolve(answer([{ subscription_id: "trigger-b" }]));
+  await settle();
+  const bQueue = context.lastQueuedWorkSignature;
+  const bTriggers = context.lastTriggerSignature;
+  requests[0].resolve(answer([{ batch_id: "batch-a" }]));
+  requests[1].reject(new Error("connection reset"));
+  requests[2].resolve(answer([{ subscription_id: "trigger-a" }]));
+  await settle();
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.queued)),
+    [[{ batch_id: "batch-b" }]],
+    "a's queue must not replace b's",
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.triggers)),
+    [[{ subscription_id: "trigger-b" }]],
+    "a's triggers must not replace b's",
+  );
+  assert.equal(context.lastQueuedWorkSignature, bQueue, "a's late failure must not reset b's queue signature");
+  assert.equal(context.lastTriggerSignature, bTriggers);
+});
+
+test("an attachment chosen in one session is never uploaded for, or attached to, the next", async () => {
+  const classes = new Set();
+  const encodings = [];
+  const context = {
+    errors: [],
+    selectedAttachment: null,
+    attachmentUploadInFlight: false,
+    attachmentInput: { value: "" },
+    attachButton: {
+      textContent: "",
+      title: "",
+      classList: { add(name) { classes.add(name); }, remove(...names) { for (const name of names) classes.delete(name); } },
+    },
+    document: { body: { dataset: { attachmentByteLimit: String(1024 * 1024) } } },
+    syncCommandAvailability() {},
+    renderError(message) { context.errors.push(message); },
+    fileBase64() {
+      const encoding = deferred();
+      encodings.push(encoding);
+      return encoding.promise;
+    },
+  };
+  const requests = sessionViewHarness(["WORKBENCH_ATTACHMENT_UPLOAD"], context);
+  vm.runInNewContext(
+    "this.uploadAttachment = uploadAttachment; this.clearAttachment = clearAttachment;",
+    context,
+  );
+  const png = name => ({ name, type: "image/png", size: 8 });
+  const showSession = sessionId => {
+    context.enterSessionView(sessionId);
+    context.clearAttachment();
+  };
+  const uploaded = id => ({
+    ok: true,
+    async json() {
+      return { attachment: { id, byte_len: 8 }, retrieve_url: `/api/attachments/${id}` };
+    },
+  });
+
+  // Still reading the file when the session changes: nothing is sent.
+  context.uploadAttachment(png("a-early.png"));
+  showSession("workbench-b");
+  encodings[0].resolve("AAAA");
+  await settle();
+  assert.equal(requests.length, 0, "a's file must not upload under b's session scope");
+  assert.equal(context.selectedAttachment, null);
+
+  // Already uploading when the session changes: the answer is not b's.
+  showSession("workbench-a");
+  context.uploadAttachment(png("a-late.png"));
+  encodings[1].resolve("AAAA");
+  await settle();
+  assert.equal(requests.length, 1);
+  showSession("workbench-b");
+  context.uploadAttachment(png("b.png"));
+  encodings[2].resolve("BBBB");
+  await settle();
+  assert.equal(requests.length, 2);
+  requests[0].resolve(uploaded("attachment-a"));
+  await settle();
+  assert.equal(context.selectedAttachment, null, "a's upload must not become b's attachment");
+  assert.equal(context.attachmentUploadInFlight, true, "a's completion must not end b's upload");
+  assert.ok(classes.has("uploading"));
+
+  requests[1].resolve(uploaded("attachment-b"));
+  await settle();
+  assert.equal(context.selectedAttachment.id, "attachment-b");
+  assert.equal(context.attachmentUploadInFlight, false);
+  assert.deepEqual(context.errors, []);
 });
