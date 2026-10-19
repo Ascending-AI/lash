@@ -64,7 +64,9 @@ pub(super) fn retired_reader(stores: Arc<lash_sqlite_store::SqliteStoreSet>) -> 
                 lash::vm::TYPESCRIPT_DIALECT,
                 bounds,
             )
-            .with_functions(Arc::new(lash::workflow::document::FunctionRegistry::new())),
+            .with_packages(Arc::new(
+                lash::package::HeldPackages::install([]).expect("retired package set"),
+            )),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())

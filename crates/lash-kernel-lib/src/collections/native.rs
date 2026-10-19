@@ -45,9 +45,11 @@ struct Native {
 }
 
 pub(super) fn functions<T>(
+    selected: Option<&str>,
     mut define: impl FnMut(&str, &dyn Fn() -> String) -> Result<T, CollectionError>,
 ) -> Result<Vec<NativeDefinition<T>>, CollectionError> {
     let mut functions = Vec::new();
+    let accepts = |name: &str| selected.is_none_or(|selected| selected == name);
     let kinds = [
         (Kind::List, "list", "List(Any)"),
         (Kind::Tuple, "tuple", "Any"),
@@ -56,6 +58,13 @@ pub(super) fn functions<T>(
         (Kind::Record, "record", "Record{..Any}"),
     ];
     for (kind, prefix, ty) in kinds {
+        if selected.is_some_and(|selected| {
+            selected
+                .strip_prefix(prefix)
+                .is_none_or(|suffix| !suffix.starts_with('.'))
+        }) {
+            continue;
+        }
         let mut ops = vec![
             ("len", Op::Len, "", "Int", "1"),
             ("copy", Op::Copy, "", ty, "sum(1, size(xs), size(result))"),
@@ -273,7 +282,11 @@ pub(super) fn functions<T>(
             if matches!(kind, Kind::Tuple) && matches!(op, Op::Check | Op::InsertIndex) {
                 continue;
             }
-            let definition = define(&format!("{prefix}.{name}"), &|| {
+            let qualified = format!("{prefix}.{name}");
+            if !accepts(&qualified) {
+                continue;
+            }
+            let definition = define(&qualified, &|| {
                 format!(
                     "function {prefix}.{name}(xs: {ty}{params}) -> {result}\nkernel 1\n\
                  errors \"type_error\", \"index_out_of_range\", \"key_missing\", \"invalid_key\", \"cyclic_value\", \"too_deep\"\ncharge {charge}\nnative\n"
@@ -299,6 +312,9 @@ pub(super) fn functions<T>(
             "type_error",
         ),
     ] {
+        if !accepts(name) {
+            continue;
+        }
         let definition = define(name, &|| {
             format!(
                 "function {name}(x: Any) -> {result}\nkernel 1\nerrors \"{error}\"\ncharge sum(1, size(x))\nnative\n"
@@ -319,24 +335,31 @@ pub(super) fn functions<T>(
     }
     // Range and NaN equivalence are explicit caller choices. No dialect's
     // coercion, missing-slot convention or index normalization lives here.
-    let definition = define("list.index_of_range", &|| {
-        String::from(
-            "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
-        )
-    })?;
-    functions.push((definition, Arc::new(IndexOfRange) as _));
+    let name = "list.index_of_range";
+    if accepts(name) {
+        let definition = define(name, &|| {
+            String::from(
+                "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
+            )
+        })?;
+        functions.push((definition, Arc::new(IndexOfRange) as _));
+    }
     // Each merge pass compares a pair at most once per element it places,
     // and a comparison reads no further than the shallower of its keys.
-    let definition = define("list.sort_by_keys", &|| {
-        String::from(
-            "function list.sort_by_keys(items: List(Any), keys: List(Any), descending: Bool) -> List(Any)\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(items), product(2, sum(size(keys), deep(keys)), sum(1, ceil_log2(size(keys)))), size(result))\nnative\n",
-        )
-    })?;
-    functions.push((definition, Arc::new(SortByKeys) as _));
-    let prepared = |function: fn(&[Value]) -> Result<Value, NativeError>,
-                    entry: fn(&[Value]) -> Option<Value>,
-                    operation: &'static str|
-     -> Arc<dyn NativeFunction> {
+    let name = "list.sort_by_keys";
+    if accepts(name) {
+        let definition = define(name, &|| {
+            String::from(
+                "function list.sort_by_keys(items: List(Any), keys: List(Any), descending: Bool) -> List(Any)\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(items), product(2, sum(size(keys), deep(keys)), sum(1, ceil_log2(size(keys)))), size(result))\nnative\n",
+            )
+        })?;
+        functions.push((definition, Arc::new(SortByKeys) as _));
+    }
+    fn prepared(
+        function: fn(&[Value]) -> Result<Value, NativeError>,
+        entry: fn(&[Value]) -> Option<Value>,
+        operation: &'static str,
+    ) -> Arc<dyn NativeFunction> {
         Arc::new(Aux(
             function,
             Some(PreparedNative {
@@ -346,58 +369,71 @@ pub(super) fn functions<T>(
                 operation,
             }),
         ))
-    };
-    for (signature, native, charge) in [
+    }
+    type NativeMaker = fn() -> Arc<dyn NativeFunction>;
+    let choices: [(&str, NativeMaker, &str); 3] = [
         (
             "bool.not(x: Bool) -> Bool",
-            prepared(
-                bool_not,
-                |args| bool_not(args).ok(),
-                "bool.not(x: Bool) -> Bool",
-            ),
+            || {
+                prepared(
+                    bool_not,
+                    |args| bool_not(args).ok(),
+                    "bool.not(x: Bool) -> Bool",
+                )
+            },
             "1",
         ),
         (
             "error.new(kind: Text, message: Text, data?: Any) -> Error",
             // Its value is built in the nursery: it has no prepared entry.
-            Arc::new(ErrorNew) as Arc<dyn NativeFunction>,
+            || Arc::new(ErrorNew),
             "sum(1, size(kind), size(message), size(result))",
         ),
         (
             "collection.function_check(x: Any) -> Any",
-            prepared(
-                function_check,
-                |args| function_check(args).ok(),
-                "collection.function_check(x: Any) -> Any",
-            ),
-            "1",
-        ),
-    ] {
-        let definition = define(
-            signature
-                .split_once('(')
-                .map_or(signature, |(name, _)| name),
-            &|| {
-                format!(
-                    "function {signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
+            || {
+                prepared(
+                    function_check,
+                    |args| function_check(args).ok(),
+                    "collection.function_check(x: Any) -> Any",
                 )
             },
-        )?;
-        functions.push((definition, native));
+            "1",
+        ),
+    ];
+    for (signature, make, charge) in choices {
+        let name = signature
+            .split_once('(')
+            .map_or(signature, |(name, _)| name);
+        if !accepts(name) {
+            continue;
+        }
+        let definition = define(name, &|| {
+            format!(
+                "function {signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
+            )
+        })?;
+        functions.push((definition, make()));
     }
-    let definition = define("collection.holds_none", &|| {
-        String::from(
-            "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
-         errors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n",
-        )
-    })?;
-    functions.push((definition, Arc::new(HoldsNone) as _));
-    let definition = define("key.identity", &|| {
-        String::from(
-            "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
-        )
-    })?;
-    functions.push((definition, Arc::new(IdentityKey) as _));
+    let name = "collection.holds_none";
+    if accepts(name) {
+        let definition = define(name, &|| {
+            String::from(
+                "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
+             errors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n",
+            )
+        })?;
+        functions.push((definition, Arc::new(HoldsNone) as _));
+    }
+    let name = "key.identity";
+    if accepts(name) {
+        let definition = define(name, &|| {
+            String::from(
+                "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
+            )
+        })?;
+        functions.push((definition, Arc::new(IdentityKey) as _));
+    }
     Ok(functions)
 }
 /// `collection.holds_none(value, kinds)`: whether a deep copy of `value`

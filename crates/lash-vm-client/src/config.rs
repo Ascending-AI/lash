@@ -301,6 +301,9 @@ impl CellLifetime {
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     pub entry: WorkerEntry,
+    /// The parent's own and retained packages. Omission selects the parent's
+    /// shipped packages once at pool start; workers register no package list.
+    pub packages: Option<std::sync::Arc<lash_kernel_package::HeldPackages>>,
     pub min_workers: usize,
     pub max_workers: usize,
     pub max_queue_items: usize,
@@ -366,6 +369,7 @@ impl PoolConfig {
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
             entry,
+            packages: None,
             min_workers: 1,
             max_workers: 4,
             max_queue_items: 2,

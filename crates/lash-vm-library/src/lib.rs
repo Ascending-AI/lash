@@ -42,9 +42,6 @@ impl LibraryError {
 struct Standard {
     /// lash's packages, the node's own set.
     packages: Arc<HeldPackages>,
-    /// Each retained release, oldest first: what every dialect the build
-    /// holds has of it, together.
-    releases: Vec<HelperReleaseIndex>,
 }
 
 fn standard() -> Result<&'static Standard, LibraryError> {
@@ -66,14 +63,7 @@ fn assemble() -> Result<Standard, LibraryError> {
     let packages = Arc::new(
         HeldPackages::install(built().map_err(LibraryError::new)?).map_err(LibraryError::new)?,
     );
-    let lines = lash_vm_releases::DIALECTS
-        .iter()
-        .map(|built| built.held_releases().map_err(LibraryError::new))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Standard {
-        packages,
-        releases: merged(lines)?,
-    })
+    Ok(Standard { packages })
 }
 
 /// lash's packages, decoded from the build's images in dependency order.
@@ -142,7 +132,20 @@ pub fn lash_packages() -> Result<Arc<HeldPackages>, LibraryError> {
 ///
 /// [`LibraryError`].
 pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryError> {
-    Ok(standard()?.releases.clone())
+    // A worker already holds its parent's frame. Reading retained-release
+    // metadata must not install the parent's packages again in that worker.
+    static RELEASES: OnceLock<Result<Vec<HelperReleaseIndex>, LibraryError>> = OnceLock::new();
+    RELEASES
+        .get_or_init(|| {
+            let lines = lash_vm_releases::DIALECTS
+                .iter()
+                .map(|built| built.held_releases().map_err(LibraryError::new))
+                .collect::<Result<Vec<_>, _>>()?;
+            merged(lines)
+        })
+        .as_ref()
+        .cloned()
+        .map_err(Clone::clone)
 }
 
 #[cfg(test)]
@@ -164,7 +167,6 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let empty = || Standard {
             packages: Arc::new(HeldPackages::install([]).expect("an empty node")),
-            releases: Vec::new(),
         };
         std::thread::scope(|threads| {
             let slot = &slot;

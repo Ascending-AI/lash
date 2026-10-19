@@ -122,3 +122,36 @@ pub(crate) fn implement(
         _ => Ok(()),
     }
 }
+
+/// Constructs one implementation selected by a generated identity table.
+/// This path never constructs or registers definitions.
+#[allow(
+    dead_code,
+    reason = "used by the worker, which shares this source with the build"
+)]
+pub(crate) fn native(
+    package: &str,
+    name: &str,
+    built: ArtifactDigest,
+    callees: &[(FunctionId, &str)],
+    registry: &FunctionRegistry,
+) -> std::sync::Arc<dyn lash_kernel_doc::NativeFunction> {
+    #[cfg(not(feature = "dialect-typescript"))]
+    let _ = (registry, callees, built);
+    let native = match package {
+        "kernel" => lash_kernel_lib::native(name).or_else(|| lash_kernel_vm::machine_native(name)),
+        #[cfg(feature = "dialect-typescript")]
+        "regex.ecma" => lash_ext_regex_ecma::native(name, built),
+        #[cfg(feature = "dialect-typescript")]
+        "date.ecma" => lash_ext_date_ecma::native(name, built),
+        #[cfg(feature = "dialect-typescript")]
+        "url.whatwg" => lash_ext_url_whatwg::native(name, built),
+        #[cfg(feature = "dialect-typescript")]
+        "typescript" => lash_ext_ts_core::native(name, |name| {
+            let (function, _) = callees.iter().find(|(_, label)| *label == name)?;
+            registry.get(function)?.native().cloned()
+        }),
+        _ => None,
+    };
+    native.unwrap_or_else(|| unreachable!("the source owner's native table names {package}:{name}"))
+}

@@ -66,6 +66,10 @@ pub fn implement_brands(registry: &mut FunctionRegistry) -> Result<(), Collectio
         .map_err(CollectionError::Registry)
 }
 
+pub(super) fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
+    (name == "brand.of").then(|| Arc::new(BrandOf) as Arc<dyn NativeFunction>)
+}
+
 struct BrandOf;
 impl NativeFunction for BrandOf {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

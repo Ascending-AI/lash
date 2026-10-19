@@ -11,6 +11,7 @@
 //! reader of a cell's packages takes a [`PackageView`] of one set.
 
 mod build;
+mod frame;
 mod held;
 mod install;
 mod lash;

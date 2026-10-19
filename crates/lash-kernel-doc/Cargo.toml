@@ -26,6 +26,7 @@ synthetic-next = []
 workspace = true
 
 [dependencies]
+libc = { workspace = true }
 blake3 = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }

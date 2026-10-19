@@ -45,6 +45,7 @@ mod service;
 mod worker;
 #[cfg(unix)]
 pub use entry::{Embed, worker_entry};
+pub use lash_kernel_vm::PreparedLibrary;
 pub use lash_vm_client::PoolError;
 
 /// Configures what a worker runs from the parent's working policy.
@@ -100,3 +101,7 @@ pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embeddin
 
 #[cfg(all(unix, feature = "testing"))]
 pub use entry::worker_entry_with_hook;
+
+mod native_tables {
+    include!(concat!(env!("OUT_DIR"), "/native_tables.rs"));
+}

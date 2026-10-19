@@ -29,6 +29,7 @@ synthetic-next = [
     "lash-vm-client/synthetic-next",
     "lash-vm-library/synthetic-next",
     "lash-kernel-doc/synthetic-next",
+    "lash-kernel-package/synthetic-next",
     "lash-kernel-migrate/synthetic-next",
     "lash-kernel-state/synthetic-next",
     "lash-kernel-vm/synthetic-next",
@@ -51,6 +52,7 @@ lash-core-ids = { workspace = true }
 lash-durable = { workspace = true }
 lash-vm-broker = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-package = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }

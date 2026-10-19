@@ -18,6 +18,8 @@ doctest = false
 # Development heap tracing needs a longer Ready handshake, not a longer live watchdog.
 dhat-heap = []
 synthetic-next = [
+    "lash-kernel-package/synthetic-next",
+    "lash-vm-library/synthetic-next",
     "lash-vm-protocol/synthetic-next",
     "lash-vm-broker/synthetic-next",
     "lash-core-execution/synthetic-next",
@@ -31,6 +33,8 @@ perf-witness = ["lash-core-execution/perf-witness"]
 workspace = true
 
 [dependencies]
+lash-kernel-package = { workspace = true }
+lash-vm-library = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-broker = { workspace = true }
 async-trait = { workspace = true }

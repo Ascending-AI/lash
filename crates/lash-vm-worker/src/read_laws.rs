@@ -201,7 +201,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
         .unwrap_or_else(|diagnostic| panic!("the {dialect} cell lowers: {diagnostic:?}"));
     let document = lowered.document.into_document();
     let library = embedding
-        .prepared_for(document.manifest.kernel)
+        .prepared_library()
         .expect("the document's library")
         .clone();
     Program {

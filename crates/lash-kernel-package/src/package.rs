@@ -113,6 +113,7 @@ enum CodeStore {
     /// A build's release image, registered in place; `ids` are in
     /// identity order.
     Image(ReleasedFunctions),
+    Registry(Arc<FunctionRegistry>),
 }
 
 impl Code {
@@ -149,6 +150,9 @@ impl Code {
         match &self.store {
             CodeStore::Defined(definitions) => definitions[at].name.as_str(),
             CodeStore::Image(image) => image.name(at),
+            CodeStore::Registry(registry) => registry
+                .name_of(&self.ids[at])
+                .unwrap_or_else(|| unreachable!("frame membership")),
         }
     }
 
@@ -160,6 +164,10 @@ impl Code {
     pub fn definition(&self, at: usize) -> Result<Arc<FunctionDefinition>, String> {
         match &self.store {
             CodeStore::Defined(definitions) => Ok(Arc::clone(&definitions[at])),
+            CodeStore::Registry(registry) => registry
+                .get(&self.ids[at])
+                .map(|registered| registered.definition().clone())
+                .ok_or_else(|| "missing frame function".into()),
             CodeStore::Image(image) => image
                 .definition(at)
                 .map(Arc::new)
@@ -169,7 +177,15 @@ impl Code {
 
     /// Where the function `name` stands, when the code defines one.
     pub fn position(&self, name: &str) -> Option<usize> {
-        (0..self.len()).find(|at| self.name(*at) == name)
+        match &self.store {
+            CodeStore::Registry(registry) => registry
+                .named(name)
+                .filter_map(|function| self.ids.iter().position(|held| *held == function))
+                // Several retained identities may share a name. Preserve
+                // this artifact's first matching position.
+                .min(),
+            _ => (0..self.len()).find(|at| self.name(*at) == name),
+        }
     }
 
     /// Registers every function `registry` does not hold yet, each with
@@ -364,7 +380,34 @@ impl Package {
         header: PackageHeader,
         image: ReleasedFunctions,
     ) -> Result<Self, PackageRefusal> {
-        let code = Code::image(image);
+        Self::from_code(header, Code::image(image))
+    }
+
+    /// Reconstructs an artifact over the one shared registry image. Membership
+    /// is checked by identity; no second copy of its definitions is registered.
+    pub fn from_registry(
+        header: PackageHeader,
+        functions: Vec<FunctionId>,
+        registry: Arc<FunctionRegistry>,
+    ) -> Result<Self, PackageRefusal> {
+        for function in &functions {
+            if registry.position(function).is_none() {
+                return Err(PackageRefusal::Source {
+                    package: header.path.clone(),
+                    message: format!("frame lacks {function}"),
+                });
+            }
+        }
+        Self::from_code(
+            header,
+            Code {
+                ids: functions,
+                store: CodeStore::Registry(registry),
+            },
+        )
+    }
+
+    fn from_code(header: PackageHeader, code: Code) -> Result<Self, PackageRefusal> {
         let PackageHeader {
             path,
             release,

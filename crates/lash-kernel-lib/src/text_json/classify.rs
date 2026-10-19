@@ -1,13 +1,15 @@
 //! Allocation-free classification of a depth-bounded JSON graph. Admission policy
 //! (excluded fields and a lexical key interval) belongs to the caller.
 
+use super::Selection;
 use std::borrow::Cow;
 
 use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Type, Value};
 
 use super::{Function, arg, count_arg, definition, raise, text_arg};
-pub(super) fn functions() -> Vec<Function> {
-    let (mut definition, native) = definition(
+pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
+    let mut definition = definition(
+        selection,
         "json.classify",
         &[
             ("value", Type::Any),
@@ -23,11 +25,13 @@ pub(super) fn functions() -> Vec<Function> {
     // Work is carried in the result, rather than charging the deep size of
     // the unvisited input. Its low bit is admission; the other bits count
     // node/field visits and bytes compared. No traversal is needed to price it.
-    definition.charge = Formula::Sum(vec![
-        Formula::Constant(1),
-        Formula::Magnitude(Operand::Result),
-    ]);
-    vec![(definition, native)]
+    definition.charge(|_| {
+        Formula::Sum(vec![
+            Formula::Constant(1),
+            Formula::Magnitude(Operand::Result),
+        ])
+    });
+    vec![definition]
 }
 
 struct Walk<'a, 'call> {

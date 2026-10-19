@@ -111,6 +111,28 @@ pub struct BuiltPackage {
     pub header: &'static str,
     /// Its code, validated against the packages it requires.
     pub image: &'static [u8],
+    /// The artifact digest stamped by this package's native constructors.
+    pub built: lash_kernel_doc::ArtifactDigest,
+    /// This build's native implementations, sorted by function identity.
+    pub natives: &'static [(lash_kernel_doc::FunctionId, &'static str)],
+}
+
+impl BuiltPackage {
+    /// The identities and local names declared by this function's body.
+    /// Constructor tables project these build-owned facts; workers never
+    /// resolve an implementation's dependencies through a global name index.
+    pub fn native_callees(
+        &self,
+        function: &lash_kernel_doc::FunctionId,
+    ) -> Result<Vec<(lash_kernel_doc::FunctionId, &'static str)>, String> {
+        let image = lash_kernel_doc::ReleasedFunctions::read(self.image)
+            .map_err(|error| error.to_string())?;
+        let at = image
+            .ids()
+            .position(|id| id == *function)
+            .ok_or_else(|| format!("{} holds no native {function}", self.path))?;
+        Ok(image.listed(at).collect())
+    }
 }
 
 macro_rules! package {
@@ -119,6 +141,8 @@ macro_rules! package {
             path: $path,
             header: include_str!(concat!(env!("OUT_DIR"), "/", $stem, ".package.json")),
             image: include_bytes!(concat!(env!("OUT_DIR"), "/", $stem, ".bin")),
+            natives: include!(concat!(env!("OUT_DIR"), "/", $stem, ".natives.rs")),
+            built: include!(concat!(env!("OUT_DIR"), "/", $stem, ".digest.rs")),
         }
     };
 }

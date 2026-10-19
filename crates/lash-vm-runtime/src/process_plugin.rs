@@ -13,7 +13,7 @@ pub struct KernelProcessPluginFactory {
     workers: Service,
     dialect: String,
     bounds: RunBounds,
-    functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
+    packages: Option<Arc<lash_kernel_package::HeldPackages>>,
     /// Content preparation survives per-activation engine construction; it
     /// carries no backend, execution context, recorded settings or authority.
     preparations: crate::process::ProcessPreparations,
@@ -31,17 +31,17 @@ impl KernelProcessPluginFactory {
             workers,
             dialect: dialect.into(),
             bounds,
-            functions: None,
+            packages: None,
             preparations: crate::process::ProcessPreparations::default(),
             #[cfg(feature = "synthetic-next")]
             writes: None,
         }
     }
 
-    /// The library functions the host's custom workers hold.
+    /// The package holdings shared by admission and worker pools.
     #[must_use]
-    pub fn with_functions(mut self, functions: Arc<lash_kernel_doc::FunctionRegistry>) -> Self {
-        self.functions = Some(functions);
+    pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
+        self.packages = Some(packages);
         self
     }
 
@@ -114,11 +114,11 @@ impl KernelProcessPluginFactory {
             join_members: self.bounds.join_members,
             // A process is saved at every park and resumed on any worker.
         };
-        let engine = match &self.functions {
-            Some(functions) => crate::KernelProcessEngine::with_functions(
+        let engine = match &self.packages {
+            Some(packages) => crate::KernelProcessEngine::with_packages(
                 documents,
                 &self.dialect,
-                Arc::clone(functions),
+                Arc::clone(packages),
                 self.workers.clone(),
                 bounds,
             ),

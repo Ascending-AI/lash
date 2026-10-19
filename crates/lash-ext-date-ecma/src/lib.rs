@@ -253,6 +253,19 @@ pub fn implement(
     Ok(())
 }
 
+/// Constructs the implementation selected by the build's identity table.
+pub fn native(
+    name: &str,
+    built: ArtifactDigest,
+) -> Option<Arc<dyn lash_kernel_doc::NativeFunction>> {
+    Operation::ALL
+        .into_iter()
+        .find(|operation| operation.name() == name)
+        .map(|operation| {
+            Arc::new(Function { operation, built }) as Arc<dyn lash_kernel_doc::NativeFunction>
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,12 +279,14 @@ mod tests {
         let built = ArtifactDigest::from_bytes([0x5a; 32]);
         let mut heap = Bench::new();
         let arguments = [Value::Float(Float::new(f64::NAN))];
-        let native = Function {
-            operation: Operation::Timestamp,
-            built,
-        };
+        let native = native("date.ecma.timestamp", built).expect("the native constructor");
         let value = heap
-            .call(&native, &arguments, u64::MAX, &mut WorkCounter::new(None))
+            .call(
+                native.as_ref(),
+                &arguments,
+                u64::MAX,
+                &mut WorkCounter::new(None),
+            )
             .answer
             .expect("native constructor");
         let Datum::Record(fields) = heap.datum(&value).expect("record data") else {

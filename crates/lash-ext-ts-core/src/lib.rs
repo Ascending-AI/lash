@@ -96,50 +96,56 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
-    let kernel = |name: &'static str| {
+    for name in ["num.add", "text.concat", "num.sub", "text.utf16_compare"] {
         registry
             .native_named(name)
-            .ok_or(ImplementError::Missing(name))
-    };
-    let add = Arc::new(Add {
-        add: kernel("num.add")?,
-        concat: kernel("text.concat")?,
-    });
-    let subtract = Arc::new(Subtract {
-        native: kernel("num.sub")?,
-    });
-    let compare = kernel("text.utf16_compare")?;
-    let mut natives: Vec<(FunctionId, Arc<dyn NativeFunction>)> = Vec::new();
+            .ok_or(ImplementError::Missing(name))?;
+    }
     for function in helpers {
         let registered = registry
             .get(&function)
             .ok_or(RegistryError::NotRegistered { function })?;
-        let relation = |relation| -> Arc<dyn NativeFunction> {
-            Arc::new(Relate {
-                relation,
-                compare: Arc::clone(&compare),
-            })
-        };
-        let native: Arc<dyn NativeFunction> = match registered.name() {
-            "ts.builtin_name" => Arc::new(BuiltinName),
-            "ts.get" => Arc::new(Get),
-            "ts.add" => add.clone(),
-            "ts.sub" => subtract.clone(),
-            "ts.to_number" => Arc::new(ToNumber),
-            "ts.to_boolean" => Arc::new(conversions::ToBoolean),
-            "ts.number.to_string" => Arc::new(conversions::NumberToString),
-            "ts.lt" => relation(Relation::Lt),
-            "ts.le" => relation(Relation::Le),
-            "ts.gt" => relation(Relation::Gt),
-            "ts.ge" => relation(Relation::Ge),
-            _ => continue,
-        };
-        natives.push((function, native));
-    }
-    for (function, native) in natives {
-        registry.implement(function, native)?;
+        let listed = registered.listed();
+        if let Some(native) = native(registered.name(), |name| {
+            let (callee, _) = listed.iter().find(|(_, label)| label.as_str() == name)?;
+            registry.get(callee)?.native().cloned()
+        }) {
+            registry.implement(function, native)?;
+        }
     }
     Ok(())
+}
+
+/// Constructs a native by the build's identity table, reading only the
+/// pure kernel implementations that this native delegates to.
+pub fn native(
+    name: &str,
+    kernel: impl Fn(&str) -> Option<Arc<dyn NativeFunction>>,
+) -> Option<Arc<dyn NativeFunction>> {
+    Some(match name {
+        "ts.builtin_name" => Arc::new(BuiltinName),
+        "ts.get" => Arc::new(Get),
+        "ts.add" => Arc::new(Add {
+            add: kernel("num.add")?,
+            concat: kernel("text.concat")?,
+        }),
+        "ts.sub" => Arc::new(Subtract {
+            native: kernel("num.sub")?,
+        }),
+        "ts.to_number" => Arc::new(ToNumber),
+        "ts.to_boolean" => Arc::new(conversions::ToBoolean),
+        "ts.number.to_string" => Arc::new(conversions::NumberToString),
+        "ts.lt" | "ts.le" | "ts.gt" | "ts.ge" => Arc::new(Relate {
+            relation: match name {
+                "ts.lt" => Relation::Lt,
+                "ts.le" => Relation::Le,
+                "ts.gt" => Relation::Gt,
+                _ => Relation::Ge,
+            },
+            compare: kernel("text.utf16_compare")?,
+        }),
+        _ => return None,
+    })
 }
 
 fn pair<'a>(call: &'a NativeCall<'_, '_>) -> (&'a Value, &'a Value) {

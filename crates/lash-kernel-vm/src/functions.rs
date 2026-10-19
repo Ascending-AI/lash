@@ -126,3 +126,12 @@ pub fn register_machine_functions(
         tasks_unfinished: register(MachineFunction::TasksUnfinished)?,
     })
 }
+
+/// The machine-owned functions share a native marker; execution dispatches
+/// them through the machine's own entry before that marker is called.
+pub fn machine_native(name: &str) -> Option<Arc<dyn NativeFunction>> {
+    [MachineFunction::Deref, MachineFunction::TasksUnfinished]
+        .into_iter()
+        .any(|function| definition(function, KERNEL_VERSION).name.as_str() == name)
+        .then(|| Arc::new(RunByTheMachine) as Arc<dyn NativeFunction>)
+}

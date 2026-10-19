@@ -125,10 +125,10 @@ impl<'embedding> Server<'embedding> {
             .release_manifests()
             .map_err(|error| machine_breach(error.to_string()))?;
         embedding
-            .prepared_for(lash_kernel_doc::KERNEL_VERSION)
+            .prepared_library()
             .map_err(|error| machine_breach(error.to_string()))?;
         let tuning = bootstrap.tuning;
-        let mut server = Self {
+        Ok(Self {
             embedding,
             pipe,
             inbound: Arc::new(Mutex::new(FrameSource::with_capacity(
@@ -148,12 +148,18 @@ impl<'embedding> Server<'embedding> {
             owner: None,
             prepared: false,
             cpu_ceiling: None,
-        };
-        server.send(WorkerMessage::Ready {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            crate_version: env!("CARGO_PKG_VERSION").to_owned(),
-        })?;
-        Ok(server)
+        })
+    }
+
+    /// A worker is pooled only after its registry and preparation are ready.
+    pub(crate) fn installed(&mut self) -> Result<(), PoolError> {
+        let reply = lash_vm_client::packages::result(Ok(()))?;
+        let bytes = self.codec.encode_pool_started(&reply)?;
+        write_frame(
+            &mut self.pipe,
+            &bytes,
+            Instant::now() + self.bootstrap.serialization,
+        )
     }
 
     fn send(&mut self, message: WorkerMessage) -> Result<(), PoolError> {
@@ -686,8 +692,7 @@ impl<'embedding> Server<'embedding> {
                     detail: Detail::new(error),
                 })
             })?;
-        let kernel = document.manifest.kernel;
-        let library = self.embedding.prepared_for(kernel).map_err(|error| {
+        let library = self.embedding.prepared_library().map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
                 detail: Detail::new(error),
             })
@@ -1036,8 +1041,7 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
 mod tests {
     use super::*;
 
-    /// A server on one end of a pipe and its parent's end, its Ready frame
-    /// read.
+    /// A bound server and its parent's pipe, with preparation complete.
     fn ready_server() -> (
         lash_vm_client::PoolConfig,
         FrameCodec,
@@ -1048,13 +1052,12 @@ mod tests {
         let config =
             lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
         let codec = FrameCodec::new(config.protocol.decode);
-        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
+        let (pipe, parent) = UnixStream::pair().expect("pipe");
         let embedding: &'static Embedding = Box::leak(Box::new(
             crate::embedding::tests::typescript_only(&config.tuning).expect("embedding"),
         ));
         let server =
             Server::new(pipe, codec.clone(), Bootstrap::from(&config), embedding).expect("server");
-        read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
         (config, codec, embedding, server, parent)
     }
 
@@ -1190,7 +1193,6 @@ mod tests {
             .expect("a TypeScript embedding");
         let mut server =
             Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
-        read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
         let drain = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             // Releasing backpressure lets the unfixed write finish too, so
@@ -1220,11 +1222,6 @@ mod tests {
         let mut server =
             Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
-        let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
-            .expect("ready");
-        fence
-            .admit(&codec.decode_worker(&ready).expect("ready frame").header)
-            .expect("ready fence");
         let message = WorkerMessage::Prepared {
             response: EncodedPayload(vec![0; 2048]),
         };

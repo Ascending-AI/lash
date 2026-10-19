@@ -2001,3 +2001,202 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
             && receipt.pid != std::process::id()
     ));
 }
+
+#[path = "../src/fixture/pool_package.rs"]
+mod pool_package;
+
+/// The parent's code-only package; the shipped worker is given no package list.
+fn pool_package(kernel: &str, release: &str) -> Arc<lash_kernel_package::Package> {
+    Arc::new(
+        lash_kernel_package::Package::build(
+            "pool_fixture",
+            release,
+            &lash_kernel_package::PackageSources {
+                kernel,
+                surface: "",
+                labels: "",
+            },
+            &[],
+        )
+        .expect("the fixture package"),
+    )
+}
+
+fn pool_holdings(
+    own: Arc<lash_kernel_package::Package>,
+    retained: Option<Arc<lash_kernel_package::Package>>,
+) -> Arc<lash_kernel_package::HeldPackages> {
+    use lash_kernel_package::{HeldPackages, PackageSet};
+    let shipped = lash_vm_library::lash_packages().expect("parent's shipped packages");
+    let mut artifacts: Vec<_> = shipped.artifacts().values().cloned().collect();
+    let mut sets: Vec<_> = shipped.sets().values().cloned().collect();
+    if let Some(retained) = retained {
+        let mut members: Vec<_> = artifacts.iter().map(Arc::as_ref).collect();
+        members.push(retained.as_ref());
+        sets.push(PackageSet::new(members.iter().copied()).expect("retained set"));
+        artifacts.push(retained);
+    }
+    // Each set holds one fixture release. The artifact map holds both.
+    let mut members: Vec<_> = shipped.artifacts().values().map(Arc::as_ref).collect();
+    members.push(own.as_ref());
+    let set = PackageSet::new(members.iter().copied()).expect("own set");
+    let own_set = set.digest();
+    sets.push(set);
+    artifacts.push(own);
+    Arc::new(HeldPackages::new(artifacts, sets, own_set).expect("parent's holdings"))
+}
+
+fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) {
+    let definition = lash_kernel_doc::parse_definition(definition).expect("definition");
+    let function = definition.identity();
+    let name = definition.name;
+    let document = parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\nuse {name} = @{function}\nmain {{ let x = invoke {name}(7) return x }}"
+    )).expect("fixture document");
+    let bytes = EncodedPayload(document.canonical_bytes());
+    worker
+        .start(
+            fresh(&bytes, Target::Main, Vec::new()),
+            &document.identity().to_string(),
+            ExecutionClass::Cell,
+        )
+        .expect("start");
+    let step = worker.run(SLICE, false).expect("run");
+    let RunStep::Ended { end, meters, .. } = step else {
+        panic!("fixture ends: {step:?}")
+    };
+    (
+        wire::decode(PayloadKind::End, &end).expect("end"),
+        meters.charged,
+    )
+}
+
+/// K-LIB-002: the same shipped package function, run with a native by the
+/// fixture executable and without one by the unmodified shipped worker,
+/// answers with exactly the same value and charge.
+#[test]
+fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_value_and_charge() {
+    HOST_DIALECTS.set("typescript");
+    let packages = pool_holdings(pool_package(pool_package::BOTH, "1"), None);
+    let mut native = config("package_native");
+    native.packages = Some(packages.clone());
+    let native = WorkerPool::new(native).expect("native-enabled worker");
+    let mut worker = checkout(&native);
+    let expected = pool_call(&mut worker, pool_package::BOTH);
+    assert!(matches!(&expected.0, EndWire::Finished { result, .. } if *result == int(7)));
+    worker.release().expect("reset native");
+
+    let mut config =
+        PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
+    config.packages = Some(packages);
+    let body = WorkerPool::new(config).expect("unmodified shipped worker");
+    let mut worker = checkout(&body);
+    assert_eq!(pool_call(&mut worker, pool_package::BOTH), expected);
+    worker.release().expect("reset body");
+}
+
+/// K-LIB-006 over a shipped package: equal native arguments answer equally
+/// under a warm worker and a fresh process, including the charge.
+#[test]
+fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
+    let held = lash_vm_library::lash_packages().expect("shipped packages");
+    let function = held
+        .functions()
+        .named("num.abs")
+        .next()
+        .expect("a shipped native");
+    let definition = lash_kernel_doc::print_definition(
+        held.functions()
+            .get(&function)
+            .expect("the native")
+            .definition(),
+    );
+    let mut config =
+        PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
+    config.max_workers = 1;
+    config.packages = Some(held);
+    let pool = WorkerPool::new(config.clone()).expect("warm pool");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid();
+    let expected = pool_call(&mut worker, &definition);
+    assert!(matches!(&expected.0, EndWire::Finished { result, .. } if *result == int(7)));
+    worker.release().expect("reset");
+    let mut worker = checkout(&pool);
+    assert_eq!(worker.pid(), pid);
+    assert_eq!(pool_call(&mut worker, &definition), expected);
+    worker.release().expect("reset warm");
+    let cold = WorkerPool::new(config).expect("cold pool");
+    let mut worker = checkout(&cold);
+    assert_ne!(worker.pid(), pid);
+    assert_eq!(pool_call(&mut worker, &definition), expected);
+    worker.release().expect("reset cold");
+}
+
+/// POOL-FRAME: retained definitions arrive from the parent too. Reset and
+/// process replacement preserve the pool-start frame for the pool's life.
+#[test]
+fn a_workers_registry_is_the_pool_start_frame_unchanged_for_its_life() {
+    HOST_DIALECTS.set("typescript");
+    let later = pool_package::BOTH.replace("return x", "return 99");
+    let held = pool_holdings(
+        pool_package(&later, "2"),
+        Some(pool_package(pool_package::BOTH, "1")),
+    );
+    let mut config =
+        PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
+    config.packages = Some(held);
+    let pool = WorkerPool::new(config).expect("parent's own and retained frame");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid();
+    let retained = pool_call(&mut worker, pool_package::BOTH);
+    assert!(matches!(&retained.0, EndWire::Finished { result, .. } if *result == int(7)));
+    worker.release().expect("reset");
+    let mut worker = checkout(&pool);
+    assert_eq!(worker.pid(), pid);
+    let own = pool_call(&mut worker, &later);
+    assert!(matches!(own.0, EndWire::Finished { result, .. } if result == int(99)));
+    // Dropping a checkout discards its worker. Its replacement gets the
+    // original frame rather than rebuilding from the worker binary.
+    drop(worker);
+    let mut worker = checkout(&pool);
+    assert_ne!(worker.pid(), pid);
+    assert_eq!(pool_call(&mut worker, pool_package::BOTH), retained);
+    worker.release().expect("reset replacement");
+}
+
+/// NativeMissing is a pool-start refusal, before the first guest checkout.
+#[test]
+fn a_frame_holding_a_native_only_function_the_shipped_worker_lacks_is_refused_at_pool_start() {
+    use lash_kernel_package::PackageRefusal;
+    let source = pool_package::BOTH.replace("body { return x }\n", "");
+    let definition = lash_kernel_doc::parse_definition(&source).expect("native-only definition");
+    let mut config =
+        PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
+    config.min_workers = 0;
+    config.packages = Some(pool_holdings(pool_package(&source, "1"), None));
+    let error = WorkerPool::new(config)
+        .err()
+        .expect("refused before checkout");
+    let expected = PackageRefusal::NativeMissing {
+        function: definition.identity(),
+        name: definition.name,
+    };
+    assert_eq!(error, PoolError::Package(expected.clone()));
+    let runtime = error.into_runtime_error();
+    let Some(lash_core_execution::RuntimeErrorCause::VmWorker { outcome }) = runtime.cause else {
+        panic!("package refusal retains its worker cause");
+    };
+    let InfrastructureOutcome::ProtocolViolation {
+        breach:
+            lash_vm_protocol::ProtocolBreach::Pool {
+                fault: lash_vm_protocol::PoolFault::Package { refusal },
+            },
+    } = *outcome
+    else {
+        panic!("package refusal stays typed at the runtime boundary");
+    };
+    assert_eq!(
+        lash_vm_client::packages::refusal(&refusal).expect("typed refusal"),
+        expected
+    );
+}

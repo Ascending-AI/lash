@@ -128,3 +128,19 @@ pub fn register(registry: &mut FunctionRegistry) -> Result<Functions, RegistryEr
         split: register(Operation::Split)?,
     })
 }
+
+/// Constructs the implementation selected by the build's identity table.
+pub fn native(
+    name: &str,
+    built: ArtifactDigest,
+) -> Option<Arc<dyn lash_kernel_doc::NativeFunction>> {
+    static ENGINE: std::sync::OnceLock<Arc<Engine>> = std::sync::OnceLock::new();
+    let operation = Operation::ALL
+        .into_iter()
+        .find(|operation| operation.name() == name)?;
+    Some(Arc::new(functions::Function {
+        engine: ENGINE.get_or_init(|| Arc::new(Engine::new(256))).clone(),
+        operation,
+        built,
+    }))
+}

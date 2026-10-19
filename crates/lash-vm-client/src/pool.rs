@@ -40,6 +40,8 @@ struct Pool {
     epoch: u64,
     measurements: SharedMeasurements,
     config: PoolConfig,
+    /// Encoded once from the parent, shared by prewarm and replacement workers.
+    packages: Vec<u8>,
     /// The most workers the pool runs at once, within its memory budget.
     capacity: usize,
     state: Mutex<State>,
@@ -62,9 +64,21 @@ impl WorkerPool {
         if let Some(cgroup) = &config.cgroup {
             cgroup.probe().map_err(PoolError::cgroup)?;
         }
+        let held = match &config.packages {
+            Some(packages) => packages.clone(),
+            None => lash_vm_library::lash_packages().map_err(|error| {
+                PoolError::breach(ProtocolBreach::Machine {
+                    detail: Detail::new(error),
+                })
+            })?,
+        };
+        let codec = FrameCodec::new(config.protocol.decode)
+            .with_detail_limit(config.tuning.diagnostic_bytes);
+        let packages = codec.encode_pool_start(&crate::packages::frame(&held))?;
         static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
             phases,
+            packages,
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             measurements: Arc::new(Mutex::new(Measurements::default())),
             capacity: config.worker_capacity(),
@@ -82,6 +96,12 @@ impl WorkerPool {
             }),
             available: Condvar::new(),
         }));
+        // Even a pool with no warm workers validates the binary against its
+        // frame at startup. A missing native must never first meet a guest.
+        if pool.0.config.min_workers == 0 {
+            let mut probe = pool.0.spawn_ready()?;
+            probe.terminate();
+        }
         for _ in 0..pool.0.config.min_workers {
             let worker = pool.0.spawn_ready()?;
             let mut state = lock(&pool.0.state);
@@ -232,6 +252,10 @@ impl Pool {
                     env!("CARGO_PKG_VERSION"),
                     &crate_version,
                 )?;
+                // Ready admits the protocol only. Installation is a bounded
+                // startup exchange, completed before this worker can enter the
+                // pool or receive a guest checkout.
+                worker.install_packages(&self.packages, deadline)?;
                 let mut measurements = lock(&self.measurements);
                 if measurements.pending_replacements > 0 {
                     measurements.pending_replacements -= 1;

@@ -215,6 +215,52 @@ fn write_package(
         out.join(format!("{stem}.bin")),
         validated.to_image(&lash_kernel_vm::body_census),
     )?;
+    // Native membership is derived from the source owner's installer once,
+    // at build time. Workers consume sorted constructor tables, never harvest
+    // a second registry to discover this membership.
+    for dependency in requires {
+        library::implement(
+            &dependency.path().to_string(),
+            &mut checked,
+            dependency.code().ids(),
+            dependency.digest(),
+        )?;
+    }
+    library::implement(
+        &package.path().to_string(),
+        &mut checked,
+        package.code().ids(),
+        package.digest(),
+    )?;
+    let mut rows: Vec<_> = package
+        .code()
+        .ids()
+        .iter()
+        .filter_map(|function| {
+            let registered = checked.get(function)?;
+            registered
+                .native()
+                .map(|_| (*function, registered.name().to_owned()))
+        })
+        .collect();
+    rows.sort_by_key(|(function, _)| *function);
+    std::fs::write(
+        out.join(format!("{stem}.digest.rs")),
+        format!(
+            "lash_kernel_doc::ArtifactDigest::from_bytes({:?})\n",
+            package.digest().as_bytes()
+        ),
+    )?;
+    let mut source = String::from("&[\n");
+    for (function, name) in rows {
+        source.push_str(&format!(
+            "(lash_kernel_doc::FunctionId::from_bytes({:?}), {:?}),\n",
+            function.as_bytes(),
+            name
+        ));
+    }
+    source.push_str("]\n");
+    std::fs::write(out.join(format!("{stem}.natives.rs")), source)?;
     Ok(())
 }
 

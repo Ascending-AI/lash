@@ -1,4 +1,5 @@
 //! Token-preserving JSON (`K-EFF-005` to `K-EFF-007`).
+use super::Selection;
 
 use std::borrow::Cow;
 
@@ -608,9 +609,10 @@ pub fn stringify_json<'call>(
     Ok(out.text)
 }
 
-pub(super) fn functions() -> Vec<Function> {
+pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     vec![
         definition(
+            selection,
             "json.parse",
             &[
                 ("text", Type::Text),
@@ -628,13 +630,14 @@ pub(super) fn functions() -> Vec<Function> {
             parse,
         ),
         definition(
+            selection,
             "json.stringify",
             &[("value", Type::Any)],
             Type::Text,
             &["json_number", "json_key", "json_depth"],
             stringify,
         ),
-        render_definition(),
+        render_definition(selection),
     ]
 }
 
@@ -867,8 +870,9 @@ impl DecimalLayout {
     }
 }
 
-fn render_definition() -> Function {
+fn render_definition(selection: &Selection<'_>) -> Function {
     definition(
+        selection,
         "json.render",
         &[
             ("value", Type::Any),

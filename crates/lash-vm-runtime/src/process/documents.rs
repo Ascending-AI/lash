@@ -1053,18 +1053,24 @@ mod tests {
     #[tokio::test]
     async fn activation_effects_are_prepared_once_per_document_and_registry() {
         use lash_execution_contracts::process::ProcessEngine as _;
-        let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        let helper = registry
-            .register(
-                lash_kernel_doc::parse_definition(
-                    "function helper() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
-                )
-                .expect("helper"),
-                None,
-            )
-            .expect("registered");
+        let package = lash_kernel_package::Package::build(
+            "fixture",
+            "1",
+            &lash_kernel_package::PackageSources {
+                kernel: "function fixture.helper() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
+                surface: "",
+                labels: "",
+            },
+            &[],
+        )
+        .expect("helper package");
+        let helper = package.function("fixture.helper").expect("helper identity");
+        let held = Arc::new(
+            lash_kernel_package::HeldPackages::install([package])
+                .expect("one package registration"),
+        );
         let document = lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse helper = @{helper}\neffect ping(x: Any) -> Any\nentry work() -> Any\nfn work() {{ let n = invoke helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
+            "kernel 1\nnumbers float\nuse fixture.helper = @{helper}\neffect ping(x: Any) -> Any\nentry work() -> Any\nfn work() {{ let n = invoke fixture.helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
         )).expect("document");
         let identity = document.identity();
         let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));
@@ -1075,7 +1081,7 @@ mod tests {
             lash_vm_releases::TYPESCRIPT,
             config.run_bounds,
         )
-        .with_functions(Arc::new(registry));
+        .with_packages(held);
         let payload =
             serde_json::json!({ "document": identity, "functions": [helper], "entry": "work" });
         let mut bindings = Vec::new();

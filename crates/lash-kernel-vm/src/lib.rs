@@ -71,3 +71,5 @@ pub use interface::{
     OpenError, Outcome, Park, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
     SealError, SleepRequest, StartError, Step, Target, WaitId,
 };
+
+pub use functions::machine_native;

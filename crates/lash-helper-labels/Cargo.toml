@@ -16,3 +16,6 @@ doctest = false
 
 [lints]
 workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }

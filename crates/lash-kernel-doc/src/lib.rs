@@ -256,3 +256,8 @@ pub mod testkit {
         crate::EffectId(raw)
     }
 }
+
+mod frame_array;
+pub use frame_array::FrameArray;
+
+pub use native::NativeCtor;

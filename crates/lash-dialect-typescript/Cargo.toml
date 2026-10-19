@@ -34,6 +34,8 @@ swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
 lash-ext-helper-compiler = { workspace = true }
+lash-kernel-package = { workspace = true }
+lash-vm-library = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 libc = { workspace = true }
 lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-kernel-state = { workspace = true }

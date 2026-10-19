@@ -162,6 +162,23 @@ impl FrameCodec {
         Ok(frame)
     }
 
+    /// Encodes the one pool-start frame, under the transport's normal bounds.
+    pub fn encode_pool_start(&self, frame: &crate::PoolStart) -> Result<Vec<u8>, CodecRefusal> {
+        self.encode(frame)
+    }
+
+    pub fn decode_pool_start(&self, bytes: &[u8]) -> Result<crate::PoolStart, CodecRefusal> {
+        self.decode_exact(bytes)
+    }
+
+    pub fn encode_pool_started(&self, frame: &crate::PoolStarted) -> Result<Vec<u8>, CodecRefusal> {
+        self.encode(frame)
+    }
+
+    pub fn decode_pool_started(&self, bytes: &[u8]) -> Result<crate::PoolStarted, CodecRefusal> {
+        self.decode_exact(bytes)
+    }
+
     fn encode<T: Serialize>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
         let limit = u64::from(self.limits.max_frame_bytes);
         // The payload is serialized behind its header's place, so a frame is

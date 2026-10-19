@@ -25,12 +25,15 @@ testing = []
 synthetic-next = [
     "lash-kernel-doc/synthetic-next",
     "lash-kernel-migrate/synthetic-next",
+    "lash-kernel-vm/synthetic-next",
 ]
 
 [lints]
 workspace = true
 
 [dependencies]
+lash-kernel-vm = { workspace = true }
+rmp-serde = { workspace = true }
 blake3 = { workspace = true }
 lash-helper-labels = { workspace = true }
 lash-kernel-dialect = { workspace = true }

@@ -453,6 +453,37 @@ pub struct RunMeters {
     pub live_tasks: u32,
 }
 
+/// The parent's immutable holdings, sent once after protocol admission and
+/// before any checkout. Definitions use the zero-copy release-image encoding;
+/// metadata names artifacts and package sets, referring to those definitions
+/// by identity. Neither payload contains host authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolStart {
+    #[serde(with = "pool_frame_bytes")]
+    pub frame: std::sync::Arc<[u8]>,
+}
+
+mod pool_frame_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+    pub fn serialize<S: Serializer>(bytes: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(bytes)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<[u8]>, D::Error> {
+        serde_bytes::ByteBuf::deserialize(deserializer).map(|bytes| bytes.into_vec().into())
+    }
+}
+
+/// The installation result, before the worker can serve any guest request.
+/// The client owns the typed package-refusal encoding, as it owns the
+/// kernel encodings of other opaque worker payloads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolStarted {
+    pub result: EncodedPayload,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParentMessage {

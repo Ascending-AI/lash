@@ -5,8 +5,8 @@
 //! it registers, and the host boundary a document runs against.
 //!
 //! A run executes in a worker process that hosts one kernel machine. The
-//! worker registers every library function when it starts; a document names
-//! functions by identity and carries none.
+//! worker opens its parent's immutable package frame at startup; a document
+//! names functions by identity and carries none.
 //!
 //! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryMeter}`.
 //! A worker's [`RunBounds`] carries their wire mirrors, [`RunCharge`] and
@@ -19,6 +19,8 @@
 //! [`HostReadKind::Bound`] read naming a [`BoundReached`] and answered by a
 //! [`RunLimitDecision`]. Without one, the run refuses there.
 
+/// Decodes the typed package refusal carried by [`PoolFault::Package`].
+pub use lash_vm_client::packages::refusal as package_refusal;
 /// One shared pool for Code mode cells, process bodies, and pure language work.
 ///
 /// SDK releases attach `lash-sdk-worker-VERSION-TARGET.tar.gz` and its SHA256.
@@ -83,7 +85,7 @@ pub use lash_vm_worker::typescript as typescript_worker_dialect;
 #[cfg(feature = "worker")]
 pub use lash_vm_worker::{
     Dialect as WorkerDialect, Embed as WorkerEmbed, EmbedError as WorkerEmbedError,
-    Embedder as WorkerEmbedder, Embedding as WorkerEmbedding,
+    Embedder as WorkerEmbedder, Embedding as WorkerEmbedding, PreparedLibrary,
     built_dialects as built_worker_dialects, built_embedding as built_worker_embedding,
     worker_entry,
 };

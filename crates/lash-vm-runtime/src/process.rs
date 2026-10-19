@@ -435,20 +435,21 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_library::LibraryError> {
-        let functions = lash_vm_library::lash_packages()
-            .map(|packages| std::sync::Arc::clone(packages.functions()))?;
-        Ok(Self::with_functions(
-            documents, dialect, functions, workers, bounds,
+        let packages = workers
+            .config()
+            .packages
+            .clone()
+            .map_or_else(lash_vm_library::lash_packages, Ok)?;
+        Ok(Self::with_packages(
+            documents, dialect, packages, workers, bounds,
         ))
     }
 
-    /// The engine for workers a host assembled itself: `functions` are the
-    /// library functions its worker entry holds, which every document is
-    /// linked and admitted against.
-    pub fn with_functions(
+    /// The engine and its workers share the same installed package holdings.
+    pub fn with_packages(
         documents: KernelDocuments,
         dialect: &str,
-        functions: Arc<lash_kernel_doc::FunctionRegistry>,
+        packages: Arc<lash_kernel_package::HeldPackages>,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Self {
@@ -457,8 +458,8 @@ impl KernelProcessEngine {
             effect_preparations: Arc::new(std::sync::Mutex::new(
                 documents::EffectPreparations::default(),
             )),
-            functions,
-            workers,
+            functions: Arc::clone(packages.functions()),
+            workers: workers.with_packages(packages),
             dialect: dialect.to_owned(),
             bounds,
             writes: lash_kernel_doc::KernelVersion::NEWEST,

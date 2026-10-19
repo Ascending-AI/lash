@@ -376,6 +376,9 @@ fn start_observed(
     reason = "benchmark entry point: it reads its arguments, its program files and its switches, and reports on stdout"
 )]
 fn main() -> Result<(), String> {
+    if std::env::args().nth(1).as_deref() == Some("write-frame") {
+        return embedded::write_frame();
+    }
     if std::env::args().nth(1).as_deref() == Some("embedded") {
         return embedded::main();
     }

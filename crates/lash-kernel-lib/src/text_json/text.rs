@@ -1,3 +1,4 @@
+use super::Selection;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
     Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
@@ -12,7 +13,7 @@ use super::{
     text_view,
 };
 
-pub(super) fn functions() -> Vec<Function> {
+pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     let mut functions = Vec::new();
     for (name, native) in [
         (
@@ -22,6 +23,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.utf16_len", utf16_len),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[("text", Type::Text)],
             Type::Int,
@@ -38,6 +40,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.utf16_get", Type::Int, utf16_get),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[("text", Type::Text), ("index", Type::Int)],
             result,
@@ -53,6 +56,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.utf16_slice", utf16_slice),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[
                 ("text", Type::Text),
@@ -72,6 +76,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.utf16_find", utf16_find),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[
                 ("text", Type::Text),
@@ -106,6 +111,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.ends_with", Type::Bool, ends_with, None),
     ] {
         functions.push(prepared_definition(
+            selection,
             name,
             &[("text", Type::Text), ("other", Type::Text)],
             result,
@@ -115,6 +121,7 @@ pub(super) fn functions() -> Vec<Function> {
         ));
     }
     functions.push(definition(
+        selection,
         "text.split",
         &[
             ("text", Type::Text),
@@ -126,6 +133,7 @@ pub(super) fn functions() -> Vec<Function> {
         split,
     ));
     functions.push(definition(
+        selection,
         "text.join",
         &[
             ("items", sequence_type(Type::Text)),
@@ -135,7 +143,8 @@ pub(super) fn functions() -> Vec<Function> {
         &[],
         join,
     ));
-    let (mut admission, native) = definition(
+    let mut admission = definition(
+        selection,
         "text.join_or_index",
         &[
             ("items", sequence_type(Type::Any)),
@@ -147,17 +156,20 @@ pub(super) fn functions() -> Vec<Function> {
     );
     // Two borrowed list passes, buffer writing and final text copying. The list's
     // own size never follows a rejected member, even when it holds a cycle.
-    admission.charge = Formula::Sum(vec![
-        Formula::Constant(1),
-        Formula::Product(vec![
-            Formula::Constant(2),
-            Formula::Size(Operand::Param(Name::new("items"))),
-        ]),
-        Formula::Size(Operand::Param(Name::new("separator"))),
-        Formula::Product(vec![Formula::Constant(2), Formula::Size(Operand::Result)]),
-    ]);
-    functions.push((admission, native));
+    admission.charge(|_| {
+        Formula::Sum(vec![
+            Formula::Constant(1),
+            Formula::Product(vec![
+                Formula::Constant(2),
+                Formula::Size(Operand::Param(Name::new("items"))),
+            ]),
+            Formula::Size(Operand::Param(Name::new("separator"))),
+            Formula::Product(vec![Formula::Constant(2), Formula::Size(Operand::Result)]),
+        ])
+    });
+    functions.push(admission);
     functions.push(definition(
+        selection,
         "text.replace",
         &[
             ("text", Type::Text),
@@ -169,6 +181,7 @@ pub(super) fn functions() -> Vec<Function> {
         replace,
     ));
     functions.push(definition(
+        selection,
         "text.repeat",
         &[("text", Type::Text), ("count", Type::Int)],
         Type::Text,
@@ -183,6 +196,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.pad_end", pad_end),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[
                 ("text", Type::Text),
@@ -194,7 +208,8 @@ pub(super) fn functions() -> Vec<Function> {
             native,
         ));
     }
-    let (mut trim_definition, native) = definition(
+    let mut trim_definition = definition(
+        selection,
         "text.trim_set",
         &[
             ("text", Type::Text),
@@ -210,15 +225,17 @@ pub(super) fn functions() -> Vec<Function> {
     // stopped scans together probe at most B + 1 scalars, including a middle
     // scalar twice. Charge decoding, set bytes searched and output copying.
     let size = |name| Formula::Size(Operand::Param(Name::new(name)));
-    trim_definition.charge = Formula::Sum(vec![
-        Formula::Constant(8),
-        Formula::Product(vec![
-            Formula::Sum(vec![Formula::Constant(1), size("text")]),
-            Formula::Sum(vec![Formula::Constant(1), size("characters")]),
-        ]),
-        Formula::Size(Operand::Result),
-    ]);
-    functions.push((trim_definition, native));
+    trim_definition.charge(|_| {
+        Formula::Sum(vec![
+            Formula::Constant(8),
+            Formula::Product(vec![
+                Formula::Sum(vec![Formula::Constant(1), size("text")]),
+                Formula::Sum(vec![Formula::Constant(1), size("characters")]),
+            ]),
+            Formula::Size(Operand::Result),
+        ])
+    });
+    functions.push(trim_definition);
     let (major, minor, patch) = char::UNICODE_VERSION;
     for (name, native) in [
         (
@@ -231,6 +248,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("upper", upper),
     ] {
         functions.push(definition(
+            selection,
             &format!("text.{name}_u{major}_{minor}_{patch}"),
             &[("text", Type::Text)],
             Type::Text,
@@ -240,6 +258,7 @@ pub(super) fn functions() -> Vec<Function> {
     }
     let (major, minor, patch) = unicode_normalization::UNICODE_VERSION;
     functions.push(definition(
+        selection,
         &format!("text.normalize_u{major}_{minor}_{patch}"),
         &[("text", Type::Text), ("form", Type::Text)],
         Type::Text,
@@ -254,6 +273,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.to_utf16_units", to_utf16_units),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[("text", Type::Text)],
             sequence_type(Type::Int),
@@ -269,6 +289,7 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.from_utf16_units", from_utf16_units),
     ] {
         functions.push(definition(
+            selection,
             name,
             &[("items", sequence_type(Type::Int))],
             Type::Text,

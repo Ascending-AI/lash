@@ -125,3 +125,6 @@ path = "tests/pool_laws.rs"
 [[test]]
 name = "fresh_embedding"
 path = "tests/fresh_embedding.rs"
+
+[build-dependencies]
+lash-vm-releases = { workspace = true }

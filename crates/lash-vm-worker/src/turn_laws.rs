@@ -380,16 +380,6 @@ fn measure_ready_worker_turns() {
             .build()
             .expect("runtime"),
     };
-    let ready = read_frame(
-        &mut parent.pipe,
-        &codec,
-        Instant::now() + Duration::from_secs(60),
-    )
-    .expect("ready");
-    parent
-        .incoming
-        .admit(&codec.decode_worker(&ready).expect("ready").header)
-        .expect("fence");
     for _ in 0..3 {
         turn(&mut parent, config.run_bounds);
     }

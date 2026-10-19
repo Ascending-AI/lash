@@ -6,6 +6,9 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PoolError {
+    /// The worker cannot implement the parent's package frame.
+    #[error(transparent)]
+    Package(lash_kernel_package::PackageRefusal),
     #[error(transparent)]
     ProtocolVersion(#[from] lash_vm_protocol::ProtocolVersionRefusal),
     #[error(transparent)]
@@ -70,7 +73,8 @@ impl PoolError {
             | Self::CheckoutTimedOut
             | Self::RestartStorm
             | Self::RetryLimitExceeded { .. }
-            | Self::Cgroup { .. } => true,
+            | Self::Cgroup { .. }
+            | Self::Package(_) => true,
             Self::ProtocolVersion(_)
             | Self::InvalidConfiguration
             | Self::UnsupportedPlatform
@@ -96,6 +100,15 @@ impl PoolError {
     /// a transport read, a refused checkout and a worker's own refusal share.
     pub fn into_outcome(self) -> InfrastructureOutcome {
         let fault = match self {
+            Self::Package(refusal) => match rmp_serde::to_vec_named(&refusal) {
+                Ok(refusal) => PoolFault::Package { refusal },
+                Err(error) => {
+                    return ProtocolBreach::Machine {
+                        detail: Detail::new(error),
+                    }
+                    .into();
+                }
+            },
             Self::Infrastructure(outcome) => return outcome,
             Self::ProtocolVersion(refusal) => return ProtocolBreach::Version { refusal }.into(),
             // The attempt budget counts the host's losses: its verdict.

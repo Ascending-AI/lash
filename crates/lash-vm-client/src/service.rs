@@ -347,6 +347,18 @@ impl Service {
         }
     }
 
+    /// Gives every worker the same package holdings the parent uses. Select
+    /// packages before cloning or starting the service so a live pool's frame
+    /// cannot diverge from its configuration.
+    pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
+        self.config = Arc::new(PoolConfig {
+            packages: Some(packages),
+            ..self.config.as_ref().clone()
+        });
+        self.pool = Arc::new(Mutex::new(None));
+        self
+    }
+
     #[cfg(feature = "testing")]
     pub fn with_worker_receipts(mut self) -> Self {
         self.receipts = Some(Arc::new(Mutex::new(Vec::new())));

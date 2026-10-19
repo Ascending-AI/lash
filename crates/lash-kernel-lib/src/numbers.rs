@@ -85,7 +85,7 @@ struct NumericFunction {
 /// integer/float variants accept only that kind. See `docs/kernel/numbers.md`.
 pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
     let mut functions = Vec::new();
-    catalogue(|name, domain, operation, params, result| {
+    catalogue(None, |name, domain, operation, params, result| {
         let definition = definition(name, domain, operation, &params, result);
         let native: Arc<dyn NativeFunction> = Arc::new(NumericFunction {
             operation,
@@ -106,7 +106,7 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
 /// The first [`FunctionRegistry::implement_named`] refuses.
 pub fn implement_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryError> {
     let mut implemented = Ok(());
-    catalogue(|name, domain, operation, params, _| {
+    catalogue(None, |name, domain, operation, params, _| {
         if implemented.is_ok() {
             implemented = registry
                 .implement_named(
@@ -123,13 +123,37 @@ pub fn implement_numbers(registry: &mut FunctionRegistry) -> Result<(), Registry
     implemented
 }
 
+/// Constructs only the selected native; definition authoring uses the same catalogue.
+pub(crate) fn native(selected: &str) -> Option<Arc<dyn NativeFunction>> {
+    let mut found = None;
+    catalogue(Some(selected), |name, domain, operation, params, _| {
+        if name.name() == selected {
+            found = Some(Arc::new(NumericFunction {
+                operation,
+                domain,
+                params,
+            }) as Arc<dyn NativeFunction>);
+        }
+    });
+    found
+}
+
 /// Hands `add` each numeric function: its name, operand domain, operation,
 /// parameter types and result type.
 #[expect(
     clippy::expect_used,
     reason = "catalogue names are fixed valid identifiers, not guest data"
 )]
-fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Type)) {
+fn catalogue(
+    selected: Option<&str>,
+    mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Type),
+) {
+    let mut emit =
+        |name: KernelHelper, domain, operation, params: &dyn Fn() -> Vec<Type>, result| {
+            if selected.is_none_or(|selected| selected == name.name()) {
+                add(name, domain, operation, params(), result);
+            }
+        };
     for (prefix, domain) in [
         ("", Domain::Number),
         ("num.", Domain::Number),
@@ -149,12 +173,15 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
             (KernelHelper::H_min, Binary::Min),
             (KernelHelper::H_max, Binary::Max),
         ] {
-            add(
+            if selected.is_some_and(|selected| selected.strip_prefix(prefix) != Some(name.name())) {
+                continue;
+            }
+            emit(
                 KernelHelper::from_name(&format!("{prefix}{}", name.name()))
                     .expect("declared numeric family"),
                 domain,
                 Operation::Binary(op),
-                vec![domain.ty(); 2],
+                &|| vec![domain.ty(); 2],
                 if matches!(op, Binary::Div) {
                     Type::Float
                 } else {
@@ -185,12 +212,15 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
             } else {
                 domain.ty()
             };
-            add(
+            if selected.is_some_and(|selected| selected.strip_prefix(prefix) != Some(name.name())) {
+                continue;
+            }
+            emit(
                 KernelHelper::from_name(&format!("{prefix}{}", name.name()))
                     .expect("declared numeric family"),
                 domain,
                 Operation::Unary(op),
-                vec![domain.ty()],
+                &|| vec![domain.ty()],
                 result,
             );
         }
@@ -209,12 +239,15 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
             (KernelHelper::H_ge, Operation::Ge),
             (KernelHelper::H_compare, Operation::Compare),
         ] {
-            add(
+            if selected.is_some_and(|selected| selected.strip_prefix(prefix) != Some(name.name())) {
+                continue;
+            }
+            emit(
                 KernelHelper::from_name(&format!("{prefix}{}", name.name()))
                     .expect("declared numeric family"),
                 domain,
                 op,
-                vec![domain.ty(); 2],
+                &|| vec![domain.ty(); 2],
                 if matches!(op, Operation::Compare) {
                     Type::Int
                 } else {
@@ -223,25 +256,25 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
             );
         }
     }
-    add(
+    emit(
         KernelHelper::H_kind,
         Domain::Any,
         Operation::Kind,
-        vec![Type::Any],
+        &|| vec![Type::Any],
         Type::Text,
     );
-    add(
+    emit(
         KernelHelper::H_same,
         Domain::Any,
         Operation::Same,
-        vec![Type::Any; 2],
+        &|| vec![Type::Any; 2],
         Type::Bool,
     );
-    add(
+    emit(
         KernelHelper::H_ref,
         Domain::Any,
         Operation::Ref,
-        vec![Type::Any],
+        &|| vec![Type::Any],
         Type::Any,
     );
     for (name, domain, op, result) in [
@@ -282,27 +315,27 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
             Type::Text,
         ),
     ] {
-        add(name, domain, op, vec![domain.ty()], result);
+        emit(name, domain, op, &|| vec![domain.ty()], result);
     }
-    add(
+    emit(
         KernelHelper::H_int_dto_utext,
         Domain::Any,
         Operation::IntText,
-        vec![Type::Int, Type::Int],
+        &|| vec![Type::Int, Type::Int],
         Type::Text,
     );
-    add(
+    emit(
         KernelHelper::H_int_dparse,
         Domain::Any,
         Operation::IntParse,
-        vec![Type::Text, Type::Int],
+        &|| vec![Type::Text, Type::Int],
         Type::Int,
     );
-    add(
+    emit(
         KernelHelper::H_float_dparse,
         Domain::Any,
         Operation::FloatParse,
-        vec![Type::Text],
+        &|| vec![Type::Text],
         Type::Float,
     );
     for (name, op) in [
@@ -339,11 +372,11 @@ fn catalogue(mut add: impl FnMut(KernelHelper, Domain, Operation, Vec<Type>, Typ
         (KernelHelper::H_math_dpow, Math::Pow),
         (KernelHelper::H_math_dfma, Math::Fma),
     ] {
-        add(
+        emit(
             name,
             Domain::Number,
             Operation::Math(op),
-            vec![Type::Number; op.arity()],
+            &|| vec![Type::Number; op.arity()],
             Type::Float,
         );
     }

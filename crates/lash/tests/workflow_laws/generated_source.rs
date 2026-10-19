@@ -216,29 +216,37 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
 /// before reading dependencies that already carry their complete identities.
 #[tokio::test]
 async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let definition = embedding
-        .registry()
-        .expect("registry")
-        .iter()
-        .find(|(_, registered)| {
-            matches!(
-                registered.definition().implementation,
-                k::Implementation::Native
-            )
-        })
-        .map(|(_, registered)| registered.definition().as_ref().clone())
-        .expect("native definition");
-    let mut registry = k::FunctionRegistry::declarations();
-    registry
-        .register(definition.clone(), None)
-        .expect("first identity");
-    let mut other = definition;
-    other.native_version += 1;
-    registry
-        .register(other, None)
-        .expect("second identity, same label");
-    assert!(lash::dialect::NamedLibrary::from_registry(&registry).is_err());
+    let package = |release: &str, version: u32| {
+        lash::package::Package::build("import_fixture", release, &lash::package::PackageSources {
+            kernel: &format!("function import_fixture.helper() -> Any\nkernel 1\ncharge 1\nnative {version}\nbody {{ return null }}"),
+            surface: "", labels: "",
+        }, &[]).expect("fixture artifact")
+    };
+    let first = std::sync::Arc::new(package("1", 1));
+    let second = std::sync::Arc::new(package("2", 2));
+    let shipped = lash_vm_library::lash_packages().expect("shipped packages");
+    let set = |artifact: &lash::package::Package| {
+        lash::package::PackageSet::new(
+            shipped
+                .artifacts()
+                .values()
+                .map(AsRef::as_ref)
+                .chain([artifact]),
+        )
+        .expect("closed set")
+    };
+    let old = set(&first);
+    let own = set(&second);
+    let own_digest = own.digest();
+    let held = std::sync::Arc::new(
+        lash::package::HeldPackages::new(
+            shipped.artifacts().values().cloned().chain([first, second]),
+            [old, own],
+            own_digest,
+        )
+        .expect("both retained artifacts"),
+    );
+    assert!(lash::dialect::NamedLibrary::from_registry(held.functions()).is_err());
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -257,7 +265,7 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
                 lash::vm::TYPESCRIPT_DIALECT,
                 bounds,
             )
-            .with_functions(std::sync::Arc::new(registry)),
+            .with_packages(held),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())

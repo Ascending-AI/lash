@@ -65,9 +65,9 @@ pub fn register_collections(
         uses.push_str(&format!("use {name} = @{id}\n"));
     }
     let mut ids = BTreeMap::new();
-    for (definition, native) in
-        native::functions(|_, text| parse_definition(&text()).map_err(CollectionError::Parse))?
-    {
+    for (definition, native) in native::functions(None, |_, text| {
+        parse_definition(&text()).map_err(CollectionError::Parse)
+    })? {
         let name = definition.name.as_str().to_owned();
         let id = registry
             .register(definition, Some(native))
@@ -105,7 +105,7 @@ fn raise(kind: &'static str, message: impl Into<String>) -> lash_kernel_doc::Nat
 /// Attaches collection natives to the definitions supplied by the build.
 /// No kernel text is constructed or parsed on this path.
 pub fn implement_collections(registry: &mut FunctionRegistry) -> Result<(), CollectionError> {
-    let functions = native::functions(|name, _| {
+    let functions = native::functions(None, |name, _| {
         registry
             .named(name)
             .next()
@@ -117,4 +117,15 @@ pub fn implement_collections(registry: &mut FunctionRegistry) -> Result<(), Coll
             .map_err(CollectionError::Registry)?;
     }
     Ok(())
+}
+
+/// Constructs a native from the collection catalogue without parsing definitions.
+pub(crate) fn native(
+    selected: &str,
+) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
+    native::functions(Some(selected), |_, _| Ok(()))
+        .ok()?
+        .into_iter()
+        .next()
+        .map(|(_, native)| native)
 }

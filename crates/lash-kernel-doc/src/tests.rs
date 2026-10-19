@@ -868,6 +868,49 @@ fn a_release_image_registers_without_decoding_a_definition() {
         before + 1,
         "clones share the one decoded definition"
     );
+
+    // POOL-FRAME: a parent's image is self-contained, includes the functions
+    // that were the original image's basis, and freezes the captured census.
+    let bytes = registry.to_image();
+    let expected: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
+    registry
+        .register(definition("helper.after_pool_start", false), None)
+        .unwrap();
+    let bytes = Vec::leak(bytes);
+    let frozen = FunctionRegistry::over_frame(bytes).unwrap();
+    let before = decoded();
+    assert_eq!(
+        (0..frozen.len())
+            .filter_map(|at| frozen.function_at(at))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(
+        frozen.get(&calling_id).unwrap().census(),
+        clone.get(&calling_id).unwrap().census()
+    );
+    assert_eq!(
+        frozen.named("helper.calling").collect::<Vec<_>>(),
+        vec![calling_id]
+    );
+    assert_eq!(
+        decoded(),
+        before,
+        "opening the frame and reading facts decodes no body"
+    );
+    let image = ReleasedFunctions::read(bytes).unwrap();
+    assert_eq!(image.basis().len(), 0);
+    assert_eq!(image.ids().collect::<Vec<_>>(), expected);
+    let mut received = FunctionRegistry::declarations();
+    received.register_released(image).unwrap();
+    let transferred = received.get(&calling_id).unwrap();
+    assert_eq!(
+        transferred.census(),
+        clone.get(&calling_id).unwrap().census()
+    );
+    assert_eq!(**transferred.definition(), calling);
+    assert!(received.get(&base).unwrap().states_native());
+    assert!(received.named("helper.after_pool_start").next().is_none());
 }
 
 /// `K-LIB-011`: a native implementation states its version, the first when

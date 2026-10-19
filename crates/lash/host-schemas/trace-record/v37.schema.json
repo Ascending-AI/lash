@@ -2071,7 +2071,7 @@
           "type": "object"
         },
         {
-          "description": "A composition whose members no kernel type states, at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
+          "description": "A composition whose members no kernel type states, or whose meet\ngrows past the projection's bound\n([`lash_kernel_check::MAX_PROJECTED_TYPE_NODES`]), at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
           "properties": {
             "kind": {
               "const": "unprojectable",

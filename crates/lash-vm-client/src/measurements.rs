@@ -130,12 +130,15 @@ impl FrameTraffic {
 /// boundaries. No decoding, strings or per-frame allocation for classification.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcTraffic {
-    pub sent: [FrameTraffic; 10],
-    pub received: [FrameTraffic; 17],
+    pub sent: [FrameTraffic; 11],
+    pub received: [FrameTraffic; 18],
 }
 impl IpcTraffic {
     pub(crate) const RUN_KIND: usize = 2;
-    pub const SENT_KINDS: [&'static str; 10] = [
+    pub(crate) const POOL_START_KIND: usize = 10;
+    pub(crate) const POOL_STARTED_KIND: usize = 17;
+    pub(crate) const UNDECODABLE_KIND: usize = 16;
+    pub const SENT_KINDS: [&'static str; 11] = [
         "start",
         "prepare",
         "run",
@@ -146,8 +149,9 @@ impl IpcTraffic {
         "cancel",
         "reset",
         "shutdown",
+        "pool_start",
     ];
-    pub const RECEIVED_KINDS: [&'static str; 17] = [
+    pub const RECEIVED_KINDS: [&'static str; 18] = [
         "refused",
         "progress",
         "limit_exceeded",
@@ -165,6 +169,7 @@ impl IpcTraffic {
         "reset_done",
         "prepared",
         "undecodable",
+        "pool_started",
     ];
     pub(crate) fn parent_kind(message: &lash_vm_protocol::ParentMessage) -> usize {
         use lash_vm_protocol::ParentMessage as M;
@@ -189,7 +194,10 @@ impl IpcTraffic {
         message: Option<&lash_vm_protocol::WorkerMessage>,
         bytes: usize,
     ) {
-        self.received[Self::worker_kind(message)].record(bytes);
+        self.received_kind(Self::worker_kind(message), bytes);
+    }
+    pub(crate) fn received_kind(&mut self, kind: usize, bytes: usize) {
+        self.received[kind].record(bytes);
     }
     pub(crate) fn worker_kind(message: Option<&lash_vm_protocol::WorkerMessage>) -> usize {
         use lash_vm_protocol::WorkerMessage as M;

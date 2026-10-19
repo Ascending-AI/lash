@@ -2,7 +2,7 @@
 //! set, and the one registry and member index derived from them (V1).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{Export, MemberPath, OperationExport, PackagePath, QualifiedOperation};
@@ -16,16 +16,18 @@ use crate::{ArtifactKey, Origin, Package, PackageRefusal, PackageSet, Root};
 /// the parent's admission and every worker (V1).
 #[derive(Clone, Debug)]
 pub struct HeldPackages {
-    artifacts: BTreeMap<ArtifactKey, Arc<Package>>,
-    sets: BTreeMap<PackageSetDigest, PackageSet>,
-    own: PackageSetDigest,
+    pub(crate) artifacts: BTreeMap<ArtifactKey, Arc<Package>>,
+    pub(crate) sets: BTreeMap<PackageSetDigest, PackageSet>,
+    pub(crate) own: PackageSetDigest,
     /// Every member each function backs, across the held artifacts.
-    index: BTreeMap<FunctionId, Vec<(PackagePath, MemberPath)>>,
+    pub(crate) index: BTreeMap<FunctionId, Vec<(PackagePath, MemberPath)>>,
     /// The same, with the artifact that declares each member.
-    backing: BTreeMap<FunctionId, Vec<(ArtifactKey, MemberPath)>>,
+    pub(crate) backing: BTreeMap<FunctionId, Vec<(ArtifactKey, MemberPath)>>,
     /// Every artifact's code as declarations, each function once for every
     /// kernel version the build interprets.
-    functions: Arc<FunctionRegistry>,
+    pub(crate) functions: Arc<FunctionRegistry>,
+    pub(crate) frame: Arc<[u8]>,
+    pub(crate) live_frame: OnceLock<&'static [u8]>,
 }
 
 /// A view of a set the node does not hold.
@@ -91,14 +93,18 @@ impl HeldPackages {
         let functions = Arc::new(
             interpreted(written).map_err(|message| PackageRefusal::Interpretation { message })?,
         );
-        Ok(Self {
+        let mut held = Self {
             artifacts,
             sets,
             own,
             index,
             backing,
             functions,
-        })
+            frame: Arc::from([]),
+            live_frame: OnceLock::new(),
+        };
+        held.frame = crate::frame::build(&held)?;
+        Ok(held)
     }
 
     pub fn artifacts(&self) -> &BTreeMap<ArtifactKey, Arc<Package>> {
@@ -275,7 +281,7 @@ impl<'a> PackageView<'a> {
 /// The member index: every member each function backs, by the artifact
 /// declaring it.
 #[allow(clippy::type_complexity)]
-fn member_index(
+pub(crate) fn member_index(
     artifacts: &BTreeMap<ArtifactKey, Arc<Package>>,
 ) -> (
     BTreeMap<FunctionId, Vec<(PackagePath, MemberPath)>>,

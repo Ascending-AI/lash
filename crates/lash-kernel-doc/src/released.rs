@@ -82,6 +82,29 @@ impl ReleasedFunctions {
     ///
     /// [`ImageError`] when it does not.
     pub fn read(bytes: &'static [u8]) -> Result<Self, ImageError> {
+        let image = Self::over_frame(bytes)?;
+        let blob = bytes.len() - image.blob();
+        for at in 0..image.count {
+            let fits =
+                |range: (usize, usize)| range.0.checked_add(range.1).is_some_and(|end| end <= blob);
+            let (name, len) = image.range(at, 2);
+            if !fits(image.range(at, 0))
+                || image.names.get(name..name + len).is_none()
+                || !fits(image.range(at, 9))
+                || !fits(image.range(at, 12))
+            {
+                return Err(ImageError("a record states a range outside it"));
+            }
+            if image.name_order(at) >= image.count {
+                return Err(ImageError("its name order names no record"));
+            }
+        }
+        Ok(image)
+    }
+
+    /// Opens an image already validated by the parent of this worker. Only
+    /// its envelope is read; record validation and merging belong to install.
+    pub fn over_frame(bytes: &'static [u8]) -> Result<Self, ImageError> {
         let word = |at: usize| -> Result<usize, ImageError> {
             bytes
                 .get(at..at + 4)
@@ -104,22 +127,6 @@ impl ReleasedFunctions {
             std::str::from_utf8(names).map_err(|_| ImageError("its names are not UTF-8"))?;
         if image.blob() > bytes.len() {
             return Err(ImageError("it ends inside its tables"));
-        }
-        let blob = bytes.len() - image.blob();
-        for at in 0..image.count {
-            let fits =
-                |range: (usize, usize)| range.0.checked_add(range.1).is_some_and(|end| end <= blob);
-            let (name, len) = image.range(at, 2);
-            if !fits(image.range(at, 0))
-                || image.names.get(name..name + len).is_none()
-                || !fits(image.range(at, 9))
-                || !fits(image.range(at, 12))
-            {
-                return Err(ImageError("a record states a range outside it"));
-            }
-            if image.name_order(at) >= image.count {
-                return Err(ImageError("its name order names no record"));
-            }
         }
         Ok(image)
     }
@@ -284,6 +291,13 @@ impl ValidatedFunctions {
     /// census as `census` gives it. It is read back only by the same build.
     #[must_use]
     pub fn to_image(&self, census: &dyn Fn(&FunctionDefinition) -> Option<BodyCensus>) -> Vec<u8> {
+        self.to_image_with(&|_, definition| census(definition))
+    }
+
+    pub(crate) fn to_image_with(
+        &self,
+        census: &dyn Fn(&FunctionId, &FunctionDefinition) -> Option<BodyCensus>,
+    ) -> Vec<u8> {
         let mut functions: Vec<_> = self.iter().collect();
         functions.sort_by_key(|(function, _)| **function);
         let basis: BTreeSet<FunctionId> = self.basis().iter().copied().collect();
@@ -306,7 +320,7 @@ impl ValidatedFunctions {
             let body = put(&crate::graph_tokens::encode_body(*definition));
             let name = [names.len() as u32, definition.name.as_str().len() as u32];
             names.push_str(definition.name.as_str());
-            let census = census(definition);
+            let census = census(function, definition);
             let mut flags = 0;
             if definition.body().is_some() {
                 flags |= HAS_BODY;

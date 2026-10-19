@@ -1,33 +1,34 @@
 //! Process-local helper preparation. A syntax census reserves disjoint table
 //! ranges without lowering code. First use fills only one helper's tables;
 //! saved sites still select the same body under a fresh library and layout.
+use doc::FrameArray;
 use std::sync::{Arc, OnceLock};
 
 use super::*;
 
 pub(super) struct Body {
-    function: FunctionId,
+    pub(super) function: FunctionId,
     pub(super) base: Base,
-    tables: OnceLock<Tables>,
-    closures: bool,
+    pub(super) tables: OnceLock<Tables>,
+    pub(super) closures: bool,
 }
 
 #[derive(Default)]
 pub(super) struct LibraryTables {
-    pub(super) bodies: Vec<Body>,
+    pub(super) bodies: FrameArray<Body>,
     /// Each library function's body, by library id: `NO_BODY` for one
     /// with none.
-    body_of: Vec<u32>,
+    pub(super) body_of: FrameArray<u32>,
     // Dense owner indexes preserve constant-time code/statement lookup.
-    pub(super) codes: Vec<usize>,
-    pub(super) blocks: Vec<usize>,
-    pub(super) stmts: Vec<usize>,
+    pub(super) codes: FrameArray<usize>,
+    pub(super) blocks: FrameArray<usize>,
+    pub(super) stmts: FrameArray<usize>,
     pub(super) occurrence_at: BTreeMap<Site, usize>,
     pub(super) occurrence_keys: Box<[Vec<u8>]>,
 }
 
 /// A library function with no body to compile.
-const NO_BODY: u32 = u32::MAX;
+pub(super) const NO_BODY: u32 = u32::MAX;
 
 impl LibraryTables {
     /// The body of library function `lib`, when it has one.
@@ -266,7 +267,7 @@ pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
 
 /// A registered function's census: its build's, for a released function,
 /// and computed from its definition otherwise.
-fn census_of(registered: &doc::RegisteredFunction) -> Option<doc::BodyCensus> {
+pub(super) fn census_of(registered: &doc::RegisteredFunction) -> Option<doc::BodyCensus> {
     if registered.released() {
         registered.census()
     } else {
@@ -300,8 +301,8 @@ impl PreparedLibrary {
             lib_at
         });
         let mut tables = LibraryTables {
-            bodies: Vec::with_capacity(order.len()),
-            body_of: Vec::with_capacity(order.len()),
+            bodies: FrameArray::with_capacity(order.len()),
+            body_of: FrameArray::with_capacity(order.len()),
             ..LibraryTables::default()
         };
         let mut sites = 0;
@@ -362,14 +363,15 @@ impl PreparedLibrary {
             registry,
             layout: stated,
             tables,
-            functions,
+            functions: functions.into(),
             lib_at,
             libs,
             missing,
             sites,
             documents: Default::default(),
-            runs,
+            runs: runs.into(),
             plan_sites,
+            frame_index: None,
         }))
     }
 }

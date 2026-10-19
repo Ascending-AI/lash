@@ -250,6 +250,15 @@ pub enum BootstrapFault {
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PoolFault {
+    /// A typed package refusal in the client's package encoding. It stays
+    /// opaque here for the same reason kernel payloads do: protocol types do
+    /// not depend on package authoring or on the kernel machine.
+    #[error("the worker refused the parent's package frame")]
+    Package {
+        #[serde(with = "serde_bytes")]
+        #[schemars(with = "Vec<u8>")]
+        refusal: Vec<u8>,
+    },
     #[error("the worker recovery store failed")]
     Recovery,
     #[error("the worker queue refuses {bytes} bytes")]

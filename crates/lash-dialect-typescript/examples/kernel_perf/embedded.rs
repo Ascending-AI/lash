@@ -43,7 +43,34 @@ pub(super) fn main() -> Result<(), String> {
     } else {
         "\nawait finish(result);\n"
     });
-    let registry = registry();
+    let frame = std::env::var_os("KERNEL_PERF_FRAME")
+        .map(|path| {
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            let held = lash_kernel_package::HeldPackages::from_frame(bytes.into())
+                .map_err(|error| error.to_string())?;
+            let embedding = lash_vm_worker::built_dialects(&Default::default())
+                .and_then(|builder| builder.finish(&held))
+                .map_err(|error| error.to_string())?;
+            let registry = Arc::clone(embedding.registry().map_err(|error| error.to_string())?);
+            let prepared = match charge {
+                lash_kernel_vm::Charge::Exact => embedding
+                    .prepared_library()
+                    .map_err(|error| error.to_string())?
+                    .clone(),
+                lash_kernel_vm::Charge::Off => PreparedLibrary::over_frame(
+                    registry.clone(),
+                    charge,
+                    held.frame_indexes().map_err(|error| error.to_string())?.1,
+                )
+                .map_err(|error| error.to_string())?,
+            };
+            Ok::<_, String>((registry, prepared))
+        })
+        .transpose()?;
+    let (registry, prepared) = match frame {
+        Some((registry, prepared)) => (registry, Some(prepared)),
+        None => (registry(), None),
+    };
 
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
@@ -74,10 +101,12 @@ pub(super) fn main() -> Result<(), String> {
     let program = Program {
         release: pages::RELEASE,
         document: Arc::clone(document.shared()),
-        library: lash_kernel_vm::kernel_internals::in_charge(
-            &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
-            charge,
-        ),
+        library: prepared.unwrap_or_else(|| {
+            lash_kernel_vm::kernel_internals::in_charge(
+                &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
+                charge,
+            )
+        }),
     };
     let library_compile_ns = compile.elapsed().as_nanos();
     // Document compilation is lazy inside start, together with cell setup.
@@ -266,4 +295,16 @@ impl Drop for Instructions {
             libc::close(self.0);
         }
     }
+}
+
+/// Produces exactly the parent frame used by production pool installation.
+#[expect(clippy::disallowed_methods, reason = "explicit benchmark frame output")]
+pub(super) fn write_frame() -> Result<(), String> {
+    let mut args = std::env::args().skip(2);
+    let path = args.next().ok_or("write-frame needs one output path")?;
+    if args.next().is_some() {
+        return Err("write-frame needs exactly one output path".into());
+    }
+    let held = lash_vm_library::lash_packages().map_err(|error| error.to_string())?;
+    std::fs::write(path, held.frame()).map_err(|error| error.to_string())
 }

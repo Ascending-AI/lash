@@ -1,3 +1,4 @@
+use super::Selection;
 use std::fmt::Write as _;
 
 use lash_kernel_doc::{Formula, NativeCall, NativeError, NewObject, Nursery, Type, Value};
@@ -7,8 +8,9 @@ use super::{
     Function, arg, count_arg, definition, integer_value, materialized_text, raise, text_buffer,
 };
 
-pub(super) fn functions() -> Vec<Function> {
+pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     let mut parts = definition(
+        selection,
         "format.decimal_parts",
         &[("number", Type::Float)],
         Type::Tuple(vec![
@@ -22,10 +24,11 @@ pub(super) fn functions() -> Vec<Function> {
     );
     // Binary64 shortest conversion is bounded independently of the value;
     // traversing/copying its digits is priced by the result's deep size.
-    parts.0.charge = Formula::Sum(vec![Formula::Constant(64), parts.0.charge]);
+    parts.charge(|charge| Formula::Sum(vec![Formula::Constant(64), charge]));
     vec![
         parts,
         definition(
+            selection,
             "format.fixed",
             &[("number", Type::Number), ("precision", Type::Int)],
             Type::Text,
@@ -33,6 +36,7 @@ pub(super) fn functions() -> Vec<Function> {
             fixed,
         ),
         definition(
+            selection,
             "format.scientific",
             &[("number", Type::Float), ("precision", Type::Int)],
             Type::Text,
@@ -40,6 +44,7 @@ pub(super) fn functions() -> Vec<Function> {
             scientific,
         ),
         definition(
+            selection,
             "format.radix",
             &[("integer", Type::Int), ("radix", Type::Int)],
             Type::Text,
@@ -47,6 +52,7 @@ pub(super) fn functions() -> Vec<Function> {
             radix,
         ),
         definition(
+            selection,
             "format.pad",
             &[
                 ("text", Type::Text),

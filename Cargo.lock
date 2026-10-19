@@ -2111,6 +2111,7 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-vm-library",
  "lash-internal-vm-worker",
  "lash-kernel-check",
  "lash-kernel-conformance",
@@ -2118,6 +2119,7 @@ dependencies = [
  "lash-kernel-doc",
  "lash-kernel-edit",
  "lash-kernel-lib",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
@@ -2232,6 +2234,9 @@ dependencies = [
 [[package]]
 name = "lash-helper-labels"
 version = "0.0.0-dev"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "lash-internal-checkpoint-encoder"
@@ -2747,6 +2752,7 @@ dependencies = [
  "lash-internal-vm-worker",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
@@ -3083,9 +3089,11 @@ dependencies = [
  "lash-internal-core-execution",
  "lash-internal-core-store",
  "lash-internal-vm-broker",
+ "lash-internal-vm-library",
  "lash-internal-vm-protocol",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
@@ -3167,6 +3175,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-migrate",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
@@ -3284,6 +3293,7 @@ name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
+ "libc",
  "num-bigint",
  "num-traits",
  "schemars",
@@ -3351,6 +3361,7 @@ dependencies = [
  "lash-kernel-migrate",
  "lash-kernel-state",
  "lash-kernel-vm",
+ "rmp-serde",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3555,6 +3566,7 @@ dependencies = [
  "lash-internal-trace",
  "lash-internal-transport-failure",
  "lash-internal-vm-client",
+ "lash-internal-vm-library",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
  "lash-kernel-check",

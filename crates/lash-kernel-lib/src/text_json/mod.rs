@@ -19,7 +19,24 @@ use lash_kernel_doc::{
 
 pub use json::{decode_number, parse_json, stringify_json};
 
-pub(super) type Function = (FunctionDefinition, Arc<dyn NativeFunction>);
+pub(super) enum Selection<'a> {
+    Definitions,
+    Native(&'a str),
+}
+pub(super) struct Function {
+    definition: Option<FunctionDefinition>,
+    native: Option<Arc<dyn NativeFunction>>,
+}
+impl Function {
+    fn charge(&mut self, make: impl FnOnce(Formula) -> Formula) {
+        if let Some(definition) = &mut self.definition {
+            definition.charge = make(std::mem::replace(
+                &mut definition.charge,
+                Formula::Constant(0),
+            ));
+        }
+    }
+}
 
 struct Native {
     function: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
@@ -52,13 +69,31 @@ impl NativeFunction for Native {
 /// `json.classify` instead charges one plus the work encoded in its result,
 /// so an early refusal never prices the unvisited input.
 /// Unicode-dependent names include the pinned Unicode data version.
-pub fn text_json() -> Vec<Function> {
-    let mut functions = text::functions();
-    functions.extend(bytes::functions());
-    functions.extend(json::functions());
-    functions.extend(classify::functions());
-    functions.extend(format::functions());
+fn catalogue(selection: &Selection<'_>) -> Vec<Function> {
+    let mut functions = text::functions(selection);
+    functions.extend(bytes::functions(selection));
+    functions.extend(json::functions(selection));
+    functions.extend(classify::functions(selection));
+    functions.extend(format::functions(selection));
     functions
+}
+
+pub fn text_json() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
+    catalogue(&Selection::Definitions)
+        .into_iter()
+        .map(|function| match (function.definition, function.native) {
+            (Some(definition), Some(native)) => (definition, native),
+            _ => unreachable!("definition selection builds each definition and native"),
+        })
+        .collect()
+}
+
+/// Constructs one native from the same catalogue that authors its definition.
+/// No definition or unrelated native is constructed on this path.
+pub fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
+    catalogue(&Selection::Native(name))
+        .into_iter()
+        .find_map(|function| function.native)
 }
 
 /// Adds each text, bytes, JSON and format native to the registered
@@ -86,18 +121,20 @@ pub fn register_text_json(registry: &mut FunctionRegistry) -> Result<(), Registr
 /// A definition whose parameters are named as in kernel text: a name that
 /// ends in `?` is an optional parameter.
 fn definition(
+    selection: &Selection<'_>,
     name: &str,
     params: &[(&str, Type)],
     result: Type,
     errors: &[&str],
     native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
 ) -> Function {
-    prepared_definition(name, params, result, errors, native, None)
+    prepared_definition(selection, name, params, result, errors, native, None)
 }
 
 /// [`definition`], its native answering first by `prepared` where that
 /// entry's guard holds.
 fn prepared_definition(
+    selection: &Selection<'_>,
     name: &str,
     params: &[(&str, Type)],
     result: Type,
@@ -105,6 +142,21 @@ fn prepared_definition(
     native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
     prepared: Option<PreparedNative>,
 ) -> Function {
+    if let Selection::Native(selected) = selection {
+        return Function {
+            definition: None,
+            native: (*selected == name).then(|| {
+                Arc::new(Native {
+                    function: native,
+                    arity: params
+                        .iter()
+                        .filter(|(name, _)| !name.ends_with('?'))
+                        .count()..=params.len(),
+                    prepared,
+                }) as Arc<dyn NativeFunction>
+            }),
+        };
+    }
     // All names are literals supplied by this module, or literals followed by
     // decimal Unicode-version components; none comes from guest input.
     let name = match FunctionName::new(name) {
@@ -130,8 +182,8 @@ fn prepared_definition(
             .collect(),
     );
     let arity = params.iter().filter(|param| !param.optional).count()..=params.len();
-    (
-        FunctionDefinition {
+    Function {
+        definition: Some(FunctionDefinition {
             kernel: KERNEL_VERSION,
             name,
             signature: Signature { params, result },
@@ -140,13 +192,13 @@ fn prepared_definition(
             guard: None,
             implementation: Implementation::Native,
             native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
-        },
-        Arc::new(Native {
+        }),
+        native: Some(Arc::new(Native {
             function: native,
             arity,
             prepared,
-        }),
-    )
+        })),
+    }
 }
 
 fn raise(kind: &'static str, message: impl Into<String>) -> NativeError {

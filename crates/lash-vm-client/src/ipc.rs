@@ -177,6 +177,50 @@ impl Worker {
         Ok(())
     }
 
+    pub(crate) fn install_packages(
+        &mut self,
+        bytes: &[u8],
+        deadline: Instant,
+    ) -> Result<(), PoolError> {
+        self.send_encoded(
+            bytes,
+            crate::IpcTraffic::POOL_START_KIND,
+            deadline.saturating_duration_since(Instant::now()),
+        )?;
+        let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
+        let started = Instant::now();
+        let bytes = match self
+            .inbound
+            .read_frame(&mut self.pipe, &self.codec, deadline)
+        {
+            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
+                return Err(self.crashed());
+            }
+            result => result.map_err(|error| error.with_silence(started.elapsed()))?,
+        };
+        let reply = decode_pool_measured(
+            &self.codec,
+            &bytes,
+            bytes.capacity() + self.inbound.buffer_capacity(),
+            self.measurements.as_ref(),
+        );
+        if let (Some(scope), Some(start)) = (&self.phases, observed) {
+            let kind = if reply.is_ok() {
+                crate::IpcTraffic::POOL_STARTED_KIND
+            } else {
+                crate::IpcTraffic::UNDECODABLE_KIND
+            };
+            scope.frame(
+                "receive",
+                start,
+                Some("received"),
+                Some(crate::IpcTraffic::RECEIVED_KINDS[kind]),
+                Some(bytes.len()),
+            );
+        }
+        crate::packages::installed(reply?, &self.codec)
+    }
+
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
         let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
         let started = Instant::now();
@@ -663,6 +707,33 @@ fn decode_measured(
     frame
 }
 
+fn decode_pool_measured(
+    codec: &FrameCodec,
+    bytes: &[u8],
+    peak_buffers: usize,
+    measurements: Option<&crate::measurements::SharedMeasurements>,
+) -> Result<lash_vm_protocol::PoolStarted, PoolError> {
+    let reply = codec.decode_pool_started(bytes).map_err(PoolError::from);
+    if let Some(measurements) = measurements {
+        let mut measurements = measurements
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let kind = if reply.is_ok() {
+            crate::IpcTraffic::POOL_STARTED_KIND
+        } else {
+            crate::IpcTraffic::UNDECODABLE_KIND
+        };
+        measurements.counters.ipc.received_kind(kind, bytes.len());
+        measurements.counters.peak_buffer_bytes = measurements
+            .counters
+            .peak_buffer_bytes
+            .max(peak_buffers as u64);
+        measurements.counters.ipc_received_messages += 1;
+        measurements.counters.ipc_received_bytes += bytes.len() as u64;
+    }
+    reply
+}
+
 #[cfg(test)]
 mod traffic_tests {
     use super::*;
@@ -680,6 +751,15 @@ mod traffic_tests {
         let codec = FrameCodec::new(DecodeLimits::standard());
         let mut fence = MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1));
         let measurements = Arc::new(Mutex::new(Measurements::default()));
+        let installed = codec
+            .encode_pool_started(&crate::packages::result(Ok(())).unwrap())
+            .unwrap();
+        decode_pool_measured(&codec, &installed, installed.len(), Some(&measurements)).unwrap();
+        assert_eq!(
+            measurements.lock().unwrap().counters.ipc.received[IpcTraffic::POOL_STARTED_KIND]
+                .frames,
+            1
+        );
         for capacity in [16 * 1024, FRAME_HEADER_BYTES] {
             let (mut tx, mut rx) = UnixStream::pair().unwrap();
             let messages = [

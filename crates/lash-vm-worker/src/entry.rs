@@ -3,8 +3,9 @@ use crate::PoolError;
 use crate::embedding::{EmbedError, Embedder, Embedding};
 use crate::process::inherited_pipe;
 use crate::worker::Server;
-use lash_vm_client::ipc::Bootstrap;
+use lash_vm_client::ipc::{Bootstrap, read_frame, write_frame};
 use lash_vm_protocol::*;
+use std::time::Instant;
 
 /// Enter the credential-free worker with the host's configuration: the
 /// dialects it names and the natives of its own packages, assembled once
@@ -20,8 +21,7 @@ pub fn worker_entry(embed: &Embed) -> Result<bool, PoolError> {
     worker_entry_inner(embed, None)
 }
 
-/// Configures what a worker runs from the parent's working policy: its
-/// natives and dialects, never its packages.
+/// Configures the worker's natives and dialects, never its packages.
 pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedder, EmbedError>;
 
 #[cfg(feature = "testing")]
@@ -67,7 +67,7 @@ fn worker_entry_inner(
         unsafe_code,
         reason = "entry consumes the launcher's inherited IPC descriptor"
     )]
-    let pipe = unsafe { inherited_pipe(fd)? };
+    let mut pipe = unsafe { inherited_pipe(fd)? };
     let bootstrap: Bootstrap = serde_json::from_str(
         args.get(index + 2)
             .ok_or_else(|| PoolError::breach(BootstrapFault::MissingBounds))?,
@@ -82,21 +82,46 @@ fn worker_entry_inner(
     .with_detail_limit(bootstrap.tuning.diagnostic_bytes);
     // A registry that cannot be assembled is a defect of this build: the
     // worker never becomes ready, and the pool reports its bootstrap.
-    // The worker binds to lash's packages, the ones its parent holds when
-    // it installs none of its own.
-    let embedding = embed(&bootstrap.tuning)
-        .and_then(|embedder| {
-            let packages = lash_vm_library::lash_packages()
-                .map_err(|error| EmbedError::Registry(error.to_string()))?;
-            embedder.finish(&packages)
+    let embedder = embed(&bootstrap.tuning).map_err(|error| {
+        PoolError::breach(ProtocolBreach::Machine {
+            detail: Detail::new(error),
         })
-        .map_err(|error| {
-            PoolError::breach(ProtocolBreach::Machine {
-                detail: Detail::new(error),
-            })
-        })?;
+    })?;
     #[cfg(target_os = "linux")]
     crate::process::confine(&bootstrap.confinement)?;
+    let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
+    let ready = codec.encode_worker(&WorkerFrame {
+        header: fence.next_header(),
+        message: WorkerMessage::Ready {
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+        },
+    })?;
+    write_frame(&mut pipe, &ready, Instant::now() + bootstrap.serialization)?;
+    let bytes = read_frame(
+        &mut pipe,
+        &codec,
+        Instant::now() + bootstrap.tuning.parent_wait,
+    )?;
+    let held = lash_vm_client::packages::read(codec.decode_pool_start(&bytes)?, &codec);
+    let embedding = held.and_then(|held| {
+        embedder.finish(&held).map_err(|error| match error {
+            EmbedError::Package(refusal) => PoolError::Package(refusal),
+            other => PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(other),
+            }),
+        })
+    });
+    let embedding = match embedding {
+        Ok(embedding) => embedding,
+        Err(PoolError::Package(refusal)) => {
+            let reply = lash_vm_client::packages::result(Err(refusal.clone()))?;
+            let bytes = codec.encode_pool_started(&reply)?;
+            write_frame(&mut pipe, &bytes, Instant::now() + bootstrap.serialization)?;
+            return Err(PoolError::Package(refusal));
+        }
+        Err(error) => return Err(error),
+    };
     run_server(pipe, codec, bootstrap, &embedding, &mut hook)?;
     Ok(true)
 }
@@ -109,6 +134,7 @@ fn run_server(
     hook: &mut Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<(), PoolError> {
     let mut server = Server::new(pipe, codec, bootstrap, embedding)?;
+    server.installed()?;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(hook)))
         .unwrap_or_else(|panic| {
             let reason = panic

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 /// `true` for, under its own equality, order or truth, in parameter order.
 /// A reply receiver takes one effect reply and returns that reply in its
 /// dialect's representation; it neither selects a part nor converts its kind.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemberDisplay {
     pub title: String,
     pub comparison: Option<Comparison>,
@@ -31,7 +31,7 @@ impl MemberDisplay {
 /// What a comparison function decides. A binary comparison takes its left
 /// operand first: `Contains` holds when the first argument holds the
 /// second, `StartsWith` when the first begins with the second.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Comparison {
     Eq,
     Ne,

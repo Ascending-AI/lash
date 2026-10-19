@@ -17,7 +17,7 @@
 //! first document arrives: every held artifact's code, lash's packages'
 //! natives and plans, and the host's natives, each by identity. lash's
 //! packages are made once, when `lash-vm-releases` is built; a worker
-//! registers their images as built (FIG-5796, FIG-6843).
+//! opens its parent's merged image and binds its build's natives.
 //!
 //! The embedding also holds the helper releases its parent's dialects
 //! retain (FIG-5799, `lash-vm-releases`): names resolve against the
@@ -31,7 +31,7 @@ use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
 use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction};
-use lash_kernel_package::{HeldPackages, Origin, PackageInstall, PackageRefusal};
+use lash_kernel_package::{HeldPackages, PackageInstall, PackageRefusal};
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::graph::ReleaseGraph;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
@@ -71,19 +71,12 @@ fn cached<T>(
     slot.get_or_init(init).as_ref().map_err(Clone::clone)
 }
 
-/// Everything a worker registered at startup.
+/// What a worker holds from its parent's pool-start frame.
 pub struct Embedding {
     /// The functions as registered, each written for the kernel version
     /// the dialects lower to.
     written: Arc<FunctionRegistry>,
-    /// `written` and each function redeclared for every successor version
-    /// the build interprets, made when first asked for: a worker that runs
-    /// no successor's document never redeclares (FIG-5796).
-    interpreted: OnceLock<Result<Arc<FunctionRegistry>, EmbedError>>,
-    /// Prepared indexes of `written` and `interpreted`, shared by every
-    /// run of the worker. Each helper body compiles only when it is needed.
-    prepared_written: OnceLock<PreparedLibrary>,
-    prepared_interpreted: OnceLock<PreparedLibrary>,
+    prepared: OnceLock<PreparedLibrary>,
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Dialect>,
     /// The helper release the embedding's own names are.
@@ -168,65 +161,21 @@ impl Embedding {
         })
     }
 
-    /// The registry a machine runs documents against: each function once
-    /// for every kernel version this build interprets. A build that also
-    /// interprets the successor of the version the dialects write holds
-    /// every function redeclared for it, by identity, from the first call.
+    /// The fixed registry a machine runs documents against, interpreted by
+    /// the parent and held unchanged from the pool-start frame.
     ///
     /// # Errors
     ///
-    /// [`EmbedError::Registry`] when a function cannot be redeclared: a
-    /// defect of the build.
+    /// None after the frame was installed successfully.
     pub fn registry(&self) -> Result<&Arc<FunctionRegistry>, EmbedError> {
-        cached(&self.interpreted, || {
-            let migrations: Vec<_> = lash_kernel_doc::KernelVersion::ALL
-                .iter()
-                .filter_map(|version| lash_kernel_migrate::migration_from(*version))
-                .collect();
-            if migrations.is_empty() {
-                return Ok(Arc::clone(&self.written));
-            }
-            let mut registry = FunctionRegistry::clone(&self.written);
-            for migration in migrations {
-                lash_kernel_migrate::migrate_registry(&mut registry, migration)
-                    .map_err(|error| EmbedError::Registry(error.to_string()))?;
-            }
-            Ok(Arc::new(registry))
-        })
+        Ok(&self.written)
     }
 
-    /// The registry a machine runs a document written for kernel version
-    /// `kernel` against: the functions as registered when the dialects
-    /// write that version, and [`Embedding::registry`] otherwise.
-    ///
-    /// # Errors
-    ///
-    /// [`Embedding::registry`]'s.
-    pub(crate) fn registry_for(&self, kernel: u32) -> Result<&Arc<FunctionRegistry>, EmbedError> {
-        if kernel == lash_kernel_doc::KERNEL_VERSION {
-            return Ok(&self.written);
-        }
-        self.registry()
-    }
-
-    /// The prepared library a machine runs a document written for kernel
-    /// version `kernel` over: [`Embedding::registry_for`]'s registry, its
-    /// library bodies compiled on first use.
-    ///
-    /// # Errors
-    ///
-    /// [`Embedding::registry`]'s.
-    pub(crate) fn prepared_for(&self, kernel: u32) -> Result<&PreparedLibrary, EmbedError> {
-        let prepared = if kernel == lash_kernel_doc::KERNEL_VERSION {
-            &self.prepared_written
-        } else {
-            &self.prepared_interpreted
-        };
-        if let Some(library) = prepared.get() {
-            return Ok(library);
-        }
-        let registry = self.registry_for(kernel)?;
-        Ok(prepared.get_or_init(|| PreparedLibrary::new(Arc::clone(registry))))
+    /// The library reservation the parent computed for this same image.
+    pub fn prepared_library(&self) -> Result<&PreparedLibrary, EmbedError> {
+        self.prepared
+            .get()
+            .ok_or_else(|| EmbedError::Registry("unprepared frame".into()))
     }
 
     /// Lowers `source` as the installed dialect `dialect` does in `mode`:
@@ -300,7 +249,7 @@ impl Embedder {
     }
 
     /// Binds this configuration to `packages`, the parent's one
-    /// registration: registers every held artifact's code, lash's natives
+    /// registration: views its frozen code and binds this build's natives
     /// and plans and the host's natives, each by identity.
     ///
     /// # Errors
@@ -313,54 +262,50 @@ impl Embedder {
         if self.dialects.is_empty() {
             return Err(EmbedError::NoDialect);
         }
-        let mut install = lash_install(packages)?;
-        for (function, native) in self.natives.natives {
-            if install.natives.insert(function, native).is_some() {
-                return Err(EmbedError::Registry(format!(
-                    "lash implements {function}; a host supplies no native for it"
-                )));
-            }
-        }
-        let mut registry = FunctionRegistry::new();
-        packages.register_into(&mut registry, &|function| {
-            install.natives.get(function).cloned()
-        })?;
-        for function in install.natives.keys() {
-            if registry
-                .get(function)
-                .is_none_or(|registered| !registered.states_native())
-            {
-                return Err(PackageRefusal::NativeUnused {
-                    function: *function,
-                }
-                .into());
-            }
-        }
+        let (image, index) = packages.frame_indexes()?;
+        let mut registry = FunctionRegistry::over_frame(image)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         registry
-            .install_plans(&install.plans)
+            .bind_native_tables(
+                packages.frame_positions()?,
+                crate::native_tables::native_tables(),
+                &self.natives.natives,
+            )
+            .map_err(|error| match error {
+                lash_kernel_doc::RegistryError::FrameNativeMissing { function, name } => {
+                    EmbedError::Package(PackageRefusal::NativeMissing { function, name })
+                }
+                lash_kernel_doc::RegistryError::FrameNativeUnused { function } => {
+                    EmbedError::Package(PackageRefusal::NativeUnused { function })
+                }
+                other => EmbedError::Registry(other.to_string()),
+            })?;
+        #[cfg(feature = "dialect-typescript")]
+        registry
+            .bind_frame_plans(packages.frame_positions()?, lash_ext_ts_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        if let Some((function, registered)) = registry.iter().find(|(_, registered)| {
-            registered.states_native() && !registered.has_body() && registered.native().is_none()
-        }) {
-            return Err(PackageRefusal::NativeMissing {
-                function: *function,
-                name: registered.definition().name.clone(),
-            }
-            .into());
-        }
-        // The names a front end resolves are those of the version it
-        // writes. A successor's functions are redeclared when a document
-        // of it first runs (`Embedding::registry`).
-        let library = NamedLibrary::from_registry(&registry)
+        #[cfg(feature = "dialect-python")]
+        registry
+            .bind_frame_plans(packages.frame_positions()?, lash_ext_py_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        let own: std::collections::BTreeSet<_> = packages
+            .view(&packages.own())
+            .map_err(|error| EmbedError::Registry(error.to_string()))?
+            .packages()
+            .flat_map(|package| package.code().ids().iter().copied())
+            .collect();
+        let library = NamedLibrary::resolving(&registry, |function| own.contains(function))
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        let registry = Arc::new(registry);
+        let prepared =
+            PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
+                .map_err(|error| EmbedError::Registry(error.to_string()))?;
         let releases = lash_vm_library::standard_helper_releases()
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         Ok(Embedding {
             library,
-            written: Arc::new(registry),
-            interpreted: OnceLock::new(),
-            prepared_written: OnceLock::new(),
-            prepared_interpreted: OnceLock::new(),
+            written: registry,
+            prepared: OnceLock::from(prepared),
             dialects: self.dialects,
             writes: HELPER_RELEASE,
             releases: releases
@@ -370,28 +315,6 @@ impl Embedder {
             manifests: OnceLock::new(),
         })
     }
-}
-
-/// The natives and plans of lash's held packages, by identity: each one's
-/// crate implements it by name in a registry holding every held artifact,
-/// requirements first, and hands it on.
-fn lash_install(packages: &HeldPackages) -> Result<PackageInstall, EmbedError> {
-    let mut registry = FunctionRegistry::declarations();
-    packages.register_into(&mut registry, &|_| None)?;
-    let mut functions = Vec::new();
-    for package in packages.in_order() {
-        if package.origin() == Origin::Lash {
-            crate::library::implement(
-                &package.path().to_string(),
-                &mut registry,
-                package.code().ids(),
-                package.digest(),
-            )
-            .map_err(EmbedError::Registry)?;
-            functions.extend_from_slice(package.code().ids());
-        }
-    }
-    Ok(PackageInstall::of_registry(&registry, &functions))
 }
 
 /// The TypeScript dialect, its parser's stack sized by the parent's working
@@ -681,65 +604,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Target 5: the worker registers every function before a document
-    /// arrives, and a document resolves against nothing else. A TypeScript
-    /// embedding holds the kernel library, the machine's functions, the
-    /// regular-expression extension and the TypeScript dialect's helpers,
-    /// each under one name, and the functions of the helper releases it
-    /// retains under none (FIG-5799), each once for every kernel version
-    /// the build interprets: a build that interprets a version's successor
-    /// holds each function redeclared for it too (FIG-5793), from when a
-    /// document of the successor first needs them (FIG-5796).
-    #[test]
-    fn an_embedding_registers_every_function_at_startup() {
-        let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
-        let registry = embedding.registry().expect("every version's functions");
-        let names: Vec<String> = embedding
-            .library()
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect();
-        for name in [
-            "num.add",
-            "text.concat",
-            "collection.map",
-            "deref",
-            "tasks.unfinished",
-            "regex.ecma.exec",
-            "ts.number.parse",
-        ] {
-            assert!(
-                names.iter().any(|known| known == name),
-                "{name} is registered"
-            );
-        }
-        let written = embedding
-            .registry_for(lash_kernel_doc::KERNEL_VERSION)
-            .expect("the functions as registered");
-        let named: BTreeSet<FunctionId> = embedding.library().iter().map(|(_, id)| id).collect();
-        assert!(
-            named.iter().all(|function| written.get(function).is_some()),
-            "every name resolves to a registered function"
-        );
-        for version in lash_kernel_doc::KernelVersion::ALL {
-            let held = registry
-                .iter()
-                .filter(|(_, function)| function.definition().kernel == version.number())
-                .count();
-            assert_eq!(
-                held,
-                written.len(),
-                "kernel version {version} holds every registered function once"
-            );
-        }
-        assert_eq!(
-            registry.iter().count(),
-            written.len() * lash_kernel_doc::KernelVersion::ALL.len(),
-            "every registered function is of a version the build interprets"
-        );
-        assert!(embedding.dialects.contains_key("typescript"));
-    }
-
     /// A parent holds exactly the functions a worker of every dialect the
     /// build holds does, without linking a dialect or an extension
     /// (FIG-5812): the registry it reads from each built dialect's retained
@@ -751,6 +615,19 @@ pub(crate) mod tests {
     /// every session it opens links against the same one (FIG-5759).
     #[test]
     fn a_parent_holds_exactly_the_functions_a_worker_holds() {
+        let packages = lash_vm_library::lash_packages().expect("the parent's holdings");
+        let child = HeldPackages::from_frame(packages.frame()).expect("the child's frame");
+        for (key, package) in packages.artifacts() {
+            assert_eq!(
+                package.display(),
+                child
+                    .artifacts()
+                    .get(key)
+                    .expect("the same artifact")
+                    .display(),
+                "POOL-FRAME carries display facts intact, including comparisons and reply receivers"
+            );
+        }
         let parent = lash_vm_library::lash_packages()
             .map(|packages| std::sync::Arc::clone(packages.functions()))
             .expect("the parent's functions");
@@ -764,7 +641,10 @@ pub(crate) mod tests {
             |registry: &FunctionRegistry| -> BTreeMap<FunctionId, FunctionDefinition> {
                 registry
                     .iter()
-                    .map(|(function, registered)| {
+                    .map(|(function, _)| {
+                        let registered = registry
+                            .get(function)
+                            .expect("each held identity is indexed");
                         (
                             *function,
                             FunctionDefinition::clone(registered.definition()),
@@ -786,36 +666,6 @@ pub(crate) mod tests {
                 );
             }
         }
-    }
-
-    /// A worker that starts redeclares nothing for a successor version: a
-    /// document written in the version the dialects lower runs against the
-    /// functions as registered, and the successor's are redeclared when one
-    /// of its documents first needs them (FIG-5796).
-    #[cfg(feature = "synthetic-next")]
-    #[test]
-    fn a_successor_is_redeclared_when_a_document_of_it_first_needs_it() {
-        let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
-        let written = embedding
-            .registry_for(lash_kernel_doc::KERNEL_VERSION)
-            .expect("the functions as registered");
-        assert!(Arc::ptr_eq(written, &embedding.written));
-        assert!(
-            embedding.interpreted.get().is_none(),
-            "nothing is redeclared before a successor's document runs"
-        );
-        let next = embedding
-            .registry_for(lash_kernel_doc::KernelVersion::SyntheticNext.number())
-            .expect("the successor's functions");
-        assert!(Arc::ptr_eq(
-            next,
-            embedding.registry().expect("every version's functions")
-        ));
-        assert_eq!(
-            next.len(),
-            2 * written.len(),
-            "each function once per version"
-        );
     }
 
     /// The host flow cells under `examples/typescript-host-flows/` lower as a

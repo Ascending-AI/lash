@@ -1,3 +1,4 @@
+use super::Selection;
 use std::borrow::Cow;
 
 use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Type, Value};
@@ -7,9 +8,10 @@ use super::{
     Function, arg, definition, integer_value, materialized_text, ordering, raise, room, sequence,
     sequence_type,
 };
-pub(super) fn functions() -> Vec<Function> {
+pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     vec![
         definition(
+            selection,
             "bytes.from_octets",
             &[("items", sequence_type(Type::Int))],
             Type::Bytes,
@@ -17,6 +19,7 @@ pub(super) fn functions() -> Vec<Function> {
             from_octets,
         ),
         definition(
+            selection,
             "bytes.slice",
             &[
                 ("bytes", Type::Bytes),
@@ -28,6 +31,7 @@ pub(super) fn functions() -> Vec<Function> {
             slice,
         ),
         definition(
+            selection,
             "bytes.concat",
             &[("bytes", Type::Bytes), ("other", Type::Bytes)],
             Type::Bytes,
@@ -35,6 +39,7 @@ pub(super) fn functions() -> Vec<Function> {
             concat,
         ),
         definition(
+            selection,
             "bytes.compare",
             &[("bytes", Type::Bytes), ("other", Type::Bytes)],
             Type::Int,
@@ -42,6 +47,7 @@ pub(super) fn functions() -> Vec<Function> {
             compare,
         ),
         definition(
+            selection,
             "bytes.utf8_encode",
             &[("text", Type::Text)],
             Type::Bytes,
@@ -49,6 +55,7 @@ pub(super) fn functions() -> Vec<Function> {
             encode,
         ),
         definition(
+            selection,
             "bytes.utf8_decode",
             &[("bytes", Type::Bytes)],
             Type::Text,

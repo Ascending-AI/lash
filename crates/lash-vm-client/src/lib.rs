@@ -12,6 +12,8 @@ pub use lash_vm_broker::kernel::state as graph;
 pub mod ipc;
 mod machine;
 mod measurements;
+#[doc(hidden)]
+pub mod packages;
 mod phases;
 mod pool;
 pub use phases::{EffectPhase, EffectPhases};

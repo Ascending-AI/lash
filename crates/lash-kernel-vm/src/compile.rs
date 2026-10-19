@@ -44,6 +44,7 @@ pub(crate) mod islands;
 pub(crate) mod kind_test;
 mod library;
 pub(crate) use library::{Lib, LibRun, PreparedPlan};
+mod frame;
 mod lazy;
 pub use lazy::body_census;
 mod lower;
@@ -232,13 +233,13 @@ struct Prepared {
     tables: lazy::LibraryTables,
     /// Every registered function, in the layout's order, each prepared
     /// when first asked for.
-    libs: Box<[std::sync::OnceLock<lazy::LibSlot>]>,
-    functions: Vec<FunctionId>,
+    libs: doc::FrameArray<std::sync::OnceLock<lazy::LibSlot>>,
+    functions: doc::FrameArray<FunctionId>,
     /// Each library id by its function's registry position, when the
     /// layout permutes them; the position itself otherwise.
     lib_at: Option<Box<[u32]>>,
-    runs: Vec<Runs>,
-    plan_sites: Vec<u32>,
+    runs: doc::FrameArray<Runs>,
+    plan_sites: doc::FrameArray<u32>,
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
@@ -246,6 +247,7 @@ struct Prepared {
     /// end.
     sites: u32,
     documents: std::sync::Mutex<preparation::Documents>,
+    frame_index: Option<&'static [u8]>,
 }
 
 impl fmt::Debug for PreparedLibrary {
@@ -274,12 +276,14 @@ impl PreparedLibrary {
         } else {
             self.0
                 .alternative
-                .get_or_init(|| {
-                    Self::with_layout_and_charge(
+                .get_or_init(|| match self.0.frame_index {
+                    Some(index) => Self::over_frame(self.0.registry.clone(), charge, index)
+                        .unwrap_or_else(|error| panic!("library frame allocation: {error}")),
+                    None => Self::with_layout_and_charge(
                         Arc::clone(&self.0.registry),
                         self.0.layout,
                         charge,
-                    )
+                    ),
                 })
                 .clone()
         }

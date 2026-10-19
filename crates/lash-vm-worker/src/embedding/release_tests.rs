@@ -25,9 +25,7 @@ fn every_function_of_a_retained_helper_release_is_held() {
 }
 
 fn every_function_of_release_one_is_held(embedding: &super::Embedding) {
-    let written = embedding
-        .registry_for(lash_kernel_doc::KERNEL_VERSION)
-        .expect("the functions as registered");
+    let written = embedding.registry().expect("the functions as registered");
     let first = embedding
         .helper_releases()
         .next()

@@ -2,6 +2,9 @@
     clippy::expect_used,
     reason = "fault-injection fixture requires its declared bootstrap inputs"
 )]
+#[path = "../fixture/pool_package.rs"]
+mod pool_package;
+
 #[expect(
     clippy::disallowed_methods,
     reason = "fault-injection executable deliberately aborts and probes process inheritance"
@@ -28,13 +31,14 @@ fn main() {
         let _ = pipe.read_exact(&mut [0]);
         return;
     }
+    if mode == "bootstrap_delayed" {
+        // Delay the real bootstrap so its frame is installed by the normal
+        // entry after the profiled build's extra startup allowance.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
     if matches!(
         mode,
-        "protocol_below"
-            | "protocol_above"
-            | "opposite_generation"
-            | "crate_version"
-            | "bootstrap_delayed"
+        "protocol_below" | "protocol_above" | "opposite_generation" | "crate_version"
     ) {
         use lash_vm_protocol::*;
         use std::io::Write;
@@ -49,11 +53,6 @@ fn main() {
             reason = "fixture consumes the socket passed by its owning launcher"
         )]
         let mut pipe = unsafe { std::os::unix::net::UnixStream::from_raw_fd(socket) };
-        if mode == "bootstrap_delayed" {
-            // Arrive after the law's one-second live silence window, but
-            // within the profiled build's separate startup allowance.
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        }
         let protocol_version = match mode {
             "protocol_below" => MIN_SUPPORTED_WORKER_PROTOCOL_VERSION - 1,
             "protocol_above" => WORKER_PROTOCOL_VERSION + 1,
@@ -179,13 +178,37 @@ fn main() {
     };
     // The pool laws run under a host that names TypeScript alone and under
     // one that names every dialect the fixture is built with (FIG-5990).
-    let embed: &lash_vm_worker::Embed = if args.iter().any(|arg| arg == "--dialects=typescript") {
-        &|tuning| lash_vm_worker::Embedder::new().dialect(lash_vm_worker::typescript(tuning)?)
-    } else {
-        &lash_vm_worker::built_dialects
+
+    let typescript_only = args.iter().any(|arg| arg == "--dialects=typescript");
+    let package_native = mode == "package_native";
+    let embed = move |tuning: &lash_vm_client::WorkerTuning| {
+        let embedder = if typescript_only {
+            lash_vm_worker::Embedder::new().dialect(lash_vm_worker::typescript(tuning)?)?
+        } else {
+            lash_vm_worker::built_dialects(tuning)?
+        };
+        if package_native {
+            let function = lash_kernel_doc::parse_definition(pool_package::BOTH)
+                .expect("the shipped package fixture")
+                .identity();
+            embedder.native(function, std::sync::Arc::new(Same))
+        } else {
+            Ok(embedder)
+        }
     };
-    match lash_vm_worker::worker_entry_with_hook(embed, &mut hook) {
+    match lash_vm_worker::worker_entry_with_hook(&embed, &mut hook) {
         Ok(true) => {}
         _ => std::process::exit(1),
+    }
+}
+
+pub struct Same;
+impl lash_kernel_doc::arena::native::NativeFunction for Same {
+    fn call(
+        &self,
+        call: lash_kernel_doc::arena::native::NativeCall<'_, '_>,
+    ) -> Result<lash_kernel_doc::arena::Value, lash_kernel_doc::arena::native::NativeError> {
+        call.counter.spend(1)?;
+        Ok(call.args.values()[0])
     }
 }

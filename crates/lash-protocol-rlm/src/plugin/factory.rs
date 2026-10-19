@@ -18,7 +18,7 @@ pub struct RlmProtocolPluginFactory {
     workers: lash_vm_client::service::Service,
     /// The library functions the workers were assembled with; `None` is
     /// the embedding lash ships.
-    worker_functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
+    packages: Option<Arc<lash_kernel_package::HeldPackages>>,
     /// The host's process preparation owner survives runtime binding.
     process_factory: std::sync::OnceLock<lash_vm_runtime::KernelProcessPluginFactory>,
     #[cfg(test)]
@@ -45,7 +45,7 @@ impl RlmProtocolPluginFactory {
             config,
             dialects: vec![dialect],
             workers: lash_vm_client::service::Service::default(),
-            worker_functions: None,
+            packages: None,
             process_factory: std::sync::OnceLock::new(),
             #[cfg(test)]
             process_factory_preparations: std::sync::atomic::AtomicUsize::new(0),
@@ -72,7 +72,10 @@ impl RlmProtocolPluginFactory {
     /// service lowers every cell and hosts every cell's machine.
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
         self.process_factory.take();
-        self.workers = workers;
+        self.workers = match &self.packages {
+            Some(packages) => workers.with_packages(packages.clone()),
+            None => workers,
+        };
         self
     }
 
@@ -116,15 +119,11 @@ impl RlmProtocolPluginFactory {
         self.helpers.is_some()
     }
 
-    /// State the library functions the worker entry was assembled with,
-    /// for a host whose entry is not the one lash ships: a workflow
-    /// document is linked and admitted against exactly these.
-    pub fn with_worker_functions(
-        mut self,
-        functions: Arc<lash_kernel_doc::FunctionRegistry>,
-    ) -> Self {
+    /// Install the same package holdings in the executor and worker pools.
+    pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
         self.process_factory.take();
-        self.worker_functions = Some(functions);
+        self.workers = self.workers.with_packages(Arc::clone(&packages));
+        self.packages = Some(packages);
         self
     }
 
@@ -332,7 +331,9 @@ impl PluginFactory for RlmProtocolPluginFactory {
                         execution_bounds: config.execution_bounds(),
                         channel: config.channel,
                         kernel: crate::executor::KernelCarry::new(
-                            self.worker_functions.clone(),
+                            self.packages
+                                .as_ref()
+                                .map(|packages| Arc::clone(packages.functions())),
                             writes,
                         ),
                         helpers: self.helpers.clone(),
@@ -415,8 +416,8 @@ impl RlmProtocolPluginFactory {
                 self.creation_dialect().name(),
                 self.process_bounds(),
             );
-            let factory = match &self.worker_functions {
-                Some(functions) => factory.with_functions(Arc::clone(functions)),
+            let factory = match &self.packages {
+                Some(packages) => factory.with_packages(Arc::clone(packages)),
                 None => factory,
             };
             #[cfg(feature = "synthetic-next")]
@@ -497,8 +498,9 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             1
         );
-        let factory =
-            factory.with_worker_functions(Arc::new(lash_kernel_doc::FunctionRegistry::new()));
+        let factory = factory.with_packages(Arc::new(
+            lash_kernel_package::HeldPackages::install([]).expect("empty package set"),
+        ));
         for _ in 0..3 {
             let _binding = factory.process_factory();
         }
