@@ -22,84 +22,48 @@ pub(super) fn object() -> Object {
                 function: "ts.map.size",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "set",
-                function: "ts.map.set",
-            },
-            Row::Function {
                 path: "Map.prototype.set",
+                receivers: &[Receiver::Map],
                 function: "ts.map.set",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "get",
-                function: "ts.map.get",
-            },
-            Row::Function {
                 path: "Map.prototype.get",
+                receivers: &[Receiver::Map],
                 function: "ts.map.get",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "has",
-                function: "ts.map.has",
-            },
-            Row::Function {
                 path: "Map.prototype.has",
+                receivers: &[Receiver::Map],
                 function: "ts.map.has",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "delete",
-                function: "ts.map.delete",
-            },
-            Row::Function {
                 path: "Map.prototype.delete",
+                receivers: &[Receiver::Map],
                 function: "ts.map.delete",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "clear",
-                function: "ts.map.clear",
-            },
-            Row::Function {
                 path: "Map.prototype.clear",
+                receivers: &[Receiver::Map],
                 function: "ts.map.clear",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "keys",
-                function: "ts.map.keys",
-            },
-            Row::Function {
                 path: "Map.prototype.keys",
+                receivers: &[Receiver::Map],
                 function: "ts.map.keys",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "values",
-                function: "ts.map.values",
-            },
-            Row::Function {
                 path: "Map.prototype.values",
+                receivers: &[Receiver::Map],
                 function: "ts.map.values",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "entries",
-                function: "ts.map.entries",
-            },
-            Row::Function {
                 path: "Map.prototype.entries",
+                receivers: &[Receiver::Map],
                 function: "ts.map.entries",
             },
             Row::Method {
-                receiver: Receiver::Map,
-                name: "forEach",
-                function: "ts.map.forEach",
-            },
-            Row::Function {
                 path: "Map.prototype.forEach",
+                receivers: &[Receiver::Map],
                 function: "ts.map.forEach",
             },
             Row::Function {

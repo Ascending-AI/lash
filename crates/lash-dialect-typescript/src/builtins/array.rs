@@ -1,5 +1,9 @@
 use super::{Object, Receiver, Row};
 
+/// The receivers of every Array method: a list, and a regex match result,
+/// which answers them as the list of its items.
+const LISTS: &[Receiver] = &[Receiver::List, Receiver::Brand("regex.match")];
+
 /// Array operations carry the JavaScript differences in kernel bodies.
 pub(super) fn object() -> Object {
     let mut rows = vec![
@@ -34,368 +38,200 @@ pub(super) fn object() -> Object {
         },
     ];
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "at",
-        function: "ts.array.at",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.at",
+        receivers: LISTS,
         function: "ts.array.at",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "concat",
-        function: "ts.array.concat",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.concat",
+        receivers: LISTS,
         function: "ts.array.concat",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "copyWithin",
-        function: "ts.array.copyWithin",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.copyWithin",
+        receivers: LISTS,
         function: "ts.array.copyWithin",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "entries",
-        function: "ts.array.entries",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.entries",
+        receivers: LISTS,
         function: "ts.array.entries",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "every",
-        function: "ts.array.every",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.every",
+        receivers: LISTS,
         function: "ts.array.every",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "fill",
-        function: "ts.array.fill",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.fill",
+        receivers: LISTS,
         function: "ts.array.fill",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "filter",
-        function: "ts.array.filter",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.filter",
+        receivers: LISTS,
         function: "ts.array.filter",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "find",
-        function: "ts.array.find",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.find",
+        receivers: LISTS,
         function: "ts.array.find",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "findIndex",
-        function: "ts.array.findIndex",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.findIndex",
+        receivers: LISTS,
         function: "ts.array.findIndex",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "findLast",
-        function: "ts.array.findLast",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.findLast",
+        receivers: LISTS,
         function: "ts.array.findLast",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "findLastIndex",
-        function: "ts.array.findLastIndex",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.findLastIndex",
+        receivers: LISTS,
         function: "ts.array.findLastIndex",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "flat",
-        function: "ts.array.flat",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.flat",
+        receivers: LISTS,
         function: "ts.array.flat",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "flatMap",
-        function: "ts.array.flatMap",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.flatMap",
+        receivers: LISTS,
         function: "ts.array.flatMap",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "forEach",
-        function: "ts.array.forEach",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.forEach",
+        receivers: LISTS,
         function: "ts.array.forEach",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "includes",
-        function: "ts.array.includes",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.includes",
+        receivers: LISTS,
         function: "ts.array.includes",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "indexOf",
-        function: "ts.array.indexOf",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.indexOf",
+        receivers: LISTS,
         function: "ts.array.indexOf",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "join",
-        function: "ts.array.join",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.join",
+        receivers: LISTS,
         function: "ts.array.join",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "keys",
-        function: "ts.array.keys",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.keys",
+        receivers: LISTS,
         function: "ts.array.keys",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "lastIndexOf",
-        function: "ts.array.lastIndexOf",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.lastIndexOf",
+        receivers: LISTS,
         function: "ts.array.lastIndexOf",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "map",
-        function: "ts.array.map",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.map",
+        receivers: LISTS,
         function: "ts.array.map",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "pop",
-        function: "ts.array.pop",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.pop",
+        receivers: LISTS,
         function: "ts.array.pop",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "push",
-        function: "ts.array.push",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.push",
+        receivers: LISTS,
         function: "ts.array.push",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "reduce",
-        function: "ts.array.reduce",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.reduce",
+        receivers: LISTS,
         function: "ts.array.reduce",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "reduceRight",
-        function: "ts.array.reduceRight",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.reduceRight",
+        receivers: LISTS,
         function: "ts.array.reduceRight",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "reverse",
-        function: "ts.array.reverse",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.reverse",
+        receivers: LISTS,
         function: "ts.array.reverse",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "shift",
-        function: "ts.array.shift",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.shift",
+        receivers: LISTS,
         function: "ts.array.shift",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "slice",
-        function: "ts.array.slice",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.slice",
+        receivers: LISTS,
         function: "ts.array.slice",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "some",
-        function: "ts.array.some",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.some",
+        receivers: LISTS,
         function: "ts.array.some",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "sort",
-        function: "ts.array.sort",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.sort",
+        receivers: LISTS,
         function: "ts.array.sort",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "splice",
-        function: "ts.array.splice",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.splice",
+        receivers: LISTS,
         function: "ts.array.splice",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "toLocaleString",
-        function: "ts.array.toLocaleString",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.toLocaleString",
+        receivers: LISTS,
         function: "ts.array.toLocaleString",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "toReversed",
-        function: "ts.array.toReversed",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.toReversed",
+        receivers: LISTS,
         function: "ts.array.toReversed",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "toSorted",
-        function: "ts.array.toSorted",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.toSorted",
+        receivers: LISTS,
         function: "ts.array.toSorted",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "toSpliced",
-        function: "ts.array.toSpliced",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.toSpliced",
+        receivers: LISTS,
         function: "ts.array.toSpliced",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "toString",
-        function: "ts.array.toString",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.toString",
+        receivers: LISTS,
         function: "ts.array.toString",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "unshift",
-        function: "ts.array.unshift",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.unshift",
+        receivers: LISTS,
         function: "ts.array.unshift",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "valueOf",
-        function: "ts.array.valueOf",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.valueOf",
+        receivers: LISTS,
         function: "ts.array.valueOf",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "values",
-        function: "ts.array.values",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.values",
+        receivers: LISTS,
         function: "ts.array.values",
     });
     rows.push(Row::Method {
-        receiver: Receiver::List,
-        name: "with",
-        function: "ts.array.with",
-    });
-    rows.push(Row::Function {
         path: "Array.prototype.with",
+        receivers: LISTS,
         function: "ts.array.with",
     });
-    let methods: Vec<_> = rows
-        .iter()
-        .filter_map(|row| match row {
-            Row::Method { name, function, .. } => Some((*name, *function)),
-            _ => None,
-        })
-        .collect();
-    rows.extend(methods.into_iter().map(|(name, function)| Row::Method {
-        receiver: Receiver::Brand("regex.match"),
-        name,
-        function,
-    }));
     rows.push(Row::Property {
         receiver: Receiver::Brand("regex.match"),
         name: "length",

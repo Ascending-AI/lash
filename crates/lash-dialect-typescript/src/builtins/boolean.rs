@@ -9,21 +9,13 @@ pub(super) fn object() -> Object {
                 function: "ts.boolean.convert",
             },
             Row::Method {
-                receiver: Receiver::Bool,
-                name: "valueOf",
-                function: "ts.boolean.valueOf",
-            },
-            Row::Function {
                 path: "Boolean.prototype.valueOf",
+                receivers: &[Receiver::Bool],
                 function: "ts.boolean.valueOf",
             },
             Row::Method {
-                receiver: Receiver::Bool,
-                name: "toString",
-                function: "ts.boolean.toString",
-            },
-            Row::Function {
                 path: "Boolean.prototype.toString",
+                receivers: &[Receiver::Bool],
                 function: "ts.boolean.toString",
             },
         ],

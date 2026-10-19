@@ -5,237 +5,133 @@ pub(super) fn object() -> Object {
         source: include_str!("../helpers/string.kernel"),
         rows: vec![
             Row::Method {
-                receiver: Receiver::Text,
-                name: "localeCompare",
-                function: "ts.string.locale_unsupported",
-            },
-            Row::Function {
                 path: "String.prototype.localeCompare",
+                receivers: &[Receiver::Text],
                 function: "ts.string.locale_unsupported",
             },
             Row::Method {
-                receiver: Receiver::Text,
-                name: "toLocaleLowerCase",
-                function: "ts.string.locale_unsupported",
-            },
-            Row::Function {
                 path: "String.prototype.toLocaleLowerCase",
+                receivers: &[Receiver::Text],
                 function: "ts.string.locale_unsupported",
             },
             Row::Method {
-                receiver: Receiver::Text,
-                name: "toLocaleUpperCase",
-                function: "ts.string.locale_unsupported",
-            },
-            Row::Function {
                 path: "String.prototype.toLocaleUpperCase",
+                receivers: &[Receiver::Text],
                 function: "ts.string.locale_unsupported",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.normalize",
+                receivers: &[Receiver::Text],
                 function: "ts.string.normalize",
             },
             Row::Method {
-                receiver: Receiver::Text,
-                name: "normalize",
-                function: "ts.string.normalize",
-            },
-            Row::Function {
                 path: "String.prototype.at",
+                receivers: &[Receiver::Text],
                 function: "ts.string.at",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.charAt",
+                receivers: &[Receiver::Text],
                 function: "ts.string.charAt",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.charCodeAt",
+                receivers: &[Receiver::Text],
                 function: "ts.string.charCodeAt",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.codePointAt",
+                receivers: &[Receiver::Text],
                 function: "ts.string.codePointAt",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.slice",
+                receivers: &[Receiver::Text],
                 function: "ts.string.slice",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.substring",
+                receivers: &[Receiver::Text],
                 function: "ts.string.substring",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.indexOf",
+                receivers: &[Receiver::Text],
                 function: "ts.string.indexOf",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.lastIndexOf",
+                receivers: &[Receiver::Text],
                 function: "ts.string.lastIndexOf",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.includes",
+                receivers: &[Receiver::Text],
                 function: "ts.string.includes",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.startsWith",
+                receivers: &[Receiver::Text],
                 function: "ts.string.startsWith",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.endsWith",
+                receivers: &[Receiver::Text],
                 function: "ts.string.endsWith",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.concat",
+                receivers: &[Receiver::Text],
                 function: "ts.string.concat",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.toLowerCase",
+                receivers: &[Receiver::Text],
                 function: "ts.string.toLowerCase",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.toUpperCase",
+                receivers: &[Receiver::Text],
                 function: "ts.string.toUpperCase",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.trim",
+                receivers: &[Receiver::Text],
                 function: "ts.string.trim",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.trimStart",
+                receivers: &[Receiver::Text],
                 function: "ts.string.trimStart",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.trimEnd",
+                receivers: &[Receiver::Text],
                 function: "ts.string.trimEnd",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.repeat",
+                receivers: &[Receiver::Text],
                 function: "ts.string.repeat",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.padStart",
+                receivers: &[Receiver::Text],
                 function: "ts.string.padStart",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.padEnd",
+                receivers: &[Receiver::Text],
                 function: "ts.string.padEnd",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.toString",
+                receivers: &[Receiver::Text],
                 function: "ts.string.toString",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.valueOf",
-                function: "ts.string.valueOf",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "at",
-                function: "ts.string.at",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "charAt",
-                function: "ts.string.charAt",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "charCodeAt",
-                function: "ts.string.charCodeAt",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "codePointAt",
-                function: "ts.string.codePointAt",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "slice",
-                function: "ts.string.slice",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "substring",
-                function: "ts.string.substring",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "indexOf",
-                function: "ts.string.indexOf",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "lastIndexOf",
-                function: "ts.string.lastIndexOf",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "includes",
-                function: "ts.string.includes",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "startsWith",
-                function: "ts.string.startsWith",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "endsWith",
-                function: "ts.string.endsWith",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "concat",
-                function: "ts.string.concat",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "toLowerCase",
-                function: "ts.string.toLowerCase",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "toUpperCase",
-                function: "ts.string.toUpperCase",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "trim",
-                function: "ts.string.trim",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "trimStart",
-                function: "ts.string.trimStart",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "trimEnd",
-                function: "ts.string.trimEnd",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "repeat",
-                function: "ts.string.repeat",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "padStart",
-                function: "ts.string.padStart",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "padEnd",
-                function: "ts.string.padEnd",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "toString",
-                function: "ts.string.toString",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "valueOf",
+                receivers: &[Receiver::Text],
                 function: "ts.string.valueOf",
             },
             Row::Property {

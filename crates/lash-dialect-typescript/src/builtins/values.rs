@@ -193,9 +193,9 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         tokens.push_str("    if same(receiver, \"builtin\") { return absent }\n");
     }
     let mut kinds = String::new();
-    for (receiver, helper) in table.methods.get(name).into_iter().flatten() {
+    for (receiver, path) in table.methods.get(name).into_iter().flatten() {
         branches += 1;
-        let child = answer(table.method_path(helper), &mut uses);
+        let child = answer(path, &mut uses);
         kinds.push_str(&format!(
             "  if same(receiver, \"{}\") {{\n    {child}\n  }}\n",
             receiver.tag()

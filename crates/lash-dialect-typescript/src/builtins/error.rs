@@ -101,12 +101,8 @@ pub(super) fn object() -> Object {
                 function: "ts.error.is_AggregateError",
             },
             Row::Method {
-                receiver: Receiver::Error,
-                name: "toString",
-                function: "ts.error.toString",
-            },
-            Row::Function {
                 path: "Error.prototype.toString",
+                receivers: &[Receiver::Error],
                 function: "ts.error.toString",
             },
         ],

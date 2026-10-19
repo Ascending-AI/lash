@@ -24,6 +24,17 @@ fn built_in_values_have_identity_name_and_length() {
     );
 }
 
+/// BUILTIN-MEMBER-IDENTITY: methods that share one helper are still
+/// distinct function objects. A member read answers its own prototype
+/// function, with that function's name and length, while a true alias
+/// (`Set.prototype.keys`) stays the one function it names.
+#[test]
+fn methods_sharing_a_helper_keep_their_own_identity() {
+    agrees(
+        "const s = 'x'; const d = new Date(0); await finish(s.localeCompare === String.prototype.localeCompare && s.toLocaleLowerCase === String.prototype.toLocaleLowerCase && s.toLocaleUpperCase === String.prototype.toLocaleUpperCase && s.localeCompare !== s.toLocaleUpperCase && s.toLocaleLowerCase !== s.toLocaleUpperCase && s.localeCompare.name === 'localeCompare' && s.localeCompare.length === 1 && s.toLocaleLowerCase.name === 'toLocaleLowerCase' && s.toLocaleUpperCase.length === 0 && d.toDateString === Date.prototype.toDateString && d.toDateString !== d.toTimeString && d.getTimezoneOffset.name === 'getTimezoneOffset' && d.toLocaleDateString.name === 'toLocaleDateString' && d.toTimeString.name === 'toTimeString' && new Set().keys === Set.prototype.values && new Set().keys.name === 'values');",
+    );
+}
+
 /// A method read from one receiver keeps its own helper: called on a value
 /// of another kind it rejects that receiver, as ECMA-262's brand checks do,
 /// rather than answering with the other kind's method.

@@ -25,7 +25,7 @@
 //! a function defined after it.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 mod array;
@@ -91,10 +91,13 @@ impl Receiver {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
-    /// `receiver.name(args)`.
+    /// A prototype's method (`Array.prototype.map`): one function object,
+    /// which a read of `path` gives, and which a value of each of
+    /// `receivers` answers for the member named by the path's last segment,
+    /// so `receiver.name(args)` calls it.
     Method {
-        receiver: Receiver,
-        name: &'static str,
+        path: &'static str,
+        receivers: &'static [Receiver],
         function: &'static str,
     },
     /// A read of `receiver.name`: the function is called with the receiver
@@ -283,7 +286,11 @@ const POSITIONAL: &[(&str, Positional)] = &[
 /// walks are derived on its first use.
 #[derive(Debug, Default)]
 pub(crate) struct Table {
+    /// Each method name's receiver kinds, with the path of the function
+    /// each kind's member by that name is.
     pub(crate) methods: SortedMap<Vec<(Receiver, &'static str)>>,
+    /// Each property name's receiver kinds, with the function each kind's
+    /// read calls.
     pub(crate) properties: SortedMap<Vec<(Receiver, &'static str)>>,
     pub(crate) functions: SortedMap<&'static str>,
     pub(crate) positional: SortedMap<Positional>,
@@ -305,9 +312,6 @@ pub(crate) struct Table {
     pub(crate) member_names: SortedSet,
     /// Every path [`builtin`](Self::builtin) answers, derived on first use.
     paths: OnceLock<BTreeSet<Cow<'static, str>>>,
-    /// The path whose value a method row's helper is, for each helper,
-    /// derived on first use.
-    method_paths: OnceLock<BTreeMap<&'static str, &'static str>>,
 }
 
 impl Table {
@@ -319,10 +323,20 @@ impl Table {
         for row in objects().into_iter().flat_map(|object| object.rows) {
             match row {
                 Row::Method {
-                    receiver,
-                    name,
+                    path,
+                    receivers,
                     function,
-                } => methods.push((name, (receiver, function))),
+                } => {
+                    let Some((_, name)) = path
+                        .rsplit_once('.')
+                        .filter(|(parent, _)| parent.ends_with(".prototype"))
+                    else {
+                        panic!("method `{path}` is no `X.prototype.<name>`");
+                    };
+                    globals.push(root(path));
+                    functions.push((path, function));
+                    methods.extend(receivers.iter().map(|receiver| (name, (*receiver, path))));
+                }
                 Row::Property {
                     receiver,
                     name,
@@ -395,7 +409,6 @@ impl Table {
             classes,
             member_names: SortedSet::new(member_names),
             paths: OnceLock::new(),
-            method_paths: OnceLock::new(),
         }
     }
 
@@ -467,43 +480,6 @@ impl Table {
         })
     }
 
-    /// The path whose value the method row helper `helper` is: the one
-    /// path of its helper, or the one that ends in `.prototype.<name>`.
-    pub(crate) fn method_path(&self, helper: &str) -> &'static str {
-        let paths = self.method_paths.get_or_init(|| {
-            let mut helper_paths: BTreeMap<&'static str, Vec<&'static str>> = BTreeMap::new();
-            for (path, helper) in &self.functions {
-                helper_paths.entry(helper).or_default().push(path);
-            }
-            let mut found = BTreeMap::new();
-            let mut unnamed = Vec::new();
-            for (name, rows) in &self.methods {
-                for (receiver, helper) in rows {
-                    let paths = helper_paths.get(helper).map_or(&[][..], Vec::as_slice);
-                    let path = match paths {
-                        [path] => Some(*path),
-                        _ => paths.iter().copied().find(|path| {
-                            path.strip_suffix(name)
-                                .is_some_and(|parent| parent.ends_with(".prototype."))
-                        }),
-                    };
-                    match path {
-                        Some(path) => {
-                            found.insert(*helper, path);
-                        }
-                        None => unnamed.push(format!("{receiver:?} `{name}` ({helper})")),
-                    }
-                }
-            }
-            assert!(
-                unnamed.is_empty(),
-                "these method rows have no `X.prototype.<name>` function row naming their helper: {unnamed:?}"
-            );
-            found
-        });
-        paths[helper]
-    }
-
     /// The value a path names, as kernel text: a token, or the value row's
     /// helper called with no arguments.
     pub(crate) fn token(&self, path: &str) -> Option<String> {
@@ -566,7 +542,7 @@ pub(crate) fn object_tag(path: &str) -> &'static str {
 }
 
 /// Member rows by name, each name's rows in the order they came: one
-/// row per receiver kind.
+/// row per receiver kind, with its row's path or function.
 fn members(
     mut rows: Vec<(&'static str, (Receiver, &'static str))>,
     what: &str,

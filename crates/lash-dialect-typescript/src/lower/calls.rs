@@ -1216,7 +1216,8 @@ impl Lowerer<'_> {
             .methods
             .get(name)
             .and_then(|rows| rows.iter().find(|(kind, _)| *kind == receiver))
-            .map(|(_, function)| *function)
+            .and_then(|(_, path)| self.table.functions.get(path))
+            .copied()
         else {
             return Ok(None);
         };

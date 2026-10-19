@@ -9,39 +9,23 @@ pub(super) fn object() -> Object {
                 function: "ts.function.eval",
             },
             Row::Method {
-                receiver: Receiver::Closure,
-                name: "call",
-                function: "ts.function.call",
-            },
-            Row::Function {
                 path: "Function.prototype.call",
+                receivers: &[Receiver::Closure],
                 function: "ts.function.call",
             },
             Row::Method {
-                receiver: Receiver::Closure,
-                name: "apply",
-                function: "ts.function.apply",
-            },
-            Row::Function {
                 path: "Function.prototype.apply",
+                receivers: &[Receiver::Closure],
                 function: "ts.function.apply",
             },
             Row::Method {
-                receiver: Receiver::Closure,
-                name: "bind",
-                function: "ts.function.bind",
-            },
-            Row::Function {
                 path: "Function.prototype.bind",
+                receivers: &[Receiver::Closure],
                 function: "ts.function.bind",
             },
             Row::Method {
-                receiver: Receiver::Closure,
-                name: "toString",
-                function: "ts.function.toString",
-            },
-            Row::Function {
                 path: "Function.prototype.toString",
+                receivers: &[Receiver::Closure],
                 function: "ts.function.toString",
             },
         ],

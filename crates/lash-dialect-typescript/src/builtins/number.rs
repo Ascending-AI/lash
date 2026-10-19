@@ -41,48 +41,28 @@ pub(super) fn object() -> Object {
                 function: "ts.number.parseInt",
             },
             Row::Method {
-                receiver: Receiver::Number,
-                name: "valueOf",
-                function: "ts.number.valueOf",
-            },
-            Row::Function {
                 path: "Number.prototype.valueOf",
+                receivers: &[Receiver::Number],
                 function: "ts.number.valueOf",
             },
             Row::Method {
-                receiver: Receiver::Number,
-                name: "toString",
-                function: "ts.number.toString",
-            },
-            Row::Function {
                 path: "Number.prototype.toString",
+                receivers: &[Receiver::Number],
                 function: "ts.number.toString",
             },
             Row::Method {
-                receiver: Receiver::Number,
-                name: "toFixed",
-                function: "ts.number.toFixed",
-            },
-            Row::Function {
                 path: "Number.prototype.toFixed",
+                receivers: &[Receiver::Number],
                 function: "ts.number.toFixed",
             },
             Row::Method {
-                receiver: Receiver::Number,
-                name: "toExponential",
-                function: "ts.number.toExponential",
-            },
-            Row::Function {
                 path: "Number.prototype.toExponential",
+                receivers: &[Receiver::Number],
                 function: "ts.number.toExponential",
             },
             Row::Method {
-                receiver: Receiver::Number,
-                name: "toPrecision",
-                function: "ts.number.toPrecision",
-            },
-            Row::Function {
                 path: "Number.prototype.toPrecision",
+                receivers: &[Receiver::Number],
                 function: "ts.number.toPrecision",
             },
             Row::Value {

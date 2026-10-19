@@ -4,70 +4,34 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/regexp.kernel"),
         rows: vec![
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.match",
+                receivers: &[Receiver::Text],
                 function: "ts.string.match",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.matchAll",
+                receivers: &[Receiver::Text],
                 function: "ts.string.matchAll",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.search",
+                receivers: &[Receiver::Text],
                 function: "ts.string.search",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.split",
+                receivers: &[Receiver::Text],
                 function: "ts.string.split",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.replace",
+                receivers: &[Receiver::Text],
                 function: "ts.string.replace",
             },
-            Row::Function {
+            Row::Method {
                 path: "String.prototype.replaceAll",
-                function: "ts.string.replaceAll",
-            },
-            Row::Function {
-                path: "RegExp.prototype.exec",
-                function: "ts.regexp.exec",
-            },
-            Row::Function {
-                path: "RegExp.prototype.test",
-                function: "ts.regexp.test",
-            },
-            Row::Function {
-                path: "RegExp.prototype.toString",
-                function: "ts.regexp.toString",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "match",
-                function: "ts.string.match",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "matchAll",
-                function: "ts.string.matchAll",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "search",
-                function: "ts.string.search",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "split",
-                function: "ts.string.split",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "replace",
-                function: "ts.string.replace",
-            },
-            Row::Method {
-                receiver: Receiver::Text,
-                name: "replaceAll",
+                receivers: &[Receiver::Text],
                 function: "ts.string.replaceAll",
             },
             Row::Function {
@@ -83,18 +47,18 @@ pub(super) fn object() -> Object {
                 function: "ts.regexp.is",
             },
             Row::Method {
-                receiver: Receiver::Brand("regex.ecma"),
-                name: "exec",
+                path: "RegExp.prototype.exec",
+                receivers: &[Receiver::Brand("regex.ecma")],
                 function: "ts.regexp.exec",
             },
             Row::Method {
-                receiver: Receiver::Brand("regex.ecma"),
-                name: "test",
+                path: "RegExp.prototype.test",
+                receivers: &[Receiver::Brand("regex.ecma")],
                 function: "ts.regexp.test",
             },
             Row::Method {
-                receiver: Receiver::Brand("regex.ecma"),
-                name: "toString",
+                path: "RegExp.prototype.toString",
+                receivers: &[Receiver::Brand("regex.ecma")],
                 function: "ts.regexp.toString",
             },
             Row::Property {

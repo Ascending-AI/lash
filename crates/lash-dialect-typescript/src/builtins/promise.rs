@@ -36,27 +36,14 @@ pub(super) fn object() -> Object {
     ];
     rows.extend(
         [
-            ("then", "ts.promise.then"),
-            ("catch", "ts.promise.catch"),
-            ("finally", "ts.promise.finally"),
+            ("Promise.prototype.then", "ts.promise.then"),
+            ("Promise.prototype.catch", "ts.promise.catch"),
+            ("Promise.prototype.finally", "ts.promise.finally"),
         ]
-        .into_iter()
-        .flat_map(|(name, function)| {
-            [
-                Row::Method {
-                    receiver: Receiver::Brand("Promise"),
-                    name,
-                    function,
-                },
-                Row::Function {
-                    path: match name {
-                        "then" => "Promise.prototype.then",
-                        "catch" => "Promise.prototype.catch",
-                        _ => "Promise.prototype.finally",
-                    },
-                    function,
-                },
-            ]
+        .map(|(path, function)| Row::Method {
+            path,
+            receivers: &[Receiver::Brand("Promise")],
+            function,
         }),
     );
     Object {
