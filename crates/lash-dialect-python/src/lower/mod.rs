@@ -414,7 +414,7 @@ pub(crate) fn lower_with_calls(
     })?;
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let lash_kernel_dialect::SiteLayers {
-        mut source_map,
+        source_map,
         written,
         captions,
     } = lash_kernel_dialect::site_layers(
@@ -426,44 +426,6 @@ pub(crate) fn lower_with_calls(
         &lowerer.declared_captions,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
-    let mut mapped: BTreeSet<_> = source_map
-        .sites
-        .iter()
-        .map(|located| located.site.clone())
-        .collect();
-    let mut additional = Vec::new();
-    for located in &source_map.sites {
-        if !matches!(
-            document.node(&located.site),
-            Some(lash_kernel_doc::Node::Stmt(_))
-        ) {
-            continue;
-        }
-        let Some(node) = document.node(&located.site) else {
-            continue;
-        };
-        let mut pending = vec![(node, located.site.clone())];
-        while let Some((node, site)) = pending.pop() {
-            for (index, child) in (0u32..).zip(node.children()) {
-                if matches!(child, lash_kernel_doc::Node::Block(_)) {
-                    continue;
-                }
-                let site = site.child(index);
-                if matches!(child, lash_kernel_doc::Node::Expr(Expr::Act(_)))
-                    && mapped.insert(site.clone())
-                {
-                    let mut nested = located.clone();
-                    nested.site = site.clone();
-                    additional.push(nested);
-                }
-                pending.push((child, site));
-            }
-        }
-    }
-    source_map.sites.extend(additional);
-    source_map
-        .sites
-        .sort_by(|left, right| left.site.cmp(&right.site));
     Ok(Lowered {
         document,
         source_map: Some(source_map),
