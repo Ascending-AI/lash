@@ -145,6 +145,16 @@ impl Working {
         sites
     }
 
+    /// The base identity of a surviving node at an edited address. New
+    /// wrappers have no base identity and cannot be offered as base targets.
+    pub(super) fn origin(&self, site: &Site) -> Option<Site> {
+        let (_, _, mut shadow) = self.units().find(|(unit, _, _)| unit == &site.unit)?;
+        for index in &site.path {
+            shadow = shadow.children.get(*index as usize)?;
+        }
+        shadow.origin.clone()
+    }
+
     /// Where the node that was at `base` is now.
     pub(super) fn locate(&self, base: &Site) -> Result<Site, Fault> {
         self.units()

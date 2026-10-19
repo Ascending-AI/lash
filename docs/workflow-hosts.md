@@ -316,8 +316,23 @@ let applied = draft.apply(&Transaction { base, edits: vec![
 
 The supported operations are SetValue, InsertStep, RemoveStep, MoveStep,
 WrapSteps, UnwrapSteps and ChangeCondition. Values are data or in-scope binding
-references. Structural step operations accept separable perform/tool steps;
-nonseparable nested actions require source. Wrap/unwrap supports if/for/try,
+references. Structural step operations accept separable perform/tool steps.
+A whole-statement perform whose inline argument helpers are pure library calls,
+such as `await tools.inbox.send_item(ts.boundary({...}))`, moves, removes and
+wraps with those helpers. Library purity follows the called bodies; another
+perform, a wait, a declared call or a callback application is not an argument
+helper. Assignment receivers must remain action-free.
+
+Hosts that match `EditDiagnosticKind::NonSeparableStep` must now read its
+`enclosing_statement` and `separable_step` fields. The diagnostic location still
+identifies the requested base site. Offer `separable_step`, when present, as the
+`action` (or wrap endpoint) of a structural operation against that same base.
+Offer `enclosing_statement` for a source edit of the whole statement. Both
+fields are optional base Sites; a statement containing two performs has an
+enclosing statement and no separable step. Use the regenerated kernel edit
+refusal schema when decoding this cause; its code remains `non_separable_step`.
+
+Wrap/unwrap supports if/for/try,
 with empty discarded arms and preserved binding/control targets. While loops
 support condition changes only. Source replacement and re-import own renames,
 declarations, arbitrary code, handlers and terminal structure.

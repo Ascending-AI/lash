@@ -44,7 +44,6 @@
             "unsupported_canvas_edit",
             "not_value_target",
             "value_outside_canvas_set",
-            "non_separable_step",
             "not_contiguous_steps",
             "action_in_header",
             "non_empty_discarded_arm",
@@ -182,6 +181,43 @@
           },
           "required": [
             "no_such_entry"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "non_separable_step": {
+              "additionalProperties": false,
+              "properties": {
+                "enclosing_statement": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Site"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Nearest enclosing complete statement in the transaction's base,\nfor editing the inseparable actions together in source."
+                },
+                "separable_step": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Site"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Nearest enclosing perform accepted by structural step operations,\nwhen one exists. A statement with two performs has none."
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "non_separable_step"
           ],
           "type": "object"
         },

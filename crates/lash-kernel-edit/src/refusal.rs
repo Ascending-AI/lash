@@ -101,8 +101,17 @@ pub enum EditDiagnosticKind {
     NotValueTarget,
     #[error("this value contains executable syntax")]
     ValueOutsideCanvasSet,
-    #[error("this action is not a separable perform step; edit source")]
-    NonSeparableStep,
+    #[error(
+        "this action is not a separable perform step; select the enclosing step or edit its statement in source"
+    )]
+    NonSeparableStep {
+        /// Nearest enclosing complete statement in the transaction's base,
+        /// for editing the inseparable actions together in source.
+        enclosing_statement: Option<Site>,
+        /// Nearest enclosing perform accepted by structural step operations,
+        /// when one exists. A statement with two performs has none.
+        separable_step: Option<Site>,
+    },
     #[error("select complete contiguous sibling steps")]
     NotContiguousSteps,
     #[error("changing this header would add or discard action sites; edit source")]
@@ -134,7 +143,7 @@ impl EditDiagnosticKind {
             Self::UnsupportedCanvasEdit => "unsupported_canvas_edit",
             Self::NotValueTarget => "not_value_target",
             Self::ValueOutsideCanvasSet => "value_outside_canvas_set",
-            Self::NonSeparableStep => "non_separable_step",
+            Self::NonSeparableStep { .. } => "non_separable_step",
             Self::NotContiguousSteps => "not_contiguous_steps",
             Self::ActionInHeader => "action_in_header",
             Self::NonEmptyDiscardedArm => "non_empty_discarded_arm",

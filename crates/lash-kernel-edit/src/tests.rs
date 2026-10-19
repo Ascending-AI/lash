@@ -520,7 +520,7 @@ fn canvas_step() {
         );
         assert!(matches!(
             error.diagnostics[0].kind,
-            Cause::NonSeparableStep | Cause::NoSuchNode
+            Cause::NonSeparableStep { .. } | Cause::NoSuchNode
         ));
     }
     let mut receiver_source =
@@ -550,7 +550,13 @@ fn canvas_step() {
         }],
         &env,
     );
-    assert_eq!(error.diagnostics[0].kind, Cause::NonSeparableStep);
+    assert_eq!(
+        error.diagnostics[0].kind,
+        Cause::NonSeparableStep {
+            enclosing_statement: Some(site(&[1])),
+            separable_step: None,
+        }
+    );
     let mut scoped = Draft::open(doc(
         r#"if true { let x = "inner" let sent = perform send(x) as Any } finish null"#,
     ))
@@ -593,6 +599,173 @@ fn canvas_step() {
         &env,
     );
     assert_eq!(error.diagnostics[0].kind, Cause::IntoItself);
+}
+
+/// FIG-6895 / CANVAS-STEP: inline argument helpers travel with the whole
+/// perform statement, preserving every descendant's correspondence.
+#[test]
+fn canvas_step_inline_library_arguments() {
+    let mut registry = FunctionRegistry::new();
+    let boundary = registry.register(lash_kernel_doc::parse_definition(
+        "function ts.boundary(value: Any) -> Any\nkernel 1\ncharge 1\nbody { return value }"
+    ).unwrap(), None).unwrap();
+    let mut environment = env(&registry);
+    let effect = EffectName::new("tools.inbox.send_item").unwrap();
+    let signature = environment
+        .effects
+        .remove(&EffectName::new("send").unwrap())
+        .unwrap();
+    environment.effects.insert(effect, signature);
+    for statement in [
+        r#"let sent = perform tools.inbox.send_item(invoke ts.boundary({title: "card"})) as Any"#,
+        r#"let sent = null set sent = perform tools.inbox.send_item(invoke ts.boundary({title: "card"})) as Any"#,
+        r#"do perform tools.inbox.send_item(invoke ts.boundary({title: "card"})) as Any"#,
+    ] {
+        let original = parse_document(&format!(
+            "kernel 1\nnumbers float\nuse ts.boundary = @{boundary}\neffect tools.inbox.send_item(value: Any) -> Any\nmain {{ {statement} finish null }}"
+        )).unwrap();
+        let index = original.main.len() as u32 - 2;
+        let action = site(&[index, 0]);
+        let helper = action.child(0);
+        let argument = helper.child(0);
+        let whole_statement = original.main[index as usize].clone();
+        for operation in 0..3 {
+            let mut draft = Draft::open(original.clone()).unwrap();
+            let base = draft.identity();
+            let edit = match operation {
+                0 => Operation::MoveStep {
+                    base,
+                    action: action.clone(),
+                    to: Position::end(site(&[])),
+                },
+                1 => Operation::RemoveStep {
+                    base,
+                    action: action.clone(),
+                },
+                _ => Operation::WrapSteps {
+                    base,
+                    first: action.clone(),
+                    last: action.clone(),
+                    wrapper: Wrapper::If {
+                        condition: Expr::Literal(Literal::Bool(true)),
+                    },
+                },
+            };
+            let refusal = rejected(
+                &mut draft,
+                vec![Operation::RemoveStep {
+                    base,
+                    action: helper.clone(),
+                }],
+                &environment,
+            );
+            assert_eq!(
+                refusal.diagnostics[0].kind,
+                Cause::NonSeparableStep {
+                    enclosing_statement: Some(site(&[index])),
+                    separable_step: Some(action.clone()),
+                }
+            );
+            let applied = draft
+                .apply(&batch(&draft, vec![edit]), &environment)
+                .unwrap();
+            let destination = match operation {
+                0 => {
+                    assert_eq!(draft.document().main.last(), Some(&whole_statement));
+                    Some(site(&[index + 1, 0]))
+                }
+                1 => {
+                    assert_eq!(draft.document().main.len(), original.main.len() - 1);
+                    None
+                }
+                _ => {
+                    let Stmt::If { then_block, .. } = &draft.document().main[index as usize] else {
+                        unreachable!()
+                    };
+                    assert_eq!(then_block, &vec![whole_statement.clone()]);
+                    Some(site(&[index, 1, 0, 0]))
+                }
+            };
+            for (old, suffix) in [
+                (&action, vec![]),
+                (&helper, vec![0]),
+                (&argument, vec![0, 0]),
+            ] {
+                let expected = destination.clone().map(|mut site| {
+                    site.path.extend(suffix);
+                    site
+                });
+                assert_eq!(applied.correspondence.successor(old), expected.as_ref());
+            }
+        }
+    }
+}
+
+/// FIG-6895 / CANVAS-STEP: another perform, a declared call, a wait, or
+/// a helper that applies a callback cannot become part of an argument helper.
+#[test]
+fn canvas_step_effectful_arguments_refuse() {
+    let mut registry = FunctionRegistry::new();
+    let wait = registry.register(lash_kernel_doc::parse_definition(
+        "function helper.wait(value: Any) -> Any\nkernel 1\ncharge 1\nbody { let waited = sleep 1 return value }"
+    ).unwrap(), None).unwrap();
+    let indirect = registry.register(lash_kernel_doc::parse_definition(&format!(
+        "function helper.indirect(value: Any) -> Any\nkernel 1\ncharge 1\nuse helper.wait = @{wait}\nbody {{ let got = invoke helper.wait(value) return got }}"
+    )).unwrap(), None).unwrap();
+    let callback = registry.register(lash_kernel_doc::parse_definition(
+        "function helper.callback(f: Any) -> Any\nkernel 1\ncharge 1\nbody { let got = apply f() return got }"
+    ).unwrap(), None).unwrap();
+    let environment = env(&registry);
+    for argument in [
+        r#"perform send("inner") as Any"#,
+        "call other()",
+        "sleep 1",
+        "invoke helper.indirect(null)",
+        "invoke helper.callback(fn() { return null })",
+    ] {
+        let mut original = parse_document(&format!(
+            "kernel 1\nnumbers float\nuse helper.wait = @{wait}\nuse helper.indirect = @{indirect}\nuse helper.callback = @{callback}\neffect send(value: Any) -> Any\nfn other() {{ let got = perform send(null) as Any return got }}\nmain {{ do perform send({argument}) as Any }}"
+        )).unwrap();
+        original.manifest.functions =
+            lash_kernel_check::requirements(&original, &registry).functions;
+        for action in [site(&[0, 0]), site(&[0, 0, 0])] {
+            for operation in 0..3 {
+                let mut draft = Draft::open(original.clone()).unwrap();
+                let base = draft.identity();
+                let edit = match operation {
+                    0 => Operation::MoveStep {
+                        base,
+                        action: action.clone(),
+                        to: Position::end(site(&[])),
+                    },
+                    1 => Operation::RemoveStep {
+                        base,
+                        action: action.clone(),
+                    },
+                    _ => Operation::WrapSteps {
+                        base,
+                        first: action.clone(),
+                        last: action.clone(),
+                        wrapper: Wrapper::If {
+                            condition: Expr::Literal(Literal::Bool(true)),
+                        },
+                    },
+                };
+                let refusal = rejected(&mut draft, vec![edit], &environment);
+                assert_eq!(
+                    refusal.diagnostics[0].kind,
+                    Cause::NonSeparableStep {
+                        enclosing_statement: Some(site(&[0])),
+                        separable_step: None,
+                    }
+                );
+                assert_eq!(
+                    refusal.diagnostics[0].location,
+                    Some(crate::Location::Base(action.clone()))
+                );
+            }
+        }
+    }
 }
 
 /// CANVAS-WRAP: wrappers preserve children and discard only empty arms.
@@ -1181,7 +1354,10 @@ fn canvas_refusal_wire() {
         Cause::UnsupportedCanvasEdit,
         Cause::NotValueTarget,
         Cause::ValueOutsideCanvasSet,
-        Cause::NonSeparableStep,
+        Cause::NonSeparableStep {
+            enclosing_statement: Some(site(&[0])),
+            separable_step: Some(site(&[0, 0])),
+        },
         Cause::NotContiguousSteps,
         Cause::ActionInHeader,
         Cause::NonEmptyDiscardedArm,

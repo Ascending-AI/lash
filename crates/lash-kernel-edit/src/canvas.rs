@@ -1,4 +1,6 @@
 //! Admit canvas targets before any private tree write.
+use std::collections::BTreeMap;
+
 use crate::apply::{Fault, Working, at, node};
 use crate::authoring::{Branch, Operation, ValueTarget, Wrapper};
 use crate::tree::{NodeClass, NodeMut, Shadow};
@@ -7,7 +9,8 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, NodeKind, PlaceNode, Reference, StmtNode,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Catch, Expr, Literal, Node, Place, Rhs, Site, Stmt, TryStmt,
+    ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, FunctionId, Literal, Node,
+    Place, Rhs, Site, Stmt, TryStmt,
 };
 
 fn has_action(node: Node<'_>) -> bool {
@@ -41,9 +44,70 @@ fn header(expr: &Expr, base: &Site) -> Result<(), Fault> {
     }
 }
 
-/// The sole perform must occupy the entire carrier, with data arguments.
+/// Argument helpers may call other library helpers, but cannot wait, apply a
+/// callback, or reach another effect. Library identity pins the complete body.
+fn pure_argument(
+    node: Node<'_>,
+    catalog: &dyn FunctionCatalog,
+    known: &mut BTreeMap<FunctionId, bool>,
+) -> bool {
+    let library = match node {
+        Node::Action(Action::Call {
+            callee: Callee::Library(function),
+            ..
+        })
+        | Node::Expr(Expr::Call { function, .. }) => Some(*function),
+        Node::Expr(Expr::Act(act)) => match &act.kind {
+            ActKind::Call(Callee::Library(function)) => Some(*function),
+            _ => return false,
+        },
+        Node::Action(_) | Node::Expr(Expr::Closure(_)) => return false,
+        Node::Stmt(Stmt::ReturnVia { policy, .. }) => Some(*policy),
+        Node::Stmt(Stmt::For {
+            via: Some(protocol),
+            ..
+        }) => {
+            if !protocol
+                .functions()
+                .all(|function| pure_library(*function, catalog, known))
+            {
+                return false;
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(function) = library
+        && !pure_library(function, catalog, known)
+    {
+        return false;
+    }
+    node.children()
+        .into_iter()
+        .all(|child| pure_argument(child, catalog, known))
+}
+
+fn pure_library(
+    function: FunctionId,
+    catalog: &dyn FunctionCatalog,
+    known: &mut BTreeMap<FunctionId, bool>,
+) -> bool {
+    if let Some(pure) = known.get(&function) {
+        return *pure;
+    }
+    let pure = catalog.definition(&function).is_some_and(|definition| {
+        definition
+            .body()
+            .is_none_or(|body| pure_argument(Node::Block(&body.block), catalog, known))
+    });
+    known.insert(function, pure);
+    pure
+}
+
+/// The sole perform must occupy the entire carrier, with pure argument helpers.
 /// Assignment receivers cannot contain actions or other effects either.
-fn step(stmt: &Stmt) -> Option<u32> {
+fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog) -> Option<u32> {
+    let mut known = BTreeMap::new();
     let (rhs, index) = match stmt {
         Stmt::Let { value, .. } => (Some(value), 0),
         Stmt::Assign { place, value, .. } => {
@@ -57,7 +121,10 @@ fn step(stmt: &Stmt) -> Option<u32> {
         Stmt::Do {
             value: Expr::Act(act),
         } if matches!(act.kind, ActKind::Perform { .. })
-            && act.args.iter().all(|arg| !has_action(Node::Expr(arg))) =>
+            && act
+                .args
+                .iter()
+                .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known)) =>
         {
             return Some(0);
         }
@@ -75,7 +142,10 @@ fn step(stmt: &Stmt) -> Option<u32> {
         Rhs::Action(Action::Perform { .. }) => Some(index),
         Rhs::Expr(Expr::Act(act))
             if matches!(act.kind, ActKind::Perform { .. })
-                && act.args.iter().all(|arg| !has_action(Node::Expr(arg))) =>
+                && act
+                    .args
+                    .iter()
+                    .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known)) =>
         {
             Some(index)
         }
@@ -84,24 +154,56 @@ fn step(stmt: &Stmt) -> Option<u32> {
 }
 
 impl Working {
-    fn carrier(&mut self, action: &Site) -> Result<Site, Fault> {
+    fn non_separable(
+        &mut self,
+        action: &Site,
+        site: &Site,
+        catalog: &dyn FunctionCatalog,
+    ) -> Fault {
+        let mut ancestor = site.clone();
+        let mut enclosing_statement = None;
+        let mut separable_step = None;
+        while ancestor.path.pop().is_some() {
+            if let Some(NodeMut::Stmt(stmt)) = node(&mut self.document, &ancestor) {
+                let index = step(stmt, catalog);
+                if enclosing_statement.is_none() {
+                    enclosing_statement = self.origin(&ancestor);
+                }
+                if let Some(index) = index {
+                    separable_step = self.origin(&ancestor.child(index));
+                    if separable_step.is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+        at(
+            action,
+            Cause::NonSeparableStep {
+                enclosing_statement,
+                separable_step,
+            },
+        )
+    }
+
+    fn carrier(&mut self, action: &Site, catalog: &dyn FunctionCatalog) -> Result<Site, Fault> {
         let site = self.locate(action)?;
         let mut parent = site.clone();
         let index = parent
             .path
             .pop()
-            .ok_or_else(|| at(action, Cause::NonSeparableStep))?;
+            .ok_or_else(|| self.non_separable(action, &site, catalog))?;
         let Some(NodeMut::Stmt(stmt)) = node(&mut self.document, &parent) else {
-            return Err(at(action, Cause::NonSeparableStep));
+            return Err(self.non_separable(action, &site, catalog));
         };
-        if step(stmt) != Some(index) {
-            return Err(at(action, Cause::NonSeparableStep));
+        if step(stmt, catalog) != Some(index) {
+            return Err(self.non_separable(action, &site, catalog));
         }
         // Work with base addresses even after an earlier batch operation moved it.
         let mut base_parent = action.clone();
         base_parent.path.pop();
         if self.locate(&base_parent)? != parent {
-            return Err(at(action, Cause::NonSeparableStep));
+            return Err(self.non_separable(action, &site, catalog));
         }
         Ok(base_parent)
     }
@@ -242,7 +344,7 @@ impl Working {
                 })?;
             }
             Operation::RemoveStep { action, .. } => {
-                let statement = self.carrier(action)?;
+                let statement = self.carrier(action, catalog)?;
                 self.edit(&Edit::RemoveStatement { statement })?;
             }
             Operation::MoveStep { action, to, .. } => {
@@ -253,7 +355,7 @@ impl Working {
                 if destination.unit == parent.unit && destination.path.starts_with(&parent.path) {
                     return Err(at(action, Cause::IntoItself));
                 }
-                let statement = self.carrier(action)?;
+                let statement = self.carrier(action, catalog)?;
                 self.edit(&Edit::MoveStatement {
                     statement,
                     to: to.clone(),
@@ -282,7 +384,7 @@ impl Working {
                 last,
                 wrapper,
                 ..
-            } => self.wrap(first, last, wrapper)?,
+            } => self.wrap(first, last, wrapper, catalog)?,
             Operation::UnwrapSteps {
                 wrapper, branch, ..
             } => self.unwrap(wrapper, *branch, catalog)?,
@@ -290,16 +392,22 @@ impl Working {
         Ok(())
     }
 
-    fn wrap(&mut self, first: &Site, last: &Site, wrapper: &Wrapper) -> Result<(), Fault> {
-        let first_statement = self.carrier(first)?;
-        let last_statement = self.carrier(last)?;
+    fn wrap(
+        &mut self,
+        first: &Site,
+        last: &Site,
+        wrapper: &Wrapper,
+        catalog: &dyn FunctionCatalog,
+    ) -> Result<(), Fault> {
+        let first_statement = self.carrier(first, catalog)?;
+        let last_statement = self.carrier(last, catalog)?;
         let (block, start) = self.statement(&first_statement)?;
         let (end_block, end) = self.statement(&last_statement)?;
         if block != end_block
             || start > end
             || self.block(&block)[start..=end]
                 .iter()
-                .any(|stmt| step(stmt).is_none())
+                .any(|stmt| step(stmt, catalog).is_none())
         {
             return Err(at(first, Cause::NotContiguousSteps));
         }
