@@ -205,3 +205,96 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         );
     }
 }
+/// Settled bindings remain observation facts, not active runs or scan work.
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when_configured() {
+    use lash_core_store::turn_input_vocabulary::TurnInputStateKind;
+
+    let url = crate::testing::required_database_url();
+    let database = crate::testing::IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url()).await.unwrap();
+    let mut connection = storage.pool().acquire().await.unwrap();
+    sqlx::query(
+        "INSERT INTO lash_pending_turn_inputs
+             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+              submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
+         SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+                CASE WHEN n % 2 = 0 THEN 'completed' ELSE 'cancelled' END,
+                '{}', 'digest', 0, 'past-' || n, 0
+         FROM generate_series(1, 10000) AS n",
+    )
+    .execute(&mut *connection)
+    .await
+    .unwrap();
+    sqlx::query("ANALYZE lash_pending_turn_inputs")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    let sql = lash_store_sql::durable::session_mail::SessionMailStatements::render(
+        lash_store_sql::Dialect::postgres().with_vocabulary(super::TURN_INPUT_LIFECYCLE),
+    );
+    let plan = explain(
+        &mut connection,
+        sql.bound_run.sql(),
+        &[PlanParam::Text("history")],
+    )
+    .await;
+    assert!(
+        plan.contains("idx_lash_pending_turn_inputs_open_bound_run"),
+        "bound_run reads settled history:\n{plan}",
+    );
+    for &state in TurnInputStateKind::ALL {
+        for bound in [false, true] {
+            let ingress = if state == TurnInputStateKind::DeferredNextTurn || state.is_terminal() {
+                r#"{"scope":"next_turn"}"#
+            } else {
+                r#"{"scope":"active_turn","turn_id":"candidate"}"#
+            };
+            sqlx::query(
+                "INSERT INTO lash_pending_turn_inputs
+                     (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                      submission_digest, enqueued_at_ms, admitted_run, admitted_by, terminal_at_ms)
+                 VALUES (10001, 'candidate', 'history', $1, $2, '{}', 'digest', 0, $3, $4, $5)",
+            )
+            .bind(ingress)
+            .bind(state.as_str())
+            .bind(bound.then_some("candidate-run"))
+            .bind((bound && !state.is_terminal()).then_some("admit"))
+            .bind(state.is_terminal().then_some(0_i64))
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+            let actual: Option<String> = sqlx::query_scalar(sql.bound_run.sql())
+                .bind("history")
+                .fetch_optional(&mut *connection)
+                .await
+                .unwrap();
+            assert_eq!(
+                actual.as_deref(),
+                (bound && !state.is_terminal()).then_some("candidate-run"),
+                "state={state:?}, bound={bound}",
+            );
+            sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE input_id = 'candidate'")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+        }
+    }
+    sqlx::query(
+        "INSERT INTO lash_queued_work_batches
+             (enqueue_seq, batch_id, session_id, delivery_policy, authority_json,
+              submission_digest, enqueued_at_ms, payload_json, admitted_run, admitted_by)
+         VALUES (10002, 'queued', 'history', 'earliest_safe_boundary', '{}',
+                 'digest', 0, '{\"type\":\"session_command\"}', 'queued-run', 'admit')",
+    )
+    .execute(&mut *connection)
+    .await
+    .unwrap();
+    let queued: String = sqlx::query_scalar(sql.bound_run.sql())
+        .bind("history")
+        .fetch_one(&mut *connection)
+        .await
+        .unwrap();
+    assert_eq!(queued, "queued-run");
+}

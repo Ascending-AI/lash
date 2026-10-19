@@ -18,6 +18,8 @@ crate::statements! {
                      WHERE session_id = ?1 AND closing_intent IS NOT NULL)";
 
         /// The run session `?1`'s bound, unsettled ingress names, if any.
+        /// The vocabulary predicate matches the stores' open-bound-run partial
+        /// indexes: retained settled bindings never lengthen this probe.
         bound_run = "SELECT admitted_run FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NOT NULL
                AND {{nonterminal_turn_input_state(state)}}

@@ -1407,6 +1407,7 @@ jobs:
             pg-operator-laws \
             pg-chaos-laws \
             pg-schema-laws \
+            pg-bound-run-settled-history \
             pg-cross-backend
 
       # Selected PostgreSQL variants require the URL exported by with-service.sh
@@ -1482,6 +1483,7 @@ jobs:
             bash scripts/ci/store-tests.sh pg-operator-laws
             bash scripts/ci/store-tests.sh pg-chaos-laws
             bash scripts/ci/store-tests.sh pg-schema-laws
+            bash scripts/ci/store-tests.sh pg-bound-run-settled-history
           '
 
       # The full differential compares backend semantics.

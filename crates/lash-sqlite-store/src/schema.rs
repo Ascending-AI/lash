@@ -317,6 +317,13 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_run
     ON pending_turn_inputs(session_id, admitted_run)
     WHERE admitted_run IS NOT NULL;
 
+-- Settled inputs retain admitted_run for observation, but cannot keep a run
+-- active. Match the session-mail probe's nonterminal vocabulary predicate so
+-- finding the active run never scans those retained bindings (FIG-6909).
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open_bound_run
+    ON pending_turn_inputs(session_id, admitted_run)
+    WHERE admitted_run IS NOT NULL AND state NOT IN ('cancelled', 'completed');
+
 -- The source keys a host forsook before any input was filed under them: no
 -- input is ever admitted under one. A forsake and an admission of one key
 -- are serialized by the session's write authority, so a key holds either a

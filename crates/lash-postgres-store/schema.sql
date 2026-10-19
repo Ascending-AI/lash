@@ -366,6 +366,13 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_accepted_state
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_bound_run
     ON lash_pending_turn_inputs(session_id, admitted_run)
     WHERE admitted_run IS NOT NULL;
+
+-- Settled inputs retain admitted_run for observation, but cannot keep a run
+-- active. Match the session-mail probe's nonterminal vocabulary predicate so
+-- finding the active run never scans those retained bindings (FIG-6909).
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open_bound_run
+    ON lash_pending_turn_inputs(session_id, admitted_run)
+    WHERE admitted_run IS NOT NULL AND state NOT IN ('cancelled', 'completed');
 -- The settled inputs whose body a revision release may clear (FIG-6607):
 -- a released or live row never lengthens the scan.
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_settled_body
