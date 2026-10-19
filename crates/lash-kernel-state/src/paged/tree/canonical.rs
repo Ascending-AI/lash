@@ -100,6 +100,24 @@ pub(super) fn cut<I>(
     pieces
 }
 
+/// A leaf's page tokens, encoded as the seal encodes a chunk, and whether
+/// its rows are one canonical chunk read from their own start: the rule
+/// ends the chunk at its last row and at no earlier one.
+pub(super) fn leaf_page<T: Cell>(rows: &[(Key, T)], sequence: bool) -> (Vec<u8>, bool) {
+    let mut tokens = TokenWriter::new();
+    tokens.seq(rows.len() as u64);
+    let body = tokens.len();
+    let mut chunk = !rows.is_empty();
+    for (at, (key, cell)) in rows.iter().enumerate() {
+        tokens.seq(2);
+        key.encode(&mut tokens);
+        cell.encode(&mut tokens);
+        let bytes = (tokens.len() - body) as u64;
+        chunk &= ends(sequence, 0, at + 1, bytes, key.as_slice()) == (at + 1 == rows.len());
+    }
+    (tokens.into_bytes(), chunk)
+}
+
 /// Cuts an overflowing working leaf.
 pub(super) fn cut_leaf<T: Cell>(
     rows: &mut Vec<(Key, T)>,
@@ -136,8 +154,7 @@ fn height<T: Cell>(
 ) -> Result<u64, HeapFault> {
     if let Link::Dirty(page) = &branch.link {
         match &*page.borrow() {
-            Node::Leaf(_) => return Ok(0),
-            Node::Staged(_, _, true) => return Ok(0),
+            Node::Leaf(_) | Node::Staged(..) => return Ok(0),
             Node::Index(children) => {
                 let next = children
                     .iter()
@@ -146,7 +163,6 @@ fn height<T: Cell>(
                     .ok_or_else(|| HeapFault::Malformed("empty working index".into()))?;
                 return Ok(1 + height(next, access, sequence)?);
             }
-            Node::Staged(..) => {}
         }
     }
     if branch.is_leaf == Some(true) {
@@ -192,6 +208,22 @@ fn prepare<T: Cell>(
     }
 }
 
+/// `branch` as a sealed leaf, when it names a spilled leaf whose rows are
+/// one canonical chunk.
+fn staged_chunk<T: Cell>(branch: &Branch<T>) -> Option<Branch<T>> {
+    let Link::Dirty(page) = &branch.link else {
+        return None;
+    };
+    let Node::Staged(page, bytes, true) = *page.borrow() else {
+        return None;
+    };
+    let mut sealed = branch.clone();
+    sealed.link = Link::Sealed(page);
+    sealed.encoded_bytes = Some(bytes);
+    sealed.is_leaf = Some(true);
+    Some(sealed)
+}
+
 /// One level's open chunk. `ended` defers closing until the next item
 /// arrives, so a level's only item becomes the root instead of the single
 /// child of a node above it.
@@ -229,6 +261,15 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
     fn feed(&mut self, branch: &Branch<T>, height: u64) -> Result<(), HeapFault> {
         if matches!(branch.link, Link::Sealed(_)) && self.align(height)? {
             return self.push_branch(height + 1, branch.clone());
+        }
+        // A spilled leaf that is one canonical chunk is the page this seal
+        // builds from its rows once the leaf level is at a boundary: it is
+        // taken whole, never read back (FIG-6902).
+        if height == 0
+            && let Some(staged) = staged_chunk(branch)
+            && self.align(0)?
+        {
+            return self.push_branch(1, staged);
         }
         let loaded = Tree::load_node(branch, self.access, self.sequence)?;
         match (&*loaded.node(), height) {

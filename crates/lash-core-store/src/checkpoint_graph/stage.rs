@@ -2,8 +2,9 @@
 //! hands a store (FIG-6195, `docs/design/persistent-heap-seams.md`).
 //!
 //! Declarations only. The spool is node-local temporary storage owned by
-//! the parent for one activation: content-addressed, disk-indexed, quota
-//! limited, with bounded buffers. It is never a checkpoint, never admits an
+//! the parent for one activation: content-addressed, resident in the
+//! parent's memory up to a bound and disk-indexed past it, quota limited,
+//! with bounded buffers. It is never a checkpoint, never admits an
 //! effect and need not survive the parent. A sealed page may name only
 //! committed pages the activation's root lease protects or pages sealed
 //! into this spool before it, so the staged graph is acyclic by

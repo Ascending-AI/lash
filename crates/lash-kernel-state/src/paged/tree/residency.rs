@@ -36,7 +36,7 @@ impl<T: Cell> Stage for DirtyNode<T> {
             }
             cell.children(&mut children);
         }
-        let tokens = encode_body(&rows);
+        let (tokens, chunk) = super::canonical::leaf_page(&rows, sequence);
         let bytes = tokens.len() as u64;
         let kind = if sequence {
             PageKind::SEQUENCE_LEAF
@@ -44,7 +44,7 @@ impl<T: Cell> Stage for DirtyNode<T> {
             PageKind::KEYED_LEAF
         };
         let page = access.seal(kind, tokens, children)?;
-        *self.borrow_mut() = Node::Staged(page, bytes, true);
+        *self.borrow_mut() = Node::Staged(page, bytes, chunk);
         Ok(())
     }
 }

@@ -276,6 +276,11 @@ impl CellLifetime {
 /// by what its files hold, never by a count of pages: a session of 50,000
 /// bindings stages about 50,000 pages and 10 MB of the quota.
 ///
+/// A spool holds its first 64 MiB of that charge (or the quota, if smaller)
+/// in the parent's memory and opens no file per page; the seal that would
+/// pass it moves the spool's pages to this directory once (FIG-6902). Count
+/// up to 64 MiB of parent memory per live spool.
+///
 /// A code-mode session's cells share one turn spool, so this is also its
 /// per-active-session bound. Multiply by the host's maximum number of live
 /// spools for a directory budget: independently staged process activations

@@ -356,7 +356,10 @@ const TOUCHES_PER_PAGE: u64 = 12;
 #[test]
 fn a_large_candidate_builds_streams_and_settles_in_bounded_memory_and_linear_work() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 64 << 20).expect("root");
+    // On disk from the first seal, where a spool holds nothing per page.
+    let root = SpoolRoot::open(dir.path(), 64 << 20)
+        .expect("root")
+        .resident_within(0);
     let mut spool = root.spool(StageLeaseId(1)).expect("spool");
     let committed = page("committed", &[]);
     let protected = |id: &NodeId| *id == committed.id;
@@ -423,6 +426,106 @@ fn a_large_candidate_builds_streams_and_settles_in_bounded_memory_and_linear_wor
         touched <= TOUCHES_PER_PAGE * staged,
         "the spool touched {touched} records for {staged} pages"
     );
+}
+
+/// Regular files and links under `dir`, at any depth.
+fn files(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .expect("dir")
+        .map(|entry| entry.expect("entry").path())
+        .map(|path| {
+            if path.is_dir() && !path.is_symlink() {
+                files(&path)
+            } else {
+                1
+            }
+        })
+        .sum()
+}
+
+/// FIG-6902: within its resident bound a spool stages a cell's pages,
+/// builds its candidate and settles it without a file per page: past the
+/// parents' locks, its directory only ever holds the standing candidate's
+/// manifest. A spool whose seals pass the bound moves every page and
+/// count to its directory once and keeps them exactly: the same seals
+/// give the same usage, retention, manifest and settlement.
+#[test]
+fn a_cell_within_the_resident_bound_opens_no_file_per_page() {
+    let committed = page("committed", &[]);
+    let protected = |id: &NodeId| *id == committed.id;
+    let run = |root: &SpoolRoot, dir: &std::path::Path| {
+        let idle = files(dir);
+        let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+        let orphan = page("orphan", &[committed.id]);
+        spool.seal(orphan.clone(), &protected).expect("staged");
+        let mut level: Vec<NodeId> = (0..2_048)
+            .map(|leaf| {
+                let node = page(&format!("leaf {leaf}"), &[]);
+                spool.seal(node.clone(), &protected).expect("staged");
+                node.id
+            })
+            .collect();
+        let mut depth = 0;
+        while level.len() > 1 {
+            depth += 1;
+            level = level
+                .chunks(32)
+                .enumerate()
+                .map(|(at, children)| {
+                    let node = page(&format!("index {depth}/{at}"), children);
+                    spool.seal(node.clone(), &protected).expect("staged");
+                    node.id
+                })
+                .collect();
+        }
+        let top = page("top", &[level[0], committed.id]);
+        spool.seal(top.clone(), &protected).expect("staged");
+        let staged = (spool.usage(), spool.entries(), files(dir) - idle);
+        spool.retain(&[top.id]).expect("retained");
+        assert_eq!(spool.read(&orphan.id), Err(StageFault::Missing(orphan.id)));
+        let commit = CommitId([4; 32]);
+        let mut manifest = spool.candidate(top.id, None, commit).expect("candidate");
+        let entries: Vec<(NodeId, Option<Arc<[u8]>>)> = drain(manifest.as_mut(), None, 64)
+            .into_iter()
+            .map(|entry| match entry {
+                ManifestEntry::Fresh(node) => (node.id, Some(node.bytes)),
+                ManifestEntry::External(id) => (id, None),
+            })
+            .collect();
+        let candidate = files(dir) - idle;
+        spool.settle(commit).expect("settled");
+        assert_eq!(spool.usage().pages, 0);
+        assert_eq!(files(dir), idle, "settlement leaves no file behind");
+        (spool.on_disk(), staged, entries, candidate)
+    };
+    let dir = tempfile::tempdir().expect("dir");
+    let resident = run(
+        &SpoolRoot::open(dir.path(), 64 << 20).expect("root"),
+        dir.path(),
+    );
+    let (on_disk, (usage, _, staged_files), _, candidate_files) = &resident;
+    assert_eq!(*staged_files, 0, "staging opened a file per page");
+    assert!(!on_disk, "the cell stays within the bound");
+    assert_eq!(
+        *candidate_files, 1,
+        "a standing candidate holds its manifest"
+    );
+
+    let dir = tempfile::tempdir().expect("dir");
+    let bound = usage.bytes / 2;
+    let moved = run(
+        &SpoolRoot::open(dir.path(), 64 << 20)
+            .expect("root")
+            .resident_within(bound),
+        dir.path(),
+    );
+    assert!(moved.0, "the seals past the bound moved the spool");
+    assert!(
+        moved.1.2 as u64 >= usage.pages,
+        "every page moved to a file"
+    );
+    assert_eq!((moved.1.0, moved.1.1), (resident.1.0, resident.1.1));
+    assert_eq!(moved.2, resident.2, "one manifest wherever the pages are");
 }
 
 /// A staged page may name only committed pages a capability protects or
@@ -979,10 +1082,11 @@ fn parent_dirs(dir: &std::path::Path) -> usize {
         .count()
 }
 
-/// The parent crash cuts: after a spill, and after a candidate is sealed.
-/// The spool dies with its parent; the next parent reaps it (and never a
-/// live parent's), and a fresh activation leases the committed root,
-/// which the crash left exactly as it was.
+/// The parent crash cuts: after a spill, after a candidate is sealed, and
+/// after the spool moved past its resident bound to its directory. The
+/// spool dies with its parent, in memory or on disk; the next parent reaps
+/// its directory (and never a live parent's), and a fresh activation
+/// leases the committed root, which the crash left exactly as it was.
 #[tokio::test]
 async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
     let dir = tempfile::tempdir().expect("dir");
@@ -992,8 +1096,12 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
     store.commit(&kept);
     store.commit(&base);
     let before = store.pages.lock().expect("pages").clone();
-    for cut in ["after a spill", "after a candidate"] {
+    for cut in ["after a spill", "after a candidate", "after a move to disk"] {
         let crashed = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        let crashed = match cut {
+            "after a move to disk" => crashed.resident_within(0),
+            _ => crashed,
+        };
         let mut pages = activation(&store, &crashed, base.id);
         let top = page(cut, &[]);
         let top_cap = sealed(seal(&mut pages, &top, Vec::new()).await);

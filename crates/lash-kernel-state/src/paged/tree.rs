@@ -275,6 +275,9 @@ struct Branch<T: Cell> {
 enum Node<T: Cell> {
     Leaf(Vec<(Key, T)>),
     Index(Vec<Branch<T>>),
+    /// A spilled leaf: its page, the page's token bytes, and whether its
+    /// rows are one canonical chunk read from their own start, so the
+    /// seal takes the page whole (FIG-6902). Only leaves stage.
     Staged(PageRef, u64, bool),
 }
 
@@ -296,7 +299,7 @@ impl<T: Cell> Clone for Node<T> {
         match self {
             Self::Leaf(rows) => Self::Leaf(rows.clone()),
             Self::Index(rows) => Self::Index(rows.clone()),
-            Self::Staged(page, bytes, leaf) => Self::Staged(*page, *bytes, *leaf),
+            Self::Staged(page, bytes, chunk) => Self::Staged(*page, *bytes, *chunk),
         }
     }
 }
@@ -551,11 +554,11 @@ impl<T: Cell> Tree<T> {
         match &branch.link {
             Link::Dirty(n) => {
                 let node = n.borrow().clone();
-                if let Node::Staged(page, bytes, leaf) = node {
+                if let Node::Staged(page, bytes, _) = node {
                     let mut staged = branch.clone();
                     staged.link = Link::Sealed(page);
                     staged.encoded_bytes = Some(bytes);
-                    staged.is_leaf = Some(leaf);
+                    staged.is_leaf = Some(true);
                     Self::load_shared(&staged, access, sequence)
                 } else {
                     Ok(Rc::new(node))

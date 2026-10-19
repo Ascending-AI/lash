@@ -17,6 +17,8 @@ pub(super) struct Pages {
     pub seals: u64,
     /// Seals by page kind, re-encodings of an existing page included.
     pub kinds: BTreeMap<PageKind, u64>,
+    /// Seals of a page the port already held.
+    pub resealed: u64,
     pub bytes: u64,
     pub seal_fault: Option<HeapFault>,
 }
@@ -59,6 +61,7 @@ impl PageSource for Source {
         };
         let mut store = self.0.borrow_mut();
         store.seals += 1;
+        store.resealed += u64::from(store.pages.contains_key(&page.id));
         *store.kinds.entry(body.kind).or_default() += 1;
         store.bytes += body.tokens.len() as u64 + 32 * body.children.len() as u64;
         store.pages.insert(
@@ -752,6 +755,57 @@ fn fresh_small_records_stage_no_page_of_their_own_rows() {
             key_of(ordinal)
         ));
     }
+}
+
+/// FIG-6902: a spilled leaf whose rows are one canonical chunk is the
+/// page the seal builds from them, so the seal takes it whole: records
+/// stored in order past the dirty bound spill directory leaves, and the
+/// final seal reads none of them back and seals none of them again. The
+/// root is the one a history whose spills are not chunks seals.
+#[test]
+fn a_spilled_canonical_leaf_is_the_seals_own_page() {
+    use super::super::stored::StoredObject;
+    const N: u64 = 40_000;
+    let build = |order: &mut dyn Iterator<Item = u64>| {
+        let (mut heap, pages) = fresh();
+        let id = PageValue::Text(heap.text("id").expect("text"));
+        let key = PageValue::Text(heap.text("key").expect("text"));
+        for ordinal in order {
+            heap.store_object(
+                EntityId {
+                    family: FamilyId::PRIMARY,
+                    ordinal,
+                },
+                StoredObject::Table {
+                    kind: ObjectKind::Record,
+                    entries: vec![
+                        (0, id.clone(), int(ordinal as i64)),
+                        (1, key.clone(), int(((ordinal * 7_919) % N) as i64)),
+                    ],
+                    next: 2,
+                },
+            )
+            .expect("a fresh record");
+        }
+        heap.release_statement_roots();
+        let spilled = pages.borrow().kinds.get(&PageKind::KEYED_LEAF).copied();
+        let (reads, resealed) = (pages.borrow().reads, pages.borrow().resealed);
+        let root = seal(&mut heap).root.directory;
+        let pages = pages.borrow();
+        (
+            root,
+            spilled.unwrap_or(0),
+            pages.reads - reads,
+            pages.resealed - resealed,
+        )
+    };
+    let (root, spilled, reads, resealed) = build(&mut (0..N));
+    assert!(spilled > 0, "the directory stages under dirty pressure");
+    assert_eq!(reads, 0, "the seal read a spilled leaf back");
+    assert_eq!(resealed, 0, "the seal sealed a spilled leaf again");
+    let (reversed, spilled, _, _) = build(&mut (0..N).rev());
+    assert!(spilled > 0, "the reversed directory stages too");
+    assert_eq!(root, reversed, "one directory whatever was spilled");
 }
 
 /// D-CAP/D-SEALTIME: private pages spill at 32 MiB without publishing a

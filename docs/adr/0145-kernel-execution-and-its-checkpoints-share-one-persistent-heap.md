@@ -304,8 +304,9 @@ Laws: `lash-kernel-vm`'s `laws::census`
 ### 6. A park publishes one candidate with its admissions
 
 A park that requests something seals a candidate root into its
-activation's spool, a content-addressed, disk-indexed staging area bounded
-by a quota (1 GiB per activation by default). The spool lives as long as
+activation's spool, a content-addressed staging area bounded by a quota
+(1 GiB per activation by default): in the parent's memory up to 64 MiB of
+it, disk-indexed past that (FIG-6902). The spool lives as long as
 its stage lease: the activation plus the resolution of its last
 publication. The parent builds the candidate's manifest by walking only the
 staged DAG, stopping at committed pages, and streams it in ascending digest

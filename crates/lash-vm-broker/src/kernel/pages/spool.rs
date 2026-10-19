@@ -1,15 +1,22 @@
-//! The activation's private staging spool (S5, `D-SPOOL`): sealed pages on
-//! the parent's local disk until a publication settles them.
+//! The activation's private staging spool (S5, `D-SPOOL`): sealed pages
+//! held for the parent until a publication settles them.
 //!
-//! A spool is content addressed: each staged page is one file named by its
-//! digest, and the directory is the index, so the parent's memory holds the
-//! spool's usage and nothing per page. A page is written straight to its
-//! own file, so a buffer holds at most the page being written; a write
-//! that fails removes its file. A quota bounds the spool's file contents:
-//! each staged page's bytes, plus [`ENTRY_BYTES`] of manifest scratch for
-//! each staged page and each distinct external reference (FIG-6512). A
-//! publication's install writes its edge log within that scratch, beside
-//! the sorted manifest (FIG-6596).
+//! A spool is content addressed. While its quota charge stays within its
+//! resident bound ([`RESIDENT_BYTES`], or its quota if smaller) it holds
+//! its staged pages and their reference counts in the parent's memory, so
+//! a cell that stages, publishes and settles them opens no file per page
+//! (FIG-6902). The first seal that would pass the bound moves every page
+//! and count into the spool's directory, once, and the spool stays there
+//! for the rest of its life: each staged page is then one file named by
+//! its digest, and the directory is the index, so the parent's memory
+//! holds the spool's usage and nothing per page. A page is written
+//! straight to its own file, so a buffer holds at most the page being
+//! written; a write that fails removes its file. A quota bounds the
+//! spool's contents in either place: each staged page's bytes, plus
+//! [`ENTRY_BYTES`] of manifest scratch for each staged page and each
+//! distinct external reference (FIG-6512). A publication's install writes
+//! its edge log within that scratch, beside the sorted manifest
+//! (FIG-6596).
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
 //! DAG that stops at committed references, appending the record of each
@@ -27,15 +34,17 @@
 //! A spool lives exactly as long as its stage lease: an authoritative
 //! commit deletes the candidate's pages, an authoritative refusal discards
 //! the spool with the activation, and an ambiguous publication keeps it. It
-//! never survives its parent process: a parent that opens its
-//! [`SpoolRoot`] reaps the spools of dead parents.
+//! never survives its parent process, in memory or on disk: a parent that
+//! dies takes its resident pages with it, and a parent that opens its
+//! [`SpoolRoot`] reaps the directories of dead parents. Their activations
+//! resume from their committed roots.
 #![expect(
     clippy::disallowed_methods,
     reason = "the spool is the host-supplied staging directory's sole reader and writer (D-SPOOL)"
 )]
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Write};
@@ -93,6 +102,10 @@ const RUN_RECORDS: usize = 4096;
 const MERGE_FANIN: usize = 64;
 /// The buffer a streamed record file reads or writes through.
 const RECORD_BUFFER: usize = 8 << 10;
+/// The most quota charge a spool holds in the parent's memory before it
+/// moves to its directory (FIG-6902): a 200,000-record cell stages about
+/// 42 MB.
+pub(crate) const RESIDENT_BYTES: u64 = 64 << 20;
 
 fn record(id: &NodeId, fresh: bool) -> Record {
     let mut record = [0; RECORD];
@@ -249,6 +262,8 @@ impl SpoolMeter {
 pub struct SpoolRoot {
     dir: PathBuf,
     quota: u64,
+    /// The charge each spool holds in memory before it moves to disk.
+    resident: u64,
     /// Cumulative successful page writes across this runtime's activations.
     #[cfg(feature = "perf-witness")]
     spooled_bytes: Arc<AtomicU64>,
@@ -260,7 +275,8 @@ impl SpoolRoot {
     /// Opens this process's directory under `parent`, a directory the host
     /// gives its parents for staging, with a quota of `quota` bytes per
     /// spool: page bytes plus 99 bytes of manifest scratch for each staged
-    /// page and distinct external reference. The spools of parents that
+    /// page and distinct external reference. A spool holds up to
+    /// [`RESIDENT_BYTES`] of that charge in memory. The spools of parents that
     /// died are deleted first: a spool never survives its parent, and their
     /// activations resume from their committed roots.
     ///
@@ -293,6 +309,7 @@ impl SpoolRoot {
         Ok(Self {
             dir,
             quota,
+            resident: RESIDENT_BYTES.min(quota),
             #[cfg(feature = "perf-witness")]
             spooled_bytes: Arc::default(),
             _lock: lock,
@@ -307,7 +324,15 @@ impl SpoolRoot {
         self.spooled_bytes.load(Ordering::Relaxed)
     }
 
-    /// The spool of the activation `lease` names, empty.
+    /// This root with spools that hold at most `bytes` of charge in
+    /// memory, so a law can stage past the bound with a few pages.
+    #[cfg(test)]
+    pub(crate) fn resident_within(mut self, bytes: u64) -> Self {
+        self.resident = bytes;
+        self
+    }
+
+    /// The spool of the activation `lease` names, empty and resident.
     ///
     /// # Errors
     ///
@@ -315,11 +340,11 @@ impl SpoolRoot {
     pub fn spool(&self, lease: StageLeaseId) -> Result<DiskSpool, StageFault> {
         let dir = self.dir.join(format!("{:016x}", lease.0));
         fs::create_dir(&dir).map_err(|error| io(&error))?;
-        fs::create_dir(dir.join("pages")).map_err(|error| io(&error))?;
-        fs::create_dir(dir.join("refs")).map_err(|error| io(&error))?;
         Ok(DiskSpool {
             lease,
             dir,
+            resident: self.resident,
+            tier: Tier::Resident(Resident::default()),
             #[cfg(feature = "perf-witness")]
             spooled_bytes: Arc::clone(&self.spooled_bytes),
             usage: StageUsage {
@@ -338,13 +363,56 @@ impl SpoolRoot {
 #[derive(Debug)]
 struct Candidate {
     summary: ManifestSummary,
+    pages: Pages,
 }
 
-/// One activation's spool on disk.
+/// The staged pages and reference counts of a spool within its resident
+/// bound.
+#[derive(Debug, Default)]
+struct Resident {
+    pages: HashMap<NodeId, Arc<[u8]>>,
+    refs: HashMap<NodeId, u64>,
+}
+
+/// Where a spool's staged pages and reference counts are: in memory until
+/// its charge would pass its resident bound, then in its directory for the
+/// rest of its life.
+#[derive(Debug)]
+enum Tier {
+    Resident(Resident),
+    Files,
+}
+
+/// Where a candidate's manifest reads its fresh pages: the bytes its walk
+/// reached in memory, or the spool's page files.
+#[derive(Clone, Debug)]
+enum Pages {
+    Resident(Arc<HashMap<NodeId, Arc<[u8]>>>),
+    Files(PathBuf),
+}
+
+impl Pages {
+    fn read(&self, id: &NodeId) -> Result<Arc<[u8]>, StageFault> {
+        match self {
+            Self::Resident(pages) => pages.get(id).cloned().ok_or(StageFault::Missing(*id)),
+            Self::Files(dir) => match fs::read(dir.join(id.to_hex())) {
+                Ok(bytes) => Ok(bytes.into()),
+                Err(error) if error.kind() == ErrorKind::NotFound => Err(StageFault::Missing(*id)),
+                Err(error) => Err(io(&error)),
+            },
+        }
+    }
+}
+
+/// One activation's spool: in the parent's memory within its resident
+/// bound, on disk past it.
 #[derive(Debug)]
 pub struct DiskSpool {
     lease: StageLeaseId,
     dir: PathBuf,
+    /// The charge the spool holds in memory before it moves to disk.
+    resident: u64,
+    tier: Tier,
     usage: StageUsage,
     #[cfg(feature = "perf-witness")]
     spooled_bytes: Arc<AtomicU64>,
@@ -366,6 +434,12 @@ impl DiskSpool {
         self.entries
     }
 
+    /// Whether the spool has moved its pages to its directory.
+    #[cfg(test)]
+    pub(crate) fn on_disk(&self) -> bool {
+        matches!(self.tier, Tier::Files)
+    }
+
     fn pages(&self) -> PathBuf {
         self.dir.join("pages")
     }
@@ -379,20 +453,23 @@ impl DiskSpool {
     }
 
     /// Incoming edges from staged pages, including edges to staged children.
-    /// The count is the target of a symbolic link named by the child's
-    /// digest, so one call reads it and one writes it. A link adds no
-    /// content bytes beyond the entry's charge, and the index stays on disk
-    /// rather than growing a per-entry map in the parent.
+    /// On disk the count is the target of a symbolic link named by the
+    /// child's digest, so one call reads it and one writes it. A link adds
+    /// no content bytes beyond the entry's charge, and the index stays on
+    /// disk rather than growing a per-entry map in the parent.
     fn references(&self, id: &NodeId) -> Result<u64, StageFault> {
-        let count = match fs::read_link(self.refs(id)) {
-            Ok(count) => count,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
-            Err(error) => return Err(io(&error)),
+        let Tier::Resident(resident) = &self.tier else {
+            let count = match fs::read_link(self.refs(id)) {
+                Ok(count) => count,
+                Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+                Err(error) => return Err(io(&error)),
+            };
+            return count
+                .to_str()
+                .and_then(|count| count.parse().ok())
+                .ok_or_else(|| StageFault::Io("a staging reference count is invalid".to_owned()));
         };
-        count
-            .to_str()
-            .and_then(|count| count.parse().ok())
-            .ok_or_else(|| StageFault::Io("a staging reference count is invalid".to_owned()))
+        Ok(resident.refs.get(id).copied().unwrap_or(0))
     }
 
     /// Moves `id`'s count from `old`, which [`Self::references`] read, one
@@ -406,28 +483,78 @@ impl DiskSpool {
         staged: bool,
     ) -> Result<(), StageFault> {
         let next = if add { old + 1 } else { old - 1 };
-        let path = self.refs(id);
+        match &mut self.tier {
+            Tier::Resident(resident) if next == 0 => {
+                resident.refs.remove(id);
+            }
+            Tier::Resident(resident) => {
+                resident.refs.insert(*id, next);
+            }
+            Tier::Files => {
+                let path = self.refs(id);
+                match (old, next) {
+                    (0, _) => std::os::unix::fs::symlink(next.to_string(), &path)
+                        .map_err(|error| io(&error))?,
+                    (_, 0) => fs::remove_file(&path).map_err(|error| io(&error))?,
+                    _ => {
+                        let partial = self.dir.join("refs").join(format!(".next-{}", id.to_hex()));
+                        std::os::unix::fs::symlink(next.to_string(), &partial)
+                            .map_err(|error| io(&error))?;
+                        fs::rename(&partial, &path).map_err(|error| io(&error))?;
+                    }
+                }
+            }
+        }
         match (old, next) {
-            (0, _) => {
-                std::os::unix::fs::symlink(next.to_string(), &path).map_err(|error| io(&error))?;
-                self.entries += u64::from(!staged);
-            }
-            (_, 0) => {
-                fs::remove_file(&path).map_err(|error| io(&error))?;
-                self.entries -= u64::from(!staged);
-            }
-            _ => {
-                let partial = self.dir.join("refs").join(format!(".next-{}", id.to_hex()));
-                std::os::unix::fs::symlink(next.to_string(), &partial)
-                    .map_err(|error| io(&error))?;
-                fs::rename(&partial, &path).map_err(|error| io(&error))?;
-            }
+            (0, _) => self.entries += u64::from(!staged),
+            (_, 0) => self.entries -= u64::from(!staged),
+            _ => {}
         }
         Ok(())
     }
 
     fn staged(&self, id: &NodeId) -> bool {
-        self.page(id).is_file()
+        match &self.tier {
+            Tier::Resident(resident) => resident.pages.contains_key(id),
+            Tier::Files => self.page(id).is_file(),
+        }
+    }
+
+    /// Stages `bytes` as the page `id`, which is not staged yet.
+    fn write(&mut self, id: NodeId, bytes: Arc<[u8]>) -> Result<(), StageFault> {
+        let Tier::Resident(resident) = &mut self.tier else {
+            return write_page(&self.page(&id), &bytes);
+        };
+        resident.pages.insert(id, bytes);
+        Ok(())
+    }
+
+    /// Moves every resident page and count into the spool's directory, the
+    /// spool's one move (FIG-6902). A move that fails leaves the spool
+    /// resident, with what it wrote removed.
+    fn move_to_disk(&mut self) -> Result<(), StageFault> {
+        let Tier::Resident(resident) = &self.tier else {
+            return Ok(());
+        };
+        let written = (|| {
+            fs::create_dir(self.pages()).map_err(|error| io(&error))?;
+            fs::create_dir(self.dir.join("refs")).map_err(|error| io(&error))?;
+            for (id, bytes) in &resident.pages {
+                write_page(&self.page(id), bytes)?;
+            }
+            for (id, count) in &resident.refs {
+                std::os::unix::fs::symlink(count.to_string(), self.refs(id))
+                    .map_err(|error| io(&error))?;
+            }
+            Ok(())
+        })();
+        if let Err(fault) = written {
+            let _ = fs::remove_dir_all(self.pages());
+            let _ = fs::remove_dir_all(self.dir.join("refs"));
+            return Err(fault);
+        }
+        self.tier = Tier::Files;
+        Ok(())
     }
 
     /// Where the candidate committed under `commit` keeps its manifest
@@ -442,7 +569,7 @@ impl DiskSpool {
         let candidate = self.candidate.as_ref()?;
         (candidate.summary.commit == commit).then(|| {
             Box::new(DiskManifest {
-                pages: self.pages(),
+                pages: candidate.pages.clone(),
                 manifest: self.candidate_dir(commit).join("manifest"),
                 summary: candidate.summary,
                 meter: Arc::clone(&self.meter),
@@ -460,7 +587,12 @@ impl DiskSpool {
         };
         let envelope =
             parse_envelope(&bytes, Some(*id)).map_err(|_| StageFault::HashMismatch(*id))?;
-        fs::remove_file(self.page(id)).map_err(|error| io(&error))?;
+        match &mut self.tier {
+            Tier::Resident(resident) => {
+                resident.pages.remove(id);
+            }
+            Tier::Files => fs::remove_file(self.page(id)).map_err(|error| io(&error))?,
+        }
         self.entries -= u64::from(self.references(id)? == 0);
         for child in envelope.children.iter() {
             let old = self.references(&child)?;
@@ -472,6 +604,35 @@ impl DiskSpool {
         self.usage.bytes -= bytes.len() as u64;
         Ok(())
     }
+
+    /// The staged pages, by digest.
+    fn staged_ids(&self) -> Result<Vec<NodeId>, StageFault> {
+        let Tier::Resident(resident) = &self.tier else {
+            let mut ids = Vec::new();
+            for entry in fs::read_dir(self.pages()).map_err(|error| io(&error))? {
+                let name = entry.map_err(|error| io(&error))?.file_name();
+                ids.extend(name.to_str().and_then(NodeId::from_hex));
+            }
+            return Ok(ids);
+        };
+        Ok(resident.pages.keys().copied().collect())
+    }
+}
+
+/// Writes a page's file, which must not exist; a write that fails removes
+/// it.
+fn write_page(target: &Path, bytes: &[u8]) -> Result<(), StageFault> {
+    let mut file = File::options()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|error| io(&error))?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        let _ = fs::remove_file(target);
+        return Err(io(&error));
+    }
+    Ok(())
 }
 
 impl Drop for DiskSpool {
@@ -531,18 +692,10 @@ impl StageSpool for DiskSpool {
                 quota: self.usage.quota_bytes,
             });
         }
-        let target = self.page(&page.id);
-        let mut file = File::options()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-            .map_err(|error| io(&error))?;
-        if let Err(error) = file.write_all(&page.bytes) {
-            drop(file);
-            let _ = fs::remove_file(&target);
-            return Err(io(&error));
+        if charged > self.resident {
+            self.move_to_disk()?;
         }
-        drop(file);
+        self.write(page.id, page.bytes)?;
         self.entries += own_entry;
         for (child, staged, old) in counted {
             self.reference(&child, old, true, staged)?;
@@ -555,10 +708,13 @@ impl StageSpool for DiskSpool {
     }
 
     fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault> {
-        match fs::read(self.page(page)) {
-            Ok(bytes) => Ok(bytes.into()),
-            Err(error) if error.kind() == ErrorKind::NotFound => Err(StageFault::Missing(*page)),
-            Err(error) => Err(io(&error)),
+        match &self.tier {
+            Tier::Resident(resident) => resident
+                .pages
+                .get(page)
+                .cloned()
+                .ok_or(StageFault::Missing(*page)),
+            Tier::Files => Pages::Files(self.pages()).read(page),
         }
     }
 
@@ -567,44 +723,32 @@ impl StageSpool for DiskSpool {
     }
 
     fn retain(&mut self, roots: &[NodeId]) -> Result<(), StageFault> {
-        // Mark what the roots reach in a scratch directory, then delete
-        // every unmarked page; the stack holds digests, never page bytes.
-        let reached = self.dir.join("retain");
-        match fs::remove_dir_all(&reached) {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(io(&error)),
-        }
-        fs::create_dir(&reached).map_err(|error| io(&error))?;
+        // Mark what the roots reach, then delete every unmarked page; the
+        // stack holds digests, never page bytes.
+        let mut reached = Reached::open(self)?;
         let mut stack: Vec<NodeId> = roots.iter().copied().filter(|id| self.staged(id)).collect();
         for id in &stack {
-            fs::write(reached.join(id.to_hex()), []).map_err(|error| io(&error))?;
+            reached.mark(id)?;
         }
         while let Some(id) = stack.pop() {
             let bytes = self.read(&id)?;
             let envelope =
                 parse_envelope(&bytes, Some(id)).map_err(|_| StageFault::HashMismatch(id))?;
             for child in envelope.children.iter() {
-                let marker = reached.join(child.to_hex());
-                if self.staged(&child) && !marker.is_file() {
-                    fs::write(&marker, []).map_err(|error| io(&error))?;
+                if self.staged(&child) && reached.mark(&child)? {
                     stack.push(child);
                 }
             }
         }
-        let mut dead = Vec::new();
-        for entry in fs::read_dir(self.pages()).map_err(|error| io(&error))? {
-            let name = entry.map_err(|error| io(&error))?.file_name();
-            if let Some(id) = name.to_str().and_then(NodeId::from_hex)
-                && !reached.join(id.to_hex()).is_file()
-            {
-                dead.push(id);
-            }
-        }
+        let dead: Vec<NodeId> = self
+            .staged_ids()?
+            .into_iter()
+            .filter(|id| !reached.contains(id))
+            .collect();
         for id in dead {
             self.remove(&id)?;
         }
-        fs::remove_dir_all(&reached).map_err(|error| io(&error))
+        reached.close()
     }
 
     fn candidate(
@@ -676,6 +820,9 @@ impl StageSpool for DiskSpool {
         let mut walk = reader(&records)?;
         self.meter.holding(2 * RECORD_BUFFER as u64);
         let (mut written, mut flushed, mut walked) = (0_u64, 0_u64, 0_u64);
+        // A resident candidate keeps the fresh pages its walk reached, so
+        // its manifest reads them whatever the spool does next.
+        let mut reached = matches!(self.tier, Tier::Resident(_)).then(HashMap::new);
         mark(&root, true)?;
         append(&mut queue, &record(&root, true), &self.meter)?;
         written += 1;
@@ -696,6 +843,9 @@ impl StageSpool for DiskSpool {
             let bytes = self.read(&id)?;
             let envelope =
                 parse_envelope(&bytes, Some(id)).map_err(|_| StageFault::HashMismatch(id))?;
+            if let Some(reached) = &mut reached {
+                reached.insert(id, Arc::clone(&bytes));
+            }
             summary.fresh_nodes += 1;
             summary.fresh_bytes += bytes.len() as u64;
             summary.fresh_edges += envelope.children.len() as u64;
@@ -716,7 +866,11 @@ impl StageSpool for DiskSpool {
         sort_records(&dir, &records, &dir.join("manifest"), written, &self.meter)?;
         fs::remove_file(&records).map_err(|error| io(&error))?;
         fs::remove_dir_all(&marks).map_err(|error| io(&error))?;
-        self.candidate = Some(Candidate { summary });
+        let pages = match reached {
+            Some(reached) => Pages::Resident(Arc::new(reached)),
+            None => Pages::Files(self.pages()),
+        };
+        self.candidate = Some(Candidate { summary, pages });
         self.manifest(commit)
             .ok_or_else(|| StageFault::Io("the candidate was not kept".to_owned()))
     }
@@ -770,10 +924,62 @@ impl StageSpool for DiskSpool {
     }
 }
 
+/// The pages a retention walk reached: a set in memory for a resident
+/// spool, marker files in a scratch directory for a spool on disk.
+enum Reached {
+    Set(HashSet<NodeId>),
+    Dir(PathBuf),
+}
+
+impl Reached {
+    fn open(spool: &DiskSpool) -> Result<Self, StageFault> {
+        if matches!(spool.tier, Tier::Resident(_)) {
+            return Ok(Self::Set(HashSet::new()));
+        }
+        let dir = spool.dir.join("retain");
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(io(&error)),
+        }
+        fs::create_dir(&dir).map_err(|error| io(&error))?;
+        Ok(Self::Dir(dir))
+    }
+
+    /// Marks `id`, whether it was unmarked.
+    fn mark(&mut self, id: &NodeId) -> Result<bool, StageFault> {
+        match self {
+            Self::Set(set) => Ok(set.insert(*id)),
+            Self::Dir(dir) => {
+                let marker = dir.join(id.to_hex());
+                if marker.is_file() {
+                    return Ok(false);
+                }
+                fs::write(&marker, []).map_err(|error| io(&error))?;
+                Ok(true)
+            }
+        }
+    }
+
+    fn contains(&self, id: &NodeId) -> bool {
+        match self {
+            Self::Set(set) => set.contains(id),
+            Self::Dir(dir) => dir.join(id.to_hex()).is_file(),
+        }
+    }
+
+    fn close(self) -> Result<(), StageFault> {
+        match self {
+            Self::Set(_) => Ok(()),
+            Self::Dir(dir) => fs::remove_dir_all(&dir).map_err(|error| io(&error)),
+        }
+    }
+}
+
 /// A candidate's manifest over its sorted record file.
 #[derive(Debug)]
 struct DiskManifest {
-    pages: PathBuf,
+    pages: Pages,
     manifest: PathBuf,
     summary: ManifestSummary,
     meter: Arc<SpoolMeter>,
@@ -838,16 +1044,9 @@ impl CandidateManifest for DiskManifest {
             let (id, fresh) = parse(record);
             last = Some(id);
             entries.push(if fresh {
-                let bytes = match fs::read(self.pages.join(id.to_hex())) {
-                    Ok(bytes) => bytes,
-                    Err(error) if error.kind() == ErrorKind::NotFound => {
-                        return Err(StageFault::Missing(id));
-                    }
-                    Err(error) => return Err(io(&error)),
-                };
                 ManifestEntry::Fresh(EncodedNode {
                     id,
-                    bytes: bytes.into(),
+                    bytes: self.pages.read(&id)?,
                 })
             } else {
                 ManifestEntry::External(id)
@@ -860,7 +1059,20 @@ impl CandidateManifest for DiskManifest {
     }
 
     fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
-        let file = match File::open(self.pages.join(id.to_hex())) {
+        let dir = match &self.pages {
+            Pages::Resident(pages) => {
+                let bytes = pages.get(id).ok_or(StageFault::Missing(*id))?;
+                return usize::try_from(offset)
+                    .ok()
+                    .and_then(|start| bytes.get(start..start.checked_add(len)?))
+                    .map(<[u8]>::to_vec)
+                    .ok_or_else(|| {
+                        StageFault::Io("a fresh page range is out of bounds".to_owned())
+                    });
+            }
+            Pages::Files(dir) => dir,
+        };
+        let file = match File::open(dir.join(id.to_hex())) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Err(StageFault::Missing(*id));

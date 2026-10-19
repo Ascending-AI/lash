@@ -535,8 +535,12 @@ pub trait CandidateManifest: Send {
 
 Invariants:
 
-- The spool is content-addressed and disk-indexed with bounded buffers and a
-  quota. It is never an unbounded parent map.
+- The spool is content-addressed with bounded buffers and a quota. It holds
+  its pages and reference counts in the parent's memory while its quota
+  charge stays within a resident bound (64 MiB, or the quota if smaller),
+  so a cell's commit opens no file per page. The first seal past the bound
+  moves them to its directory once, where it stays disk-indexed. It is
+  never an unbounded parent map (FIG-6902).
 - A staged page's children are protected committed pages or pages staged
   earlier, so the staged graph is acyclic by construction.
 - `candidate` walks the root's staged DAG only and stops at protected
@@ -557,6 +561,8 @@ Laws: unit, `//crates/lash-vm-broker:lash-vm-broker__unit_test`, in
 - `staging_refuses_an_unprotected_child`
 - `an_ambiguous_publication_keeps_its_spool_until_resolved`
 - `a_quota_failure_is_a_host_outcome`
+- `a_cell_within_the_resident_bound_opens_no_file_per_page`
+- `a_crashed_parents_spool_is_reaped_and_the_committed_root_stands`
 
 ### S6 Store publication
 
