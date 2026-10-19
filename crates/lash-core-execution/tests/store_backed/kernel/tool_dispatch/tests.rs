@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod composition_laws;
+mod live_fence_sweep;
 mod protocol_version_refusal;
 
 fn named_beta_tool(name: &str) -> crate::ToolDefinition {

@@ -320,6 +320,72 @@ async fn modern_mrtr_cancellation_reaches_the_host_without_retry() {
     factory.shutdown().await.unwrap();
 }
 
+/// Answers each form after a short wait, keeping every request's
+/// cancellation token for the law.
+#[derive(Default)]
+struct WatchedHost {
+    tokens: std::sync::Mutex<Vec<tokio_util::sync::CancellationToken>>,
+}
+#[async_trait]
+impl McpElicitationHandler for WatchedHost {
+    fn modes(&self) -> McpElicitationModes {
+        McpElicitationModes::Form
+    }
+    async fn create_elicitation(
+        &self,
+        request: McpElicitationRequest<'_>,
+    ) -> Result<McpElicitationResult, McpHostRefusal> {
+        let token = request.context.cancellation_token().clone();
+        self.tokens.lock().unwrap().push(token.clone());
+        tokio::select! {
+            () = token.cancelled() => Err(McpHostRefusal::internal("host input cancelled")),
+            () = tokio::time::sleep(Duration::from_millis(20)) => {
+                request.accept(json!({"answer":"yes"})).map_err(McpHostRefusal::from)
+            }
+        }
+    }
+}
+
+/// Ownership at the claim: a tool call owns the cancellation of the host
+/// input it starts from the moment it creates it, so a call dropped at each
+/// await, while the host is still answering among them, cancels every host
+/// request it started instead of leaving it running unowned.
+#[tokio::test]
+async fn a_tool_call_dropped_at_each_await_cancels_the_host_input_it_started() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let host = Arc::new(WatchedHost::default());
+    let factory = McpPluginFactory::builder(configs(&trace, "form"))
+        .elicitation_handler(host.clone())
+        .build()
+        .await
+        .unwrap();
+    let name = crate::mcp_tool_names("modern", &["exercise"])["exercise"].clone();
+    lash_core::cancel_sweep::sweep_drops(
+        async || {
+            let (pool, name) = (Arc::clone(factory.pool()), name.clone());
+            let call = async move {
+                let fixture = lash_core::testing::ToolCallFixture::mock();
+                let context = fixture.attempt("swept-call");
+                let outcome = pool.call_tool(&name, &json!({}), &context).await;
+                assert!(outcome.is_success(), "the call completes: {outcome:?}");
+            };
+            ((), call)
+        },
+        async |(), cut| {
+            let tokens = std::mem::take(&mut *host.tokens.lock().unwrap());
+            assert!(
+                tokens
+                    .iter()
+                    .all(tokio_util::sync::CancellationToken::is_cancelled),
+                "every host input the call started is cancelled once the call is {cut}"
+            );
+        },
+    )
+    .await;
+    factory.shutdown().await.unwrap();
+}
+
 async fn execute(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
     use lash_core::ToolProvider;
     let provider = McpToolProvider::new(Arc::clone(factory.pool()));

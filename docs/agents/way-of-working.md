@@ -182,6 +182,16 @@ never failed on a real bug.
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
 When those durable-semantics lines change, follow the named transcript-justification rule in [pr-style.md](pr-style.md).
 
+## Authoring rules for concurrent code
+
+Most defects the FIG-6840 audit found share five shapes. Each rule below prevents one; reviewers check them like tests.
+
+1. **Ownership at the claim.** Create the cleanup or invalidation owner at the moment a resource, queue position, reservation, frame or view lifetime is claimed, before the first `.await` or external callback, and transfer that same obligation on success. A future can be dropped at any point it returned `Pending`, so a dropped future must release or hand on what it holds in every state. Test it with the cancellation sweep, `lash_core_ids::cancel_sweep::sweep_drops` (re-exported as `lash_core::cancel_sweep`): it drops a fresh scenario's future after 0, 1, 2, … polls until one run completes and checks your invariant after every cut (the next acquirer proceeds, no reserved, held or sealed state remains, the prior frame is installed). Each sweep law names the site and the abandonment it guards against.
+2. **Check and mutation under one owner.** Make the state predicate and its transition one operation under the same synchronization owner. Do expensive sizing, callbacks and awaits outside that critical section, then reclassify under it.
+3. **Identity, not position.** Carry an ID with its value and update by that ID. A vector index, FIFO order, a "most recent with this name" search or a sentinel value is never an identity.
+4. **Pass facts intact.** The producer of a validated or ordered fact passes it intact to its consumer; normalize only at the boundary that needs the simpler form, never flatten and rebuild.
+5. **One inventory owner.** Author a membership list or discriminant once, at its source owner, and project it; consumers own policy, never a second hand-maintained inventory.
+
 ## Team and session norms
 
 - Read `CONTEXT.md` and area-relevant ADRs before exploring (see [domain.md](domain.md)).

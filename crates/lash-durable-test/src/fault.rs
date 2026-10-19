@@ -1285,6 +1285,49 @@ mod tests {
         ));
     }
 
+    /// Ownership at the claim (FIG-6855): a contested claim holds a turn
+    /// ticket while it waits and is counted in flight while the store runs
+    /// it, and a diagnostic read waits at its paused node's read seam. Dropped
+    /// at each await, waiting for the node to resume, for its turn or inside
+    /// the store, they leave no turn queued and nothing in flight: the
+    /// deployment is idle and another node's claim proceeds.
+    #[tokio::test]
+    async fn a_claim_and_read_dropped_at_each_await_leave_the_deployment_idle() {
+        lash_core_ids::cancel_sweep::sweep_drops(
+            async || {
+                let deployment = Deployment::new().await;
+                let (a, a_life) = deployment.node("a");
+                let lease = a.register_node(&Deployment::spec("a")).await.unwrap();
+                a.commit_mail(create("one"), CREATE).await.expect("create");
+                a.commit_mail(mail("one"), MAIL).await.expect("mail");
+                a_life.pause();
+                let resuming = async move {
+                    settle().await;
+                    a_life.resume();
+                };
+                let working = async move {
+                    let _ = a.claim_facts(None, &actor("one")).await;
+                    a.claim(&lease, 1).await.expect("claim");
+                };
+                (deployment, async move { tokio::join!(working, resuming) })
+            },
+            async |deployment, cut| {
+                let idle = std::pin::pin!(deployment.activity.idle());
+                assert!(
+                    idle.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                        .is_ready(),
+                    "the deployment is idle once the work is {cut}"
+                );
+                let (b, _) = deployment.node("b");
+                let lease = b.register_node(&Deployment::spec("b")).await.unwrap();
+                b.claim(&lease, 1)
+                    .await
+                    .expect("another node's claim proceeds");
+            },
+        )
+        .await;
+    }
+
     /// A stale-epoch cut commits the write, then pauses the node with the
     /// reply until the node resumes.
     #[tokio::test]

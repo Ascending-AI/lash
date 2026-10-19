@@ -127,6 +127,8 @@ pub mod sync {
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_execution::test_support;
 #[cfg(any(test, feature = "testing"))]
+pub use lash_core_ids::cancel_sweep;
+#[cfg(any(test, feature = "testing"))]
 pub use lash_core_ids::test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

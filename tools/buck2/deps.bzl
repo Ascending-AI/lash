@@ -401,7 +401,9 @@ PACKAGE_DEPS = {
     },
     "lash-internal-core-ids": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "tokio": "//third-party/rust:p0381"
+        },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "chrono": "//third-party/rust:p0048",

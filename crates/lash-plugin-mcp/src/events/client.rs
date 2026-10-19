@@ -191,6 +191,10 @@ impl EventStreams {
         inner.routes.remove(&key);
         inner.orphans.retain(|(orphan, _, _)| *orphan != key);
     }
+    #[cfg(test)]
+    fn routes(&self) -> usize {
+        self.inner.lock_recover().routes.len()
+    }
 }
 /// One pool entry's enabled policy, data limits and live connection, admitted
 /// together. An operation captures it once and runs on it to the end.
@@ -925,6 +929,63 @@ mod tests {
                 if server == "tickets" && method == wire::LIST_METHOD),
             "the listing fails on its own closed connection: {result:?}"
         );
+        pool.shutdown_all().await;
+    }
+
+    /// Ownership at the claim (FIG-6857): an event operation (a paged
+    /// listing, then a stream opened, read for one window and closed) dropped
+    /// at each await leaves no route installed on the connection it admitted,
+    /// and the next operation on that connection opens and closes a stream.
+    #[tokio::test]
+    async fn an_event_operation_dropped_at_each_await_leaves_no_route_installed() {
+        let world = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(world.path());
+        fixture.control(serde_json::json!({"list_pages": 2, "pause_stream": true}));
+        let pool = McpConnectionPool::connect(BTreeMap::from([(
+            "tickets".to_owned(),
+            fixture.server(McpEventTransportPolicy::default()),
+        )]))
+        .await
+        .unwrap();
+        let client = McpEventClient::new(Arc::clone(&pool));
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while let Err(McpEventsCallError::Disconnected { .. }) =
+                client.list("tickets", Duration::from_secs(5)).await
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let streams = admit(&pool, "tickets").unwrap().handler.event_streams();
+        lash_core::cancel_sweep::sweep_drops(
+            async || {
+                let client = client.clone();
+                let operation = async move {
+                    client
+                        .list("tickets", Duration::from_secs(5))
+                        .await
+                        .unwrap();
+                    let mut stream = client.open("tickets", &window_request()).await.unwrap();
+                    stream
+                        .read_window(Duration::from_millis(10), 10)
+                        .await
+                        .unwrap();
+                    stream.close().await.unwrap();
+                };
+                ((), operation)
+            },
+            async |(), cut| {
+                assert_eq!(
+                    streams.routes(),
+                    0,
+                    "no route remains once the operation is {cut}"
+                );
+                let next = client.open("tickets", &window_request()).await;
+                next.unwrap().close().await.unwrap();
+            },
+        )
+        .await;
         pool.shutdown_all().await;
     }
 

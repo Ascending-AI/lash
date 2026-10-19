@@ -273,3 +273,64 @@ mod tests {
         assert!(record.completed);
     }
 }
+
+#[cfg(test)]
+mod drop_tests {
+    use crate::conn::tests::installed;
+    use crate::conn::{SqliteConnectionPolicy, SqliteSynchronous};
+    use crate::location::DatabaseTarget;
+
+    async fn rows(connection: &crate::conn::SqliteConnection) -> i64 {
+        connection
+            .call(|c| c.query_row("SELECT COUNT(*) FROM swept", [], |row| row.get(0)))
+            .await
+            .expect("count the swept rows")
+    }
+
+    /// Ownership at the claim (FIG-3975): a write is the connection thread's
+    /// from the moment it is queued, and the write gate is held only there,
+    /// so a write future dropped at each await either never queued or commits
+    /// whole, and the next write proceeds behind it.
+    #[tokio::test]
+    async fn a_write_dropped_at_each_await_commits_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().expect("sweep tempdir");
+        let connection = installed(
+            &DatabaseTarget::File(dir.path().join("core.db")),
+            SqliteConnectionPolicy::standard(SqliteSynchronous::Normal),
+        )
+        .await;
+        connection
+            .write(|tx| tx.execute_batch("CREATE TABLE swept (n INTEGER)"))
+            .await
+            .expect("create the swept table");
+        lash_core_ids::cancel_sweep::sweep_drops(
+            async || {
+                let before = rows(&connection).await;
+                let writer = connection.clone();
+                let write = async move {
+                    writer
+                        .write(|tx| {
+                            tx.execute_batch(
+                                "INSERT INTO swept VALUES (1); INSERT INTO swept VALUES (2)",
+                            )
+                        })
+                        .await
+                        .expect("the swept write");
+                };
+                (before, write)
+            },
+            async |before, cut| {
+                connection.write(|_| Ok(())).await.unwrap_or_else(|error| {
+                    panic!("the next write proceeds once the write is {cut}: {error}")
+                });
+                let committed = if cut.polls == 0 { 0 } else { 2 };
+                assert_eq!(
+                    rows(&connection).await,
+                    before + committed,
+                    "the write committed whole or not at all once it is {cut}"
+                );
+            },
+        )
+        .await;
+    }
+}

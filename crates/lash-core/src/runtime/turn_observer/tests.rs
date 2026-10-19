@@ -567,3 +567,50 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
         ]
     );
 }
+
+/// Ownership at the claim: the host end owns the event its publisher took,
+/// so a publication dropped at each await, with an event taken and its host
+/// delivery pending among them, leaves the turn's wait for its publication
+/// answered instead of held on an event nobody will finish publishing.
+#[tokio::test]
+async fn a_publication_dropped_at_each_await_never_strands_the_turns_wait() {
+    crate::cancel_sweep::sweep_drops(
+        async || {
+            let (observer, mut observations) = TurnObserver::unread();
+            let shift_observer = observer.clone();
+            let work = async move {
+                let shift = std::pin::pin!(async move {
+                    for text in ["one", "two"] {
+                        shift_observer.publish(RuntimeStreamEvent::Session(
+                            SessionStreamEvent::Error(ReportedFailure {
+                                message: text.into(),
+                                envelope: None,
+                            }),
+                        ));
+                        tokio::task::yield_now().await;
+                    }
+                    shift_observer.published().await;
+                });
+                crate::runtime::work_with_observations(
+                    shift,
+                    &mut observations,
+                    |_| tokio::task::yield_now(),
+                    lash_trace::ObservationWorkLimits::standard(),
+                )
+                .await;
+            };
+            (observer, work)
+        },
+        async |observer, cut| {
+            let mut published = std::pin::pin!(observer.published());
+            assert!(
+                published
+                    .as_mut()
+                    .poll(&mut Context::from_waker(std::task::Waker::noop()))
+                    .is_ready(),
+                "the turn's publication wait answers once its publication is {cut}"
+            );
+        },
+    )
+    .await;
+}

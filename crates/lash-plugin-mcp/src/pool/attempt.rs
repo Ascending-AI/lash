@@ -134,6 +134,9 @@ impl McpConnectionPool {
             .cancellation_token()
             .map(tokio_util::sync::CancellationToken::child_token)
             .unwrap_or_default();
+        // The host work this call starts is cancelled however the call ends,
+        // a dropped call included: its owner exists before any of it starts.
+        let host_work = cancellation.clone().drop_guard();
         let total = entry.config.call_max_total_timeout();
         let deadline = tokio::time::Instant::now() + total;
         let rounds = async {
@@ -228,7 +231,7 @@ impl McpConnectionPool {
         });
         // MRTR host work observes cancellation on both local cancellation and
         // the total deadline, including when a host task has been spawned.
-        cancellation.cancel();
+        drop(host_work);
 
         match response {
             Ok(ServerResult::CallToolResult(result)) => {

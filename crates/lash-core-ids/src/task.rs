@@ -34,3 +34,64 @@ where
         None => tokio::spawn(future.instrument(tracing::Span::current())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use lash_trace::{AmbientFrame, Framed};
+
+    use crate::cancel_sweep::sweep_drops;
+
+    fn is_current(expected: &Arc<AmbientFrame>) -> bool {
+        AmbientFrame::current().is_some_and(|current| Arc::ptr_eq(&current, expected))
+    }
+
+    fn frame() -> Arc<AmbientFrame> {
+        AmbientFrame::new(None, Arc::new(()))
+    }
+
+    /// Ownership at the claim (FIG-6858): a task's frame is installed for one
+    /// poll at a time and restored by the poll that installed it, so a framed
+    /// task dropped at any await, with a framed child pending inside it,
+    /// leaves the caller's frame installed, never its own or its child's.
+    #[tokio::test]
+    async fn a_framed_task_dropped_at_each_await_leaves_the_prior_frame_installed() {
+        let prior = frame();
+        let _prior = prior.enter();
+        sweep_drops(
+            async || {
+                let (task, child) = (frame(), frame());
+                let polled = Arc::clone(&task);
+                let task = Framed::new(
+                    async move {
+                        tokio::task::yield_now().await;
+                        assert!(is_current(&polled), "the task polls under its frame");
+                        let entered = Arc::clone(&child);
+                        Framed::new(
+                            async move {
+                                tokio::task::yield_now().await;
+                                assert!(is_current(&entered), "the child polls under its frame");
+                            },
+                            child,
+                        )
+                        .await;
+                        assert!(
+                            is_current(&polled),
+                            "the child's exit restores the task's frame"
+                        );
+                    },
+                    task,
+                );
+                ((), task)
+            },
+            async |(), cut| {
+                assert!(
+                    is_current(&prior),
+                    "the caller's frame is installed once the task is {cut}"
+                );
+            },
+        )
+        .await;
+    }
+}

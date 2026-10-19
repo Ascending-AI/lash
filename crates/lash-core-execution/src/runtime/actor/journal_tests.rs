@@ -25,28 +25,43 @@ fn a_non_process_context_cannot_rescope_into_a_process() {
     );
 }
 
-/// R3: P cannot register through a clone while the owner awaits D.
+/// R3: P cannot register through a clone while the owner awaits D, and
+/// ownership at the claim: the owner step is released however its await
+/// ends, so an await dropped at any point of its step, or completed, leaves
+/// registration admitted.
 #[tokio::test]
 async fn preparation_registration_refuses_at_the_owner_await() {
     let scoped = ActorContext::unavailable()
         .scoped(AdmittedScope::turn("s", "t"))
         .expect("scope");
-    let actor = scoped.clone();
-    let mut wait = Box::pin(scoped.await_owner_step(
-        "D".to_owned(),
-        std::future::pending::<Result<(), RuntimeEffectControllerError>>(),
-    ));
-    assert!(futures_util::poll!(&mut wait).is_pending());
-    let refused = actor
-        .admit_journal_write_at(Some("start:prepare"))
-        .expect_err("P registration must refuse at its live site");
-    assert_eq!(
-        refused.code,
-        crate::RuntimeErrorCode::JournalWriteDuringOwnerStep
-    );
-    assert!(refused.message.contains("D"));
-    drop(wait);
-    actor
-        .admit_journal_write_at(Some("start:prepare"))
-        .expect("dropping the await releases admission");
+    lash_core_ids::cancel_sweep::sweep_drops(
+        async || {
+            let (owner, actor) = (scoped.clone(), scoped.clone());
+            let step = async move {
+                for _ in 0..2 {
+                    let refused = actor
+                        .admit_journal_write_at(Some("start:prepare"))
+                        .expect_err("P registration must refuse at its live site");
+                    assert_eq!(
+                        refused.code,
+                        crate::RuntimeErrorCode::JournalWriteDuringOwnerStep
+                    );
+                    assert!(refused.message.contains("D"));
+                    tokio::task::yield_now().await;
+                }
+                Ok::<(), RuntimeEffectControllerError>(())
+            };
+            ((), async move {
+                owner.await_owner_step("D".to_owned(), step).await
+            })
+        },
+        async |(), cut| {
+            scoped
+                .admit_journal_write_at(Some("start:prepare"))
+                .unwrap_or_else(|error| {
+                    panic!("registration is admitted once the owner await is {cut}: {error:?}")
+                });
+        },
+    )
+    .await;
 }

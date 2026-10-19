@@ -577,58 +577,47 @@ mod tests {
         })
     }
 
-    fn poll_acquisition(
-        acquisition: &mut PendingAcquisition,
-    ) -> std::task::Poll<Result<CommitAdmissionGuard, CommitAdmissionError>> {
-        acquisition
-            .as_mut()
-            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
-    }
-
+    /// Ownership at the claim (FIG-6849): a pending acquisition dropped at
+    /// each await, while still queued behind the holder or after release
+    /// already granted it the lane but before it was polled again, frees the
+    /// session, so the next acquirer proceeds at once.
     #[tokio::test]
     async fn dropped_acquisitions_relinquish_queued_and_granted_ownership() {
-        let session = SessionId::from("session");
-        for granted_before_drop in [true, false] {
-            let coordinator = CommitAdmissionCoordinator::default();
-            let holder = coordinator
-                .acquire_typed(
-                    CommitAdmissionClaim::new("session", "holder"),
-                    CancellationToken::new(),
-                    CommitAdmissionPolicy::standard(),
+        let polls = crate::cancel_sweep::sweep_drops(
+            async || {
+                let coordinator = CommitAdmissionCoordinator::default();
+                let holder = pending_acquisition(&coordinator, "holder")
+                    .await
+                    .expect("holder admission");
+                // The holder releases after the acquisition queued and before
+                // its next poll, so one cut holds a granted, unpolled lane.
+                let releasing = async move {
+                    tokio::task::yield_now().await;
+                    holder.release_after_head_advance();
+                };
+                let acquiring = pending_acquisition(&coordinator, "dropped");
+                (
+                    coordinator,
+                    futures_util::future::join(acquiring, releasing),
                 )
-                .await
-                .expect("holder admission");
-            let mut dropped = pending_acquisition(&coordinator, "dropped");
-            let mut next = pending_acquisition(&coordinator, "next");
-            assert!(poll_acquisition(&mut dropped).is_pending());
-            assert!(poll_acquisition(&mut next).is_pending());
-            assert_eq!(
-                coordinator.queued_work_identities(&session),
-                ["dropped", "next"]
-            );
-
-            if granted_before_drop {
-                // Release hands the lane to `dropped`, whose future is
-                // destroyed before it is polled again.
-                holder.release_after_head_advance();
-                assert_eq!(coordinator.queued_work_identities(&session), ["next"]);
-                drop(dropped);
-            } else {
-                drop(dropped);
-                assert_eq!(coordinator.queued_work_identities(&session), ["next"]);
-                holder.release_after_head_advance();
-            }
-
-            let std::task::Poll::Ready(admitted) = poll_acquisition(&mut next) else {
-                panic!(
-                    "the next acquirer proceeds after a dropped acquisition (granted before drop: {granted_before_drop})"
+            },
+            async |coordinator, cut| {
+                assert_eq!(
+                    coordinator.active_session_count(),
+                    0,
+                    "the session is free once the acquisition is {cut}"
                 );
-            };
-            let admitted = admitted.expect("next admission");
-            assert_eq!(admitted.claim.work_identity, "next");
-            admitted.release_after_head_advance();
-            assert_eq!(coordinator.active_session_count(), 0);
-        }
+                let next = pending_acquisition(&coordinator, "next")
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+                assert!(
+                    matches!(next, std::task::Poll::Ready(Ok(_))),
+                    "the next acquirer proceeds once the acquisition is {cut}"
+                );
+            },
+        )
+        .await;
+        assert_eq!(polls, 3, "the sweep cut the acquisition queued and granted");
     }
 
     #[tokio::test]

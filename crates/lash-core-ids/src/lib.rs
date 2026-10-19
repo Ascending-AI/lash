@@ -6,6 +6,8 @@
 //! live in their own crate and `lash-core` re-exports every one of them at its
 //! original path.
 
+#[cfg(any(test, feature = "testing"))]
+pub mod cancel_sweep;
 pub mod clock;
 pub mod identity_json;
 pub mod operational_metrics;
