@@ -58,7 +58,7 @@ py.float	7e4403b4680779b174db0b88e112ca8d77d7cf4e5c41e46a573707a7308bc216	callba
 py.abs	431d7c66bf4f61735231ee2ed3042976e11af283e98acad6f74dc65b9a96da69	closed	-	false	0	false	sum(4, size(value))	generated
 py.extreme	a6f4e04841dcf8f7c2d1f0eef75ad7064e9a26ac3da807c3e482e6e185a9d9a6	closed	-	false	0	false	sum(4, deep_size(args))	generated
 py.sum	82bb75745974ce3d788ba064bef208d2c7dc85ded5ce201c4e9f27673f5da443	closed	-	false	0	false	sum(4, deep_size(values))	generated
-py.sorted	da8d793cb7b3b47b74be72503d23273e1d6e35d1fef62ba1b8d5a8fa2e8c0855	callback	apply key	true	0	false	sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))	segment of 1 sites
+py.sorted	574dd8867e3e1b7ca275c6cc2ffbd52e4f1bf35566f3d12bf69e02630e7fea71	callback	apply sort; apply key	true	1	false	sum(8, product(2, size(values)), size(result))	segment of 2 sites
 collection.range	415c2e292b3d92d430c2d45093ced467eb1753e255ee1fe0b668296f84153d4b	closed	-	true	0	false	sum(1, size(start), size(end), size(step), size(result))	generated
 py.range	bfa1a2450157b5454b0426dea95595bfb9d9f876c17cf425d3ffe2f33c49dc82	closed	-	true	0	false	sum(4, size(result))	generated
 py.enumerate	1de49ea81aff57fcf4bc8a03f43a943ac5a082d8c3d60edfde47f3d4c4cf4f18	closed	-	true	0	false	sum(4, size(values), size(result))	generated
@@ -81,7 +81,7 @@ py.method.pop	8aaa99b70ecb88aed81e20bdd6ce35bf3dad1d5200bf4063603148660cdc71e2	c
 py.method.remove	9e353af06cab8c661de706bd17a64c7710ae8b613d6b12f04a5db30605c7729e	callback	invoke py.repr	true	0	false	sum(6, size(self), deep_size(value))	segment of 1 sites
 py.method.index	d9a2747829ce914a42d94450ff4ea60378549a5333028bd9c8ffad4f473d7bc2	callback	invoke py.repr	false	0	false	sum(6, size(self), deep_size(value))	segment of 1 sites
 py.method.count	e495fc8d3619334722227bc170c6936f21eca799404e70c92464f112bdbbfe55	closed	-	false	0	false	sum(6, size(self), deep_size(value))	generated
-py.method.sort	2d7b21523be02853bf335673dc6e62dff8cdc3793af2dd93130a4b737404de38	callback	invoke py.sorted	true	0	true	sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))	segment of 2 sites
+py.method.sort	cfb55e128f5e7bdc7e594a48275aa1ea36e1b7333a51802c2377f2dfc24853c7	callback	invoke py.sorted	true	0	true	sum(8, product(4, size(self)))	segment of 2 sites
 py.method.reverse	f69089761e00d70b3a3b2185a047f5655c5e5616d6064a7d56abbb4e80b7018f	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.copy	fe9c064f3103b290740c50f10befb3e09c5523f7df21c734fb7fd4296221a66c	closed	-	false	0	false	sum(4, size(self))	generated
 list.clear	60cfea808c1d6121cea1f0605e928b4418db7d358e8d47f0ea09427c4580c0ea	closed	-	true	0	true	sum(1, size(xs))	generated

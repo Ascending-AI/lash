@@ -340,7 +340,7 @@ body {
 # merge compares them as a comparator closure over them would (FIG-6886).
 function py.sorted(values: Any, key?: Any, reverse?: Any) -> List(Any)
 kernel 1
-charge sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))
+charge sum(8, product(2, size(values)), size(result))
 body {
   let items = invoke py.to_list(values)
   let keyed = bool.not(same(key, absent))
@@ -359,7 +359,14 @@ body {
   if bool.not(same(reverse, absent)) {
     set descending = invoke py.truth(reverse)
   }
-  return list.sort_by_keys(items, ranks, descending)
+  # An ordinary frame bills the native's formula over the actual ranks.
+  # Nested library calls are covered by our linear completion formula,
+  # which cannot measure callback-produced keys (K-CHG-007, FIG-6904).
+  let sort = fn(items, ranks, descending) {
+    return list.sort_by_keys(items, ranks, descending)
+  }
+  let ordered = apply sort(items, ranks, descending)
+  return ordered
 }
 
 # `range(...)` as the list of its integers.

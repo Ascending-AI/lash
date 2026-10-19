@@ -27,7 +27,8 @@ or constant schedules.
 | `py.number_underscores` | `sum(8, size(digits))` | `sum(8, product(size(digits), size(digits)))` | 0 × 2/test | Repeated text assembly copies growing prefixes. |
 | `py.mul` | `sum(4, size(left), size(right), size(result))` | `sum(4, size(left), size(right), size(result))` | 2 × 2/test | Empty sequences repeat without growing; numeric multiplication keeps its size schedule. |
 | `py.format.group` | `sum(4, size(digits))` | `sum(4, product(size(digits), size(digits)))` | 1 × 2/test | Repeated prefix copies are quadratic; zero width requires a metered termination guard. |
-| `py.method.sort` | `sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))` | `sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
+| `py.sorted` | `sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))` | `sum(8, product(2, size(values)), size(result))` | 0 × 2/test | Linear copying and key collection; key callbacks and the native merge bill separately. |
+| `py.method.sort` | `sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))` | `sum(8, product(4, size(self)))` | 1 × 2/test | Linear copying, key collection, clearing and replacement; the native merge bills separately, and replacement pays 2 per test. |
 | `ts.array.integer` | `8` | `sum(8, deep(value))` | 0 × 2/test | Numeric coercion parses variable-sized input. |
 | `ts.array.dense` | `8` | `sum(8, size(this), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.spread` | `8` | `sum(8, size(this), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
@@ -332,6 +333,19 @@ comparator may shrink the original while the merge walks a captured copy.
 no callback: each merge pass makes at most one comparison per item it
 places, and a comparison reads no further than the shallower key, so
 `2 × (size(keys) + deep(keys))` per pass bounds its comparisons (FIG-6886).
+Python's `py.sorted` applies the key once per item, as ordinary charged
+callback code, then applies one ordinary closure that calls
+`list.sort_by_keys`. The closure makes the native bill its own completion
+formula, `sum(1, size(items), product(2, sum(size(keys), deep(keys)),
+sum(1, ceil_log2(size(keys)))), size(result))`, even inside `py.method.sort`.
+This boundary is necessary under K-CHG-007: nested library calls add no
+completion charge, and the outer helper's arguments and result cannot
+bound arbitrarily large captured keys returned by a callback. The wrappers
+cover only linear work: `py.sorted` allows two input traversals and an
+output traversal; `py.method.sort` allows four receiver traversals for
+copying, key collection, clearing and replacement. It retains the metered
+replacement loop. Neither wrapper reserves the old closure sort's
+`256 × n × (1 + ceil_log2(n))` allowance (FIG-6904).
 `tasks.wait_all` and `tasks.cancel_all` declare two units per task-set test;
 their trip counts come from live tasks rather than call arguments.
 

@@ -399,6 +399,49 @@ fn a_key_sort_computes_each_key_once_and_charges_alike_in_any_order() {
     );
 }
 
+/// FIG-6904 / K-CHG-007: sorting bills the actual callback-produced keys,
+/// even when they are large captured values absent from the input/result.
+/// Key construction and callback work stay fixed; only the native merge's
+/// deep-key charge changes, equally for every input order and both APIs.
+#[test]
+fn a_key_sort_bills_large_captured_keys_exactly_in_any_order() {
+    let mut charges = Vec::new();
+    for items in ["0, 1, 2", "2, 1, 0", "1, 2, 0"] {
+        let mut by_key_size = Vec::new();
+        for keys in ["small", "large"] {
+            let source = format!(
+                "small = [[1], [1], [1]]\n\
+                 large = [[1] * 10000, [1] * 10000, [1] * 10000]\n\
+                 keys = {keys}\n\
+                 def rank(x):\n    return keys[x]\n\
+                 xs = [{items}]\nys = sorted(xs, key=rank)\n\
+                 xs.sort(key=rank, reverse=True)\nprint(ys)\nprint(xs)\n"
+            );
+            let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
+            let program = Program {
+                release: pages::RELEASE,
+                document: Arc::clone(lowered.document.shared()),
+                library: installed().prepared.clone(),
+            };
+            let observed = execution_observation(program, BOUNDS, false);
+            assert!(
+                matches!(observed.end, End::Finished(_)),
+                "{:?}",
+                observed.end
+            );
+            assert_eq!(observed.lines, [format!("[{items}]"), format!("[{items}]")]);
+            by_key_size.push(observed.charged);
+        }
+        // Three distinct lists gain 9999 members each: one shallow slot
+        // and two units for integer 1. The native bills twice this deep
+        // size over 1 + ceil_log2(size(keys)) = 3 passes, in each sort.
+        let deep_difference = 3 * 9999 * (1 + 2);
+        assert_eq!(by_key_size[1] - by_key_size[0], 2 * 2 * deep_difference * 3);
+        charges.push(by_key_size);
+    }
+    assert!(charges.iter().all(|charge| *charge == charges[0]));
+}
+
 /// FIG-6406: replacing every visited key preserves size but must exhaust
 /// the dict iterator's entry budget instead of extending the loop forever.
 #[test]
