@@ -68,9 +68,9 @@ workbench-continue-as-budget-gate:
 # alone: `just latency-gate --cases fast --fast-samples 1050 --lanes 1`.
 #
 # `scripts/latency_load_record.py` samples the host's load averages and CPU
-# pressure through the run into `latency-load.json` and marks the run
-# unqualified when the 1-minute load reaches the core count during the fast
-# case (FIG-3843's quiet-host rule). `scripts/latency_slope.py` then reads
+# pressure through the run into `latency-load.json`, with each case's load
+# summarized beside it. Load is evidence, never a verdict: the latency report
+# alone passes or fails the gate. `scripts/latency_slope.py` then reads
 # the ledger's accept-to-admission slope and ordinal-bin medians.
 latency-gate *args:
   #!/usr/bin/env bash

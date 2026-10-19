@@ -37,13 +37,13 @@ class Host:
 
 
 class LoadRecordTests(unittest.TestCase):
-    def run_child(self, load1, *cases, mode="runs", cores=32):
+    def run_child(self, load1, *cases, mode="runs"):
         with tempfile.TemporaryDirectory() as directory:
             host = Host(directory, load1)
             out = io.StringIO()
             status, result = record.record(
-                [sys.executable, "-c", CHILD, mode, *cases], interval=0.05, case="fast",
-                cores=cores, loadavg=host.loadavg, pressure=host.pressure, out=out)
+                [sys.executable, "-c", CHILD, mode, *cases], interval=0.05,
+                loadavg=host.loadavg, pressure=host.pressure, out=out)
             return status, result, out.getvalue()
 
     def test_subsecond_cases_sample_both_edges_without_inventing_interval_coverage(self):
@@ -51,61 +51,33 @@ class LoadRecordTests(unittest.TestCase):
             host = Host(directory, 1.0)
             _, result = record.record(
                 [sys.executable, "-c", CHILD, "runs", "grace"], interval=60.0,
-                case="grace", cores=32, loadavg=host.loadavg,
-                pressure=host.pressure, out=io.StringIO())
+                loadavg=host.loadavg, pressure=host.pressure, out=io.StringIO())
         edges = [row for row in result["samples"] if row.get("case") == "grace"]
         self.assertEqual(["started", "finished"], [row["edge"] for row in edges])
-        self.assertEqual(0, result["cases"]["grace"]["interval_samples"])
-        self.assertEqual(2, result["verdict"]["samples_in_window"])
+        self.assertEqual(0, result["cases"]["grace"]["load"]["interval_samples"])
+        self.assertEqual(2, result["cases"]["grace"]["load"]["samples"])
 
-    def test_a_quiet_fast_case_qualifies(self):
-        status, result, output = self.run_child(3.0, "fast")
+    def test_load_never_changes_the_exit_status(self):
+        """NO-LOAD-GATE (Sam, 2026-10-19): the record is evidence beside the
+        run; a loaded host neither fails a passing run nor masks a failing
+        one, and every case window still carries its load."""
+
+        status, result, output = self.run_child(500.0, "fast", "stream")
         self.assertEqual(0, status)
-        verdict = result["verdict"]
-        self.assertTrue(verdict["qualified"], verdict)
-        self.assertEqual(3.0, verdict["max_load1"])
-        self.assertEqual(12.5, verdict["max_cpu_some_avg10"])
-        self.assertGreaterEqual(verdict["samples_in_window"], 2)
+        self.assertEqual(0, result["exit_status"])
+        self.assertNotIn("verdict", result)
         self.assertIn("latency gate: PASS", output, "the command's output is forwarded")
-        self.assertEqual(12.5, result["samples"][0]["cpu_pressure"]["some_avg10"])
+        for case in ("fast", "stream"):
+            load = result["cases"][case]["load"]
+            self.assertEqual(500.0, load["max_load1"])
+            self.assertEqual(12.5, load["max_cpu_some_avg10"])
+            self.assertGreaterEqual(load["samples"], 2)
         self.assertEqual(2.0, result["samples"][0]["load5"])
 
-    def test_load_at_the_core_count_during_the_fast_case_is_unqualified(self):
-        status, result, _ = self.run_child(32.0, "fast")
-        self.assertEqual(3, status, "an unqualified run cannot certify")
-        self.assertFalse(result["verdict"]["qualified"])
-        self.assertIn("reached 32.00", result["verdict"]["reason"])
-
-    def test_load_just_below_the_core_count_qualifies(self):
-        _, result, _ = self.run_child(31.99, "fast")
-        self.assertTrue(result["verdict"]["qualified"])
-
-    def test_only_the_fast_cases_window_is_judged(self):
-        samples = [{"unix_s": 10.0, "load1": 90.0, "cpu_pressure": None},
-                   {"unix_s": 20.0, "load1": 4.0, "cpu_pressure": None},
-                   {"unix_s": 30.0, "load1": 90.0, "cpu_pressure": None}]
-        windows = record.case_windows([
-            {"case": "stream", "edge": "started", "unix_s": 5.0},
-            {"case": "stream", "edge": "finished", "unix_s": 15.0},
-            {"case": "fast", "edge": "started", "unix_s": 15.0},
-            {"case": "fast", "edge": "finished", "unix_s": 25.0},
-        ])
-        verdict = record.qualify(samples, windows, "fast", 32)
-        self.assertTrue(verdict["qualified"], verdict)
-        self.assertEqual(1, verdict["samples_in_window"])
-        self.assertFalse(record.qualify(samples, windows, "stream", 32)["qualified"])
-
-    def test_a_run_without_the_fast_case_is_unqualified(self):
-        _, result, _ = self.run_child(1.0, "stream")
-        self.assertFalse(result["verdict"]["qualified"])
-        self.assertIn("did not run", result["verdict"]["reason"])
-        self.assertIn("stream", result["cases"])
-
-    def test_a_fast_case_that_dies_is_unqualified_and_keeps_its_status(self):
-        status, result, _ = self.run_child(1.0, "fast", mode="dies")
-        self.assertEqual(7, status)
-        self.assertFalse(result["verdict"]["qualified"])
-        self.assertIn("did not finish", result["verdict"]["reason"])
+        status, result, _ = self.run_child(500.0, "fast", mode="dies")
+        self.assertEqual(7, status, "a failed command keeps its own status")
+        self.assertIsNone(result["cases"]["fast"]["finished_unix_s"])
+        self.assertIsNone(result["cases"]["fast"]["load"]["max_load1"])
 
     def test_a_host_without_pressure_files_still_records_load(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -114,7 +86,7 @@ class LoadRecordTests(unittest.TestCase):
             self.assertIsNone(row["cpu_pressure"])
             self.assertEqual(1.0, row["load1"])
 
-    def test_the_command_writes_the_record_and_prints_its_verdict(self):
+    def test_the_command_writes_the_record_and_prints_each_cases_load(self):
         with tempfile.TemporaryDirectory() as directory:
             host = Host(directory, 40.0)
             out = Path(directory) / "artifacts" / "latency-load.json"
@@ -122,16 +94,15 @@ class LoadRecordTests(unittest.TestCase):
             stdout, sys.stdout = sys.stdout, printed
             try:
                 status = record.main([
-                    "--out", str(out), "--interval", "0.05", "--cores", "32",
+                    "--out", str(out), "--interval", "0.05",
                     "--loadavg", str(host.loadavg), "--cpu-pressure", str(host.pressure),
                     "--", sys.executable, "-c", CHILD, "runs", "fast"])
             finally:
                 sys.stdout = stdout
-            self.assertEqual(3, status)
+            self.assertEqual(0, status)
             written = json.loads(out.read_text())
-            self.assertFalse(written["verdict"]["qualified"])
-            self.assertEqual(32, written["verdict"]["cores"])
-            self.assertIn("latency load record: UNQUALIFIED", printed.getvalue())
+            self.assertEqual(40.0, written["cases"]["fast"]["load"]["max_load1"])
+            self.assertIn("latency load record: case fast: max load1 40.0", printed.getvalue())
 
 
 if __name__ == "__main__":

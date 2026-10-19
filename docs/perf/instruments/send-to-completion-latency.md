@@ -32,13 +32,13 @@ cross-worker send-to-completion under scheduled arrivals, run
 These diagnostic runs retain completed samples but exit 2 because the fast
 case did not run. This is functional proof, not a passing latency gate. The default
 `just latency-gate` still runs every case and requires 10,000 fast samples,
-overhead p50 below 50 ms and p99 below 250 ms on a qualified quiet host.
-A successful child with `qualified=false` makes the load wrapper exit 3; a
-failed child retains its own status. The load receipt records both
-`exit_status` (child) and `certification_exit_status` (wrapper). Qualification
-uses the maximum sampled 1-minute load average in the fast-case window against
-the configured core-count bound; PSI is diagnostic. `just latency-gate`
-propagates that status and cannot certify an unqualified run.
+overhead p50 below 50 ms and p99 below 250 ms.
+The load wrapper records load and CPU pressure through the run and summarizes
+each case's window (`cases.<case>.load`), but load never changes the exit
+status (Sam, 2026-10-19): the wrapper exits with the child's status, and the
+latency report's own verdict (budget and population rules) decides the gate.
+Judge from the recorded load, PSI and work counts whether the host explains a
+result, and rerun on a quiet host only when it does.
 
 The receipt retains every sample in its referenced ledger. `clocks` contains
 absolute Unix nanoseconds (join to `latency-load.json`'s `unix_s`) and Linux

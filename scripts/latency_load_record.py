@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the host's load beside a latency run, and say whether it qualifies.
+"""Record the host's load beside a latency run.
 
     scripts/latency_load_record.py --out latency-load.json -- <command...>
 
@@ -10,17 +10,12 @@ Runs the command, forwarding its output, and samples through the whole run:
 
 `lash-perf latency` prints `latency case <name>: started` and
 `latency case <name>: finished` around each case, so the record knows the
-wall-clock window of every case the command ran.
+wall-clock window of every case the command ran, and summarizes the load
+inside each window. Both case edges are sampled as well as the interval.
 
-FIG-3843's quiet-host rule: a latency run counts only when the 1-minute load
-stays below the core count for the whole fast case. The record's `qualified`
-is false when any sample inside the fast case's window reaches the core
-count, and also when the rule could not be checked: the fast case never ran
-to its end, or no sample fell inside its window. The reason is recorded and
-printed as one `latency load record: ...` line.
-
-A failed command retains its own exit status. A successful command on an
-unqualified host exits 3, so it cannot certify latency.
+The record is evidence, never a verdict (Sam, 2026-10-19: no load gate on
+performance checks): the command's exit status is the wrapper's exit status,
+whatever the load was. The latency report's own verdict decides the gate.
 """
 
 from __future__ import annotations
@@ -75,39 +70,28 @@ def case_windows(markers: list[dict]) -> dict[str, dict]:
     return windows
 
 
-def qualify(samples: list[dict], windows: dict[str, dict], case: str, cores: int) -> dict:
-    """The verdict on `case`'s window: load1 below `cores` in every sample."""
+def window_load(samples: list[dict], window: dict) -> dict:
+    """The load inside one case window: its samples, maximum and mean load1,
+    and maximum CPU `some` avg10. Empty for a case that never finished."""
 
-    window = windows.get(case)
-    verdict = {"case": case, "cores": cores, "window": window, "samples_in_window": 0,
-               "max_load1": None, "max_cpu_some_avg10": None}
-    if window is None or window["started_unix_s"] is None:
-        return {**verdict, "qualified": False, "reason": f"the {case} case did not run"}
-    if window["finished_unix_s"] is None:
-        return {**verdict, "qualified": False, "reason": f"the {case} case did not finish"}
+    start, end = window["started_unix_s"], window["finished_unix_s"]
     inside = [row for row in samples
-              if window["started_unix_s"] <= row["unix_s"] <= window["finished_unix_s"]]
-    if not inside:
-        return {**verdict, "qualified": False,
-                "reason": f"no load sample fell inside the {case} case's window"}
-    max_load1 = max(row["load1"] for row in inside)
+              if start is not None and end is not None and start <= row["unix_s"] <= end]
     some = [row["cpu_pressure"]["some_avg10"] for row in inside
             if row["cpu_pressure"] and "some_avg10" in row["cpu_pressure"]]
-    verdict.update(samples_in_window=len(inside), max_load1=max_load1,
-                   max_cpu_some_avg10=max(some) if some else None)
-    if max_load1 >= cores:
-        return {**verdict, "qualified": False,
-                "reason": f"load1 reached {max_load1:.2f} during the {case} case, "
-                          f"at or above the {cores} cores"}
-    return {**verdict, "qualified": True,
-            "reason": f"load1 stayed below the {cores} cores during the {case} case "
-                      f"(max {max_load1:.2f})"}
+    return {
+        "samples": len(inside),
+        "interval_samples": sum(row.get("source") == "interval" for row in inside),
+        "max_load1": max((row["load1"] for row in inside), default=None),
+        "mean_load1": sum(row["load1"] for row in inside) / len(inside) if inside else None,
+        "max_cpu_some_avg10": max(some) if some else None,
+    }
 
 
-def record(command: list[str], *, interval: float, case: str, cores: int,
-           loadavg: Path, pressure: Path, out) -> tuple[int, dict]:
-    """Run `command`, sampling load until it exits. Return certification
-    status and a record retaining the child status."""
+def record(command: list[str], *, interval: float, loadavg: Path, pressure: Path,
+           out) -> tuple[int, dict]:
+    """Run `command`, sampling load until it exits. Return its exit status
+    and the record."""
 
     samples: list[dict] = []
     markers: list[dict] = []
@@ -143,22 +127,16 @@ def record(command: list[str], *, interval: float, case: str, cores: int,
     windows = case_windows(markers)
     samples.sort(key=lambda row: row["unix_s"])
     for window in windows.values():
-        start, end = window["started_unix_s"], window["finished_unix_s"]
-        window["interval_samples"] = sum(
-            row.get("source") == "interval" and start is not None and end is not None
-            and start <= row["unix_s"] <= end for row in samples)
-    verdict = qualify(samples, windows, case, cores)
-    certification_status = status if status != 0 else (0 if verdict["qualified"] else 3)
-    return certification_status, {
-        "schema_version": 1,
+        window["load"] = window_load(samples, window)
+    return status, {
+        "schema_version": 2,
         "command": command,
         "exit_status": status,
-        "certification_exit_status": certification_status,
         "started_unix_s": started,
         "finished_unix_s": time.time(),
         "interval_seconds": interval,
+        "cores": os.cpu_count(),
         "cases": windows,
-        "verdict": verdict,
         "samples": samples,
     }
 
@@ -167,9 +145,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", required=True, type=Path, help="write the load record here")
     parser.add_argument("--interval", type=float, default=1.0, help="seconds between samples")
-    parser.add_argument("--case", default="fast", help="the case whose window must be quiet")
-    parser.add_argument("--cores", type=int, default=os.cpu_count() or 1,
-                        help="the load1 bound (default: this host's core count)")
     parser.add_argument("--loadavg", type=Path, default=LOADAVG, help=argparse.SUPPRESS)
     parser.add_argument("--cpu-pressure", type=Path, default=CPU_PRESSURE, help=argparse.SUPPRESS)
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -177,13 +152,16 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("name the command to run after `--`")
-    status, result = record(command, interval=args.interval, case=args.case, cores=args.cores,
-                            loadavg=args.loadavg, pressure=args.cpu_pressure, out=sys.stdout)
+    status, result = record(command, interval=args.interval, loadavg=args.loadavg,
+                            pressure=args.cpu_pressure, out=sys.stdout)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    verdict = result["verdict"]
-    print(f"latency load record: {'QUALIFIED' if verdict['qualified'] else 'UNQUALIFIED'}: "
-          f"{verdict['reason']}; {len(result['samples'])} samples in {args.out}", flush=True)
+    for name, window in result["cases"].items():
+        load = window["load"]
+        print(f"latency load record: case {name}: max load1 {load['max_load1']}, "
+              f"max CPU some avg10 {load['max_cpu_some_avg10']}, {load['samples']} samples",
+              flush=True)
+    print(f"latency load record: {len(result['samples'])} samples in {args.out}", flush=True)
     return status
 
 

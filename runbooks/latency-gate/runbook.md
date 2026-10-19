@@ -13,7 +13,7 @@ full selector, and require nonzero executed counts:
 
 ```sh
 kiln test //crates/lash-perf:latency__test --test_arg=--exact --test_arg=latency_receipts_use_engine_clocks_and_include_remote_work
-kiln gate lash <fork> -- python3 scripts/test_latency_load_record.py LoadRecordTests.test_a_quiet_fast_case_qualifies LoadRecordTests.test_load_at_the_core_count_during_the_fast_case_is_unqualified LoadRecordTests.test_a_fast_case_that_dies_is_unqualified_and_keeps_its_status
+kiln gate lash <fork> -- python3 scripts/test_latency_load_record.py LoadRecordTests.test_load_never_changes_the_exit_status LoadRecordTests.test_the_command_writes_the_record_and_prints_each_cases_load LoadRecordTests.test_subsecond_cases_sample_both_edges_without_inventing_interval_coverage
 kiln gate lash <fork> -- python3 scripts/test_latency_slope.py SlopeTests.test_a_known_slope_is_recovered_exactly_without_noise SlopeTests.test_bin_medians_are_the_ordinal_ranges_medians
 ```
 
@@ -21,27 +21,23 @@ Expect one Rust test, three load laws and two slope laws: six passed tests.
 Keep test logs and the Rust `kiln: test passed executed=1 passed=1` receipt.
 An empty selection is Abort, and a red law remains a product finding.
 
-## Phase 2 — Qualify the window before measuring
+## Phase 2 — Record the host before measuring
 
-The qualifying release run belongs to the planned quiet window immediately
-before FIG-5193's certification dress rehearsal, owned under FIG-3843:
-stop dispatching new lanes, let active lanes finish, then wait for load1
-below 8. Do not stop someone else's job or reconfigure the shared pool.
-Record `/proc/loadavg`, `/proc/pressure/cpu`, core count, source SHA, dirty
-status, command/configuration, store and artifact directory. Do not begin a
-certifying measurement with load1 >=8. During the fast case load1 must remain
-below the host's core count; the wrapper samples the case edges and intervals.
-CPU PSI is recorded as diagnostic evidence, not an extra pass threshold.
-The automated core-count predicate can qualify a run started above load1 8;
-record both predicates and keep that run unqualified for the planned release
-window.
+Load never qualifies or disqualifies a run (Sam, 2026-10-19: "remove that
+gate on performance checks - we should only think about doing on quiet if it
+shows that the machine is the issue"). Measure when the run is due; do not
+wait for a quiet host, and do not rerun because of load. Do not stop someone
+else's job or reconfigure the shared pool.
 
-A busy development lane can rehearse the report-reading procedure once with
-`--cases fast --fast-samples 1050 --lanes 1`; it is an **unqualified rehearsal**,
-not release certification. The audit's 1050-sample example is below the current
-10,000-sample minimum and intentionally exits 2. Never reduce the release
-population, lanes or budget to turn that rehearsal green. Do not wait for a
-quiet window inside an implementation lane.
+Record `/proc/loadavg`, `/proc/pressure/cpu`, core count, `kiln cgroup
+status`, source SHA, dirty status, command/configuration, store and artifact
+directory before and after. The wrapper samples load and CPU pressure through
+the run, at both edges of every case, and summarizes each case's window.
+
+A development lane can rehearse the report-reading procedure once with
+`--cases fast --fast-samples 1050 --lanes 1`. The 1050-sample example is below
+the 10,000-sample minimum and intentionally exits 2. Never reduce the release
+population, lanes or budget to turn that rehearsal green.
 
 ## Phase 3 — Run once with the full release configuration
 
@@ -66,26 +62,27 @@ target directories. Retain `build-report.json`, `latency-gate.log`,
 `latency-report.json`, `latency-samples.json`, `latency-load.json` and
 `latency-slope.txt` plus the command, source identity and RSS record.
 
-## Phase 4 — Read qualification before the verdict
+## Phase 4 — Read the verdict, then the host evidence
 
-1. Read `latency-load.json`: `verdict.qualified`, `reason`, `max_load1`,
-   `cores`, CPU PSI and samples/interval coverage for the fast window.
-   An unqualified host yields **UNQUALIFIED**, even if child output says PASS.
-   A successful child on an unqualified host makes the wrapper exit 3;
-   a failed child retains its status. Record both `exit_status` and
-   `certification_exit_status`. Missing or incomplete fast coverage is Abort.
+1. Read `latency-load.json`: `exit_status` (the wrapper's own) and, for each
+   case, `cases.<case>.load` (samples, interval samples, max and mean load1,
+   max CPU `some` avg10). A case with no finished window did not complete.
 2. Read `latency-report.json`'s `verdict` and fast case: at least 10,000
    samples, actual 16 lanes, overhead **p50 <50 ms and p99 <250 ms**, with
-   failures retained. A qualified budget violation is FAIL. Qualification
-   alone never means PASS, and exit 0 alone is insufficient evidence.
-3. Pin environment/binary identity and `baseline.kind`, `baseline.sha`,
+   failures retained. A budget violation is FAIL whatever the load; exit 0
+   alone is insufficient evidence.
+3. Judge from the evidence whether the host explains the result: phases
+   dominated by waiting rather than work, CPU pressure, wall time far above
+   the write and busy counts, or variance tracking load. Recommend a quiet
+   rerun only when it does, with those numbers.
+4. Pin environment/binary identity and `baseline.kind`, `baseline.sha`,
    dirty status, fixture and payload. The current baseline subtracts the
    same-run provider duration; it is not a historical inline A/B baseline.
-4. Compare request→acceptance, acceptance→admission, first actual delta,
+5. Compare request→acceptance, acceptance→admission, first actual delta,
    admission→terminal and terminal→host completion. Null delta remains
    absent. Inspect physical SQLite writes/send and writer busy ms/send;
    summed reader-thread work is not another elapsed latency phase.
-5. Read the centred overall/per-lane slope and medians for ordinals 0–99
+6. Read the centred overall/per-lane slope and medians for ordinals 0–99
    and 500–599. An interval wholly above zero signals growth with settled
    history (FIG-4033). Empty bins and undetermined slopes are missing evidence.
    `latency_slope.py` reports numbers and exits 0 when samples exist: it
@@ -101,15 +98,15 @@ interpret it as proof of a removed engine's grace behaviour.
 | Gate | Expected | Observed | Verdict/evidence |
 | --- | --- | --- | --- |
 | Companions | six executed, six passed | | |
-| Initial window | load1 <8; source/config/core count recorded | | |
-| Fast qualification | completed sampled window, load1 below cores | | |
+| Host record | load, PSI, cgroup status, source/config/core count recorded before, during and after | | |
+| Fast window | completed sampled window | | |
 | Population/config | >=10,000 fast samples, actual 16 lanes | | |
 | Budget | overhead p50 <50 ms, p99 <250 ms | | |
 | Report integrity | ledgers, failures, causal clocks and baseline identity retained | | |
 | Slope/bins | numerical estimates/CI and populated ordinal bins reviewed | | |
-| Outcome | PASS / FAIL / UNQUALIFIED / Abort, matching receipts | | |
+| Outcome | PASS / FAIL / Abort, matching receipts; whether the host explains it | | |
 | Resources/cost | peak RSS within 8 GiB; no provider spend ($0) | | |
 
-If two qualified quiet runs are borderline, FIG-3843's next step is a dedicated
+If two runs are borderline and the host evidence does not explain them, FIG-3843's next step is a dedicated
 gate machine; it is not permission to retry within this runbook invocation or
 relax thresholds. [Recorded operator rehearsal](recorded-run.md).
