@@ -852,6 +852,38 @@ fi
 [[ ! -e "$test_tmp/lease-public-retry-borrower-run" \
   && "$(<"$mock_state/build-count")" = "$((lease_public_retry_builds_before + 1))" ]] \
   || fail "startup finalization borrower refusal mutated candidate state"
+# A retained current startup finalization, this checkout's or another's,
+# refuses a candidate whose application or run path overlaps its own and
+# admits another identity whose paths are disjoint (FIG-6856).
+assert_start_finalization_scope() {
+  local receipt="$1" label="$2" overlap_data_existed=0
+  local disjoint_data="$test_tmp/data-disjoint-$label"
+  local overlap_run="$test_tmp/overlap-$label-run"
+  [[ -e "$test_tmp/data-lease-public-retry" ]] && overlap_data_existed=1
+  run_launcher "$disjoint_data" 3174 up > "$test_tmp/disjoint-$label-up.log" 2>&1 \
+    || fail "$label startup finalization refused a launch with disjoint paths"
+  run_launcher "$disjoint_data" 3174 down > "$test_tmp/disjoint-$label-down.log" 2>&1
+  if launcher_env "$test_tmp/data-lease-public-retry" 3176 \
+    AGENT_WORKBENCH_RUN_DIR="$overlap_run" \
+    bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3176 \
+    > "$test_tmp/overlap-$label-up.log" 2>&1; then
+    fail "$label startup finalization admitted an overlapping application path"
+  fi
+  grep -Fq 'overlaps a startup cleanup awaiting finalization' \
+    "$test_tmp/overlap-$label-up.log" \
+    || fail "$label startup finalization did not name the overlap it refused"
+  [[ -f "$receipt" && ! -e "$overlap_run" ]] \
+    || fail "$label startup finalization scope check mutated retained state"
+  if [[ -e "$test_tmp/data-lease-public-retry" ]]; then
+    ((overlap_data_existed)) || fail "$label overlap refusal created its application path"
+  fi
+}
+lease_public_retry_foreign="$launcher_runtime_root/$(printf 'another checkout' \
+  | sha256sum | awk '{print $1}')-$lease_public_retry_key-start-finalizing"
+assert_start_finalization_scope "$lease_public_retry_finalization" retired
+mv -- "$lease_public_retry_finalization" "$lease_public_retry_foreign"
+assert_start_finalization_scope "$lease_public_retry_foreign" foreign-retired
+mv -- "$lease_public_retry_foreign" "$lease_public_retry_finalization"
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then return 1; fi; command rm "$@"; }' \
@@ -867,6 +899,7 @@ grep -Fq 'start_finalization_phase=data-finalized' "$lease_public_retry_finaliza
 grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
   "$test_tmp/lease-public-retry-final-clear.log" \
   || fail "retained startup finalization did not report its exact public retry command"
+assert_start_finalization_scope "$lease_public_retry_finalization" data-finalized
 launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
   'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then command rm -f -- "$MOCK_START_FINALIZATION"; return 1; fi; command rm "$@"; }' \

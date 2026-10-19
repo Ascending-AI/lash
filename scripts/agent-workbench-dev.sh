@@ -517,33 +517,14 @@ path_overlaps_start_finalization() {
   local path="$1" file
   for file in "$launcher_lock_root"/*-start-finalizing; do
     [[ -e "$file" || -L "$file" ]] || continue
-    regular_private_file "$file" || return 0
-    if ! (
-      start_finalization_schema="" start_finalization_phase=""
-      start_finalization_data_dir="" start_finalization_state_dir=""
-      start_finalization_data_action=""
-      # shellcheck disable=SC1090
-      source "$file"
-      [[ "$start_finalization_schema" = 2 \
-        && "$start_finalization_phase" =~ ^(retired|data-finalized)$ \
-        && "$start_finalization_data_action" =~ ^(remove|preserve)$ \
-        && "$start_finalization_data_dir" = /* \
-        && "$start_finalization_state_dir" = /* ]]
-    ); then
-      return 0
-    fi
+    # Any checkout's receipt fences its paths. One that does not decode as
+    # the current format is an overlap: its paths are unknown.
     if (
-      start_finalization_schema="" start_finalization_data_dir=""
-      start_finalization_state_dir=""
-      # shellcheck disable=SC1090
-      source "$file"
-      [[ "$start_finalization_schema" = 2 \
-        && ( "$path" = "$start_finalization_data_dir" \
-          || "$path" = "$start_finalization_data_dir/"* \
-          || "$start_finalization_data_dir" = "$path/"* \
-          || "$path" = "$start_finalization_state_dir" \
-          || "$path" = "$start_finalization_state_dir/"* \
-          || "$start_finalization_state_dir" = "$path/"* ) ]]
+      decode_start_finalization_receipt "$file" || exit 0
+      path_contains_path "$path" "$start_finalization_data_dir" \
+        || path_contains_path "$start_finalization_data_dir" "$path" \
+        || path_contains_path "$path" "$start_finalization_state_dir" \
+        || path_contains_path "$start_finalization_state_dir" "$path"
     ); then
       return 0
     fi
@@ -1591,7 +1572,10 @@ finalize_orphaned_service_receipt() {
   printf '%s\n' "$token"
 }
 
-load_start_finalization_context() {
+# The current startup-finalization receipt's format, whichever checkout wrote
+# it: its fields and its file name under the shared launcher lock root.
+# Callers add the ownership they need.
+decode_start_finalization_receipt() {
   local file="$1"
   regular_private_file "$file" || return 1
   start_finalization_schema="" start_finalization_phase=""
@@ -1614,7 +1598,16 @@ load_start_finalization_context() {
     && "$start_finalization_data_hash" =~ ^[0-9a-f]{64}$ \
     && "$start_finalization_data_identity" =~ ^(-|[0-9]+:[0-9]+)$ \
     && "$start_finalization_token" =~ ^[0-9a-fA-F-]{36}$ \
-    && "$file" = "$launcher_lock_root/$launcher_lock_hash-$start_finalization_state_key-start-finalizing" ]]
+    && "${file%/*}" = "$launcher_lock_root" \
+    && "${file##*/}" =~ ^[0-9a-f]{64}-(.*)-start-finalizing$ \
+    && "${BASH_REMATCH[1]}" = "$start_finalization_state_key" ]]
+}
+
+# This checkout's receipt: cleanup authority only ever comes from it.
+load_start_finalization_context() {
+  local file="$1"
+  decode_start_finalization_receipt "$file" \
+    && [[ "$file" = "$launcher_lock_root/$launcher_lock_hash-$start_finalization_state_key-start-finalizing" ]]
 }
 
 load_start_finalization_receipt() {
