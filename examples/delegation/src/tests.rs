@@ -231,8 +231,7 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     let request = *spawn.create_request;
 
     let expected =
-        lash::SessionCreateRequest::root(lash::SessionStartPoint::Empty, PluginOptions::default())
-            .with_spec(&child_spec());
+        lash::SessionCreateRequest::root(PluginOptions::default()).with_spec(&child_spec());
     assert_eq!(request.session_id, None);
     assert_eq!(request.policy, expected.policy);
     assert_eq!(request.model, expected.model);

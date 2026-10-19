@@ -576,7 +576,6 @@ mod tests {
         let child_session_id = "child-session";
         let create_request = lash::SessionCreateRequest::child_session(
             "root",
-            lash::SessionStartPoint::Empty,
             lash::plugins::PluginOptions::default(),
         )
         .with_session_id(child_session_id);
@@ -698,7 +697,6 @@ mod tests {
         let old_session_id = &SessionId::from("old-session");
         let create_request = lash::SessionCreateRequest::child_session(
             current_session_id,
-            lash::SessionStartPoint::Empty,
             lash::plugins::PluginOptions::default(),
         )
         .with_session_id(child_session_id);
@@ -1002,7 +1000,6 @@ mod tests {
                     create_request: Box::new(
                         lash::SessionCreateRequest::child_session(
                             "root",
-                            lash::SessionStartPoint::Empty,
                             lash::plugins::PluginOptions::default(),
                         )
                         .with_session_id("child"),

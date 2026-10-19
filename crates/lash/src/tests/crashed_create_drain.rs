@@ -243,7 +243,6 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
     let policy = creator.policy_snapshot();
     let request = |id: &str| {
         let mut request = lash_execution_contracts::session_types::SessionCreateRequest::root(
-            lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
         .with_session_id(lash_core::SessionId::fixture(id));

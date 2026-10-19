@@ -2,7 +2,6 @@ pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
-    SessionStartPoint,
 };
 
 use crate::SessionId;
@@ -72,7 +71,6 @@ pub struct SessionCreateRequest {
     pub session_id: Option<SessionId>,
     #[serde(default)]
     pub relation: SessionRelation,
-    pub start: SessionStartPoint,
     #[serde(default)]
     pub policy: Option<SessionPolicy>,
     /// The initial prompt plan chosen by the creator. An unstated plan uses
@@ -109,11 +107,10 @@ pub struct SessionCreateRequest {
 impl SessionCreateRequest {
     /// A root session's request. Which tools it is offered is its tool
     /// providers' configuration, stated in `plugin_options`.
-    pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
+    pub fn root(plugin_options: PluginOptions) -> Self {
         Self {
             session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Root,
-            start,
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
@@ -126,7 +123,6 @@ impl SessionCreateRequest {
 
     pub fn child_session(
         parent_session_id: impl Into<SessionId>,
-        start: SessionStartPoint,
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
@@ -135,7 +131,6 @@ impl SessionCreateRequest {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
             },
-            start,
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
@@ -148,7 +143,6 @@ impl SessionCreateRequest {
 
     pub fn child(
         parent_session_id: impl Into<SessionId>,
-        start: SessionStartPoint,
         policy: SessionPolicy,
         plugin_options: PluginOptions,
     ) -> Self {
@@ -158,7 +152,6 @@ impl SessionCreateRequest {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
             },
-            start,
             policy: Some(policy),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
@@ -265,5 +258,36 @@ mod observer_intent_relation_cutover_tests {
                 .to_string()
                 .contains("unknown variant `observer_intent`")
         );
+    }
+}
+
+#[cfg(test)]
+mod create_request_decode_tests {
+    use super::SessionCreateRequest;
+
+    /// A creation always starts fresh: a recorded request that still names a
+    /// start point, a predecessor snapshot start included, is refused at
+    /// decode rather than read as an empty creation.
+    #[test]
+    fn a_create_request_naming_a_start_point_is_refused_at_decode() {
+        let mut recorded =
+            serde_json::to_value(SessionCreateRequest::root(crate::PluginOptions::default()))
+                .expect("a create request encodes");
+        assert!(
+            serde_json::from_value::<SessionCreateRequest>(recorded.clone()).is_ok(),
+            "the request decodes as recorded"
+        );
+        for start in [
+            serde_json::json!({ "kind": "empty" }),
+            serde_json::json!({ "kind": "snapshot", "snapshot": {} }),
+        ] {
+            recorded["start"] = start;
+            let error = serde_json::from_value::<SessionCreateRequest>(recorded.clone())
+                .expect_err("a request naming a start point is refused");
+            assert!(
+                error.to_string().contains("unknown field `start`"),
+                "{error}"
+            );
+        }
     }
 }

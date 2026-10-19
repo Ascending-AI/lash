@@ -14,7 +14,6 @@ pub(super) fn session_turn_start(
         key,
         text,
         lash_execution_contracts::session_types::SessionCreateRequest::root(
-            lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
         .with_spec(spec),
@@ -112,7 +111,6 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     // A start that states no spec is refused typed, and so is one that
     // states a policy and names no model; neither registers anything.
     let bare = lash_execution_contracts::session_types::SessionCreateRequest::root(
-        lash_core::SessionStartPoint::Empty,
         lash_core::PluginOptions::default(),
     );
     let unstated = start_on(

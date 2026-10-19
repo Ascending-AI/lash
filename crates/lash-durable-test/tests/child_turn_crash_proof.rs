@@ -36,7 +36,6 @@ use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core_execution::ProcessId;
-use lash_core_execution::SessionStartPoint;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -168,7 +167,7 @@ impl ChildTurn {
     /// Register the process as a host would, uncut: its execution
     /// environment published under a host pin, its child session named.
     async fn register(&self) -> Result<ProcessId, String> {
-        let request = SessionCreateRequest::root(SessionStartPoint::Empty, Default::default())
+        let request = SessionCreateRequest::root(Default::default())
             .with_session_id(child())
             .with_spec(&spec());
         let registration = ProcessRegistration::new(

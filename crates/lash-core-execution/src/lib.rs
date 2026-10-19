@@ -654,7 +654,6 @@ pub use lash_core_store::session_identity::FrameNodeIdError;
 pub use lash_core_store::session_identity::SessionLineage;
 pub use lash_core_store::session_identity::SessionRelation;
 pub use lash_core_store::session_identity::SessionSnapshot;
-pub use lash_core_store::session_identity::SessionStartPoint;
 pub use plugin::AppendSessionNodesOutcome;
 pub use plugin::AppendSessionNodesRequest;
 pub use plugin::FormatVersion;

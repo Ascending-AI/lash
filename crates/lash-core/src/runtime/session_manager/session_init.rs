@@ -56,7 +56,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
 ) -> Result<SessionInitPlan, lash_execution_contracts::plugin_error::PluginError> {
-    let (session_id, request) = identified_create_request(request)?;
+    let (session_id, request) = identified_create_request(request);
     let facts = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
     plan_session_init(current, request, session_id, facts)
 }
@@ -73,7 +73,7 @@ fn recorded_creation_plan(
     request: SessionCreateRequest,
     created: &RuntimeSessionState,
 ) -> Result<SessionInitPlan, lash_execution_contracts::plugin_error::PluginError> {
-    let (session_id, mut request) = identified_create_request(request)?;
+    let (session_id, mut request) = identified_create_request(request);
     let policy = created.policy.clone();
     request.prompt_plan = Some(created.authority.prompt_plan.clone());
     let facts = ChildFacts {
@@ -84,29 +84,15 @@ fn recorded_creation_plan(
 }
 
 /// `request` with its session identified: the id it names, or a minted one.
-/// A start point initialisation does not admit is refused.
 fn identified_create_request(
     mut request: SessionCreateRequest,
-) -> Result<(SessionId, SessionCreateRequest), lash_execution_contracts::plugin_error::PluginError>
-{
+) -> (SessionId, SessionCreateRequest) {
     let session_id = request
         .session_id
         .take()
         .unwrap_or_else(|| SessionId::from_uuid(uuid::Uuid::new_v4().as_u128()));
     request.session_id = Some(session_id.clone());
-    // `SessionStartPoint` keeps predecessor variants only so durable and
-    // remote payloads still decode; `Empty` is the only start point
-    // initialisation admits. A recorded request carrying anything else can
-    // never run — refuse it here so the refusal is typed rather than a
-    // silent reinterpretation.
-    if !matches!(request.start, crate::SessionStartPoint::Empty) {
-        return Err(
-            lash_execution_contracts::plugin_error::PluginError::Session(format!(
-                "session `{session_id}` create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)"
-            )),
-        );
-    }
-    Ok((session_id, request))
+    (session_id, request)
 }
 
 /// Build the plan that creates `session_id` with `facts`: the facts
@@ -131,8 +117,7 @@ fn plan_session_init(
         policy,
         plugin_config: recorded_plugin_config,
     } = facts;
-    // Every session initializes empty: `SessionStartPoint::Empty` is the only
-    // start point initialisation admits. Durable forks and resumed sessions
+    // Every session initializes empty. Durable forks and resumed sessions
     // get their state from the store, not from the create request.
     let start_state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -921,18 +906,6 @@ impl RuntimeSessionServices {
         parent: Option<lash_trace::TraceParent>,
     ) -> Result<SessionId, SessionTurnInitError> {
         let requested_session_id = create_request.session_id.clone();
-        // A recorded request can carry a start point this build keeps only
-        // for decode (a predecessor `snapshot` payload on a durable
-        // `ProcessInput::SessionTurn` row or its remote copy). Nothing can
-        // run it — refuse deterministically so the process terminalizes
-        // instead of retrying an unrunnable row on every pass.
-        if !matches!(create_request.start, crate::SessionStartPoint::Empty) {
-            return Err(SessionTurnInitError::Refused {
-                source: Box::new(lash_execution_contracts::plugin_error::PluginError::Session(
-                    "the recorded session create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)".to_string(),
-                )),
-            });
-        }
         let initialized = Box::pin(initialize_session(
             &self.current,
             create_request,
@@ -1134,9 +1107,8 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
         source: Box<lash_execution_contracts::plugin_error::PluginError>,
     },
     /// The recorded request can never be initialized by this deployment —
-    /// a predecessor payload whose start point `SessionStartPoint` keeps
-    /// only for decode, a configured catalog that cannot resolve the
-    /// recorded session by id, or a config its plugin set refuses.
+    /// a configured catalog that cannot resolve the recorded session by id,
+    /// or a config its plugin set refuses.
     /// Deterministic: no pass can run it, so the process terminalizes with
     /// the refusal rather than retrying an unrunnable row forever.
     Refused {
@@ -1223,10 +1195,7 @@ mod tests {
     }
 
     fn root_request() -> SessionCreateRequest {
-        SessionCreateRequest::root(
-            crate::SessionStartPoint::Empty,
-            crate::PluginOptions::default(),
-        )
+        SessionCreateRequest::root(crate::PluginOptions::default())
     }
 
     /// A stated policy with nothing else: the turn budget and tool-call
@@ -1350,11 +1319,8 @@ mod tests {
     /// plugin config is every owner's default, never a parent's namespace.
     #[test]
     fn a_child_records_only_what_its_request_states() {
-        let unstated = SessionCreateRequest::child_session(
-            "parent",
-            crate::SessionStartPoint::Empty,
-            crate::PluginOptions::default(),
-        );
+        let unstated =
+            SessionCreateRequest::child_session("parent", crate::PluginOptions::default());
         let refused = child_facts(&unstated)
             .err()
             .expect("a request with no policy is refused");
@@ -1372,13 +1338,9 @@ mod tests {
             "{runtime:?}"
         );
 
-        let keyed = SessionCreateRequest::child(
-            "parent",
-            crate::SessionStartPoint::Empty,
-            stated_policy(),
-            crate::PluginOptions::default(),
-        )
-        .with_llm_profile(crate::LlmProfileKey::new(THINKER));
+        let keyed =
+            SessionCreateRequest::child("parent", stated_policy(), crate::PluginOptions::default())
+                .with_llm_profile(crate::LlmProfileKey::new(THINKER));
         let facts = child_facts(&keyed).expect("a stated policy and key resolve");
         assert_eq!(
             facts.policy.model.expect("the key mints").reasoning,
@@ -1390,7 +1352,6 @@ mod tests {
             facts.plugin_config,
             child_facts(&SessionCreateRequest::child(
                 "another-parent",
-                crate::SessionStartPoint::Empty,
                 stated_policy(),
                 crate::PluginOptions::default(),
             ))
@@ -1406,7 +1367,6 @@ mod tests {
     #[test]
     fn a_refused_child_creation_request_carries_its_typed_cause() {
         let mut request = SessionCreateRequest::root(
-            crate::SessionStartPoint::Empty,
             crate::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
                 .expect("options"),
         );

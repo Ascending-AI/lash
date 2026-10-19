@@ -25,7 +25,6 @@ pub fn started(model: &str, keyed: bool) -> lash_execution_contracts::process::P
     ));
     let mut create_request = lash_execution_contracts::session_types::SessionCreateRequest::child(
         PARENT,
-        lash_core::SessionStartPoint::Empty,
         lash_core::SessionPolicy {
             model: (!keyed).then_some(recorded),
             ..lash_core::SessionPolicy::new(

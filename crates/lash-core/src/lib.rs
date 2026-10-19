@@ -644,7 +644,6 @@ pub use plugin::SessionLineage;
 pub use plugin::SessionReadView;
 pub use plugin::SessionRelation;
 pub use plugin::SessionSnapshot;
-pub use plugin::SessionStartPoint;
 pub use plugin::SessionStateService;
 
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};

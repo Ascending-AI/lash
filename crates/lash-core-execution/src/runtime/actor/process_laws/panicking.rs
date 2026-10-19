@@ -171,7 +171,6 @@ pub async fn a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or
             turns.panics.store(true, Ordering::SeqCst);
             let mails_before = turns.mails.load(Ordering::SeqCst);
             let request = lash_execution_contracts::session_types::SessionCreateRequest::root(
-                crate::SessionStartPoint::Empty,
                 crate::PluginOptions::default(),
             );
             let process = register(

@@ -191,7 +191,6 @@ impl BlobTools {
         let mut create_request =
             lash_execution_contracts::session_types::SessionCreateRequest::child_session(
                 session_id.clone(),
-                lash_core::SessionStartPoint::Empty,
                 lash_core::PluginOptions::default(),
             )
             .with_spec(&served::spec(1024));
@@ -1250,7 +1249,6 @@ fn host_start(
     lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "law-host-start-input:v1".to_owned(),
         lash_execution_contracts::session_types::SessionCreateRequest::root(
-            lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
         .with_spec(&served::spec(1024)),

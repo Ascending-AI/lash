@@ -39,7 +39,6 @@ fn request(
         "uploaded-start-input",
         lash_execution_contracts::session_types::SessionCreateRequest::child(
             SESSION,
-            lash_core::SessionStartPoint::Empty,
             lash_core::SessionPolicy {
                 model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                 ..lash_core::SessionPolicy::new(

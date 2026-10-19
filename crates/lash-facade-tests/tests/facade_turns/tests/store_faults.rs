@@ -913,7 +913,6 @@ mod sweep {
                 lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "sweep-child",
                     lash_execution_contracts::session_types::SessionCreateRequest::root(
-                        lash_core::SessionStartPoint::Empty,
                         lash_core::PluginOptions::default(),
                     )
                     .with_spec(&mock_session_spec())
@@ -1583,7 +1582,6 @@ mod sweep {
                 lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "fig4628-session-turn",
                     lash_execution_contracts::session_types::SessionCreateRequest::root(
-                        lash_core::SessionStartPoint::Empty,
                         lash_core::PluginOptions::default(),
                     )
                     .with_spec(&mock_session_spec())

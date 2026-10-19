@@ -1,22 +1,5 @@
 use super::*;
 
-fn recording_factory(
-    backend: &lash_execution_contracts::backend::Backend,
-) -> crate::testing::runtime_helpers::RecordingDeploymentStore {
-    crate::testing::runtime_helpers::RecordingDeploymentStore::over(backend.session_store_factory())
-}
-
-/// `backend` with its session catalog recorded by `factory`.
-fn recording_backend(
-    backend: lash_execution_contracts::backend::Backend,
-    factory: &crate::testing::runtime_helpers::RecordingDeploymentStore,
-) -> lash_execution_contracts::backend::Backend {
-    let factory = factory.clone();
-    crate::testing::runtime_helpers::LayeredBackend::over(backend)
-        .map_session_store_factory(move |_| Arc::new(factory))
-        .into_backend()
-}
-
 /// FIG-2975: every non-cancelled child stop reaches the parent as its own
 /// failure. The pre-fix runner answered all ten with one code and one
 /// sentence, so a parent model could not tell a retryable provider error
@@ -145,96 +128,6 @@ use crate::runtime::tests::helpers::{
     EmptyTools, mock_provider, runtime_with_plugins_and_tools_and_host,
 };
 use std::sync::Arc;
-
-/// Durable cutover (FIG-3378): `SessionCreateRequest` rides inside
-/// durable `ProcessInput::SessionTurn` rows, and rows recorded before
-/// the `snapshot` start was removed carry
-/// `{"kind":"snapshot","snapshot":{...}}`. The payload still decodes —
-/// `SessionStartPoint` keeps the variant for exactly that — and the run
-/// port refuses it with a terminal failure instead of a record-decode
-/// error or an endlessly recoverable infra error, before any turn is mailed.
-#[tokio::test]
-async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
-    let backend = crate::testing::sqlite_recording_backend().await;
-    let child_session_id = SessionId::from("snapshot-start-child");
-    let process_id = lash_protocol_types::ProcessId::fixture("process:child:snapshot-start-child");
-    let factory = recording_factory(&backend);
-    let backend = recording_backend(backend, &factory);
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        backend.clone(),
-        lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-        lash_protocol_types::ExecutionBudgets::recommended(),
-        crate::runtime::DeltaCoalescing::recommended(),
-        crate::DataRetentionConfig::standard(),
-    ));
-    // The refusal lands before any turn runs: no provider call is made.
-    let transport = mock_provider(Vec::new());
-    let runtime =
-        runtime_with_plugins_and_tools_and_host(Vec::new(), Arc::new(EmptyTools), transport, host)
-            .await;
-    let services = runtime
-        .runtime_session_services()
-        .expect("runtime session services");
-    let create_request =
-        lash_execution_contracts::session_types::SessionCreateRequest::child_session(
-            runtime.session_id(),
-            lash_core_store::session_identity::SessionStartPoint::Empty,
-            lash_core_store::execution_state::PluginOptions::default(),
-        )
-        .with_session_id(&child_session_id);
-
-    // Rewrite the recorded request's `start` to the predecessor durable
-    // spelling — what a pre-FIG-3378 `ProcessInput::SessionTurn` row
-    // stored.
-    let mut recorded = serde_json::to_value(&create_request).expect("serialize recorded request");
-    recorded["start"] = serde_json::json!({
-        "kind": "snapshot",
-        "snapshot": serde_json::to_value(lash_core_store::session_identity::SessionSnapshot::new(SessionId::from("session"),
-            runtime.state.policy().clone(),
-        ))
-        .expect("serialize predecessor snapshot"),
-    });
-    let predecessor_request: lash_execution_contracts::session_types::SessionCreateRequest =
-        serde_json::from_value(recorded).expect("predecessor snapshot payload decodes");
-    assert!(matches!(
-        predecessor_request.start,
-        lash_core_store::session_identity::SessionStartPoint::Snapshot { .. }
-    ));
-
-    let mailed = services
-        .mail_process_session_turn(
-            &process_id,
-            predecessor_request,
-            lash_core_store::turn_input_vocabulary::TurnInput::text("run"),
-            None,
-        )
-        .await
-        .expect("the refusal is a typed terminal, not an infra error");
-    let lash_core_execution::runtime::actor::process::SessionTurnMail::Refused(output) = mailed
-    else {
-        panic!("the snapshot start must terminalize, got {mailed:?}");
-    };
-    let failure = match output.into_tool_output().outcome {
-        lash_protocol_types::tool_output::ToolCallOutcome::Failure(failure) => failure,
-        outcome => panic!("the snapshot start must terminalize, got {outcome:?}"),
-    };
-    assert_eq!(failure.code, "process_session_turn_refused");
-    assert!(
-        failure.message.contains("snapshot"),
-        "the refusal names the removed start point: {}",
-        failure.message
-    );
-    assert!(
-        matches!(
-            crate::store::SessionCatalogStore::lookup_session(&factory, &child_session_id)
-                .await
-                .expect("inspect refused child"),
-            crate::store::SessionLookup::Absent
-        ),
-        "a refused request creates no session row"
-    );
-}
 
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {

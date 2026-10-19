@@ -92,7 +92,6 @@ fn host_session_turn(
     };
     let create_request = lash_execution_contracts::session_types::SessionCreateRequest::child(
         TURN_PARENT,
-        lash_core::SessionStartPoint::Empty,
         policy,
         plugin_options,
     )

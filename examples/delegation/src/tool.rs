@@ -40,7 +40,7 @@ use lash::tools::ToolOutcome;
 use lash::tools::ToolPrepareContext;
 use lash::tools::ToolProvider;
 use lash::tools::ToolValue;
-use lash::{RuntimeOwner, SessionCreateRequest, SessionId, SessionStartPoint};
+use lash::{RuntimeOwner, SessionCreateRequest, SessionId};
 use serde_json::{Value, json};
 
 use crate::{ChildConfig, DELEGATION_PLUGIN_ID, DelegatedChild};
@@ -279,12 +279,8 @@ impl SpawnAgent {
         } else if !seed.is_empty() {
             return Err(invalid("spawn_agent: `seed` needs an RLM child"));
         }
-        let mut request = SessionCreateRequest::child_session(
-            parent,
-            SessionStartPoint::Empty,
-            Default::default(),
-        )
-        .with_spec(&self.child.spec);
+        let mut request = SessionCreateRequest::child_session(parent, Default::default())
+            .with_spec(&self.child.spec);
         request.plugin_options = options.over(request.plugin_options);
         // The child session is the process's own, derived from the id its
         // start mints (ADR 0107), so the request names none.

@@ -339,7 +339,6 @@ pub use lash_core::SessionError;
 pub use lash_core::SessionId;
 pub use lash_core::SessionListFilter;
 pub use lash_core::SessionRelationKind;
-pub use lash_core::SessionStartPoint;
 pub use lash_core::SessionView;
 pub use lash_core::SubmittedBody;
 pub use lash_core::ToolCallLimitExceeded;
@@ -483,8 +482,8 @@ pub mod prelude {
         SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionView, TurnActivity, TurnActivityFanout, TurnActivityId,
-        TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        SessionView, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink,
+        TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
         TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnStatus, TurnStop,
     };
 }

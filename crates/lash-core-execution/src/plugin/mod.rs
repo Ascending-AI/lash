@@ -179,7 +179,6 @@ pub use lash_core_store::session_identity::SessionObservedProcessReceipt;
 pub use lash_core_store::session_identity::SessionObserverIntent;
 pub use lash_core_store::session_identity::SessionRelation;
 pub use lash_core_store::session_identity::SessionSnapshot;
-pub use lash_core_store::session_identity::SessionStartPoint;
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
     SessionGraphService, SessionLifecycleService, SessionStateService,

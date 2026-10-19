@@ -575,7 +575,6 @@ async fn lifecycle(
             "boundary-child",
             lash_execution_contracts::session_types::SessionCreateRequest::child(
                 "lifecycle-parent",
-                lash_core::SessionStartPoint::Empty,
                 lash_core::SessionPolicy {
                     model: Some(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
                         lash::LlmProfileKey::new("boundary-model"),

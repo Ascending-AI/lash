@@ -53,11 +53,8 @@ fn session_turn_input(definition_key: &str) -> ProcessInput {
     ProcessInput::SessionTurn {
         definition_key: definition_key.to_string(),
         create_request: Box::new(
-            crate::session_types::SessionCreateRequest::root(
-                crate::SessionStartPoint::Empty,
-                crate::PluginOptions::default(),
-            )
-            .with_session_id("refusal-fixture-child"),
+            crate::session_types::SessionCreateRequest::root(crate::PluginOptions::default())
+                .with_session_id("refusal-fixture-child"),
         ),
         turn_input: Box::new(crate::TurnInput::empty()),
         result: crate::process::SessionTurnOutcome::Turn,

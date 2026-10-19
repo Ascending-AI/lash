@@ -1003,10 +1003,7 @@ pub async fn env_authority_read(stores: Arc<dyn crate::StoreSet>) -> Vec<crate::
     );
     let mut children = Vec::new();
     for named in [false, true] {
-        let mut request = crate::SessionCreateRequest::root(
-            crate::SessionStartPoint::Empty,
-            crate::PluginOptions::empty(),
-        );
+        let mut request = crate::SessionCreateRequest::root(crate::PluginOptions::empty());
         request.session_id = named.then(|| crate::SessionId::from("authority-named-child"));
         let child = registry
             .register_process(crate::ProcessRegistration::new(
