@@ -505,103 +505,32 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
     workbench.shutdown().await;
 }
 
-// FIG-3292: the ledger is keyed by session, so the states the old
-// `BTreeSet<(SessionId, TurnId)>` beside a separate prompt map could represent
-// are gone from memory. A file written by that build can still hold them, so
-// the loader has to answer for each one.
-
-fn write_active_turns_file(path: &std::path::Path, body: Value) {
+// The active-turns file is the ledger's own session-keyed map of slots. A
+// file in the split shape earlier builds wrote (a turn set beside prompt and
+// kind lists that could name absent turns, claim one session twice, or omit a
+// kind) is refused at boot, never joined and repaired.
+#[test]
+fn a_split_format_active_turns_file_is_refused_rather_than_repaired() {
+    let temp = tempfile::tempdir().expect("split format tempdir");
+    let path = temp.path().join("active-turns.json");
     std::fs::write(
-        path,
-        serde_json::to_vec(&body).expect("encode active turns"),
-    )
-    .expect("write active turns fixture");
-}
-
-#[test]
-fn a_persisted_prompt_for_an_absent_turn_is_dropped_rather_than_restored() {
-    let temp = tempfile::tempdir().expect("orphan prompt tempdir");
-    let path = temp.path().join("active-turns.json");
-    write_active_turns_file(
         &path,
-        json!({
+        serde_json::to_vec(&json!({
             "turns": [["s1", "live-turn"]],
-            "prompts": [
-                { "session_id": "s1", "turn_id": "retired-turn", "prompt": "orphan",
-                  "row_id": "orphan-ui-input", "at": "2026-10-03T00:00:00Z" }
-            ],
-        }),
-    );
-
-    let restored = ActiveTurns::persistent(path).expect("an orphan prompt must not fail the boot");
-
-    let active = restored
-        .for_session(&SessionId::from("s1"))
-        .expect("the live turn is restored");
-    assert_eq!(active.address.turn_id, TurnId::from("live-turn"));
-    assert_eq!(
-        active.prompt, None,
-        "a prompt naming a turn the file does not carry is not that turn's prompt"
-    );
-}
-
-#[test]
-fn a_persisted_second_turn_for_one_session_is_dropped_on_load() {
-    let temp = tempfile::tempdir().expect("double claim tempdir");
-    let path = temp.path().join("active-turns.json");
-    write_active_turns_file(
-        &path,
-        json!({
-            "turns": [["s1", "alpha"], ["s1", "beta"], ["s2", "gamma"]],
             "prompts": [],
-        }),
-    );
+            "kinds": [{ "session_id": "s1", "turn_id": "live-turn", "kind": "user" }],
+        }))
+        .expect("encode split active turns"),
+    )
+    .expect("write split active turns");
 
-    let restored =
-        ActiveTurns::persistent(path).expect("a doubly claimed session must not fail the boot");
-
-    assert_eq!(
-        restored
-            .for_session(&SessionId::from("s1"))
-            .map(|active| active.address.turn_id),
-        Some(TurnId::from("alpha")),
-        "one session holds one turn; the first in key order survives"
-    );
-    assert_eq!(
-        restored
-            .for_session(&SessionId::from("s2"))
-            .map(|active| active.address.turn_id),
-        Some(TurnId::from("gamma")),
-        "a second session is untouched by the first session's repair"
-    );
-}
-
-#[test]
-fn a_persisted_turn_without_a_kind_recovers_one_from_its_id() {
-    let temp = tempfile::tempdir().expect("legacy kind tempdir");
-    let path = temp.path().join("active-turns.json");
-    // A file this build did not write: no `kinds` array at all.
-    write_active_turns_file(
-        &path,
-        json!({
-            "turns": [["s1", "workbench-queued-abc"], ["s2", "workbench-turn-def"]],
-            "prompts": [],
-        }),
-    );
-
-    let restored = ActiveTurns::persistent(path).expect("a pre-kind file must still load");
-
-    assert_eq!(
-        restored
-            .for_session(&SessionId::from("s1"))
-            .map(|active| active.kind),
-        Some(WorkbenchTurnKind::Queued)
-    );
-    assert_eq!(
-        restored
-            .for_session(&SessionId::from("s2"))
-            .map(|active| active.kind),
-        Some(WorkbenchTurnKind::User)
+    let error = match ActiveTurns::persistent(path) {
+        Ok(_) => panic!("a split-format active-turns file must fail the boot"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains("decode active turns"),
+        "actual error: {error:#}"
     );
 }
 

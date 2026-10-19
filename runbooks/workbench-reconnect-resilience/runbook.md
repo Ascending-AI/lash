@@ -188,7 +188,8 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
   `{"format_version": 2, "histories": {"<S>": {"cursor": …, "events": [...]}}}` — keyed under
   `histories`, not by `<S>` at top level — and its `message` events are **user rows only**, so
   it cannot serve as a durable source of assistant-row identity. `<data-dir>/active-turns.json`
-  is `{"prompts": [], "turns": []}`, not session-keyed: use it as an emptiness check only.
+  is keyed by session, `{"<S>": {"turn_id": …, "kind": …, "prompt": …}}`, and is `{}` when no
+  turn is claimed.
 - **Layer 3 — logs:** `<data-dir>/trace.jsonl`, records with `context.session_id == <S>`;
   count `type == "turn_completed"` and read `context.turn_id`. The workbench log
   (`<run-dir>/workbench-127.0.0.1_<p>.log`) carries the two process incarnations and is where

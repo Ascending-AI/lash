@@ -106,26 +106,6 @@ fn product_event_log_rejects_unversioned_product_event_root_with_clear_error() {
 }
 
 #[test]
-fn active_turns_reject_bare_legacy_set_with_clear_error() {
-    let data_dir = tempfile::tempdir().expect("legacy active turns tempdir");
-    let path = data_dir.path().join("active-turns.json");
-    std::fs::write(&path, r#"[["session", "turn"]]"#).expect("write bare active turns set");
-
-    let error = match ActiveTurns::persistent(path.clone()) {
-        Ok(_) => panic!("a bare active-turns set must be rejected"),
-        Err(error) => error,
-    };
-    let rendered = format!("{error:#}");
-    assert!(
-        rendered.contains("decode active turns")
-            && rendered.contains(
-                "legacy bare active turn set is no longer supported; expected an object with `turns` and `prompts`"
-            ),
-        "actual error: {rendered}"
-    );
-}
-
-#[test]
 fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() {
     use lash::provider::{AttemptOutcome, ProtocolPosition};
 

@@ -16,33 +16,16 @@ pub(crate) enum WorkbenchTurnKind {
     Queued,
 }
 
-impl WorkbenchTurnKind {
-    /// Recover a kind for a turn restored from an active-turns file written
-    /// before the kind was persisted.
-    ///
-    /// This is the one surviving turn-id sniff and the only place it is
-    /// allowed: it reads a file this build did not write, where the fact is
-    /// genuinely absent and the id prefix is the only evidence left. Every
-    /// live claim carries its kind, so nothing else may call this.
-    fn legacy_from_turn_id(turn_id: &TurnId) -> Self {
-        if turn_id.starts_with(QUEUED_TURN_ID_PREFIX) {
-            Self::Queued
-        } else {
-            Self::User
-        }
-    }
-}
-
-/// The id prefix queued turns are minted with, for traces and for reading a
-/// pre-kind active-turns file.
-pub(crate) const QUEUED_TURN_ID_PREFIX: &str = "workbench-queued-";
-
 /// One session's single claimed turn.
 ///
 /// The turn id, the workflow that owns it and the optimistic prompt the page
 /// is waiting to see replayed are one value under one lock, so no reader can
 /// observe a turn without its prompt or a prompt whose turn has been removed.
-#[derive(Clone, Debug)]
+/// The active-turns file is this ledger's session-keyed map of slots, written
+/// and read as is: a file in any other shape fails the boot rather than being
+/// repaired, and the operator removes it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ActiveTurnSlot {
     turn_id: TurnId,
     kind: WorkbenchTurnKind,
@@ -120,7 +103,8 @@ impl ActiveTurnClaim {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ActiveTurnPrompt {
     pub(crate) row_id: String,
     pub(crate) at: String,
@@ -193,80 +177,11 @@ impl Drop for ActiveTurnSubmissionGuard {
     }
 }
 
-/// Host routing and the UI-owned input row's identity and timestamp.
-/// A prompt or kind naming an absent turn is dropped, as is a second turn
-/// for a session that already has a claim.
-#[derive(Deserialize)]
-pub(crate) struct PersistedActiveTurns {
-    pub(crate) turns: BTreeSet<(SessionId, TurnId)>,
-    #[serde(default)]
-    pub(crate) prompts: Vec<PersistedActiveTurnPrompt>,
-    #[serde(default)]
-    pub(crate) kinds: Vec<PersistedActiveTurnKind>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct PersistedActiveTurnsRef<'a> {
-    pub(crate) turns: BTreeSet<(&'a SessionId, &'a TurnId)>,
-    pub(crate) prompts: Vec<PersistedActiveTurnPromptRef<'a>>,
-    pub(crate) kinds: Vec<PersistedActiveTurnKindRef<'a>>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct PersistedActiveTurnPrompt {
-    pub(crate) session_id: SessionId,
-    pub(crate) turn_id: TurnId,
-    pub(crate) row_id: String,
-    pub(crate) at: String,
-    pub(crate) prompt: String,
-    #[serde(default)]
-    pub(crate) attachment_id: Option<String>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct PersistedActiveTurnPromptRef<'a> {
-    pub(crate) session_id: &'a SessionId,
-    pub(crate) turn_id: &'a TurnId,
-    pub(crate) row_id: &'a str,
-    pub(crate) at: &'a str,
-    pub(crate) prompt: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) attachment_id: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct PersistedActiveTurnKind {
-    pub(crate) session_id: SessionId,
-    pub(crate) turn_id: TurnId,
-    pub(crate) kind: WorkbenchTurnKind,
-}
-
-#[derive(Serialize)]
-pub(crate) struct PersistedActiveTurnKindRef<'a> {
-    pub(crate) session_id: &'a SessionId,
-    pub(crate) turn_id: &'a TurnId,
-    pub(crate) kind: WorkbenchTurnKind,
-}
-
 impl ActiveTurns {
     pub(crate) fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let turns = match std::fs::read(&path) {
-            Ok(bytes) => {
-                let persisted: PersistedActiveTurns = serde_json::from_slice(&bytes)
-                    .map_err(|error| {
-                        let hint = serde_json::from_slice::<serde_json::Value>(&bytes)
-                            .ok()
-                            .filter(serde_json::Value::is_array)
-                            .map(|_| {
-                                "; legacy bare active turn set is no longer supported; \
-                                 expected an object with `turns` and `prompts`"
-                            })
-                            .unwrap_or("");
-                        anyhow::anyhow!("{error}{hint}")
-                    })
-                    .with_context(|| format!("decode active turns `{}`", path.display()))?;
-                restore_ledger_turns(persisted)
-            }
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .with_context(|| format!("decode active turns `{}`", path.display()))?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(err) => {
                 return Err(err).with_context(|| format!("read active turns `{}`", path.display()));
@@ -491,93 +406,14 @@ impl ActiveTurns {
 
     #[expect(
         clippy::expect_used,
-        reason = "PersistedActiveTurnsRef holds only serde-serializable plain data, so the \
-                  encode cannot fail"
+        reason = "ActiveTurnSlot holds only serde-serializable plain data under string keys, \
+                  so the encode cannot fail"
     )]
     fn persist_snapshot(&self, active: &BTreeMap<SessionId, ActiveTurnSlot>) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
-        let turns = active
-            .iter()
-            .map(|(session_id, slot)| (session_id, &slot.turn_id))
-            .collect();
-        let prompts = active
-            .iter()
-            .filter_map(|(session_id, slot)| {
-                slot.prompt
-                    .as_ref()
-                    .map(|prompt| PersistedActiveTurnPromptRef {
-                        session_id,
-                        turn_id: &slot.turn_id,
-                        row_id: &prompt.row_id,
-                        at: &prompt.at,
-                        prompt: &prompt.text,
-                        attachment_id: prompt.attachment_id.as_deref(),
-                    })
-            })
-            .collect();
-        let kinds = active
-            .iter()
-            .map(|(session_id, slot)| PersistedActiveTurnKindRef {
-                session_id,
-                turn_id: &slot.turn_id,
-                kind: slot.kind,
-            })
-            .collect();
-        let bytes = serde_json::to_vec(&PersistedActiveTurnsRef {
-            turns,
-            prompts,
-            kinds,
-        })
-        .expect("serialize active turns");
+        let bytes = serde_json::to_vec(active).expect("serialize active turns");
         crate::replace_file(path, &bytes, "active turns");
     }
-}
-
-/// Rebuild the ledger from a decoded file, dropping what the new shape cannot
-/// hold rather than failing the boot.
-fn restore_ledger_turns(persisted: PersistedActiveTurns) -> BTreeMap<SessionId, ActiveTurnSlot> {
-    let mut kinds = persisted
-        .kinds
-        .into_iter()
-        .map(|kind| ((kind.session_id, kind.turn_id), kind.kind))
-        .collect::<BTreeMap<_, _>>();
-    let mut prompts = persisted
-        .prompts
-        .into_iter()
-        .map(|prompt| {
-            (
-                (prompt.session_id, prompt.turn_id),
-                ActiveTurnPrompt {
-                    row_id: prompt.row_id,
-                    at: prompt.at,
-                    text: prompt.prompt,
-                    attachment_id: prompt.attachment_id,
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut turns = BTreeMap::<SessionId, ActiveTurnSlot>::new();
-    for key in persisted.turns {
-        if turns.contains_key(&key.0) {
-            // The old set could hold two turns for one session; the ledger
-            // cannot, and the first in key order is as good a survivor as any.
-            continue;
-        }
-        let kind = kinds
-            .remove(&key)
-            .unwrap_or_else(|| WorkbenchTurnKind::legacy_from_turn_id(&key.1));
-        let prompt = prompts.remove(&key);
-        let (session_id, turn_id) = key;
-        turns.insert(
-            session_id,
-            ActiveTurnSlot {
-                turn_id,
-                kind,
-                prompt,
-            },
-        );
-    }
-    turns
 }

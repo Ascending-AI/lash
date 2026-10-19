@@ -793,8 +793,8 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep() {
     )
     .expect("decode persisted active turns");
     assert_eq!(
-        persisted.pointer("/turns").and_then(Value::as_array),
-        Some(&Vec::new()),
+        persisted,
+        json!({}),
         "the persisted snapshot drops the retired session's route: {persisted:#}"
     );
     gate.release(1);
