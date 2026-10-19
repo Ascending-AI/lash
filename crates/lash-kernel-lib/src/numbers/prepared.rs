@@ -39,6 +39,33 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
             });
         }
     }
+    // Two word integers answer in the word where the general path's own
+    // first step does (`arithmetic::in_word`), and compare by their order.
+    if DOMAIN != 3
+        && let [Value::Int(a), Value::Int(b)] = args
+    {
+        let value = match S::OPERATION {
+            Operation::Binary(op) => crate::arithmetic::in_word(op, *a, *b).map(Value::Int),
+            Operation::Eq
+            | Operation::Lt
+            | Operation::Le
+            | Operation::Gt
+            | Operation::Ge
+            | Operation::Compare => Some(super::relation(S::OPERATION, Some(a.cmp(b))).ok()?),
+            _ => None,
+        };
+        if let Some(value) = value {
+            return Some(PreparedAnswer {
+                value,
+                scalar_sizes: CHARGED.then(|| {
+                    let nonzero = |word: i64| u8::from(word != 0);
+                    nonzero(*a)
+                        | nonzero(*b) << 1
+                        | u8::from(matches!(value, Value::Int(n) if n != 0)) << 3
+                }),
+            });
+        }
+    }
     let mut sizes = CHARGED.then_some(0u8);
     if matches!(S::OPERATION, Operation::IntParse | Operation::FloatParse) {
         if !matches!(args[0], Value::Text(_))

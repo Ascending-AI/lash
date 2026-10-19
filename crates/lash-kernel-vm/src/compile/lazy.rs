@@ -434,11 +434,7 @@ impl Prepared {
         let tables = (!plan.sites.is_empty() || !plan.closures.is_empty())
             .then(|| (self.tables.tables(self, at), &slot.base));
         let mut sites = self.plan_sites[index];
-        let same = |lib: LibId| {
-            self.libs
-                .get(lib.0 as usize)
-                .is_some_and(|lib| lib.definition.name.as_str() == "same")
-        };
+        let lib = |lib: LibId| self.libs.get(lib.0 as usize);
         PreparedPlan::new(
             plan,
             registered.definition(),
@@ -447,7 +443,7 @@ impl Prepared {
             CodeId(slot.base.codes),
             tables,
             &mut sites,
-            &same,
+            &lib,
         )
         .map(|plan| Some(Arc::new(plan)))
     }

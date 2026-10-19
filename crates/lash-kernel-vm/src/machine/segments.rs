@@ -35,7 +35,7 @@ use super::islands::Ran;
 use super::loops::Header;
 use super::operation_entry::AdmittedBody;
 use super::ops::{Answer, Flow, Reg, Status};
-use super::plans::{PlanRun, Walk};
+use super::plans::{PlanRun, Steady, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
 use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{CodeId, Executable, LibId, LibRun, PreparedPlan};
@@ -175,29 +175,102 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                     at + 1,
                     count,
                 );
-                let callee = match self.check(ran)? {
+                match self.check(ran)? {
                     Some(Ran::Returned(value)) => {
                         self.machine.spent_captures(captures);
-                        self.machine.put(at, value);
-                        self.machine.borrow_value(value);
-                        return Ok(());
+                        self.returned(at, value);
+                        Ok(())
                     }
-                    Some(Ran::Exited(levels)) => {
-                        self.machine.spent_captures(captures);
-                        Callee::Island(levels)
-                    }
-                    None => Callee::Code {
-                        code,
-                        captures,
-                        args: at + 1,
-                        count,
-                    },
-                };
-                self.stand(site);
-                self.machine.segments.callee = Some(callee);
-                Err(PlanExit::Yield)
+                    ran => Err(self.stand_callee(site, code, captures, (at, count), ran)),
+                }
             }
         }
+    }
+
+    /// [`Self::apply_at`] at a region's steady site (`super::plan_regions`):
+    /// the callback its variable holds for the whole walk is resolved once,
+    /// at the walk's first call of a closure, as [`Self::apply_at`]
+    /// resolves it.
+    pub(super) fn apply_steady(
+        &mut self,
+        site: u32,
+        at: Reg,
+        count: usize,
+    ) -> Result<(), PlanExit> {
+        let callee = self.machine.take(at);
+        let Value::Closure(closure) = callee else {
+            self.machine.put(at, callee);
+            return self.apply_at(site, at, count);
+        };
+        let steady = match self.steady.take() {
+            Some(steady) if steady.closure == closure => steady,
+            _ => {
+                let target = self.machine.target(self.exe, callee);
+                let Target::Code(code, cells) = self.check(target)? else {
+                    return Err(self.lost("a closure resolved to no code"));
+                };
+                Steady {
+                    closure,
+                    code,
+                    cells,
+                }
+            }
+        };
+        let ran = self.machine.callback_island(
+            self.task,
+            self.exe,
+            (steady.code, &steady.cells),
+            at + 1,
+            count,
+        );
+        match self.check(ran)? {
+            Some(Ran::Returned(value)) => {
+                self.steady = Some(steady);
+                self.returned(at, value);
+                Ok(())
+            }
+            ran => Err(self.stand_callee(site, steady.code, steady.cells, (at, count), ran)),
+        }
+    }
+
+    /// The callback applied from `at` returned `value`.
+    fn returned(&mut self, at: Reg, value: Value) {
+        self.machine.put(at, value);
+        self.machine.borrow_value(value);
+    }
+
+    /// Stands at site `site` for the callback of code `code` with
+    /// `captures`, applied to the `count` arguments after `at`, whose
+    /// island `ran` exited or did not run: the yield.
+    fn stand_callee(
+        &mut self,
+        site: u32,
+        code: CodeId,
+        captures: Vec<ArenaHandle>,
+        (at, count): (Reg, usize),
+        ran: Option<Ran>,
+    ) -> PlanExit {
+        let callee = match ran {
+            Some(Ran::Exited(levels)) => {
+                self.machine.spent_captures(captures);
+                Callee::Island(levels)
+            }
+            _ => Callee::Code {
+                code,
+                captures,
+                args: at + 1,
+                count,
+            },
+        };
+        self.stand(site);
+        self.machine.segments.callee = Some(callee);
+        PlanExit::Yield
+    }
+
+    #[cold]
+    fn lost(&mut self, fault: &str) -> PlanExit {
+        self.halt = Some(Box::new(super::fault(fault)));
+        PlanExit::Halt
     }
 }
 
@@ -584,6 +657,7 @@ impl KernelMachine {
             kept: Kept::Frame(kept),
             statement: None,
             halt: None,
+            steady: None,
         };
         let opened = run.open_statement();
         let outcome = match opened {

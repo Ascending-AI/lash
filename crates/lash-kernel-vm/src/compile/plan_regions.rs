@@ -25,6 +25,11 @@
 //! runs its body stands the plan at that site (FIG-6797). Plans belong
 //! to the layout's prepared library: deterministic, immutable and never
 //! saved, formed only when the layout forms regions.
+//!
+//! A region's expressions are fused (FIG-6847): a variable or a constant
+//! operand is read in place, a call its prepared entry answers directly
+//! carries that entry, and each statement names the plan registers it
+//! uses, which its end empties.
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan::{HelperPlan, SiteCall};
@@ -33,7 +38,8 @@ use lash_kernel_exec::{LocalRef, Op, Reg};
 use super::expr::{self, Expr, Kind, Make};
 use super::segments::{Segment, SiteControl};
 use super::{
-    ActionKind, Atom, Base, BlockId, Callee, Constant, Form, LibId, Local, StmtId, Tables, Var,
+    ActionKind, Atom, Base, BlockId, Callee, Constant, Entry, Form, Lib, LibId, Local, StmtId,
+    Tables, Var,
 };
 
 /// A `for` of a helper plan that runs as a region over its cursor.
@@ -55,8 +61,15 @@ pub(crate) struct Block {
     pub(crate) declares: Box<[u32]>,
 }
 
-/// One statement: each opens a statement of the plan.
-pub(crate) enum Step {
+/// One statement: each opens a statement of the plan, which puts its
+/// operands in the plan registers below `span` where its forms answer as
+/// fused; a form that does not widens the statement to all of them.
+pub(crate) struct Step {
+    pub(crate) span: u32,
+    pub(crate) kind: StepKind,
+}
+
+pub(crate) enum StepKind {
     If {
         cond: Node,
         then: Block,
@@ -70,11 +83,13 @@ pub(crate) enum Step {
     Bind { slot: u32, value: Node },
     /// `set target[index] = value`: the three in the plan's evaluation
     /// order, the target in register `target` before the index, the value
-    /// in register `src`.
+    /// in register `src`. Each goes to its register as it is evaluated
+    /// when `placed`, as one after the first stands the plan at a site.
     Store {
         order: [Node; 3],
         target: u32,
         src: u32,
+        placed: bool,
     },
     /// `do`: a value computed and dropped.
     Discard(Node),
@@ -100,14 +115,30 @@ pub(crate) enum NodeKind {
     /// statement need not build.
     IsUnit { lib: LibId, args: Box<[Node]> },
     /// A call of library function `lib` on the arguments from the node's
-    /// register, which the plan answers by its general call.
-    Call { lib: LibId, args: Box<[Node]> },
+    /// register, which the plan answers by its general call. Where that
+    /// call takes a prepared entry first (a call of every parameter, no
+    /// operation, at the plan's own depth) and no operand stands the plan
+    /// at a site, the call is fused: `direct` is that entry, handed the
+    /// operands' values in place, and the value it answers goes to no
+    /// register.
+    Call {
+        lib: LibId,
+        args: Box<[Node]>,
+        direct: Option<Entry>,
+    },
+    /// `list.len` by `lib` of the list `list` gives, which the plan
+    /// answers by its general call: a resident list's length is read from
+    /// the arena ([`Lib::length_read`]), with that call's verdict points.
+    Length { lib: LibId, list: Box<Node> },
     /// The statement's root action: the callback in plan variable
-    /// `callee`, applied at site `site` to the arguments after it.
+    /// `callee`, applied at site `site` to the arguments after it. The
+    /// region writes that variable nowhere when `steady`: it holds the
+    /// same callback for the whole run of the loop.
     Apply {
         site: u32,
         callee: u32,
         args: Box<[Node]>,
+        steady: bool,
     },
     /// A call of `lib` its plan offers at site `site`, which may run its
     /// body in a frame: the statement's root action, or a call nested in
@@ -119,27 +150,190 @@ pub(crate) enum NodeKind {
     },
 }
 
+/// The most operands a fused call holds in place.
+pub(crate) const IN_PLACE: usize = 4;
+
+impl Node {
+    /// The plan registers below which this node and its operands put
+    /// what they compute, as the plan's code puts it.
+    fn span(&self) -> u32 {
+        let args = match &self.kind {
+            NodeKind::Local(_) | NodeKind::Const(_) | NodeKind::Unit => return self.reg + 1,
+            NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => {
+                return value.span().max(self.reg + 1);
+            }
+            NodeKind::IsUnit { args, .. }
+            | NodeKind::Call { args, .. }
+            | NodeKind::Apply { args, .. }
+            | NodeKind::Invoke { args, .. } => args,
+        };
+        args.iter().map(Node::span).fold(self.reg + 1, u32::max)
+    }
+
+    /// The plan registers below which this node puts what it computes
+    /// where each form answers as fused: a variable, a constant, a fused
+    /// call and a hole test put nothing of their own.
+    fn fused(&self) -> u32 {
+        match &self.kind {
+            NodeKind::Local(_) | NodeKind::Const(_) => 0,
+            // The tuple it compares with is built only where it widens.
+            NodeKind::IsUnit { args, .. } => args.first().map_or(0, Node::fused),
+            NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => value.fused(),
+            NodeKind::Call {
+                args,
+                direct: Some(_),
+                ..
+            } => args.iter().map(Node::fused).max().unwrap_or(0),
+            NodeKind::Unit
+            | NodeKind::Call { direct: None, .. }
+            | NodeKind::Apply { .. }
+            | NodeKind::Invoke { .. } => self.span(),
+        }
+    }
+
+    /// Whether this node or one of its operands is offered at a site,
+    /// where the plan may stand.
+    fn stands(&self) -> bool {
+        match &self.kind {
+            NodeKind::Local(_) | NodeKind::Const(_) | NodeKind::Unit => false,
+            NodeKind::Apply { .. } | NodeKind::Invoke { .. } => true,
+            NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => value.stands(),
+            NodeKind::IsUnit { args, .. } | NodeKind::Call { args, .. } => {
+                args.iter().any(Node::stands)
+            }
+        }
+    }
+}
+
+impl Block {
+    /// Adds the plan variables the block's statements write to `written`.
+    fn written(&self, written: &mut Vec<u32>) {
+        for step in &self.steps {
+            match &step.kind {
+                StepKind::If {
+                    then, otherwise, ..
+                } => {
+                    then.written(written);
+                    otherwise.written(written);
+                }
+                StepKind::Assign { slot, .. } | StepKind::Bind { slot, .. } => written.push(*slot),
+                StepKind::Break(_) | StepKind::Store { .. } | StepKind::Discard(_) => {}
+            }
+        }
+    }
+
+    /// Marks steady each callback applied from a variable not in
+    /// `written`.
+    fn settle(&mut self, written: &[u32]) {
+        for step in &mut self.steps {
+            match &mut step.kind {
+                StepKind::If {
+                    cond,
+                    then,
+                    otherwise,
+                } => {
+                    cond.settle(written);
+                    then.settle(written);
+                    otherwise.settle(written);
+                }
+                StepKind::Assign { value, .. }
+                | StepKind::Bind { value, .. }
+                | StepKind::Discard(value) => value.settle(written),
+                StepKind::Store { order, .. } => {
+                    for node in order {
+                        node.settle(written);
+                    }
+                }
+                StepKind::Break(_) => {}
+            }
+        }
+    }
+}
+
+impl Node {
+    /// Marks steady each callback this node applies from a variable not in
+    /// `written`.
+    fn settle(&mut self, written: &[u32]) {
+        match &mut self.kind {
+            NodeKind::Local(_) | NodeKind::Const(_) | NodeKind::Unit => {}
+            NodeKind::Pin(value) | NodeKind::Length { list: value, .. } => value.settle(written),
+            NodeKind::Apply {
+                callee,
+                args,
+                steady,
+                ..
+            } => {
+                *steady = !written.contains(callee);
+                for arg in args {
+                    arg.settle(written);
+                }
+            }
+            NodeKind::IsUnit { args, .. }
+            | NodeKind::Call { args, .. }
+            | NodeKind::Invoke { args, .. } => {
+                for arg in args {
+                    arg.settle(written);
+                }
+            }
+        }
+    }
+}
+
+impl StepKind {
+    /// The plan registers the statement puts operands in where each of its
+    /// forms answers as fused: a list write writes from the values in
+    /// place.
+    fn fused(&self) -> u32 {
+        match self {
+            Self::If { cond, .. } => cond.fused(),
+            Self::Break(_) => 0,
+            Self::Assign { value, .. } | Self::Bind { value, .. } | Self::Discard(value) => {
+                value.fused()
+            }
+            Self::Store {
+                order,
+                target,
+                src,
+                placed: true,
+            } => order
+                .iter()
+                .map(Node::span)
+                .fold((target + 2).max(src + 1), u32::max),
+            Self::Store { order, .. } => order.iter().map(Node::fused).max().unwrap_or(0),
+        }
+    }
+}
+
+impl From<StepKind> for Step {
+    fn from(kind: StepKind) -> Self {
+        Self {
+            span: kind.fused(),
+            kind,
+        }
+    }
+}
+
 /// What forming one plan's regions reads.
-struct Former<'a> {
+struct Former<'a, 'l> {
     plan: &'static HelperPlan,
     locals: &'a [Option<Local>],
     segment: &'a Segment,
     tables: &'a Tables,
     base: &'a Base,
-    /// Whether a library function is the kernel's `same`.
-    same: &'a dyn Fn(LibId) -> bool,
+    /// The library's functions, by their table indexes.
+    lib: &'a dyn Fn(LibId) -> Option<&'l Lib>,
     /// The plan registers its statements may use.
     registers: u32,
 }
 
 /// Forms the regions of the loops `plan`'s callback sites stand in.
-pub(super) fn form(
+pub(super) fn form<'l>(
     plan: &'static HelperPlan,
     locals: &[Option<Local>],
     segment: &Segment,
     tables: &Tables,
     base: &Base,
-    same: &dyn Fn(LibId) -> bool,
+    lib: &dyn Fn(LibId) -> Option<&'l Lib>,
 ) -> Vec<PlanRegion> {
     let former = Former {
         plan,
@@ -147,7 +341,7 @@ pub(super) fn form(
         segment,
         tables,
         base,
-        same,
+        lib,
         registers: plan.registers,
     };
     let mut loops: Vec<(StmtId, u32)> = Vec::new();
@@ -173,7 +367,7 @@ pub(super) fn form(
         .collect()
 }
 
-impl Former<'_> {
+impl Former<'_, '_> {
     fn stmt(&self, id: StmtId) -> &super::Stmt {
         &self.tables.stmts[(id.0 - self.base.stmts) as usize]
     }
@@ -210,7 +404,10 @@ impl Former<'_> {
             return None;
         };
         let binding = self.slot(binding.slot)?;
-        let body = self.block(*body, &mut Vec::new())?;
+        let mut body = self.block(*body, &mut Vec::new())?;
+        let mut written = vec![binding];
+        body.written(&mut written);
+        body.settle(&written);
         Some(PlanRegion {
             walked,
             binding,
@@ -271,7 +468,7 @@ impl Former<'_> {
                 for declares in enclosing.iter().rev() {
                     left.extend(declares.iter().rev());
                 }
-                Step::Break(left.into())
+                StepKind::Break(left.into())
             }
             (
                 Form::If {
@@ -279,26 +476,26 @@ impl Former<'_> {
                     else_block,
                 },
                 Op::Branch { cond, then_, else_ },
-            ) if then_.0 == then_block.0 && else_.0 == else_block.0 => Step::If {
+            ) if then_.0 == then_block.0 && else_.0 == else_block.0 => StepKind::If {
                 cond: self.test(id, tree.take(cond)?)?,
                 then: self.block(*then_block, enclosing)?,
                 otherwise: self.block(*else_block, enclosing)?,
             },
-            (Form::Plain, Op::WriteLocal { local, src }) if src.0 == 0 => Step::Assign {
+            (Form::Plain, Op::WriteLocal { local, src }) if src.0 == 0 => StepKind::Assign {
                 slot: self.local(local)?,
                 value: self.node(id, tree.take(src)?)?,
             },
-            (Form::Plain, Op::Bind { local, src }) if src.0 == 0 => Step::Bind {
+            (Form::Plain, Op::Bind { local, src }) if src.0 == 0 => StepKind::Bind {
                 slot: self.local(local)?,
                 value: self.node(id, tree.take(src)?)?,
             },
             (Form::Plain, Op::SetIndex { target, src }) => {
                 self.store(id, &mut tree, target, src, None)?
             }
-            (Form::Plain, Op::End) => Step::Discard(self.node(id, tree.take(Reg(0))?)?),
+            (Form::Plain, Op::End) => StepKind::Discard(self.node(id, tree.take(Reg(0))?)?),
             _ => return None,
         };
-        tree.spent().then_some(step)
+        tree.spent().then(|| step.into())
     }
 
     /// A statement whose root action is a call: its value is the first
@@ -322,6 +519,8 @@ impl Former<'_> {
                     site,
                     callee: self.slot(local.slot)?,
                     args,
+                    // Settled once the whole loop is formed.
+                    steady: false,
                 }
             }
             (Callee::Library(lib), Some(site))
@@ -336,10 +535,7 @@ impl Former<'_> {
                     args: shifted(args)?,
                 }
             }
-            (Callee::Library(lib), None) => NodeKind::Call {
-                lib: *lib,
-                args: shifted(args)?,
-            },
+            (Callee::Library(lib), None) => self.called(*lib, shifted(args)?)?,
             _ => return None,
         };
         if let Some(site) = site {
@@ -353,14 +549,14 @@ impl Former<'_> {
         let step = match tree.last {
             Op::Bind { local, src } if src.0 == 0 => {
                 tree.take(src)?;
-                Step::Bind {
+                StepKind::Bind {
                     slot: self.local(local)?,
                     value: act,
                 }
             }
             Op::WriteLocal { local, src } if src.0 == 0 => {
                 tree.take(src)?;
-                Step::Assign {
+                StepKind::Assign {
                     slot: self.local(local)?,
                     value: act,
                 }
@@ -368,11 +564,11 @@ impl Former<'_> {
             Op::SetIndex { target, src } => self.store(id, &mut tree, target, src, Some(act))?,
             Op::End => {
                 tree.take(Reg(0))?;
-                Step::Discard(act)
+                StepKind::Discard(act)
             }
             _ => return None,
         };
-        tree.spent().then_some(step)
+        tree.spent().then(|| step.into())
     }
 
     /// A member write of statement `id`, of the value in `src` to the
@@ -385,7 +581,7 @@ impl Former<'_> {
         target: Reg,
         src: Reg,
         act: Option<Node>,
-    ) -> Option<Step> {
+    ) -> Option<StepKind> {
         let mut act = act;
         let mut nodes = [
             tree.take(target)?,
@@ -398,8 +594,10 @@ impl Former<'_> {
         }
         nodes.sort_by_key(|(pc, _)| *pc);
         let [a, b, c] = nodes.map(|(_, node)| node);
-        Some(Step::Store {
-            order: [a?, b?, c?],
+        let order = [a?, b?, c?];
+        Some(StepKind::Store {
+            placed: order[1..].iter().any(Node::stands),
+            order,
             target: target.0,
             src: src.0,
         })
@@ -474,8 +672,8 @@ impl Former<'_> {
     fn test(&self, id: StmtId, expr: Expr) -> Option<Node> {
         let node = self.node(id, expr)?;
         Some(match node.kind {
-            NodeKind::Call { lib, args }
-                if (self.same)(lib)
+            NodeKind::Call { lib, args, .. }
+                if (self.lib)(lib).is_some_and(|lib| lib.definition.name.as_str() == "same")
                     && args.len() == 2
                     && matches!(args[1].kind, NodeKind::Unit) =>
             {
@@ -492,8 +690,36 @@ impl Former<'_> {
     }
 
     fn call(&self, id: StmtId, lib: LibId, args: Box<[Expr]>) -> Option<NodeKind> {
-        let args = self.nodes(id, args)?;
-        Some(NodeKind::Call { lib, args })
+        self.called(lib, self.nodes(id, args)?)
+    }
+
+    /// The general call of `lib` on `args`: a resident list's length read
+    /// where it is `list.len`; otherwise fused by the prepared entry it
+    /// takes first, where it takes one (a call of every parameter, no
+    /// operation, whose entry answers at the plan's depth) and no operand
+    /// stands the plan at a site.
+    fn called(&self, lib: LibId, args: Box<[Node]>) -> Option<NodeKind> {
+        let function = (self.lib)(lib)?;
+        let in_place = args.len() <= IN_PLACE && !args.iter().any(Node::stands);
+        if function.length_read().is_some() && in_place && args.len() == 1 {
+            let list = args.into_vec().into_iter().next()?;
+            return Some(NodeKind::Length {
+                lib,
+                list: Box::new(list),
+            });
+        }
+        let direct = function
+            .prepared
+            .as_ref()
+            .map(|(entry, _)| entry)
+            .filter(|entry| {
+                in_place
+                    && args.len() == function.arity
+                    && !function.operation()
+                    && entry.depth() == 0
+            })
+            .cloned();
+        Some(NodeKind::Call { lib, args, direct })
     }
 
     /// A call of `lib` nested in statement `id`, its value to register

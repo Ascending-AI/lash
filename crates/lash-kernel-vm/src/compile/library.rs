@@ -29,6 +29,21 @@ impl Lib {
     pub(crate) fn operation(&self) -> bool {
         self.operation
     }
+
+    /// What a call of `list.len` charges, whose answer on a list is that
+    /// list's length: a region reads it from the arena where the list is
+    /// resident, as the native's own call reads it, and charges the units
+    /// of its formula, which measures nothing. `None` for every other
+    /// function.
+    pub(crate) fn length_read(&self) -> Option<u64> {
+        (self.definition.name.as_str() == "list.len"
+            && matches!(self.run, LibRun::Native { .. })
+            && self.arity == 1
+            && self.limit.is_none()
+            && self.prepared.is_none()
+            && self.charge.measurements().is_empty())
+        .then(|| self.charge.evaluate(|_, _| 0))
+    }
 }
 
 // Keep first-use caches out of the hot call entry's inline storage.
@@ -95,7 +110,7 @@ impl PreparedPlan {
         clippy::too_many_arguments,
         reason = "a plan resolves against its body, its library and its layout"
     )]
-    pub(super) fn new(
+    pub(super) fn new<'l>(
         plan: &'static doc::plan::HelperPlan,
         definition: &doc::FunctionDefinition,
         lib_of: &BTreeMap<FunctionId, LibId>,
@@ -103,7 +118,7 @@ impl PreparedPlan {
         body: CodeId,
         tables: Option<(&Tables, &Base)>,
         sites: &mut u32,
-        same: &dyn Fn(LibId) -> bool,
+        lib: &dyn Fn(LibId) -> Option<&'l Lib>,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
         let arity = definition.signature.params.len();
@@ -197,7 +212,7 @@ impl PreparedPlan {
             .transpose()?;
         let regions = match &segment {
             Some(segment) if layout.regions() => {
-                plan_regions::form(plan, &locals, segment, tables, base, same)
+                plan_regions::form(plan, &locals, segment, tables, base, lib)
             }
             _ => Vec::new(),
         };

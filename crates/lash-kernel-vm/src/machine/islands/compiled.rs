@@ -123,6 +123,9 @@ pub(super) struct NativeSite {
     pub(super) reg: u32,
     /// The depth its prepared entry's template checks.
     pub(super) depth: Depth,
+    /// What the call charges where it is `list.len`, whose answer on a
+    /// resident list is read from the arena ([`crate::compile::Lib::length_read`]).
+    pub(super) length: Option<u64>,
 }
 
 /// A compiled island call.
@@ -277,6 +280,7 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 } else {
                     Depth::None
                 },
+                length: exe.lib(*lib).length_read(),
             };
             native(site, operands(args)?)
         }
@@ -470,7 +474,7 @@ fn native(site: NativeSite, operands: Vec<Operand>) -> Node {
                 }
             }
         }
-        island.native(&site, &values[..operands.len()])
+        island.native(&site, &values, operands.len())
     })
 }
 

@@ -310,8 +310,22 @@ impl Cx<'_> {
         values: &[Value],
         fresh: Fresh,
     ) -> Option<Value> {
+        let answer = function.prepared.as_ref()?.0.answer(values, self.charging);
+        self.operated(function, values, fresh, answer)
+    }
+
+    /// [`Self::operate_on`] of what its prepared entry answered on
+    /// `values`, `answer`: that answer charged, or the call its decline
+    /// leaves.
+    pub(super) fn operated(
+        &mut self,
+        function: &Lib,
+        values: &[Value],
+        fresh: Fresh,
+        answer: Option<PreparedAnswer>,
+    ) -> Option<Value> {
         let (entry, fast) = function.prepared.as_ref()?;
-        match entry.answer(values, self.charging) {
+        match answer {
             Some(answer) => self.charged(function, fast, values, fresh, answer),
             None => self.declined(function, entry, fast, values, fresh),
         }
@@ -335,6 +349,22 @@ impl Cx<'_> {
             self.meter.measured(units);
         }
         Some(value)
+    }
+
+    /// `list.len` of `value` by native `function`, charging `units`
+    /// ([`Lib::length_read`]): a resident list's length read from the
+    /// arena, as the native's call reads it, and charged as
+    /// [`Self::general`] charges it; its general call otherwise.
+    pub(super) fn length(&mut self, function: &Lib, units: u64, value: Value) -> Option<Value> {
+        if let Value::List(list) = value
+            && let Ok(length) = self.arena.len(list)
+        {
+            if self.charging {
+                self.meter.measured(units);
+            }
+            return Some(Value::Int(length as i64));
+        }
+        self.windowed(&[value], |cx, args| cx.general(function, args))
     }
 
     /// `<table>.contains(target, key)`, looked up as the native's call

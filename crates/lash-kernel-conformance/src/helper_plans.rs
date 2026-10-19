@@ -1200,6 +1200,13 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
             "reads at a missing and an unhashable key",
             "def fill(d, keys, out):\n    for key in keys:\n        out.append(d[key])\ndef build():\n    d = {\"a\": 1, 3: 3}\n    out = []\n    for keys in [[\"a\", 3, \"a\", \"b\"], [\"a\", [1]], [3, {}]]:\n        try:\n            fill(d, keys, out)\n        except KeyError:\n            out.append(\"missing\")\n        except TypeError:\n            out.append(\"unhashable\")\n    return out\nresult = build()\n",
         ),
+        // FIG-6847: an allocating region's operators answered by their
+        // certified entries, and where those decline: products past the
+        // word, floats, and a remainder by zero that raises mid-loop.
+        (
+            "comprehension operators past the word and by zero",
+            "def build(source, d):\n    big = [item * 4611686018427387904 for item in source]\n    mixed = [item + 0.5 for item in source]\n    kept = [item for item in source if item % 3 == 0]\n    try:\n        rem = [item % d for item in source]\n    except ZeroDivisionError:\n        rem = \"zero\"\n    return [big, mixed, kept, rem, len(source)]\nresult = build([-2, -1, 0, 1, 2, 9223372036854775807], 0)\n",
+        ),
         (
             "lengths and truth of lists and dicts",
             "def build():\n    xs = []\n    d = {}\n    total = 0\n    for i in range(6):\n        if xs and d:\n            total = total + 100\n        xs.append(i)\n        d[\"k\" + str(i % 4)] = i\n        total = total + len(xs) * 1000 + len(d) * 10\n    return total\nresult = build()\n",
@@ -1414,6 +1421,16 @@ pub(crate) fn island_programs() -> Vec<(runner::Case, Program)> {
             "typescript",
             "a callback leaving its island on a text",
             "function run() {\n  return [1, \"a\", 2].map((item) => item * 2);\n}\nconst result = run();\n",
+        ),
+        // FIG-6847: a helper's plan region applies its steady callback
+        // where it fuses its statements: callbacks that capture, a fresh
+        // closure for each call of the helper, holes, a callback that
+        // shortens the array it is mapped over, truths that are not
+        // booleans, and a callback that raises mid-walk.
+        (
+            "typescript",
+            "fused callbacks that capture, shorten and raise",
+            "function run() {\n  const step = 3;\n  const scaled = [1, , 4, 5].map((x) => x * step);\n  const nested = [1, 2].map((m) => [1, 2, 3].map((x) => x * m + step));\n  const xs = [1, 2, 3, 4];\n  const shortened = xs.map((x, i, a) => { a.pop(); return x * 2; });\n  const kept = [1, 2, 3, 4, 5].filter((x) => x % 2);\n  let raised = \"none\";\n  try { [1, 2].map((x) => x.y.z); } catch (e) { raised = \"caught\"; }\n  return [scaled, nested, shortened, xs, kept, raised];\n}\nconst result = run();\n",
         ),
         (
             "typescript",

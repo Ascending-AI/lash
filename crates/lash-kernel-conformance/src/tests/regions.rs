@@ -941,6 +941,7 @@ const LEFT_TO_THE_REFERENCE: &[&str] = &[
 const PLAN_REGIONS: &[&str] = &[
     "typescript islands: map and filter callbacks",
     "typescript islands: a callback leaving its island on a text",
+    "typescript islands: fused callbacks that capture, shorten and raise",
 ];
 
 /// Adds a failure where `plans`, the loop regions and call islands

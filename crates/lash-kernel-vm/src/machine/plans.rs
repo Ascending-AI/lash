@@ -24,11 +24,13 @@ use super::{Eval, Halt, Interrupt, KernelMachine, fault, raise};
 use crate::compile::{Executable, LibId, PreparedPlan};
 
 /// What a statement the plan performs started from: what it pins from
-/// then on is its own, released when it ends.
+/// then on is its own, released when it ends, as are the operands it puts
+/// in the plan registers below `span`.
 #[derive(Clone, Copy)]
 pub(super) struct Mark {
     pins: usize,
     borrowed: usize,
+    span: u32,
 }
 
 /// A `for` a plan walks: its cursor, the variable that holds what it
@@ -41,6 +43,15 @@ pub(super) struct Walk {
     /// The region the plan runs the loop's iterations as, if any
     /// (`super::plan_regions`).
     pub(super) region: Option<u32>,
+}
+
+/// The callback a region's steady callback site applies while the region
+/// walks its loop (`super::plan_regions`): the closure in its variable,
+/// and the code and cells that closure calls.
+pub(super) struct Steady {
+    pub(super) closure: ArenaHandle,
+    pub(super) code: crate::compile::CodeId,
+    pub(super) cells: Vec<ArenaHandle>,
 }
 
 /// One running plan: the machine, the caller's arguments and the plan's
@@ -70,6 +81,9 @@ pub(super) struct PlanRun<'m, const SHARED: bool> {
     pub(super) kept: super::segments::Kept,
     pub(super) statement: Option<Mark>,
     pub(super) halt: Option<Box<Halt>>,
+    /// The callback the running region's steady site applies, once
+    /// resolved.
+    pub(super) steady: Option<Steady>,
 }
 
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
@@ -134,8 +148,9 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let machine = &mut *self.machine;
         machine.pins.values.truncate(mark.pins);
         machine.pins.borrowed.truncate(mark.borrowed);
-        let registers = self.prepared.plan.registers as usize;
-        machine.regs.clear_range(self.base..self.base + registers);
+        machine
+            .regs
+            .clear_range(self.base..self.base + mark.span as usize);
         machine.heap.execution_roots_moved();
         Ok(())
     }
@@ -203,12 +218,42 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
 
     /// Opens the next statement, ending the one open.
     pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
+        self.open_statement_of(self.prepared.plan.registers)
+    }
+
+    /// Widens the open statement to all the plan's registers: a form of
+    /// it that did not answer as fused puts its operands as the plan's
+    /// code puts them.
+    #[cold]
+    pub(super) fn widen(&mut self) {
+        if let Some(mark) = self.statement.as_mut() {
+            mark.span = self.prepared.plan.registers;
+        }
+    }
+
+    /// Opens the next statement, which puts its operands in the plan
+    /// registers below `span`, ending the one open.
+    #[inline(always)]
+    pub(super) fn open_statement_of(&mut self, span: u32) -> Result<(), PlanExit> {
+        let machine = &mut *self.machine;
+        if let Some(mark) = self.statement.as_mut()
+            && mark.span == 0
+            && mark.pins == machine.pins.values.len()
+            && mark.borrowed == machine.pins.borrowed.len()
+        {
+            // The open statement put and pinned nothing: its end releases
+            // nothing, and the next statement starts where it did.
+            machine.heap.execution_roots_moved();
+            mark.span = span;
+            return Ok(());
+        }
         let ended = self.end_statement();
         self.held(ended)?;
         let machine = &*self.machine;
         self.statement = Some(Mark {
             pins: machine.pins.values.len(),
             borrowed: machine.pins.borrowed.len(),
+            span,
         });
         Ok(())
     }
@@ -607,6 +652,7 @@ impl KernelMachine {
             kept: super::segments::Kept::Window { keep },
             statement: None,
             halt: None,
+            steady: None,
         };
         let outcome = (plan.plan.run)(&mut run, 0);
         // The statement the body leaves by stays open: the caller's goes on

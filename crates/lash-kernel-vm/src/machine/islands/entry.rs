@@ -11,8 +11,6 @@
 //! has settled, inside the same step, as a nested call's exit runs on in
 //! its caller's statement.
 
-use std::rc::Rc;
-
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{KernelDataLimits, TaskId, Value};
 use lash_kernel_exec::{ActIx, RegRange, Weight};
@@ -248,20 +246,6 @@ impl KernelMachine {
         if given > MAX_ARGS {
             return Ok(None);
         }
-        let mut values = [Value::Absent; MAX_ARGS];
-        for (index, value) in values.iter_mut().enumerate().take(given) {
-            *value = self.regs[first + index];
-        }
-        let values = &values[..given];
-        let frames = self
-            .tasks
-            .get_mut(task.0 as usize)?
-            .ok_or_else(|| fault("no task"))?
-            .frames
-            .len();
-        let base = (frames
-            + self.plans as usize
-            + usize::from(task != TaskId::MAIN || !self.session_cell)) as u64;
         // A paced run has no charge to record and no bound: its pace only
         // meets the slice's end.
         let charging = self.bounds.charge == crate::Charge::Exact;
@@ -269,45 +253,40 @@ impl KernelMachine {
             .observer
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
-        let mut scratch = std::mem::take(&mut self.islands);
-        let arena = Rc::clone(&self.arena);
-        let ran = {
-            let mut arena = arena.borrow_mut();
-            let counters = &mut self
-                .tasks
-                .get_mut(task.0 as usize)?
-                .ok_or_else(|| fault("no task"))?
-                .counters;
-            let ground = Ground {
-                exe,
-                arena: &mut arena,
-                session: &self.session,
-                tape: recorder.filter(|_| charging),
-                recorder,
-                charging,
-                bound: if charging {
-                    self.bounds.charge_limit
-                } else {
-                    u64::MAX
-                },
-                slice_end: self.slice_end,
-                observed: self.observer.is_some(),
-                limits: self.limits,
-                memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
-                base,
-                call_depth: u64::from(self.bounds.call_depth),
-            };
-            enter(
-                ground,
-                &mut scratch,
-                counters,
-                &mut self.charged,
-                (target, values),
-                occurrence,
-                &[],
-            )
+        let below = self.plans as usize + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let mut arena = self.arena.borrow_mut();
+        let running = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?;
+        let ground = Ground {
+            exe,
+            arena: &mut arena,
+            session: &self.session,
+            tape: recorder.filter(|_| charging),
+            recorder,
+            charging,
+            bound: if charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+            slice_end: self.slice_end,
+            observed: self.observer.is_some(),
+            limits: self.limits,
+            memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
+            base: (running.frames.len() + below) as u64,
+            call_depth: u64::from(self.bounds.call_depth),
         };
-        self.islands = scratch;
+        let ran = enter(
+            ground,
+            &mut self.islands,
+            &mut running.counters,
+            &mut self.charged,
+            (target, &self.regs[first..first + given]),
+            occurrence,
+            &[],
+        );
         Ok(ran?)
     }
 

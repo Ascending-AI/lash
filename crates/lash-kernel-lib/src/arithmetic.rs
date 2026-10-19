@@ -269,7 +269,7 @@ impl Room<'_, '_> {
 
 /// The integer operations whose operands and result fit in 64 bits, done
 /// there. `None` is an operation the arbitrary-precision path does.
-fn in_word(op: Binary, a: i64, b: i64) -> Option<i64> {
+pub(crate) fn in_word(op: Binary, a: i64, b: i64) -> Option<i64> {
     // A floored quotient is one less than the truncated one when the
     // remainder's sign differs from the divisor's; the remainder then
     // takes the divisor once more.

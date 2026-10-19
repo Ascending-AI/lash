@@ -445,14 +445,24 @@ impl Island<'_> {
     /// The general call `site` of a native on `args`: its prepared entry's
     /// answer or its native's, charged its formula, or a stop at its op.
     #[inline(always)]
-    fn native(&mut self, site: &NativeSite, args: &[Value]) -> Answer {
+    fn native(&mut self, site: &NativeSite, padded: &[Value; MAX_SLOTS], given: usize) -> Answer {
+        let args = &padded[..given];
         if let Some(close) = &site.close
             && !self.close(close)
         {
             return Err(self.at_operands(close.head, site.reg, args));
         }
-        let charge = self
-            .native_answer(site, args)
+        let length = match (site.length, padded[0]) {
+            (Some(units), Value::List(list)) => self.arena.len(list).ok().map(|len| {
+                (
+                    Value::Int(len as i64),
+                    if self.charging { units } else { 0 },
+                )
+            }),
+            _ => None,
+        };
+        let charge = length
+            .or_else(|| self.native_answer(site, padded))
             .filter(|(_, units)| self.fits(*units));
         let Some((value, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
@@ -461,17 +471,20 @@ impl Island<'_> {
         Ok(value)
     }
 
-    /// What the reference's general call answers `site` on `given`, its
-    /// other parameters absent: its prepared entry's answer where its guard
-    /// holds, its native's otherwise, with what it charges. `None` where
-    /// the reference runs it: the native builds or holds anything, raises,
-    /// declines or asks again, or answers what the frame may not hold.
+    /// What the reference's general call answers `site` on the operands
+    /// `padded` holds, its other parameters absent: its prepared entry's
+    /// answer where its guard holds, its native's otherwise, with what it
+    /// charges. `None` where the reference runs it: the native builds or
+    /// holds anything, raises, declines or asks again, or answers what the
+    /// frame may not hold.
     #[inline(never)]
-    fn native_answer(&self, site: &NativeSite, given: &[Value]) -> Option<(Value, u64)> {
+    fn native_answer(
+        &self,
+        site: &NativeSite,
+        padded: &[Value; MAX_SLOTS],
+    ) -> Option<(Value, u64)> {
         let function = self.exe.lib(site.lib);
-        let mut padded = [Value::Absent; MAX_SLOTS];
-        padded[..given.len()].copy_from_slice(given);
-        let args = &padded[..function.arity];
+        let args = padded.get(..function.arity)?;
         if let Some((entry, fast)) = &function.prepared
             && self.depth_fits(site.depth)
             && let Some(answer) = entry.answer(args, self.charging)

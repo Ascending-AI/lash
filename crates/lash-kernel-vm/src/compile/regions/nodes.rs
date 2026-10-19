@@ -559,6 +559,30 @@ impl Answer {
         })
     }
 
+    /// The entry's answer on `args` in an allocating plan, as
+    /// [`Cx::operate_on`] takes it: `Ok` with the value where its guard
+    /// certifies the sizes its table charges, which are charged; `Err`
+    /// with the answer, or decline, for [`Cx::operated`] to charge or run.
+    #[inline(always)]
+    fn certified(
+        &self,
+        args: &[Value],
+        cx: &mut Cx<'_>,
+    ) -> Result<Value, Option<lash_kernel_doc::PreparedAnswer>> {
+        let answer = self.prepared.answer(args, cx.charging);
+        match answer {
+            Some(answer) if !cx.charging => Ok(answer.value),
+            Some(answer) => match answer.scalar_sizes.and_then(|mask| self.table.units(mask)) {
+                Some(units) => {
+                    cx.meter.measured(units);
+                    Ok(answer.value)
+                }
+                None => Err(Some(answer)),
+            },
+            None => Err(None),
+        }
+    }
+
     /// The entry on `args`: its scalar value, metered by its formula from
     /// the table, at the sizes its guard certifies or, where it certifies
     /// none, the values show. A paced run's (not `CHARGING`) runs the
@@ -589,7 +613,15 @@ impl Answer {
 /// The compiled operator `id` over `operands`.
 fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option<Node> {
     if libs.general {
-        libs.exe.lib(id).prepared.as_ref()?;
+        let function = libs.exe.lib(id);
+        function.prepared.as_ref()?;
+        if let Some(answer) = Answer::of(function) {
+            match operands.len() {
+                1 => return Some(certified::<1>(id, answer, operands, fresh)),
+                2 => return Some(certified::<2>(id, answer, operands, fresh)),
+                _ => {}
+            }
+        }
         return Some(direct::<true>(id, operands.len(), operands, fresh));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
@@ -598,6 +630,24 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Op
     } else {
         scalar_operator::<false>(answer, operands)
     }
+}
+
+/// An allocating plan's operator `id` of `N` parameters over `operands`,
+/// held in place: its entry `answer` runs once, and its answer is charged
+/// from the table where its guard certifies the sizes
+/// ([`Answer::certified`]), and as [`Cx::operate_on`] charges it, or runs
+/// its decline, otherwise.
+fn certified<const N: usize>(id: LibId, answer: Answer, operands: Vec<Node>, fresh: Fresh) -> Node {
+    Box::new(move |slots, cx| {
+        let mut values = [Value::Absent; N];
+        for (value, operand) in values.iter_mut().zip(&operands) {
+            *value = operand(slots, cx)?;
+        }
+        match answer.certified(&values, cx) {
+            Ok(value) => Some(value),
+            Err(answered) => cx.operated(cx.exe.lib(id), &values, fresh, answered),
+        }
+    })
 }
 
 /// A scalar plan's operator over `operands`, answered by `answer`.
@@ -636,7 +686,22 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option
         let mut operands = operands.into_iter();
         return Some(contains(id, table, operands.next()?, operands.next()?));
     }
+    if let Some(units) = function.length_read()
+        && let [_] = operands[..]
+    {
+        return Some(length(id, units, operands.into_iter().next()?));
+    }
     Some(direct::<false>(id, function.arity, operands, fresh))
+}
+
+/// The compiled `list.len` of native `id` on `list`, charging `units`
+/// ([`Lib::length_read`]): its operand evaluated, then [`Cx::length`].
+fn length(id: LibId, units: u64, list: Node) -> Node {
+    Box::new(move |slots, cx| {
+        let value = list(slots, cx)?;
+        let function = cx.exe.lib(id);
+        cx.length(function, units, value)
+    })
 }
 
 /// The table whose membership test native `function` is, where the region
