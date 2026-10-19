@@ -377,7 +377,6 @@ fn build_runtime_state(
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
     base.current_frame_node_id = None;
-    base.persisted_node_ids.clear();
     base.reset_initial_agent_frame_with_clock(
         crate::AgentFrameAssignment::new(policy.clone(), plugin_config),
         clock,

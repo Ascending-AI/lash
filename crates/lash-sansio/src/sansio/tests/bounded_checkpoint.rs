@@ -333,6 +333,90 @@ fn restore_refuses_missing_or_corrupt_checkpoint_content() {
     );
 }
 
+/// FIG-6910: a turn's records and the resident graph that commits them are
+/// one buffer, the window's, which every turn appends to in place; the
+/// commit then marks the reply among those records. Once the machine has
+/// finished, no live handle but the committing one sees past the window, so
+/// the mark rewrites the reply's slot where it stands instead of copying
+/// the window into a buffer of its own.
+#[test]
+fn a_finished_turn_leaves_the_commit_its_records_to_mark_in_place() {
+    // A store-read window's history buffer has room past its records, as a
+    // grown buffer does: the turn appends there in place.
+    let committed = window(64);
+    let mut events = lash_protocol_types::AppendVec::with_capacity(128);
+    for record in committed.events().iter().cloned() {
+        events.push(record);
+    }
+    let window = TurnWindow::new(
+        committed.pin().clone(),
+        committed.messages().clone(),
+        events,
+    );
+    let mut machine = TurnMachine::in_window(
+        test_config(Arc::new(ProseDriver)),
+        window.clone(),
+        window.then(vec![user_message("the turn's own input")]),
+        vec![conversation_event(user_message("the turn's own input"))],
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("the turn's model call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    // The input was the graph's before the turn started; the protocol's
+    // records arrive through the turn's deltas.
+    let mut turn_records = vec![conversation_event(user_message("the turn's own input"))];
+    turn_records.extend(
+        progress_event_delta(&effects)
+            .unwrap_or_default()
+            .iter()
+            .cloned(),
+    );
+    let (checkpoint_id, _) = find_checkpoint(&effects).expect("the completion checkpoint");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+    let effects = drain_effects(&mut machine);
+    assert!(find_done(&effects).is_some());
+    turn_records.extend(
+        done_event_delta(&effects)
+            .unwrap_or_default()
+            .iter()
+            .cloned(),
+    );
+
+    // The committing graph's history: the window's records, then the
+    // turn's, adopted from the slots the machine wrote.
+    assert_eq!(turn_records.len(), 2, "the input and the reply");
+    let mut committing = window.events().clone();
+    committing.extend_adopting(turn_records, lash_protocol_types::same_history_record);
+    let shared = committing.as_slice().as_ptr();
+    let reply = committing.len() - 1;
+    let SessionHistoryRecord::Conversation(mut marked) = committing[reply].clone() else {
+        panic!("the turn's last record is its reply");
+    };
+    assert_eq!(marked.role, MessageRole::Assistant);
+    marked.reply_marker = Some(
+        <lash_protocol_types::TurnReply as lash_protocol_types::core_support::TurnReplyCoreSupport>::mint(
+            TurnId::from("turn"),
+            format!("{}.p0", marked.id),
+        ),
+    );
+    committing.replace_from(reply, [SessionHistoryRecord::Conversation(marked)]);
+    assert_eq!(
+        committing.as_slice().as_ptr(),
+        shared,
+        "marking the reply copied the window instead of rewriting its slot"
+    );
+    assert_eq!(committing.len(), window.events().len() + 2);
+}
+
 /// A committed window of `count` messages.
 fn window(count: usize) -> TurnWindow {
     let messages = (0..count)

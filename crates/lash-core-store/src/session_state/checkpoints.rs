@@ -68,12 +68,14 @@ impl RuntimeSessionState {
         );
     }
 
+    /// The pending suffix of the resident graph, which the next commit
+    /// carries: O(pending nodes), since durable nodes are the graph's prefix
+    /// (FIG-6910).
     pub fn pending_graph_commit(&self) -> crate::GraphAppend {
         let nodes = self
             .session_graph
-            .nodes
+            .pending_nodes()
             .iter()
-            .filter(|node| !self.persisted_node_ids.contains(&node.node_id))
             .map(|node| node.as_ref().clone())
             .collect::<Vec<_>>();
         if nodes.is_empty() {
@@ -90,8 +92,14 @@ impl RuntimeSessionState {
     where
         I: IntoIterator<Item = crate::NodeId>,
     {
-        self.persisted_node_ids.extend(node_ids);
+        let node_ids = node_ids.into_iter().collect::<Vec<_>>();
+        self.session_graph.mark_durable(&node_ids);
         self.retire_below_current_frame();
+    }
+
+    /// Whether the resident node `node_id` is durable.
+    pub fn is_node_persisted(&self, node_id: &str) -> bool {
+        self.session_graph.is_durable(node_id)
     }
 
     /// Keep the resident graph to the current frame (ADR 0112 §9).
@@ -105,14 +113,8 @@ impl RuntimeSessionState {
     /// pending node still hangs off a node it would drop. When the base is
     /// already current, this does nothing.
     pub fn retire_below_current_frame(&mut self) {
-        let Some(retired) = self
-            .session_graph
-            .retire_below_current_frame(&self.persisted_node_ids)
-        else {
+        if self.session_graph.retire_below_current_frame().is_none() {
             return;
-        };
-        for node_id in &retired {
-            self.persisted_node_ids.remove(node_id);
         }
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }

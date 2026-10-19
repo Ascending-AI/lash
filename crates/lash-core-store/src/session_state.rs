@@ -748,11 +748,6 @@ pub struct RuntimeSessionState {
     /// `PersistedSessionConfig`.
     #[serde(skip)]
     pub undelivered_config_change: Option<Box<crate::UndeliveredConfigChange>>,
-    /// Node ids known to exist durably. This is deliberately independent of
-    /// the resident graph: partial residency omits durable off-path nodes,
-    /// while host-side edits can add resident nodes before they commit.
-    #[serde(skip)]
-    pub persisted_node_ids: crate::PersistedNodeIds,
 }
 
 impl RuntimeSessionState {
@@ -775,7 +770,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             undelivered_config_change: None,
-            persisted_node_ids: crate::PersistedNodeIds::default(),
         }
     }
 
@@ -812,7 +806,8 @@ impl RuntimeSessionState {
             policy: snapshot.policy,
             agent_frames,
             current_frame_node_id: snapshot.current_frame_node_id,
-            session_graph: snapshot.session_graph,
+            // A snapshot records no durability: every node is pending.
+            session_graph: snapshot.session_graph.with_durable_prefix(0),
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage,
             last_prompt_usage: snapshot.last_prompt_usage,
@@ -822,7 +817,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             undelivered_config_change: None,
-            persisted_node_ids: crate::PersistedNodeIds::default(),
         };
         state.ensure_agent_frame_initialized();
         state
@@ -908,13 +902,17 @@ impl RuntimeSessionState {
     /// Marks the pending conversation node carrying `message_id` as its
     /// turn's reply. A durable node is immutable history and is never
     /// rewritten, so the marker lands only on a node this commit still
-    /// appends; returns whether it landed. Pending nodes are the newest, so
-    /// the search starts at the leaf end (FIG-6889).
+    /// appends; returns whether it landed. Only the pending suffix is
+    /// searched (FIG-6910).
     pub fn mark_pending_turn_reply(&mut self, message_id: &str, marker: crate::TurnReply) -> bool {
-        let Some(index) = self.session_graph.nodes.iter().rposition(|node| {
-            node.message_id() == Some(message_id)
-                && !self.persisted_node_ids.contains(&node.node_id)
-        }) else {
+        let durable_len = self.session_graph.durable_len();
+        let Some(index) = self
+            .session_graph
+            .pending_nodes()
+            .iter()
+            .rposition(|node| node.message_id() == Some(message_id))
+            .map(|offset| durable_len + offset)
+        else {
             return false;
         };
         if !self.session_graph.mark_conversation_reply(index, marker) {
@@ -1074,7 +1072,7 @@ impl RuntimeSessionState {
             &self.session_id,
             frame_key.as_str(),
         ));
-        if self.persisted_node_ids.contains(&frame_node_id) {
+        if self.is_node_persisted(&frame_node_id) {
             return;
         }
         let policy = self.policy.clone();
@@ -1332,8 +1330,9 @@ pub fn adopt_durable_head(
         checkpoint,
     } = head;
     state.session_id = session_id;
-    state.persisted_node_ids = window.try_node_ids()?;
     state.session_graph = window;
+    // A store's window is durable through its leaf.
+    state.session_graph.mark_all_durable();
     state.agent_frames = state
         .session_graph
         .try_agent_frame_records(&state.session_id)?;

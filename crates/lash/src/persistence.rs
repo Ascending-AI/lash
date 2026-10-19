@@ -79,7 +79,7 @@ pub use lash_core_store::store::{
     DurableRecord, EnumerationSource, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
     StoredRunTerminal, SurfaceFormat, WriterPin,
 };
-pub use lash_core_store::{PersistedNodeIds, surface_format};
+pub use lash_core_store::surface_format;
 pub use lash_protocol_types::ConversationRecord;
 /// The protocol-generic form [`SessionHistoryRecord`] specializes.
 pub use lash_protocol_types::SessionHistoryRecord as GenericSessionHistoryRecord;

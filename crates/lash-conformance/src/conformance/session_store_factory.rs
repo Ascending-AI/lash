@@ -1092,7 +1092,6 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     let state = crate::RuntimeSessionState {
         head_revision: second_state.head_revision,
-        persisted_node_ids: second_state.persisted_node_ids,
         session_id: second_state.session_id,
         current_frame_node_id: Some(foreign_parent),
         ..crate::RuntimeSessionState::fixture(second_request.config.session_policy())

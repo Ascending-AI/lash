@@ -734,9 +734,9 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
     // graph bodies are immutable durable history, and every production
     // mutation moves the leaf, the node count, or another covered field, so
     // serializing the node bodies per publish would re-pay an O(graph) cost
-    // for no added signal. `persisted_node_ids` contributes the
-    // order-independent digest it keeps in step with its writes.
-    let persisted_nodes_digest = state.persisted_node_ids.digest();
+    // for no added signal. Durable nodes are the graph's prefix, so its
+    // length is what durability contributes.
+    let durable_nodes = state.session_graph.durable_len();
     serde_json::to_vec(&(
         &state.session_id,
         &state.policy,
@@ -750,7 +750,7 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
         &state.checkpoint_components,
         &state.checkpoint_ref,
         state.head_revision,
-        persisted_nodes_digest,
+        durable_nodes,
     ))
     .expect("runtime observation authority must serialize")
 }

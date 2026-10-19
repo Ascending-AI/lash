@@ -194,5 +194,5 @@ pub(in crate::runtime) async fn capture_execution_state_update(
 
 /// Whether the store already holds `frame`'s open.
 fn is_committed(state: &RuntimeSessionState, frame: &crate::FrameNodeId) -> bool {
-    state.persisted_node_ids.contains(frame.node_id())
+    state.is_node_persisted(frame.node_id())
 }

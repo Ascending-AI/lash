@@ -587,8 +587,8 @@ fn read_view_current_frame_is_the_initial_frame() {
 }
 
 /// ADR 0112 §9, §14 test 6: once a frame switch is durable, the resident
-/// graph is the new frame. The window base is the new `FrameOpen`,
-/// `persisted_node_ids` stays a subset of the resident ids, and one frame
+/// graph is the new frame. The window base is the new `FrameOpen`, both
+/// resident nodes stay durable, and one frame
 /// record remains, continuing from the old frame.
 #[test]
 fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
@@ -657,13 +657,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     assert_eq!(anchor.previous_frame_node_id.as_ref(), Some(&old_frame));
     assert_eq!(anchor.generation, 3);
     assert_eq!(state.session_graph.nodes.len(), 2);
-    assert!(state.persisted_node_ids.iter().all(|id| {
-        state
-            .session_graph
-            .nodes
-            .iter()
-            .any(|node| node.node_id == id)
-    }));
+    assert_eq!(state.session_graph.durable_len(), 2);
     assert_eq!(state.agent_frames.len(), 1);
     assert_eq!(
         state.agent_frames[0].previous_frame_node_id.as_ref(),
@@ -812,5 +806,65 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
             .map(|node| node.bytes.len())
             .sum::<usize>()
             < 1024
+    );
+}
+
+/// FIG-6910: durable nodes are the resident graph's prefix. A commit carries
+/// exactly the pending suffix, and its receipt makes durable exactly what it
+/// carried: a node appended while the commit was in flight stays pending and
+/// rides the next commit, so no appended node is ever skipped or carried
+/// twice.
+#[test]
+fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable() {
+    fn ids(commit: &crate::GraphAppend) -> Vec<crate::NodeId> {
+        commit
+            .nodes()
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect()
+    }
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("durable-prefix"),
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        ))
+    };
+    state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
+    let first = state.pending_graph_commit();
+    let first_ids = ids(&first);
+    assert_eq!(
+        first_ids,
+        state
+            .session_graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>(),
+        "a fresh graph's first commit carries every node: the frame and both messages"
+    );
+
+    state.append_active_conversation_messages(&[projection_text("a3")]);
+    let in_flight = state.session_graph.leaf_node_id.clone().expect("a3's node");
+    state.mark_node_ids_persisted(first_ids.clone());
+    assert!(first_ids.iter().all(|id| state.is_node_persisted(id)));
+    assert!(!state.is_node_persisted(&in_flight));
+    let second = state.pending_graph_commit();
+    assert_eq!(
+        ids(&second),
+        vec![in_flight.clone()],
+        "the node appended behind the first commit rides the next one alone"
+    );
+
+    state.mark_node_ids_persisted(ids(&second));
+    assert!(state.is_node_persisted(&in_flight));
+    assert!(matches!(
+        state.pending_graph_commit(),
+        crate::GraphAppend::PreserveHead
+    ));
+    assert_eq!(
+        state.session_graph.durable_len(),
+        state.session_graph.nodes.len()
     );
 }

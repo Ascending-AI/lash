@@ -23,7 +23,9 @@ pub(super) struct TurnGraphEditor {
     append_builder_minted_node_ids: HashSet<NodeId>,
     appended_nodes: Vec<SessionNodeRecord>,
     appended_node_indices: HashMap<NodeId, usize>,
-    committed_node_ids: lash_core_store::PersistedNodeIds,
+    /// How many leading appended nodes a test marked durable.
+    #[cfg(test)]
+    durable_appended: usize,
     clock: Arc<dyn crate::Clock>,
     projection_diagnostics: Vec<ReadProjectionDiagnostic>,
 }
@@ -42,13 +44,11 @@ impl TurnGraphEditor {
         current_frame_node_id: Option<crate::FrameNodeId>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
-        persisted_node_ids: lash_core_store::PersistedNodeIds,
     ) -> Self {
         let append_builder = base_graph.append_builder_in_namespace(draft_namespace);
         let pre_turn_append_leaf = append_builder.leaf_node_id().cloned();
         let active_messages = MessageSequence::from_base(base_read_model.messages);
         Self {
-            committed_node_ids: persisted_node_ids,
             base_graph,
             active_events: base_read_model.active_events,
             active_messages,
@@ -58,6 +58,8 @@ impl TurnGraphEditor {
             append_builder_minted_node_ids: HashSet::new(),
             appended_nodes: Vec::new(),
             appended_node_indices: HashMap::new(),
+            #[cfg(test)]
+            durable_appended: 0,
             clock,
             projection_diagnostics: Vec::new(),
         }
@@ -259,11 +261,10 @@ impl TurnGraphEditor {
     pub(super) fn graph_commit(&self) -> GraphAppend {
         let nodes = self
             .base_graph
-            .nodes
+            .pending_nodes()
             .iter()
             .map(Arc::as_ref)
-            .chain(self.appended_nodes.iter())
-            .filter(|node| !self.committed_node_ids.contains(&node.node_id))
+            .chain(&self.appended_nodes[self.durable_appended..])
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
@@ -278,11 +279,13 @@ impl TurnGraphEditor {
     where
         I: IntoIterator<Item = crate::NodeId>,
     {
-        self.committed_node_ids.extend(node_ids);
-    }
-
-    pub(super) fn take_persisted_node_ids(&mut self) -> lash_core_store::PersistedNodeIds {
-        std::mem::take(&mut self.committed_node_ids)
+        let node_ids = node_ids.into_iter().collect::<HashSet<_>>();
+        self.durable_appended = self
+            .appended_nodes
+            .iter()
+            .take_while(|node| node_ids.contains(&node.node_id))
+            .count()
+            .max(self.durable_appended);
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {
@@ -406,7 +409,6 @@ mod tests {
             None,
             "turn-graph-editor-test",
             Arc::new(crate::SystemClock),
-            Default::default(),
         )
     }
 
@@ -472,7 +474,6 @@ mod tests {
             None,
             "turn-graph-editor-witness-test",
             Arc::new(crate::SystemClock),
-            Default::default(),
         );
 
         let next = MessageSequence::from_base_and_delta(base, vec![message("turn", "new")]);

@@ -392,14 +392,12 @@ impl TurnCommitDraft {
         state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
         let base_read_model = base_graph.read_model();
-        let persisted_node_ids = std::mem::take(&mut state.persisted_node_ids);
         let graph = TurnGraphEditor::new(
             base_graph,
             base_read_model,
             state.current_frame_node_id.clone(),
             draft_namespace,
             clock,
-            persisted_node_ids,
         );
         Self {
             graph,
@@ -499,7 +497,6 @@ impl TurnCommitDraft {
         // The final commit is the last boundary: appends queued since the
         // previous one extend the leaf the editor produced, never choose it.
         self.fold_pending_graph_appends();
-        self.state.persisted_node_ids = self.graph.take_persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
         self.state.refresh_current_frame_projection();
         self.state
@@ -565,13 +562,7 @@ mod tests {
             &[text_message("durable", "durable request")],
             &clock,
         );
-        state.persisted_node_ids.extend(
-            state
-                .session_graph
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone()),
-        );
+        state.session_graph.mark_all_durable();
         state
     }
 
@@ -867,13 +858,7 @@ mod tests {
             .leaf_node_id
             .clone()
             .expect("durable frame leaf");
-        state.persisted_node_ids.extend(
-            state
-                .session_graph
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone()),
-        );
+        state.session_graph.mark_all_durable();
 
         let mut draft =
             TurnCommitDraft::from_state_with_clock(state, Arc::new(clock), "replacement");

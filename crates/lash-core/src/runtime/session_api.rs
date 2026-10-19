@@ -310,7 +310,6 @@ impl LashRuntime {
             empty.current_frame_node_id = None;
             empty.checkpoint_ref = None;
             empty.checkpoint_components = crate::RuntimeCheckpointComponents::complete_empty();
-            empty.persisted_node_ids.clear();
             empty.head_revision = 0;
             empty.turn_index = 0;
             empty.token_usage = crate::LlmUsage::default();

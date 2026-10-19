@@ -27,8 +27,8 @@ fn turn_draft_appends_resident_nodes_not_yet_durable() {
     let durable_node_id = graph.nodes[0].node_id.clone();
     let pending_node_id = graph.nodes[1].node_id.clone();
     let mut state = state_with_graph(graph);
-    let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
-    state.persisted_node_ids.insert(durable_node_id);
+    // The frame and the first message are the durable prefix.
+    state.session_graph.mark_durable([&durable_node_id]);
 
     let draft = TurnCommitDraft::from_state_with_clock(
         state,
@@ -42,7 +42,7 @@ fn turn_draft_appends_resident_nodes_not_yet_durable() {
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec![frame_node_id.as_str(), pending_node_id.as_str()]
+        vec![pending_node_id.as_str()]
     );
 }
 fn test_protocol_event(kind: &str) -> crate::ProtocolEvent {

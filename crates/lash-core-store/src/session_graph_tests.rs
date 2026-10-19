@@ -873,19 +873,19 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
     graph.append_message(text_message("b1", MessageRole::User, "b1"));
     let pending = graph.leaf_node_id.clone().expect("leaf");
 
-    let mut durable = graph
+    let durable = graph
         .nodes
         .iter()
         .map(|node| node.node_id.clone())
         .filter(|node_id| *node_id != pending)
-        .collect::<crate::PersistedNodeIds>();
+        .collect::<Vec<_>>();
+    graph.mark_durable(&durable);
     let retired = graph
-        .retire_below_current_frame(&durable)
+        .retire_below_current_frame()
         .expect("the durable frame switch retires the old frame");
     assert_eq!(retired.len(), 3);
-    for node_id in &retired {
-        durable.remove(node_id);
-    }
+    assert_eq!(graph.durable_len(), 1, "the new FrameOpen stays durable");
+    assert_eq!(graph.pending_nodes().len(), 1, "its child stays pending");
     assert_eq!(
         graph.nodes.len(),
         2,
@@ -906,7 +906,7 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
     assert_eq!(graph.read_model().messages.len(), 1);
 
     // The base is current now: a second trim does nothing.
-    assert!(graph.retire_below_current_frame(&durable).is_none());
+    assert!(graph.retire_below_current_frame().is_none());
 }
 
 /// A pending `FrameOpen` keeps everything below it until it is durable.
@@ -921,18 +921,14 @@ fn a_pending_frame_switch_retires_nothing() {
         crate::AgentFrameReason::initial(),
     );
     graph.append_message(text_message("a1", MessageRole::User, "a1"));
-    let durable = graph
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect::<crate::PersistedNodeIds>();
+    graph.mark_all_durable();
     open_test_frame(
         &mut graph,
         &session,
         "frame-b",
         crate::AgentFrameReason::continue_as(),
     );
-    assert!(graph.retire_below_current_frame(&durable).is_none());
+    assert!(graph.retire_below_current_frame().is_none());
     assert_eq!(graph.nodes.len(), 3);
     assert!(graph.anchor().is_none());
 }
@@ -1239,6 +1235,7 @@ mod window_anchor {
             let fresh = SessionGraph {
                 inner: Arc::clone(&graph.inner),
                 cache: Arc::default(),
+                durable_len: 0,
             }
             .validate_resident_integrity();
             assert_eq!(

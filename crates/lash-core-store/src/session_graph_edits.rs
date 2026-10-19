@@ -33,6 +33,49 @@ impl SessionGraph {
             .collect()
     }
 
+    /// How many leading resident nodes are durable: the rest are the
+    /// pending suffix the next commit carries.
+    pub fn durable_len(&self) -> usize {
+        self.durable_len.min(self.nodes.len())
+    }
+
+    /// The resident nodes no commit has made durable yet, in append order.
+    pub fn pending_nodes(&self) -> &[Arc<SessionNodeRecord>] {
+        &self.nodes[self.durable_len()..]
+    }
+
+    /// Whether the resident node `node_id` is durable. A node that is not
+    /// resident is not known to be.
+    pub fn is_durable(&self, node_id: &str) -> bool {
+        self.resident_node_indices([node_id])[0].is_some_and(|index| index < self.durable_len())
+    }
+
+    /// Every resident node is durable: the graph is a store's window.
+    pub fn mark_all_durable(&mut self) {
+        self.durable_len = self.nodes.len();
+    }
+
+    /// A landed commit made `node_ids` durable: the prefix extends through
+    /// the last of them that is resident. A commit carries the pending
+    /// suffix in order, so every pending node before that one is among
+    /// them.
+    pub fn mark_durable<'a>(&mut self, node_ids: impl IntoIterator<Item = &'a NodeId>) {
+        let through = self
+            .resident_node_indices(node_ids.into_iter().map(NodeId::as_str))
+            .into_iter()
+            .flatten()
+            .max()
+            .map_or(0, |index| index + 1);
+        self.durable_len = self.durable_len().max(through);
+    }
+
+    /// This graph with its first `len` nodes durable: a rebuild of a graph
+    /// that keeps its durable nodes, in order, ahead of its pending ones.
+    pub(crate) fn with_durable_prefix(mut self, len: usize) -> Self {
+        self.durable_len = len;
+        self
+    }
+
     pub fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
@@ -78,8 +121,6 @@ impl SessionGraph {
             && let Some(cache) = cache_lock.get_mut()
         {
             for (draft, derived, index) in renamed {
-                cache.node_ids.remove(&draft);
-                cache.node_ids.insert(derived.clone());
                 cache.by_id.rename(&draft, derived, index);
             }
             cache.withdraw_proof();

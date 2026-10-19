@@ -341,15 +341,7 @@ mod tests {
     }
 
     fn mark_all_persisted(state: &mut RuntimeSessionState) {
-        let node_ids = state
-            .session_graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<Vec<_>>();
-        for node_id in node_ids {
-            state.persisted_node_ids.insert(node_id);
-        }
+        state.session_graph.mark_all_durable();
     }
 
     fn materialize(state: &mut RuntimeSessionState, outcome: &TurnOutcome) {

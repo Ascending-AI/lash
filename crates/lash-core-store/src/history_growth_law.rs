@@ -89,8 +89,8 @@ fn window(turns: usize) -> SessionGraph {
     graph
 }
 
-/// Extending a proven window by one turn's rows, validating it, taking its
-/// durable id set and decoding the turn's transcript entries costs about the
+/// Extending a proven window by one turn's rows, validating it, adopting it
+/// as durable and decoding the turn's transcript entries costs about the
 /// same at 1024 resident turns as at 16: each persistent index copies at
 /// most one trie path (32 slots a level) per write, so only a logarithmic
 /// number of allocations separates the depths. Copying one id or position
@@ -110,12 +110,14 @@ fn a_turns_window_extension_allocates_independently_of_history_depth() {
             .expect("the turn's rows extend the window");
         head.validate_resident_integrity()
             .expect("the extended window stays proven");
-        let durable = head.try_node_ids().expect("the window's id set");
+        let mut durable = head.clone();
+        durable.mark_all_durable();
         let added =
             SessionTranscript::added_since(&base, &head, &decoders).expect("the turn's entries");
         let counts = measurement.finish();
         assert_eq!(added.entries().len(), 2);
-        assert_eq!(durable.len(), 2 * turns + 3);
+        assert_eq!(durable.pending_nodes().len(), 0);
+        assert_eq!(durable.durable_len(), 2 * turns + 3);
         counts
     });
     eprintln!("window extension at 16 and 1024 turns: {measured:?}");

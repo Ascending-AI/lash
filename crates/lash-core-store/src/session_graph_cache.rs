@@ -7,7 +7,7 @@ use crate::session_graph::facade_ops::SessionNodeProjection;
 use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, SessionReadModel};
 use crate::session_graph_integrity::{ancestry_indices, graph_node_indices, validate_structure};
 use crate::session_model::SessionHistoryRecord;
-use crate::{BaseRenderCache, Message, NodeId, PersistedNodeIds};
+use crate::{BaseRenderCache, Message, NodeId};
 use lash_protocol_types::{AppendVec, same_history_record, same_message};
 
 /// Every resident node's position by id. Persistent: every snapshot of the
@@ -62,9 +62,6 @@ pub(crate) struct SessionGraphCache {
     /// Every child edge: each parent's children's positions, in append
     /// order.
     children: PersistentMap<usize, Vec<usize>>,
-    /// Every resident node id, shared with each state that adopts this
-    /// graph as its durable window (FIG-6889).
-    pub(crate) node_ids: PersistedNodeIds,
     /// The graph passed the full structural-integrity check, and every
     /// append since kept it (FIG-6889): an append whose id is fresh and
     /// whose parent is resident keeps it, any other edit withdraws it.
@@ -90,7 +87,6 @@ impl Clone for SessionGraphCache {
             active_path_indices: self.active_path_indices.clone(),
             active_frame_indices: self.active_frame_indices.clone(),
             children: self.children.clone(),
-            node_ids: self.node_ids.clone(),
             proven: AtomicBool::new(self.proven()),
             active_read: StdMutex::new(
                 self.active_read
@@ -142,13 +138,11 @@ impl SessionGraphCache {
                 });
             }
         }
-        let node_ids = by_id.keys().cloned().collect();
         let mut cache = Self {
             by_id: NodeIdIndex::from_resident(by_id),
             active_path_indices: AppendVec::from(active_path_indices),
             active_frame_indices: AppendVec::from(active_frame_indices),
             children,
-            node_ids,
             proven: AtomicBool::new(proven),
             active_read: StdMutex::new(ActiveReadModel {
                 active_events: AppendVec::new(),
@@ -317,7 +311,6 @@ impl SessionGraphCache {
                 });
         }
         self.by_id.insert(node.node_id.clone(), node_index);
-        self.node_ids.insert(node.node_id.clone());
         if !extends_leaf {
             return;
         }

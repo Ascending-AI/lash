@@ -122,23 +122,24 @@ impl SessionGraph {
     /// anchor is derived from the old one (or, for a graph built in memory,
     /// from its root at generation 0): the generation plus the path offset,
     /// the `FrameOpen`'s parent, and the frame of that parent. A node is
-    /// dropped only when it is in `durable` and is not the `FrameOpen` or a
+    /// dropped only when it is durable and is not the `FrameOpen` or a
     /// descendant of it. Nothing is dropped while the `FrameOpen` itself is
     /// pending, while a kept node would name a dropped parent, or when the
     /// parent's frame cannot be resolved from the graph.
-    pub(crate) fn retire_below_current_frame(
-        &mut self,
-        durable: &crate::PersistedNodeIds,
-    ) -> Option<Vec<NodeId>> {
+    ///
+    /// Every dropped node is durable and the kept nodes keep their order, so
+    /// the kept durable nodes are still the rebuilt graph's prefix.
+    pub(crate) fn retire_below_current_frame(&mut self) -> Option<Vec<NodeId>> {
         let path = crate::facade_support::SessionGraphFacadeOps::active_path_nodes(self);
         let frame_offset = path.iter().rposition(|node| node.frame_open().is_some())?;
         if frame_offset == 0 {
             return None;
         }
         let frame = path[frame_offset];
-        if !durable.contains(&frame.node_id) {
+        if !self.is_durable(&frame.node_id) {
             return None;
         }
+        let durable_len = self.durable_len();
         let root = path.first()?;
         let base_generation = match self.anchor() {
             Some(anchor) => anchor.generation,
@@ -164,13 +165,14 @@ impl SessionGraph {
         // Off-path nodes: a durable one below the frame goes, a pending one
         // stays, and so does anything that descends from a kept node.
         let mut dropped = Vec::new();
-        for node in self.nodes.iter() {
+        for (index, node) in self.nodes.iter().enumerate() {
             let id = node.node_id.as_str();
             if kept_ids.contains(id) {
                 continue;
             }
-            if below.contains(id) || durable.contains(&node.node_id) {
-                if durable.contains(&node.node_id) {
+            let durable = index < durable_len;
+            if below.contains(id) || durable {
+                if durable {
                     dropped.push(node.node_id.clone());
                 } else {
                     return None;
@@ -206,7 +208,7 @@ impl SessionGraph {
         };
         let leaf_node_id = self.leaf_node_id.clone();
         let rebuilt = Self::from_shared_anchored_nodes(kept, leaf_node_id, Some(anchor)).ok()?;
-        *self = rebuilt;
+        *self = rebuilt.with_durable_prefix(durable_len - dropped.len());
         Some(dropped)
     }
 

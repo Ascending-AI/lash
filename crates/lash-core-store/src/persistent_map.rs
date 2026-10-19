@@ -17,7 +17,6 @@ const BITS: u32 = 5;
 
 pub(crate) struct PersistentMap<K, V> {
     root: Option<Arc<Branch<K, V>>>,
-    len: usize,
     hasher: RandomState,
 }
 
@@ -61,7 +60,6 @@ impl<K, V> Clone for PersistentMap<K, V> {
     fn clone(&self) -> Self {
         Self {
             root: self.root.clone(),
-            len: self.len,
             hasher: self.hasher.clone(),
         }
     }
@@ -71,7 +69,6 @@ impl<K, V> Default for PersistentMap<K, V> {
     fn default() -> Self {
         Self {
             root: None,
-            len: 0,
             hasher: RandomState::new(),
         }
     }
@@ -245,10 +242,6 @@ impl<K: Clone + Eq, V: Clone> Branch<K, V> {
 }
 
 impl<K, V> PersistentMap<K, V> {
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
-
     /// Visit every entry, in no particular order.
     pub(crate) fn for_each<'a>(&'a self, mut visit: impl FnMut(&'a K, &'a V)) {
         if let Some(root) = &self.root {
@@ -282,11 +275,7 @@ impl<K: Clone + Eq + Hash, V: Clone> PersistentMap<K, V> {
                 entries: Vec::new(),
             })
         }));
-        let inserted = root.upsert(hash, key, value, merge, 0);
-        if inserted {
-            self.len += 1;
-        }
-        inserted
+        root.upsert(hash, key, value, merge, 0)
     }
 
     /// Removes `key`, answering whether it was present.
@@ -303,7 +292,6 @@ impl<K: Clone + Eq + Hash, V: Clone> PersistentMap<K, V> {
             return false;
         }
         Arc::make_mut(root).remove(hash, key, 0);
-        self.len -= 1;
         true
     }
 }
@@ -323,8 +311,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// The map answers every lookup and length exactly as a plain map does,
-    /// across inserts, merges and removals, and across clones written
+    /// The map answers every lookup and visits every entry exactly as a plain map
+    /// does, across inserts, merges and removals, and across clones written
     /// independently after they diverge: a write to one never shows in
     /// another.
     #[test]
@@ -365,7 +353,6 @@ mod tests {
             }
         }
         for (map, model) in &held {
-            assert_eq!(map.len(), model.len());
             for key in 0..700 {
                 assert_eq!(map.get(&key), model.get(&key));
             }

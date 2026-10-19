@@ -785,12 +785,24 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.finish(TurnOutcome::Stopped(TurnStop::PluginAbort));
     }
 
+    /// A finished machine hands its turn over with `Done` and keeps none of
+    /// it: its messages go with the effect, and its history past the window
+    /// is released, so the turn's commit, which marks the reply among those
+    /// records, edits the one buffer they share in place instead of copying
+    /// the window around a record this machine still sees (FIG-6910).
     fn finish(&mut self, outcome: TurnOutcome) {
         self.emit(SessionStreamEvent::TurnOutcome { outcome });
         self.emit(SessionStreamEvent::Done);
         let msgs = std::mem::take(&mut self.messages);
         self.content.rewrote(Sequence::Messages, 0);
         let event_delta = self.next_event_delta();
+        let window_events = self
+            .window
+            .as_ref()
+            .map_or(0, |window| window.events().len());
+        self.events.truncate(window_events);
+        self.progress_event_cursor = window_events;
+        self.content.rewrote(Sequence::Events, window_events);
         let protocol_iteration = self.protocol_iteration;
         self.state = MachineState::Finished;
         self.side_effect_outbox.push_back(Effect::Done {

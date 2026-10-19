@@ -187,6 +187,15 @@ pub use crate::session_graph_window::WindowAnchor;
 pub struct SessionGraph {
     inner: Arc<SessionGraphStorage>,
     cache: Arc<OnceLock<SessionGraphCache>>,
+    /// How many leading resident nodes are durable (FIG-6910). Durable
+    /// nodes form a prefix of the resident sequence by construction: every
+    /// append lands past the end, a commit carries the pending suffix and
+    /// its receipt extends the prefix through what it carried
+    /// ([`Self::mark_durable`]), adopting a store window makes all of it
+    /// durable ([`Self::mark_all_durable`]), and retiring the nodes below
+    /// the current frame drops only durable nodes while keeping the order of
+    /// the rest. A graph built in memory or decoded starts with none.
+    durable_len: usize,
 }
 
 /// Keep reader ownership in the existing graph allocation, so a graph
@@ -202,6 +211,7 @@ impl Default for SessionGraph {
         Self {
             inner: Arc::new(SessionGraphStorage::default()),
             cache: Arc::new(OnceLock::new()),
+            durable_len: 0,
         }
     }
 }
@@ -211,6 +221,7 @@ impl Clone for SessionGraph {
         Self {
             inner: Arc::clone(&self.inner),
             cache: Arc::clone(&self.cache),
+            durable_len: self.durable_len,
         }
     }
 }
@@ -936,6 +947,7 @@ impl SessionGraph {
                 read_owner: None,
             }),
             cache: Arc::new(OnceLock::new()),
+            durable_len: 0,
         }
     }
 
@@ -976,12 +988,6 @@ impl SessionGraph {
             .iter()
             .rev()
             .map(|index| self.nodes[*index].as_ref())
-    }
-
-    /// Every resident node id, as the graph's cache keeps it: what a state
-    /// adopting this graph as its durable window knows persisted.
-    pub(crate) fn try_node_ids(&self) -> Result<crate::PersistedNodeIds, crate::StoreError> {
-        Ok(self.try_cache()?.node_ids.clone())
     }
 
     pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {

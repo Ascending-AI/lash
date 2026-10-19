@@ -398,10 +398,16 @@ impl CurrentOwnerCapability {
             });
         // This is either empty or one detached frame root selected from an already-validated
         // resident graph, so identity, parent, and leaf integrity hold by construction.
-        let session_graph = crate::SessionGraph::from_validated_nodes(
+        let frame_root_durable = frame_root
+            .as_ref()
+            .is_some_and(|node| state.is_node_persisted(&node.node_id));
+        let mut session_graph = crate::SessionGraph::from_validated_nodes(
             frame_root.iter().cloned().collect(),
             frame_root.map(|node| node.node_id),
         );
+        if frame_root_durable {
+            session_graph.mark_all_durable();
+        }
         RuntimeSessionState {
             session_id: state.session_id.clone(),
             policy: state.effective_policy().clone(),
@@ -417,7 +423,6 @@ impl CurrentOwnerCapability {
             head_revision: state.head_revision,
             config_revision: state.config_revision,
             undelivered_config_change: state.undelivered_config_change.clone(),
-            persisted_node_ids: state.persisted_node_ids.clone(),
         }
     }
 
