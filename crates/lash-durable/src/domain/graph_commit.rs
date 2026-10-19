@@ -177,17 +177,19 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
 }
 
 /// A root owner's canonical encoding: its source's variant number and its
-/// key.
+/// key. The number is the source catalog's own discriminant, so two owner
+/// kinds can never share one.
 pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
+    let source = owner.source() as u32;
     match owner {
         RootOwner::ModelCall(key) => {
-            out.sum(17, 3);
+            out.sum(source, 3);
             out.text(key.session.as_str());
             out.text(&key.call.owner_column());
             out.text(&key.call.call_column());
         }
         RootOwner::Exec(exec) => {
-            out.sum(0, 1);
+            out.sum(source, 1);
             out.text(&exec.stored());
         }
         RootOwner::RunFact {
@@ -195,33 +197,33 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
             run,
             ordinal,
         } => {
-            out.sum(1, 3);
+            out.sum(source, 3);
             out.text(&owner.stored());
             out.unsigned(run.0);
             out.unsigned(ordinal.0);
         }
         RootOwner::EffectAdmission { exec, effect } => {
-            out.sum(2, 2);
+            out.sum(source, 2);
             out.text(&exec.stored());
             out.bytes(&effect.0);
         }
         RootOwner::TurnPhase { session, run } => {
-            out.sum(3, 2);
+            out.sum(source, 2);
             out.text(session.as_str());
             out.text(run.as_str());
         }
         RootOwner::WorkingExecution { session, run } => {
-            out.sum(4, 2);
+            out.sum(source, 2);
             out.text(session.as_str());
             out.text(run.as_str());
         }
         RootOwner::ModelAnswer { session, run } => {
-            out.sum(14, 2);
+            out.sum(source, 2);
             out.text(session.as_str());
             out.text(run.as_str());
         }
         RootOwner::RunTranscript { session, run } => {
-            out.sum(18, 2);
+            out.sum(source, 2);
             out.text(session.as_str());
             out.text(run.as_str());
         }
@@ -230,30 +232,30 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
             run,
             plugin,
         } => {
-            out.sum(5, 3);
+            out.sum(source, 3);
             out.text(session.as_str());
             out.text(run.as_str());
             out.text(plugin);
         }
         RootOwner::SessionRevision { session, revision } => {
-            out.sum(6, 2);
+            out.sum(source, 2);
             out.text(session.as_str());
             out.unsigned(*revision);
         }
         RootOwner::SessionAdmissionBase { session } => {
-            out.sum(7, 1);
+            out.sum(source, 1);
             out.text(session.as_str());
         }
         RootOwner::ArtifactBridge {
             namespace,
             artifact,
         } => {
-            out.sum(9, 2);
+            out.sum(source, 2);
             out.text(namespace);
             out.text(artifact);
         }
         RootOwner::ReleasePin { release } => {
-            out.sum(7, 1);
+            out.sum(source, 1);
             out.text(release);
         }
     }
@@ -1186,6 +1188,94 @@ fn merge(own: InstallEntry, manifest: InstallEntry) -> Result<InstallEntry, Grap
                 id,
                 root: root || other,
             })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_core_store::checkpoint_graph::TokenReader;
+    use lash_protocol_types::{SessionId, TurnId};
+
+    use super::*;
+    use crate::domain::{
+        CellId, EffectKey, ExecKey, ModelCallId, Ordinal, OwnerKey, PromptCallKey, RunSeq,
+    };
+
+    /// Every owner kind encodes its source catalog number, so two owner
+    /// kinds with the same text key never share an encoding.
+    #[test]
+    fn root_owner_encoding_preserves_source_identity() {
+        let key = "typescript/1.0";
+        let session = SessionId::try_from(key.to_owned()).unwrap();
+        let run = TurnId::try_from("run".to_owned()).unwrap();
+        let exec = ExecKey::Cell(session.clone(), run.clone(), CellId::new("cell"));
+        let owners = [
+            RootOwner::Exec(exec.clone()),
+            RootOwner::ModelCall(PromptCallKey {
+                session: session.clone(),
+                call: ModelCallId::Turn {
+                    run: run.clone(),
+                    ordinal: 0,
+                },
+            }),
+            RootOwner::RunFact {
+                owner: OwnerKey::Turn(session.clone(), run.clone()),
+                run: RunSeq(0),
+                ordinal: Ordinal(0),
+            },
+            RootOwner::EffectAdmission {
+                exec,
+                effect: EffectKey(b"effect".as_slice().into()),
+            },
+            RootOwner::TurnPhase {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            RootOwner::WorkingExecution {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            RootOwner::ModelAnswer {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            RootOwner::RunTranscript {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            RootOwner::TurnNamespace {
+                session: session.clone(),
+                run,
+                plugin: key.to_owned(),
+            },
+            RootOwner::SessionRevision {
+                session: session.clone(),
+                revision: 0,
+            },
+            RootOwner::SessionAdmissionBase { session },
+            RootOwner::ArtifactBridge {
+                namespace: key.to_owned(),
+                artifact: key.to_owned(),
+            },
+            RootOwner::ReleasePin {
+                release: key.to_owned(),
+            },
+        ];
+        let mut encodings = BTreeSet::new();
+        for owner in &owners {
+            let mut out = TokenWriter::new();
+            encode_owner(&mut out, owner);
+            let (variant, _) = TokenReader::new(out.as_bytes()).sum().unwrap();
+            assert_eq!(
+                variant,
+                owner.source() as u32,
+                "{owner:?} encodes another source's number"
+            );
+            assert!(
+                encodings.insert(out.into_bytes()),
+                "{owner:?} shares its encoding with another owner kind"
+            );
         }
     }
 }
