@@ -226,6 +226,84 @@ fn a_swept_child_never_resurrects_while_its_family_stays_live() {
     );
     assert_eq!(reopened.kind(child).expect("dead child membership"), None);
 }
+/// S8, ADR 0145 §9: a family's membership is exactly its live ordinals,
+/// whatever order its members are swept in. A swept ordinal (first, last,
+/// interior, adjacent either way, swept twice) reads as absent and never
+/// falls back to its frozen body, also after a cold reopen; every other
+/// ordinal reads; the census enumerates the live ones in order across its
+/// batches; and the family leaves the heap with its last member.
+#[test]
+fn a_family_holds_exactly_its_live_members_whatever_the_sweep_order() {
+    let (mut heap, pages) = fresh();
+    let child = heap
+        .allocate_object(ObjectInit::List(vec![int(1)]))
+        .expect("child");
+    let source = heap
+        .allocate_object(ObjectInit::List(vec![PageValue::List(child); 150]))
+        .expect("source");
+    let frozen = heap.freeze(&PageValue::List(source), true).expect("freeze");
+    let family = list(heap.instantiate(&frozen).expect("deliver")).family;
+    let member = |ordinal| EntityId { family, ordinal };
+    let sweep = |heap: &mut PagedHeap, ordinal| {
+        heap.sweep(&SweepSet {
+            entities: vec![member(ordinal)],
+            ended_task_results: Vec::new(),
+        })
+        .expect("sweep");
+    };
+    let swept = [0, 150, 70, 72, 71, 64, 65, 70];
+    for ordinal in swept {
+        sweep(&mut heap, ordinal);
+    }
+    let live: Vec<_> = (0..151)
+        .filter(|ordinal| !swept.contains(ordinal))
+        .map(member)
+        .collect();
+    let check = |heap: &mut PagedHeap| {
+        for ordinal in 0..151 {
+            let expected = (!swept.contains(&ordinal)).then_some(ObjectKind::List);
+            assert_eq!(
+                heap.kind(member(ordinal)).expect("kind"),
+                expected,
+                "{ordinal}"
+            );
+        }
+        let mut enumerated = Vec::new();
+        let mut after = None;
+        loop {
+            let batch = heap.census_after(after, 64).expect("census");
+            let Some(last) = batch.last().copied() else {
+                break;
+            };
+            enumerated.extend(batch.into_iter().filter(|id| id.family == family));
+            after = Some(last);
+        }
+        assert_eq!(enumerated, live);
+    };
+    check(&mut heap);
+    seal(&mut heap);
+    let mut reopened = PagedHeap::open_header(
+        heap.sealed_root().expect("header"),
+        Box::new(Source(Rc::clone(&pages))),
+        EditEpoch(2),
+    )
+    .expect("open");
+    reopened.set_family_base(Box::new(FrozenBase::default()));
+    check(&mut reopened);
+    for id in &live {
+        sweep(&mut reopened, id.ordinal);
+    }
+    for ordinal in 0..151 {
+        assert_eq!(reopened.kind(member(ordinal)).expect("kind"), None);
+    }
+    assert!(
+        reopened
+            .census_after(None, usize::MAX)
+            .expect("census")
+            .iter()
+            .all(|id| id.family != family)
+    );
+}
 #[test]
 fn a_lazy_result_length_read_instantiates_nothing() {
     let (mut heap, _) = fresh();

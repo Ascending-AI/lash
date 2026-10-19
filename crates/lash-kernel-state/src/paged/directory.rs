@@ -828,7 +828,7 @@ pub mod execution {
 
 impl Cell for MembershipRun {
     fn live_members(&self) -> u64 {
-        if self.live { self.len } else { 0 }
+        self.len
     }
     fn cost(&self) -> u64 {
         0
@@ -850,7 +850,7 @@ impl PagedHeap {
         else {
             return Ok(false);
         };
-        Ok(run.live && ordinal >= run.start && ordinal - run.start < run.len)
+        Ok(ordinal >= run.start && ordinal - run.start < run.len)
     }
     /// Reserves a fresh occurrence namespace without constructing any body.
     pub fn register_family(&mut self, frozen: FrozenRef) -> Result<FamilyId, HeapWriteError> {
@@ -865,7 +865,6 @@ impl PagedHeap {
                 MembershipRun {
                     start: 0,
                     len: frozen.summary.entities,
-                    live: true,
                 },
                 &self.access,
             )?;
@@ -913,6 +912,11 @@ impl PagedHeap {
         else {
             return Ok(());
         };
+        if entity.ordinal >= family.extent {
+            return Err(HeapFault::Malformed(
+                "swept a member beyond its family's extent".into(),
+            ));
+        }
         let mut runs = Tree::<MembershipRun>::of_keyed(&family.membership);
         let live_before = runs.live_members(&self.access)?;
         let rank = runs.passed(&entity.ordinal.to_be_bytes(), &self.access)?;
@@ -922,72 +926,35 @@ impl PagedHeap {
             .transpose()?
             .flatten()
         else {
-            return Err(HeapFault::Malformed("family membership has a hole".into()));
+            // Before the first live run: already swept.
+            return Ok(());
         };
-        if entity.ordinal < run.start || entity.ordinal - run.start >= run.len {
-            return Err(HeapFault::Malformed("family membership has a hole".into()));
-        }
-        if !run.live {
+        let offset = entity
+            .ordinal
+            .checked_sub(run.start)
+            .ok_or_else(|| HeapFault::Malformed("membership run key and start disagree".into()))?;
+        if offset >= run.len {
+            // In the gap after its run: already swept.
             return Ok(());
         }
-        runs.remove(&key, &self.access)?;
-        if entity.ordinal > run.start {
-            runs.write(
-                ordinal_key(run.start),
-                MembershipRun {
-                    start: run.start,
-                    len: entity.ordinal - run.start,
-                    live: true,
-                },
-                &self.access,
-            )?;
-        }
-        // Merge adjacent tombstones instead of retaining one row per death.
-        let mut start = entity.ordinal;
-        let mut len = 1;
-        if let Some((key, previous)) = runs.rank_get(
-            runs.passed(&start.to_be_bytes(), &self.access)?
-                .saturating_sub(1),
-            &self.access,
-        )? && !previous.live
-            && previous.start + previous.len == start
-        {
-            start = previous.start;
-            len += previous.len;
-            runs.remove(&key, &self.access)?;
-        }
-        let tail = entity.ordinal + 1;
         let end = run
             .start
             .checked_add(run.len)
-            .ok_or_else(|| HeapFault::Malformed("family extent overflow".into()))?;
-        if tail < end {
-            runs.write(
-                ordinal_key(tail),
-                MembershipRun {
-                    start: tail,
-                    len: end - tail,
-                    live: true,
-                },
-                &self.access,
-            )?;
-        } else if let Some((key, next)) =
-            runs.after(Some(&entity.ordinal.to_be_bytes()), &self.access)?
-            && !next.live
-            && next.start == tail
-        {
-            len += next.len;
-            runs.remove(&key, &self.access)?;
+            .filter(|end| *end <= family.extent)
+            .ok_or_else(|| HeapFault::Malformed("membership exceeds family extent".into()))?;
+        runs.remove(&key, &self.access)?;
+        for (start, end) in [(run.start, entity.ordinal), (entity.ordinal + 1, end)] {
+            if start < end {
+                runs.write(
+                    ordinal_key(start),
+                    MembershipRun {
+                        start,
+                        len: end - start,
+                    },
+                    &self.access,
+                )?;
+            }
         }
-        runs.write(
-            ordinal_key(start),
-            MembershipRun {
-                start,
-                len,
-                live: false,
-            },
-            &self.access,
-        )?;
         if runs.live_members(&self.access)?
             != live_before
                 .checked_sub(1)

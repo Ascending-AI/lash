@@ -43,12 +43,11 @@ pub struct FrozenRef {
     pub summary: FrozenSummary,
 }
 
-/// A run of ordinals with one census membership.
+/// A run of live ordinals, `len` of them from `start`; `len` is positive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MembershipRun {
     pub start: u64,
     pub len: u64,
-    pub live: bool,
 }
 
 /// One lazy family's record in the heap root's family table.
@@ -59,7 +58,8 @@ pub struct FamilyRecord {
     pub base: FrozenRef,
     /// Ordinals `0..extent` are allocated.
     pub extent: u64,
-    /// [`MembershipRun`]s by start: the swept ranges are not live.
+    /// Disjoint [`MembershipRun`]s by start: the live ordinals. An
+    /// allocated ordinal in no run was swept.
     pub membership: KeyedRoot,
 }
 

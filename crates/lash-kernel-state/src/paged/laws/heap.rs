@@ -418,11 +418,7 @@ fn a_forged_membership_aggregate_is_a_corrupt_page() {
         actual
             .write(
                 directory::ordinal_key(i),
-                MembershipRun {
-                    start: i,
-                    len: 1,
-                    live: true,
-                },
+                MembershipRun { start: i, len: 1 },
                 &heap.access,
             )
             .unwrap();

@@ -211,15 +211,13 @@ impl CensusGraph for PagedHeap {
                         reason: "membership exceeds family extent".into(),
                     });
                 }
-                if run.live {
-                    let count = (end.saturating_sub(run.start.max(first)))
-                        .min((limit - entities.len()) as u64);
-                    for ordinal in run.start.max(first)..run.start.max(first) + count {
-                        entities.push(EntityId {
-                            family: family.family,
-                            ordinal,
-                        });
-                    }
+                let count =
+                    (end.saturating_sub(run.start.max(first))).min((limit - entities.len()) as u64);
+                for ordinal in run.start.max(first)..run.start.max(first) + count {
+                    entities.push(EntityId {
+                        family: family.family,
+                        ordinal,
+                    });
                 }
                 rank += 1;
             }

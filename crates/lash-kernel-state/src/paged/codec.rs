@@ -101,8 +101,7 @@ record!(FrozenRef {
 });
 record!(MembershipRun {
     start: u64,
-    len: u64,
-    live: bool
+    len: u64
 });
 record!(FamilyRecord {
     family: FamilyId,
