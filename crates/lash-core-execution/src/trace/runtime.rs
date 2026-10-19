@@ -374,7 +374,7 @@ impl TraceRuntime {
         ProducerSpan::opened(
             span,
             spec.ids,
-            Box::new(move |outcome, ids| {
+            Box::new(move |outcome, ids, phases| {
                 let ended_at_ms = runtime.parts.clock.timestamp_ms();
                 let position = TracePosition {
                     span: carrier,
@@ -402,6 +402,7 @@ impl TraceRuntime {
                             TraceEvent::ProducerSettled {
                                 producer: kind,
                                 outcome,
+                                phases,
                             },
                         )
                     },

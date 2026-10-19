@@ -859,3 +859,169 @@ async fn a_workflow_cancelled_without_its_engine_keeps_its_recorded_trace_class(
     core.shutdown().await?;
     Ok(())
 }
+
+/// FIG-6808: an attempt cut mid-stream names, on its `lash.model.attempt`
+/// span, the keys of the response metadata its leaf captured from the
+/// streamed head, and no exported span carries a captured value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cut_attempt_names_the_response_metadata_keys_its_leaf_captured() -> Result<()> {
+    use lash_protocol_types::llm::types::{
+        LlmStreamEvidence, StreamBlockEvent, StreamBlockIdentity, StreamBlockKind,
+    };
+    const COST: &str = "captured-cost-value";
+    let provider = lash::testing::TestProvider::builder()
+        .kind("attempt-metadata-keys")
+        .requires_streaming(true)
+        .complete(|request| async move {
+            let stream = request.stream_events.expect("stream events");
+            stream.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
+                response_metadata: [("header:x-opper-cost".into(), serde_json::json!(COST))].into(),
+                ..Default::default()
+            }));
+            stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                block: StreamBlockIdentity::new("text:0", 0),
+                text: "Let me think.".into(),
+            }));
+            std::future::pending().await
+        })
+        .build()
+        .into_handle();
+    let builder = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec());
+    let (observed, builder) = Observed::install(builder);
+    let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        lash::SessionId::parse("emission-attempt-metadata").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
+    let handle = session.send(TurnInput::text("stream")).await?;
+    let mut events = handle.events();
+    while let Some(activity) = events.next_activity().await {
+        if matches!(
+            activity?.event,
+            lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta { .. })
+        ) {
+            break;
+        }
+    }
+    handle
+        .cancel()
+        .mode(lash::TurnCancelMode::Immediate)
+        .await?;
+    handle.output().await?;
+    observed
+        .until("the cut attempt is exported", |observed| {
+            !observed.spans("lash.model.attempt").is_empty()
+        })
+        .await;
+    let attempts = observed.spans("lash.model.attempt");
+    assert_eq!(attempts.len(), 1, "{attempts:#?}");
+    let keys = attempts[0]
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "lash.model.attempt.response_metadata.keys")
+        .map(|attribute| attribute.value.clone());
+    assert_eq!(
+        keys,
+        Some(lash::tracing::otel::Value::Array(
+            lash::tracing::otel::Array::String(vec!["header:x-opper-cost".into()])
+        )),
+        "{attempts:#?}"
+    );
+    for span in observed.exported() {
+        for attribute in &span.attributes {
+            assert!(
+                !attribute.value.to_string().contains(COST),
+                "{} exports a captured value as {}",
+                span.name,
+                attribute.key
+            );
+        }
+    }
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// FIG-6808: a host process start's `lash.process.start` producer
+/// attributes its time to each phase the start reached, in microseconds,
+/// and the phases, which run back to back, fit inside the span.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_process_start_attributes_its_time_to_each_phase_it_reached() -> Result<()> {
+    let builder = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(
+        mock_provider(vec![text_call("child answered")]).into_handle(),
+        mock_llm_profile_spec(),
+    );
+    let (observed, builder) = Observed::install(builder);
+    let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
+    core.session(
+        lash::SessionId::parse(lash_facade_tests::session_process::PARENT)
+            .expect("nonblank session id"),
+    )
+    .create(lash::SessionCreation::root(mock_session_spec()))
+    .await?;
+    core.processes()
+        .start(
+            lash_facade_tests::session_process::request("mock-model"),
+            core.effect_host(),
+        )
+        .await?;
+    let starts = observed.spans("lash.process.start");
+    assert_eq!(starts.len(), 1, "{starts:#?}");
+    let start = &starts[0];
+    let phases: Vec<(&str, i64)> = start
+        .attributes
+        .iter()
+        .filter_map(|attribute| {
+            let phase = attribute.key.as_str().strip_prefix("lash.process.start.")?;
+            let lash::tracing::otel::Value::I64(elapsed_us) = attribute.value else {
+                panic!("{phase} is an integer: {:?}", attribute.value);
+            };
+            Some((phase, elapsed_us))
+        })
+        .collect();
+    // A session-turn start resolves no definition; it passes every other
+    // phase, in order.
+    assert_eq!(
+        phases.iter().map(|(phase, _)| *phase).collect::<Vec<_>>(),
+        [
+            "dispatch_us",
+            "admission_us",
+            "environment_us",
+            "admit_us",
+            "artifacts_us",
+            "link_check_us",
+            "input_us",
+            "prepare_us",
+            "commit_us",
+            "adopt_us",
+            "observe_us",
+        ],
+        "{start:#?}"
+    );
+    let spent: i64 = phases.iter().map(|(_, elapsed_us)| elapsed_us).sum();
+    let span_us = i64::try_from(
+        start
+            .end_time
+            .duration_since(start.start_time)
+            .expect("the span ends after it starts")
+            .as_micros(),
+    )
+    .expect("a short span");
+    // The span's clocks are whole wall milliseconds.
+    assert!(
+        (0..=span_us + 1_000).contains(&spent),
+        "phases {spent} us within the span's {span_us} us: {start:#?}"
+    );
+    core.shutdown().await?;
+    Ok(())
+}

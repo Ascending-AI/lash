@@ -8,6 +8,8 @@ Openers carry no content: `LlmCallStarted` always carries an omitted request; ho
 
 `ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).
 
+`lash.model.attempt.response_metadata.keys` names the response-metadata keys the provider leaf captured for the attempt, such as `header:x-opper-cost`, and never their values. A host process start's `lash.process.start` producer carries one `lash.process.start.<phase>_us` attribute per phase the start reached; the phases run back to back from the producer's opening.
+
 Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
 
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
@@ -68,6 +70,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `gen_ai.usage.reasoning.output_tokens` | Integer | Provenance | model |
 | `lash.model.attempt.ordinal` | Integer | Provenance | model_attempt |
 | `lash.provider.terminal_delivery_timed_out` | Boolean | Provenance | model, model_attempt |
+| `lash.model.attempt.response_metadata.keys` | StringArray | Provenance | model_attempt |
 | `lash.model.attempts` | Integer | Provenance | model |
 | `gen_ai.request.stream` | Boolean | Provenance | model |
 | `gen_ai.request.reasoning.level` | String | Provenance | model |
@@ -88,6 +91,18 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.usage.reasoning_tokens` | Integer | Provenance | model_attempt |
 | `lash.provider.request_id` | String | Provenance | model_attempt |
 | `lash.process.kind` | String | Provenance | process, workflow |
+| `lash.process.start.dispatch_us` | Integer | Provenance | producer |
+| `lash.process.start.admission_us` | Integer | Provenance | producer |
+| `lash.process.start.environment_us` | Integer | Provenance | producer |
+| `lash.process.start.definition_us` | Integer | Provenance | producer |
+| `lash.process.start.admit_us` | Integer | Provenance | producer |
+| `lash.process.start.artifacts_us` | Integer | Provenance | producer |
+| `lash.process.start.link_check_us` | Integer | Provenance | producer |
+| `lash.process.start.input_us` | Integer | Provenance | producer |
+| `lash.process.start.prepare_us` | Integer | Provenance | producer |
+| `lash.process.start.commit_us` | Integer | Provenance | producer |
+| `lash.process.start.adopt_us` | Integer | Provenance | producer |
+| `lash.process.start.observe_us` | Integer | Provenance | producer |
 | `lash.process.label` | String | Provenance | process, workflow |
 | `gen_ai.workflow.name` | String | Provenance | workflow |
 | `lash.workflow.node.site` | String | Provenance | workflow_node |
@@ -129,10 +144,10 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 
 | Span kind | Attribute reserve |
 |---|---|
-| `producer` | 20 |
+| `producer` | 32 |
 | `agent` | 25 |
 | `model` | 47 |
-| `model_attempt` | 29 |
+| `model_attempt` | 30 |
 | `tool` | 31 |
 | `cell` | 29 |
 | `process` | 26 |

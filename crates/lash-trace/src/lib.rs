@@ -103,12 +103,13 @@ pub use recording::RecordingTraceSink;
 pub use telemetry::metrics::registry::{RefinableKey, attribute_reserve};
 pub use telemetry::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec, SpanKey,
-    TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceAttemptId, TraceAttemptLink, TraceCall,
-    TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceLinkMode, TraceLinks, TraceParent,
-    TraceRecordIdentity, TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer,
-    TraceScopeOwner, TraceStateBudget, TraceStateLimits, TraceToolOwner, TraceTransitionKind,
-    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
+    LashIdentity, ProcessStartPhase, ProcessStartPhaseTime, ProducerKind, ProducerOutcome,
+    ProducerSpan, ProducerSpec, SpanKey, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
+    TraceAttemptId, TraceAttemptLink, TraceCall, TraceCaller, TraceCarrier, TraceCause,
+    TraceIdentity, TraceLinkMode, TraceLinks, TraceParent, TraceRecordIdentity,
+    TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    TraceStateBudget, TraceStateLimits, TraceToolOwner, TraceTransitionKind, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use time::TraceTimestamp;
 pub use workflow_overlay::{

@@ -276,6 +276,9 @@ impl ProviderCompletionSideband {
                     ended_at_ms: observation.ended_at_ms?,
                     provider: observation.provider.clone()?,
                     terminal_delivery_timed_out: delivery_timed_out,
+                    response_metadata_keys: metadata
+                        .map(|metadata| metadata.keys().cloned().collect())
+                        .unwrap_or_default(),
                 })
             });
             observer(

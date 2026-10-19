@@ -579,6 +579,7 @@ impl TraceEvent {
             | Self::ProducerSettled {
                 producer: _,
                 outcome: _,
+                phases: _,
             } => {}
         }
     }

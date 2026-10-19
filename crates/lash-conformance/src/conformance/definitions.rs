@@ -392,6 +392,7 @@ impl World {
             session_turn_admission: None,
             executor: "definition conformance start",
             starter,
+            phases: None,
         }
     }
 

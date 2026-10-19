@@ -598,6 +598,7 @@ impl OtelTelemetry {
             event: TraceEvent::ProducerSettled {
                 producer: spec.kind,
                 outcome: crate::ProducerOutcome::Selected,
+                phases: Vec::new(),
             },
         };
         let mut attributes = Vec::new();
@@ -630,6 +631,25 @@ fn producer(kind: ProducerKind) -> DomainSpan {
         ProducerKind::ProcessStart => DomainSpan::ProcessStart,
         ProducerKind::ToolIntentSubmit => DomainSpan::IntentSubmit,
         ProducerKind::PluginInvoke => DomainSpan::PluginInvoke,
+    }
+}
+
+/// The `lash.process.start.*_us` attribute of one start phase.
+fn start_phase_key(phase: crate::ProcessStartPhase) -> A {
+    use crate::ProcessStartPhase as P;
+    match phase {
+        P::Dispatch => A::StartDispatchUs,
+        P::Admission => A::StartAdmissionUs,
+        P::Environment => A::StartEnvironmentUs,
+        P::Definition => A::StartDefinitionUs,
+        P::Admit => A::StartAdmitUs,
+        P::Artifacts => A::StartArtifactsUs,
+        P::LinkCheck => A::StartLinkCheckUs,
+        P::Input => A::StartInputUs,
+        P::Prepare => A::StartPrepareUs,
+        P::Commit => A::StartCommitUs,
+        P::Adopt => A::StartAdoptUs,
+        P::Observe => A::StartObserveUs,
     }
 }
 
@@ -851,12 +871,24 @@ impl<'a> Projection<'a> {
 
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
         if let Some(attempt) = self.attempt {
-            if attempt
-                .span
-                .as_ref()
-                .is_some_and(|span| span.terminal_delivery_timed_out)
-            {
-                out.push(A::ProviderTerminalDeliveryTimedOut.value(true));
+            if let Some(span) = &attempt.span {
+                if span.terminal_delivery_timed_out {
+                    out.push(A::ProviderTerminalDeliveryTimedOut.value(true));
+                }
+                // Keys only: a captured value may be billing or identity data.
+                if !span.response_metadata_keys.is_empty() {
+                    out.push(
+                        A::ModelAttemptResponseMetadataKeys.value(opentelemetry::Value::Array(
+                            opentelemetry::Array::String(
+                                span.response_metadata_keys
+                                    .iter()
+                                    .cloned()
+                                    .map(Into::into)
+                                    .collect(),
+                            ),
+                        )),
+                    );
+                }
             }
             model::attempt_attributes(&attempt.attempt, out);
             return;
@@ -872,10 +904,18 @@ impl<'a> Projection<'a> {
             out.push(A::ToolName.value(tool.to_owned()));
         }
         match &record.event {
-            TraceEvent::ProducerSettled { outcome, .. } => {
+            TraceEvent::ProducerSettled {
+                outcome, phases, ..
+            } => {
                 out.push(A::ProducerOutcome.value(outcome.as_str()));
                 if let crate::ProducerOutcome::Refused { error_type } = outcome {
                     out.push(A::ErrorType.value(error_type.to_string()));
+                }
+                for time in phases {
+                    out.push(
+                        start_phase_key(time.phase)
+                            .value(i64::try_from(time.elapsed_us).unwrap_or(i64::MAX)),
+                    );
                 }
             }
             TraceEvent::LlmCallCompleted {

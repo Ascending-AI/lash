@@ -17,7 +17,7 @@ pub use lash_core::runtime::{
     CanonicalRuntimeEffectEnvelope, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, HostStartAdmission, ProcessLocalExecution, ProcessOutcomeObserver,
     ProcessTurnCancellation, RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch,
+    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, StartPhaseClock, ToolAttemptLaunch,
     validate_replayed_effect_envelope,
 };
 /// Durable group and journal values returned by effect-host implementors.

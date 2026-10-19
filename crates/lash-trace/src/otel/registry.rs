@@ -78,6 +78,7 @@ const NONE: TraceSpanKindSet = TraceSpanKindSet::EMPTY;
 const DOMAIN: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Process, K::ToolIntent]);
 const MODEL: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Model]);
 const ATTEMPT: TraceSpanKindSet = TraceSpanKindSet::of(&[K::ModelAttempt]);
+const PRODUCER: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Producer]);
 /// Extension spans and points.
 const EXTENSION: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Extension, K::Point]);
 
@@ -136,7 +137,7 @@ attributes! {
     provenance: {
         ScopeKind => ("lash.scope.kind", String, EVERY),
         ScopeBoundary => ("lash.scope.boundary", Integer, EVERY),
-        ProducerOutcome => ("lash.producer.outcome", String, TraceSpanKindSet::of(&[K::Producer])),
+        ProducerOutcome => ("lash.producer.outcome", String, PRODUCER),
         LinksOmitted => ("lash.links.omitted", Integer, EVERY),
         RecordId => ("lash.record.id", String, EVERY),
         EventType => ("lash.event.type", String, EVERY),
@@ -174,6 +175,7 @@ attributes! {
         ModelAttemptOrdinal => ("lash.model.attempt.ordinal", Integer,
             TraceSpanKindSet::of(&[K::ModelAttempt])),
         ProviderTerminalDeliveryTimedOut => ("lash.provider.terminal_delivery_timed_out", Boolean, MODEL.with(K::ModelAttempt)),
+        ModelAttemptResponseMetadataKeys => ("lash.model.attempt.response_metadata.keys", StringArray, ATTEMPT),
         ModelAttempts => ("lash.model.attempts", Integer, TraceSpanKindSet::of(&[K::Model])),
         RequestStream => ("gen_ai.request.stream", Boolean, MODEL),
         ReasoningLevel => ("gen_ai.request.reasoning.level", String, MODEL),
@@ -194,6 +196,18 @@ attributes! {
         AttemptReasoningTokens => ("lash.usage.reasoning_tokens", Integer, ATTEMPT),
         ProviderRequestId => ("lash.provider.request_id", String, ATTEMPT),
         ProcessKind => ("lash.process.kind", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
+        StartDispatchUs => ("lash.process.start.dispatch_us", Integer, PRODUCER),
+        StartAdmissionUs => ("lash.process.start.admission_us", Integer, PRODUCER),
+        StartEnvironmentUs => ("lash.process.start.environment_us", Integer, PRODUCER),
+        StartDefinitionUs => ("lash.process.start.definition_us", Integer, PRODUCER),
+        StartAdmitUs => ("lash.process.start.admit_us", Integer, PRODUCER),
+        StartArtifactsUs => ("lash.process.start.artifacts_us", Integer, PRODUCER),
+        StartLinkCheckUs => ("lash.process.start.link_check_us", Integer, PRODUCER),
+        StartInputUs => ("lash.process.start.input_us", Integer, PRODUCER),
+        StartPrepareUs => ("lash.process.start.prepare_us", Integer, PRODUCER),
+        StartCommitUs => ("lash.process.start.commit_us", Integer, PRODUCER),
+        StartAdoptUs => ("lash.process.start.adopt_us", Integer, PRODUCER),
+        StartObserveUs => ("lash.process.start.observe_us", Integer, PRODUCER),
         ProcessLabel => ("lash.process.label", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
         WorkflowName => ("gen_ai.workflow.name", String, TraceSpanKindSet::of(&[K::Workflow])),
         WorkflowNodeSite => ("lash.workflow.node.site", String, TraceSpanKindSet::of(&[K::WorkflowNode])),
@@ -378,7 +392,7 @@ metrics! {
 pub fn contract_markdown() -> String {
     use std::fmt::Write;
     let mut out = format!(
-        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. An assistant message supplies its text; a declared finish control supplies one assistant text part, with string values verbatim and other values as compact JSON. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.\n\nOpeners carry no content: `LlmCallStarted` always carries an omitted request; hosts read request content from `LlmCallCompleted` or `LlmCallFailed`. `ResponseMetadata` is a separate consent category for record sinks, not an OTel-exported content attribute.\n\n`ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).\n\nProvider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.\n\nVendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
+        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. An assistant message supplies its text; a declared finish control supplies one assistant text part, with string values verbatim and other values as compact JSON. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.\n\nOpeners carry no content: `LlmCallStarted` always carries an omitted request; hosts read request content from `LlmCallCompleted` or `LlmCallFailed`. `ResponseMetadata` is a separate consent category for record sinks, not an OTel-exported content attribute.\n\n`ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).\n\n`lash.model.attempt.response_metadata.keys` names the response-metadata keys the provider leaf captured for the attempt, such as `header:x-opper-cost`, and never their values. A host process start's `lash.process.start` producer carries one `lash.process.start.<phase>_us` attribute per phase the start reached; the phases run back to back from the producer's opening.\n\nProvider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.\n\nVendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
     );
     for span in SPANS {
         let _ = writeln!(

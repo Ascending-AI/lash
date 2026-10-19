@@ -202,6 +202,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
 
         session_catalog: None,
         session_turn_admission: None,
+        phases: None,
         executor: "conformance process start",
         starter,
     };
@@ -392,6 +393,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
 
         session_catalog: None,
         session_turn_admission: None,
+        phases: None,
         executor: "conformance process start",
         starter: &starter_a,
     };
@@ -403,6 +405,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
 
         session_catalog: None,
         session_turn_admission: None,
+        phases: None,
         executor: "conformance process start",
         starter: &starter_b,
     };
@@ -836,6 +839,7 @@ pub async fn two_starts_share_one_captured_environment(
         engines: &engines,
 
         executor: "shared environment law",
+        phases: None,
         starter: &starter,
         session_catalog: None,
         session_turn_admission: None,

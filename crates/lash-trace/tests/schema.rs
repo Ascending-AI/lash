@@ -244,6 +244,15 @@ fn event_samples() -> Vec<TraceEvent> {
             outcome: lash_trace::ProducerOutcome::Refused {
                 error_type: "session_closed".into(),
             },
+            phases: Vec::new(),
+        },
+        TraceEvent::ProducerSettled {
+            producer: lash_trace::ProducerKind::ProcessStart,
+            outcome: lash_trace::ProducerOutcome::Selected,
+            phases: vec![lash_trace::ProcessStartPhaseTime {
+                phase: lash_trace::ProcessStartPhase::LinkCheck,
+                elapsed_us: 1_250,
+            }],
         },
         TraceEvent::PromptBuilt {
             prompt_hash: "h".to_string(),

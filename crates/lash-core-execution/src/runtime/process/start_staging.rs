@@ -35,6 +35,7 @@ use super::ProcessEnvPorts;
 use super::ProcessEnvRef;
 use super::ProcessEnvSelection;
 use super::SessionId;
+use super::start_phases::{StartPhaseClock, mark};
 use crate::ArtifactCleanup;
 use crate::ArtifactName;
 use crate::ArtifactReferrer;
@@ -57,6 +58,7 @@ use lash_execution_contracts::process::ProcessStartRegistration;
 use lash_execution_contracts::process::ProcessStartTarget;
 use lash_execution_contracts::process::StoreRealization;
 use lash_execution_contracts::process::artifact_referrer_ended;
+use lash_trace::ProcessStartPhase as Phase;
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
 /// its guards arm in (ADR 0113 §2.1, §2.4): what a process start and a
@@ -312,6 +314,9 @@ pub struct HostStartAdmission {
     /// Validates the child's inherited reasoning before publishing or
     /// acquiring its environment, inside the recorded start admission.
     pub session_turn_admission: Option<SessionTurnAdmission>,
+    /// Times the start's phases for its producer span; `None` when nothing
+    /// observes the start.
+    pub phases: Option<Arc<StartPhaseClock>>,
 }
 
 /// The stores one process start writes through.
@@ -334,6 +339,8 @@ pub struct ProcessStartStores<'a> {
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).
     pub starter: &'a lash_protocol_types::EffectJournalIdentity,
+    /// Times the start's phases; `None` for a start nothing times.
+    pub phases: Option<&'a StartPhaseClock>,
 }
 
 impl<'a> ProcessStartStores<'a> {
@@ -433,7 +440,10 @@ pub async fn register_process_start(
         .registry
         .commit_process_registration(registration)
         .await;
-    staging.adopt(stores, committed).await
+    mark(stores.phases, Phase::Commit);
+    let adopted = staging.adopt(stores, committed).await;
+    mark(stores.phases, Phase::Adopt);
+    adopted
 }
 
 /// A process start staged as a store-local effect of the call that
@@ -599,6 +609,7 @@ pub async fn stage_process_start<'a>(
         start_key: start_key.clone(),
         starter: stores.starter.clone(),
     });
+    mark(stores.phases, Phase::Dispatch);
     let prepared = async {
         require_host_session_live(stores, &registration).await?;
         if let Some(admit) = stores.session_turn_admission {
@@ -614,6 +625,7 @@ pub async fn stage_process_start<'a>(
                 admitted => admitted?,
             }
         }
+        mark(stores.phases, Phase::Admission);
         stage(stores, &start_key, claim, registration, observers).await
     }
     .await;
@@ -743,6 +755,7 @@ async fn stage<'a>(
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
     let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
+    mark(stores.phases, Phase::Environment);
     let (definition, mut registration) = resolve_start_target(
         stores,
         start_key,
@@ -760,7 +773,9 @@ async fn stage<'a>(
     registration.trace_nodes &=
         registration.trace_class == lash_execution_contracts::process::ProcessTraceClass::Workflow;
     check_sealed_settings(stores, &registration)?;
+    mark(stores.phases, Phase::Admit);
     let loaded = load_staged_env(stores, env.as_ref()).await?;
+    mark(stores.phases, Phase::Environment);
     registration.requires = loaded
         .as_ref()
         .map(|env| {
@@ -778,14 +793,18 @@ async fn stage<'a>(
         definition.as_ref(),
     )
     .await?;
+    mark(stores.phases, Phase::Artifacts);
     // The engine's artifacts are held: its effects are read from them.
     link_start(stores, loaded.as_ref(), &registration).await?;
+    mark(stores.phases, Phase::LinkCheck);
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
+    mark(stores.phases, Phase::Input);
     let submitted_input = Arc::clone(&registration.input);
     let prepared = stores
         .registry
         .prepare_process_registration(registration, observers)
         .await?;
+    mark(stores.phases, Phase::Prepare);
     Ok(PreparedProcessStart {
         staging: StartStaging {
             start_key: start_key.clone(),
@@ -1261,6 +1280,7 @@ async fn resolve_start_target<'a>(
         ProcessStartTarget::Input(input) => {
             let identity = match input {
                 ProcessInput::Engine { kind, payload, .. } => {
+                    mark(stores.phases, Phase::Definition);
                     Some(stores.engines.admit(kind, payload).await?)
                 }
                 _ => None,
@@ -1502,6 +1522,7 @@ async fn definition_registration(
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;
     let declared_label = registration.identity.label.clone();
+    mark(stores.phases, Phase::Definition);
     let mut identity = stores.engines.admit(&kind, &payload).await?.into_identity();
     identity.definition_id = Some(resolved.id().clone());
     Ok(registration

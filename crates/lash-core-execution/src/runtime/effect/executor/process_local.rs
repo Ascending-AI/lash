@@ -157,6 +157,7 @@ impl ProcessLocalExecution {
                         session_catalog: host_start.session_catalog.as_deref(),
                         session_turn_admission: host_start.session_turn_admission.as_ref(),
                         executor: "process start on the local executor",
+                        phases: host_start.phases.as_deref(),
                         starter: &starter,
                     },
                     registration,
@@ -166,14 +167,17 @@ impl ProcessLocalExecution {
                 let realization = started.realization();
                 let disposition = started.disposition;
                 let record = started.record;
+                let record =
+                    lash_execution_contracts::process::observation::observe_process_record(
+                        &observer, record,
+                    )
+                    .await?;
+                if let Some(phases) = &host_start.phases {
+                    phases.mark(lash_trace::ProcessStartPhase::Observe);
+                }
                 Ok((
                     ProcessEffectOutcome::Start {
-                        record: Box::new(
-                            lash_execution_contracts::process::observation::observe_process_record(
-                                &observer, record,
-                            )
-                            .await?,
-                        ),
+                        record: Box::new(record),
                         disposition,
                     },
                     realization,
@@ -423,6 +427,7 @@ impl ProcessLocalExecution {
                 session_catalog: self.host_start.session_catalog.as_deref(),
                 session_turn_admission: self.host_start.session_turn_admission.as_ref(),
                 executor: "process start staged by its call",
+                phases: None,
                 starter: &starter,
             },
             registration,

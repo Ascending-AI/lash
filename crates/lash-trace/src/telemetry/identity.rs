@@ -153,8 +153,9 @@ impl ProducerOutcome {
 }
 
 /// How a producer reports its one record: the runtime's emitter, given the
-/// call's outcome and the ids known at settle.
-type SettleProducer = Box<dyn FnOnce(ProducerOutcome, crate::TraceIds) + Send>;
+/// call's outcome, the ids known at settle and the phases it timed.
+type SettleProducer =
+    Box<dyn FnOnce(ProducerOutcome, crate::TraceIds, Vec<crate::ProcessStartPhaseTime>) + Send>;
 
 /// The producer span of one host call that admits durable work: the trace
 /// root, or the caller's child, that the admitted work takes as its parent.
@@ -166,6 +167,7 @@ type SettleProducer = Box<dyn FnOnce(ProducerOutcome, crate::TraceIds) + Send>;
 pub struct ProducerSpan {
     span: Option<TraceCarrier>,
     ids: crate::TraceIds,
+    phases: Vec<crate::ProcessStartPhaseTime>,
     settle: Option<SettleProducer>,
 }
 
@@ -178,6 +180,7 @@ impl ProducerSpan {
         Self {
             span: Some(span),
             ids,
+            phases: Vec::new(),
             settle: Some(settle),
         }
     }
@@ -188,6 +191,7 @@ impl ProducerSpan {
         Self {
             span: None,
             ids: crate::TraceIds::default(),
+            phases: Vec::new(),
             settle: None,
         }
     }
@@ -210,6 +214,11 @@ impl ProducerSpan {
         &mut self.ids
     }
 
+    /// Names the time the call spent per phase, on the settle record.
+    pub fn timed(&mut self, phases: Vec<crate::ProcessStartPhaseTime>) {
+        self.phases = phases;
+    }
+
     /// Ends the host call with `outcome`, emitting the producer's record now.
     pub fn settle(mut self, outcome: ProducerOutcome) {
         self.finish(outcome);
@@ -217,7 +226,11 @@ impl ProducerSpan {
 
     fn finish(&mut self, outcome: ProducerOutcome) {
         if let Some(settle) = self.settle.take() {
-            settle(outcome, std::mem::take(&mut self.ids));
+            settle(
+                outcome,
+                std::mem::take(&mut self.ids),
+                std::mem::take(&mut self.phases),
+            );
         }
     }
 }

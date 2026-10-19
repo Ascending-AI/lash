@@ -438,6 +438,62 @@ impl ProducerKind {
     }
 }
 
+/// A phase of a host process start, in the order a start passes them. Each
+/// phase a start reached carries its duration on the start's producer.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessStartPhase {
+    /// The host call before staging: the start key, the session-turn check
+    /// and the effect's dispatch.
+    Dispatch,
+    /// The recorded admission: the host session's liveness and the
+    /// session-turn admission.
+    Admission,
+    /// Staging the execution environment under the start's claim and
+    /// reading it back.
+    Environment,
+    /// Reading, holding and verifying a started definition, or realizing a
+    /// function the start carries inline.
+    Definition,
+    /// The engine's admission of the payload and of its sealed settings.
+    Admit,
+    /// Holding the engine artifacts the payload names.
+    Artifacts,
+    /// The link check: the effects the payload performs against the
+    /// environment's links and this node's components.
+    LinkCheck,
+    /// Staging the input's attachments.
+    Input,
+    /// Preparing the registration.
+    Prepare,
+    /// The registrar's transaction.
+    Commit,
+    /// Holding what the registered row adopts under its record.
+    Adopt,
+    /// Reading the registered process back for the receipt.
+    Observe,
+}
+
+/// How long a process start spent in one phase, in microseconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessStartPhaseTime {
+    pub phase: ProcessStartPhase,
+    pub elapsed_us: u64,
+}
+
 /// Which caller context a producer span takes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(

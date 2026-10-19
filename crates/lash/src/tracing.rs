@@ -36,9 +36,9 @@ pub use lash_trace::{
 };
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
-    ProductObservationSink, SpanKey, SpanRole, TraceAttemptId, TraceAttemptLink,
-    TraceAttemptObservation, TraceCall, TraceCaller, TraceCarrier, TraceCause,
+    LashIdentity, ProcessStartPhase, ProcessStartPhaseTime, ProducerKind, ProducerOutcome,
+    ProducerSpan, ProducerSpec, ProductObservationSink, SpanKey, SpanRole, TraceAttemptId,
+    TraceAttemptLink, TraceAttemptObservation, TraceCall, TraceCaller, TraceCarrier, TraceCause,
     TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind, TraceIdentity,
     TraceIds, TraceLinkMode, TraceLinks, TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall,
     TraceParent, TracePosition, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,

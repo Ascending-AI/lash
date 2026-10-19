@@ -181,7 +181,7 @@ pub use process::ProcessRegistryFaults;
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
     ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StagedProcessStart,
-    StartStaging, is_start_operation, register_process_start, stage_process_start,
+    StartPhaseClock, StartStaging, is_start_operation, register_process_start, stage_process_start,
     stage_store_local_start, start_operation_journal,
 };
 

@@ -264,7 +264,7 @@ impl Processes {
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessEffectOutcome> {
-        self.execute_command(command, scoped_effect_controller, None)
+        self.execute_command(command, scoped_effect_controller, None, None)
             .await
             .map_err(|err| EmbedError::Plugin(err.into()))
     }
@@ -274,6 +274,7 @@ impl Processes {
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ActorContext,
         session_turn_admission: Option<lash_core::runtime::SessionTurnAdmission>,
+        phases: Option<Arc<lash_core::runtime::StartPhaseClock>>,
     ) -> std::result::Result<lash_core::ProcessEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
         let registry = self.registry();
@@ -294,6 +295,7 @@ impl Processes {
                         tracing: Some(self.core.env.core.tracing.clone()),
                         session_catalog: Some(Arc::clone(&self.core.store_factory) as _),
                         session_turn_admission,
+                        phases,
                     },
                 )
                 .with_process_actor_parks(Arc::clone(self.core.backend.durable()))
@@ -464,6 +466,14 @@ impl Processes {
             lash_core::TraceIds::default(),
         );
         let request = request.with_trace_parent(producer.parent());
+        // The phases the start's producer attributes its time to, from its
+        // opening: timed only when something observes the start.
+        let tracing = &self.core.env.core.tracing;
+        let phases = tracing.is_observed().then(|| {
+            Arc::new(lash_core::runtime::StartPhaseClock::new(Arc::clone(
+                tracing.clock(),
+            )))
+        });
         let started = async {
             // The registrar mints the id; the key only makes the start
             // idempotent. A host mints only host keys: a key of a family lash
@@ -511,6 +521,7 @@ impl Processes {
                     command,
                     scoped_effect_controller.clone(),
                     session_turn_admission,
+                    phases.clone(),
                 )
                 .await
                 .map_err(|error| {
@@ -530,6 +541,9 @@ impl Processes {
             Ok((record, disposition, start_key))
         }
         .await;
+        if let Some(phases) = &phases {
+            producer.timed(phases.phases());
+        }
         let (record, disposition, start_key) = match started {
             Ok(started) => started,
             Err(error) => {

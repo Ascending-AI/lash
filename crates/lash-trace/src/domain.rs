@@ -158,6 +158,10 @@ pub struct TraceModelAttemptSpan {
     pub provider: String,
     /// Lash stopped awaiting the host's terminal callback before it returned.
     pub terminal_delivery_timed_out: bool,
+    /// The keys of the response metadata the provider leaf captured for
+    /// this attempt (e.g. `header:x-opper-cost`), never their values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_keys: Vec<String>,
 }
 
 /// The execution attempt's facts, with trace metadata only for an attempt

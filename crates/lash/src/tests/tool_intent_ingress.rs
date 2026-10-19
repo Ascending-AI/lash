@@ -30,6 +30,7 @@ async fn a_store_coalesced_start_reports_replayed_through_ingress() -> Result<()
             session_catalog: Some(core.store_factory.as_ref()),
             session_turn_admission: None,
             executor: "coalesced ingress law",
+            phases: None,
             starter: &starter,
         },
         request.into_registration(),

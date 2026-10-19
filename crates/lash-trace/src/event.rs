@@ -304,6 +304,9 @@ pub enum TraceEvent {
         producer: crate::ProducerKind,
         #[serde(flatten)]
         outcome: crate::ProducerOutcome,
+        /// A process start's time per phase it reached, in phase order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        phases: Vec<crate::ProcessStartPhaseTime>,
     },
     /// A built-in tool check selected one terminal reply over others. The
     /// same fact reaches session observers as a plugin runtime event.

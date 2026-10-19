@@ -170,6 +170,7 @@ fn settled(kind: ProducerKind, outcome: ProducerOutcome) -> TraceEvent {
     TraceEvent::ProducerSettled {
         producer: kind,
         outcome,
+        phases: Vec::new(),
     }
 }
 fn spec(
@@ -2183,6 +2184,7 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
                 span_id: adapter.leaf_span_id(),
                 provider: provider.into(),
                 terminal_delivery_timed_out: ordinal == 1,
+                response_metadata_keys: Vec::new(),
                 started_at_ms: 3000 + u64::from(ordinal) * 1000,
                 ended_at_ms: 3500 + u64::from(ordinal) * 1000,
             }),

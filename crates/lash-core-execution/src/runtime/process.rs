@@ -14,6 +14,7 @@ mod guarded_surface_tests;
 mod observer_intent;
 mod op_scope;
 mod service;
+mod start_phases;
 mod start_staging;
 pub mod steps;
 mod succession;
@@ -36,6 +37,7 @@ pub use observer_intent::{
 pub use op_scope::ProcessOpScope;
 pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
 pub use service::{ProcessService, ProcessToolVisibilityFilter};
+pub use start_phases::StartPhaseClock;
 pub use start_staging::{
     ArtifactReferrerPorts, HostStartAdmission, PreparedProcessStart, ProcessStartStores,
     ReferrerAcquisition, RegisteredProcessStart, SessionTurnAdmission, StagedProcessStart,

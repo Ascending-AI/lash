@@ -1093,6 +1093,7 @@ impl ToolIntentIngress {
                     tracing: Some(self.core.env.core.tracing.clone()),
                     session_catalog: Some(std::sync::Arc::clone(&self.core.store_factory) as _),
                     session_turn_admission: None,
+                    phases: None,
                 },
             )
             .with_process_actor_parks(std::sync::Arc::clone(self.core.backend.durable()))
