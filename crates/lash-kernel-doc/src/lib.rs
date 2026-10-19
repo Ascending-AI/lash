@@ -15,6 +15,7 @@ mod ast;
 mod caption;
 mod correspondence;
 mod declarations;
+mod slots;
 mod source_map;
 mod source_map_codec;
 #[cfg(test)]
@@ -84,8 +85,8 @@ pub use arena::native::{
 };
 pub use ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
-    JoinMode, Literal, MapEntry, Member, Node, Place, ProjectionRead, Protocol, RecordEntry, Rhs,
-    Site, Stmt, TryStmt, Unit, each_closure_mut,
+    JoinMode, Literal, MapEntry, Member, Node, NodeMut, Place, ProjectionRead, Protocol,
+    RecordEntry, Rhs, Site, Stmt, TryStmt, Unit, each_closure_mut,
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{

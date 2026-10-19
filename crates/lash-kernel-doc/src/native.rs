@@ -268,47 +268,15 @@ impl RegisteredFunction {
         }))
     }
 
-    /// The functions the body actually calls or spawns, including nested expressions.
+    /// Every library function the body holds, in any slot
+    /// ([`crate::Node::functions_within`]): what a document reaching this
+    /// function reaches through it (`K-DOC-002`).
     pub fn callees(&self) -> &BTreeSet<FunctionId> {
         self.facts().callees.get_or_init(|| {
-            let mut callees = BTreeSet::new();
-            if let Some(body) = self.definition().body() {
-                let mut pending = vec![crate::Node::Block(&body.block)];
-                while let Some(node) = pending.pop() {
-                    match node {
-                        crate::Node::Expr(crate::Expr::Call { function, .. })
-                        | crate::Node::Action(
-                            crate::Action::Call {
-                                callee: crate::Callee::Library(function),
-                                ..
-                            }
-                            | crate::Action::Spawn {
-                                callee: crate::Callee::Library(function),
-                                ..
-                            },
-                        ) => {
-                            callees.insert(*function);
-                        }
-                        crate::Node::Expr(crate::Expr::Act(act)) => match &act.kind {
-                            crate::ActKind::Call(crate::Callee::Library(function))
-                            | crate::ActKind::Spawn(crate::Callee::Library(function))
-                            | crate::ActKind::Await(function) => {
-                                callees.insert(*function);
-                            }
-                            _ => {}
-                        },
-                        crate::Node::Stmt(crate::Stmt::ReturnVia { policy, .. }) => {
-                            callees.insert(*policy);
-                        }
-                        crate::Node::Stmt(crate::Stmt::For { via: Some(via), .. }) => {
-                            callees.extend(via.functions());
-                        }
-                        _ => {}
-                    }
-                    pending.extend(node.children());
-                }
-            }
-            callees
+            self.definition()
+                .body()
+                .map(|body| crate::Node::Block(&body.block).functions_within())
+                .unwrap_or_default()
         })
     }
 }

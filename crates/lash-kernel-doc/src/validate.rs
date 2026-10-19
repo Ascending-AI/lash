@@ -266,8 +266,13 @@ pub fn validate_document_with_limits(
         let signature = &definition.signature;
         check_signature(signature)?;
         for function in definition.convention.functions() {
-            if !document.manifest.functions.contains_key(&function) {
-                return Err(invalid(None, InvalidReason::FunctionNotListed { function }));
+            if !document.manifest.functions.contains_key(function) {
+                return Err(invalid(
+                    None,
+                    InvalidReason::FunctionNotListed {
+                        function: *function,
+                    },
+                ));
             }
         }
         let Some(function) = document.functions.get(entry) else {
@@ -1036,10 +1041,12 @@ impl Scope<'_> {
             ));
         }
         for function in start.functions() {
-            if !self.functions.contains_key(&function) {
+            if !self.functions.contains_key(function) {
                 return Err(invalid(
                     Some(site),
-                    InvalidReason::FunctionNotListed { function },
+                    InvalidReason::FunctionNotListed {
+                        function: *function,
+                    },
                 ));
             }
         }

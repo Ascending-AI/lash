@@ -272,10 +272,11 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
         units.insert(name, with_prelude(code, captures));
     }
     let mut value = Document::new(document.manifest.numbers, Vec::new());
-    let mut library: BTreeSet<_> = entry_definition
+    let mut library: BTreeSet<FunctionId> = entry_definition
         .convention
         .functions()
         .into_iter()
+        .copied()
         .collect();
     for unit in units.values() {
         let reads = CodeReads::of(&unit.params, &unit.body);
@@ -288,14 +289,9 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
             value.manifest.effects.insert(effect, signature.clone());
         }
         library.extend(reads.library);
-        for start in std::iter::once(&unit.start).flatten() {
+        if let Some(start) = &unit.start {
             library.extend(start.functions());
         }
-        each_closure_in(&unit.body, &mut |closure| {
-            if let Some(start) = &closure.start {
-                library.extend(start.functions());
-            }
-        });
     }
     value.manifest.functions = library_closure(document, crossing.catalog, library)?;
     value.functions = units;
@@ -348,10 +344,6 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
     crate::validate_document_with_limits(&value.document, crossing.catalog, crossing.data)
         .map_err(|error| unreadable(&error.to_string()))?;
     Ok(value)
-}
-
-fn each_closure_in(block: &[Stmt], visit: &mut dyn FnMut(&crate::Closure)) {
-    each_closure(crate::Node::Block(block), visit);
 }
 
 /// `direct` and every library function their bodies reach, each with the

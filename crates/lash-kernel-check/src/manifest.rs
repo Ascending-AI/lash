@@ -24,7 +24,8 @@ pub struct Requirements {
 }
 
 /// The references in a block, shared by manifest and entry-slice derivation.
-/// Children come from the kernel's exhaustive structural walk; actions have
+/// Children come from the kernel's exhaustive structural walk and library
+/// functions from its slot inventory ([`Node::functions`]); actions have
 /// atomic arguments rather than children, so every action and literal kind
 /// is accounted for here as well.
 fn scan(
@@ -35,23 +36,14 @@ fn scan(
 ) {
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
+        functions.extend(node.functions());
         match node {
-            Node::Stmt(lash_kernel_doc::Stmt::ReturnVia { policy, .. }) => {
-                functions.insert(*policy);
-            }
-            Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
-                functions.extend(via.functions())
-            }
             Node::Block(_) | Node::Stmt(_) => {}
             Node::Expr(expr) => match expr {
-                Expr::Call { function, .. } => {
-                    functions.insert(*function);
-                }
                 Expr::Literal(literal) => reference(literal, declared),
-                Expr::Closure(closure) => {
-                    functions.extend(closure.start.iter().flat_map(|start| start.functions()));
-                }
-                Expr::Variable(_)
+                Expr::Call { .. }
+                | Expr::Closure(_)
+                | Expr::Variable(_)
                 | Expr::Tuple(_)
                 | Expr::List(_)
                 | Expr::Map(_)
@@ -64,22 +56,14 @@ fn scan(
                 | Expr::Random
                 | Expr::Read(_) => {}
                 Expr::Act(act) => match &act.kind {
-                    ActKind::Call(callee) | ActKind::Spawn(callee) => match callee {
-                        Callee::Declared(name) => {
-                            declared.insert(name.clone());
-                        }
-                        Callee::Library(function) => {
-                            functions.insert(*function);
-                        }
-                        Callee::Value(_) => {}
-                    },
+                    ActKind::Call(callee) | ActKind::Spawn(callee) => {
+                        callee_reference(callee, declared);
+                    }
                     ActKind::Perform { effect, .. } => {
                         effects.insert(effect.clone());
                     }
-                    ActKind::Await(policy) => {
-                        functions.insert(*policy);
-                    }
-                    ActKind::Sleep { .. }
+                    ActKind::Await(_)
+                    | ActKind::Sleep { .. }
                     | ActKind::Join
                     | ActKind::JoinMany(_)
                     | ActKind::Cancel
@@ -89,25 +73,14 @@ fn scan(
             Node::Action(action) => {
                 let args: &[Atom] = match action {
                     Action::Call { callee, args } | Action::Spawn { callee, args } => {
-                        match callee {
-                            Callee::Declared(name) => {
-                                declared.insert(name.clone());
-                            }
-                            Callee::Library(function) => {
-                                functions.insert(*function);
-                            }
-                            Callee::Value(_) => {}
-                        }
+                        callee_reference(callee, declared);
                         args
                     }
                     Action::Perform { effect, args, .. } => {
                         effects.insert(effect.clone());
                         args
                     }
-                    Action::Await { policy, value } => {
-                        functions.insert(*policy);
-                        std::slice::from_ref(value)
-                    }
+                    Action::Await { value, .. } => std::slice::from_ref(value),
                     Action::Sleep { duration, .. } => std::slice::from_ref(duration),
                     Action::Join { task } | Action::Cancel { task } => std::slice::from_ref(task),
                     Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
@@ -122,6 +95,15 @@ fn scan(
             }
         }
         pending.extend(node.children());
+    }
+}
+
+fn callee_reference(callee: &Callee, declared: &mut BTreeSet<Name>) {
+    match callee {
+        Callee::Declared(name) => {
+            declared.insert(name.clone());
+        }
+        Callee::Library(_) | Callee::Value(_) => {}
     }
 }
 
@@ -201,18 +183,12 @@ pub(crate) fn reach(
     catalog: &dyn FunctionCatalog,
 ) -> (BTreeSet<EffectName>, Reached) {
     // A declared function's start adapter calls its functions when the
-    // function is started: they are reached, with what they call.
+    // function is started, as an entry's convention does: they are reached,
+    // with what they call.
     let started = document
-        .functions
-        .values()
-        .filter_map(|function| function.start.as_ref())
-        .flat_map(lash_kernel_doc::StartAdapter::functions)
-        .chain(
-            document
-                .entries
-                .values()
-                .flat_map(|entry| entry.convention.functions()),
-        );
+        .header_functions()
+        .into_iter()
+        .map(|(_, function)| *function);
     reach_from(
         std::iter::once(&document.main)
             .chain(document.functions.values().map(|function| &function.body)),

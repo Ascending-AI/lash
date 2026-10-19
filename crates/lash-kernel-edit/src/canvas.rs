@@ -3,14 +3,14 @@ use std::collections::BTreeMap;
 
 use crate::apply::{Fault, Working, at, node};
 use crate::authoring::{Branch, Operation, ValueTarget, Wrapper};
-use crate::tree::{NodeClass, NodeMut, Shadow};
+use crate::tree::{NodeClass, Shadow};
 use crate::{Edit, EditDiagnosticKind as Cause};
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, NodeKind, PlaceNode, Reference, StmtNode,
 };
 use lash_kernel_doc::{
     ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, FunctionId, Literal, Node,
-    Place, Rhs, Site, Stmt, TryStmt,
+    NodeMut, Place, Rhs, Site, Stmt, TryStmt,
 };
 
 fn has_action(node: Node<'_>) -> bool {
@@ -51,34 +51,20 @@ fn pure_argument(
     catalog: &dyn FunctionCatalog,
     known: &mut BTreeMap<FunctionId, bool>,
 ) -> bool {
-    let library = match node {
+    let forbidden = match node {
         Node::Action(Action::Call {
-            callee: Callee::Library(function),
+            callee: Callee::Library(_),
             ..
-        })
-        | Node::Expr(Expr::Call { function, .. }) => Some(*function),
-        Node::Expr(Expr::Act(act)) => match &act.kind {
-            ActKind::Call(Callee::Library(function)) => Some(*function),
-            _ => return false,
-        },
-        Node::Action(_) | Node::Expr(Expr::Closure(_)) => return false,
-        Node::Stmt(Stmt::ReturnVia { policy, .. }) => Some(*policy),
-        Node::Stmt(Stmt::For {
-            via: Some(protocol),
-            ..
-        }) => {
-            if !protocol
-                .functions()
-                .all(|function| pure_library(*function, catalog, known))
-            {
-                return false;
-            }
-            None
-        }
-        _ => None,
+        }) => false,
+        Node::Expr(Expr::Act(act)) => !matches!(act.kind, ActKind::Call(Callee::Library(_))),
+        Node::Action(_) | Node::Expr(Expr::Closure(_)) => true,
+        Node::Block(_) | Node::Stmt(_) | Node::Expr(_) => false,
     };
-    if let Some(function) = library
-        && !pure_library(function, catalog, known)
+    if forbidden
+        || !node
+            .functions()
+            .into_iter()
+            .all(|function| pure_library(*function, catalog, known))
     {
         return false;
     }

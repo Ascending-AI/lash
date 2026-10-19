@@ -9,11 +9,9 @@
 //! call an earlier one. A function never calls itself: its identity covers
 //! its body.
 
-use std::collections::BTreeSet;
-
 use lash_kernel_doc::{
-    Action, Callee, Expr, FunctionDefinition, FunctionId, Implementation, Invalid, Node,
-    ParseError, parse_definition, validate_definition,
+    FunctionDefinition, Implementation, Invalid, Node, ParseError, parse_definition,
+    validate_definition,
 };
 
 use crate::library::{Library, LibraryError, NamedLibrary};
@@ -112,53 +110,14 @@ fn split(source: &str) -> Result<(Vec<String>, Vec<String>), SourceError> {
     Ok((uses, chunks))
 }
 
-/// Drops from a body's function list every function the body does not call:
-/// the list is part of the identity and of every manifest that reaches it.
+/// Drops from a body's function list every function the body does not
+/// hold: the list is part of the identity and of every manifest that
+/// reaches it.
 fn keep_called(definition: &mut FunctionDefinition) {
     let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
     else {
         return;
     };
-    let mut called = BTreeSet::new();
-    collect_calls(Node::Block(&body.block), &mut called);
-    body.functions
-        .retain(|function, _| called.contains(function));
-}
-
-fn collect_calls(node: Node<'_>, called: &mut BTreeSet<FunctionId>) {
-    match node {
-        Node::Expr(Expr::Call { function, .. }) => {
-            called.insert(*function);
-        }
-        Node::Action(
-            Action::Call {
-                callee: Callee::Library(function),
-                ..
-            }
-            | Action::Spawn {
-                callee: Callee::Library(function),
-                ..
-            },
-        ) => {
-            called.insert(*function);
-        }
-        Node::Expr(Expr::Act(act)) => match &act.kind {
-            lash_kernel_doc::ActKind::Call(Callee::Library(function))
-            | lash_kernel_doc::ActKind::Spawn(Callee::Library(function))
-            | lash_kernel_doc::ActKind::Await(function) => {
-                called.insert(*function);
-            }
-            _ => {}
-        },
-        Node::Stmt(lash_kernel_doc::Stmt::ReturnVia { policy, .. }) => {
-            called.insert(*policy);
-        }
-        Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
-            called.extend(via.functions())
-        }
-        _ => {}
-    }
-    for child in node.children() {
-        collect_calls(child, called);
-    }
+    let held = Node::Block(&body.block).functions_within();
+    body.functions.retain(|function, _| held.contains(function));
 }

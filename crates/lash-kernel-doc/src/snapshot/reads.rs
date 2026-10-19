@@ -1,5 +1,5 @@
 //! What code reads of the world outside it: the names it does not bind,
-//! the effects it performs, the library functions it calls and the
+//! the effects it performs, the library functions it holds and the
 //! declared functions it names.
 
 use std::collections::BTreeSet;
@@ -15,6 +15,7 @@ pub struct CodeReads {
     /// The variables it names and does not declare.
     pub free: BTreeSet<Name>,
     pub effects: BTreeSet<EffectName>,
+    /// Every library function it holds ([`crate::Node::functions_within`]).
     pub library: BTreeSet<FunctionId>,
     /// The declared functions it names.
     pub declared: BTreeSet<Name>,
@@ -23,7 +24,10 @@ pub struct CodeReads {
 impl CodeReads {
     /// What the code of `params` and `body` reads.
     pub fn of(params: &[Name], body: &[Stmt]) -> Self {
-        let mut reads = Self::default();
+        let mut reads = Self {
+            library: crate::Node::Block(body).functions_within(),
+            ..Self::default()
+        };
         reads.block(body, &mut params.to_vec());
         reads
     }
@@ -96,11 +100,8 @@ impl CodeReads {
                 self.block(else_block, bound);
             }
             Stmt::Break | Stmt::Continue => {}
-            Stmt::ReturnVia { value, policy } => {
-                self.library.insert(*policy);
-                self.expr(value, bound);
-            }
             Stmt::Return { value }
+            | Stmt::ReturnVia { value, .. }
             | Stmt::Throw { value }
             | Stmt::Print { value }
             | Stmt::Finish { value }
@@ -137,30 +138,29 @@ impl CodeReads {
     fn action(&mut self, action: &Action, bound: &[Name]) {
         match action {
             Action::Call { callee, args } | Action::Spawn { callee, args } => {
-                match callee {
-                    Callee::Declared(name) => {
-                        self.declared.insert(name.clone());
-                    }
-                    Callee::Value(name) => self.name(name, bound),
-                    Callee::Library(function) => {
-                        self.library.insert(*function);
-                    }
-                }
+                self.callee(callee, bound);
                 args.iter().for_each(|arg| self.atom(arg, bound));
             }
             Action::Perform { effect, args, .. } => {
                 self.effects.insert(effect.clone());
                 args.iter().for_each(|arg| self.atom(arg, bound));
             }
-            Action::Await { policy, value } => {
-                self.library.insert(*policy);
-                self.atom(value, bound);
-            }
             Action::Sleep { duration: atom, .. }
+            | Action::Await { value: atom, .. }
             | Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
             | Action::Cancel { task: atom } => self.atom(atom, bound),
             Action::Yield => {}
+        }
+    }
+
+    fn callee(&mut self, callee: &Callee, bound: &[Name]) {
+        match callee {
+            Callee::Declared(name) => {
+                self.declared.insert(name.clone());
+            }
+            Callee::Value(name) => self.name(name, bound),
+            Callee::Library(_) => {}
         }
     }
 
@@ -198,10 +198,7 @@ impl CodeReads {
                 self.block(&closure.body, bound);
                 bound.truncate(outer);
             }
-            Expr::Call { function, args } => {
-                self.library.insert(*function);
-                args.iter().for_each(|arg| self.expr(arg, bound));
-            }
+            Expr::Call { args, .. } => args.iter().for_each(|arg| self.expr(arg, bound)),
             Expr::If { cond, then, r#else } => {
                 self.expr(cond, bound);
                 self.expr(then, bound);
@@ -219,22 +216,12 @@ impl CodeReads {
             }
             Expr::Act(act) => {
                 match &act.kind {
-                    ActKind::Call(callee) | ActKind::Spawn(callee) => match callee {
-                        Callee::Declared(name) => {
-                            self.declared.insert(name.clone());
-                        }
-                        Callee::Value(name) => self.name(name, bound),
-                        Callee::Library(function) => {
-                            self.library.insert(*function);
-                        }
-                    },
+                    ActKind::Call(callee) | ActKind::Spawn(callee) => self.callee(callee, bound),
                     ActKind::Perform { effect, .. } => {
                         self.effects.insert(effect.clone());
                     }
-                    ActKind::Await(policy) => {
-                        self.library.insert(*policy);
-                    }
-                    ActKind::Sleep { .. }
+                    ActKind::Await(_)
+                    | ActKind::Sleep { .. }
                     | ActKind::Join
                     | ActKind::JoinMany(_)
                     | ActKind::Yield

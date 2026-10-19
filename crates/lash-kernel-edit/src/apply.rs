@@ -10,13 +10,13 @@ use std::collections::BTreeMap;
 
 use lash_kernel_check::{Admitted, Environment, admit, requirements};
 use lash_kernel_doc::{
-    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, Place, Rhs, Site, Stmt,
-    Unit,
+    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, NodeMut, Place, Rhs, Site,
+    Stmt, Unit,
 };
 
 use crate::edit::{Edit, Position};
 use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};
-use crate::tree::{NodeClass, NodeMut, Shadow};
+use crate::tree::{NodeClass, Shadow};
 
 /// Why one edit cannot be applied.
 pub(crate) enum FaultKind {
@@ -166,9 +166,11 @@ impl Working {
     /// `class`.
     pub(super) fn locate_as(&mut self, base: &Site, class: NodeClass) -> Result<Site, Fault> {
         let site = self.locate(base)?;
-        let found = node(&mut self.document, &site)
-            .ok_or_else(|| at(base, EditDiagnosticKind::NoSuchNode))?
-            .class();
+        let found = NodeClass::of(
+            node(&mut self.document, &site)
+                .ok_or_else(|| at(base, EditDiagnosticKind::NoSuchNode))?
+                .as_node(),
+        );
         if found == class {
             Ok(site)
         } else {
@@ -415,7 +417,7 @@ impl Working {
                     base,
                     EditDiagnosticKind::WrongNode {
                         expected: NodeClass::Action,
-                        found: found.class(),
+                        found: NodeClass::of(found.as_node()),
                     },
                 ));
             }

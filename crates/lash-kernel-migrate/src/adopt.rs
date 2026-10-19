@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::{Document, FunctionBody, FunctionCatalog, FunctionId, Unit};
 
 use crate::migration::{DocumentRefusal, Rewritten};
-use crate::rewrite::{replace_functions, replace_in_block, same_sites, unmoved};
+use crate::rewrite::{replace_functions, replace_in_body, same_sites, unmoved};
 
 /// `base` with each library function `replacements` names replaced, and
 /// the correspondence a run of it is carried over: every node of its own
@@ -67,7 +67,7 @@ pub fn adopt(
             continue;
         }
         if let (Some(old), Some(new)) = (body(&function)?, body(&replacement)?)
-            && replaced(&old, replacements) == new
+            && replaced(function, &old, replacements) == new
         {
             same_sites(
                 Unit::Library(function),
@@ -108,13 +108,14 @@ fn reached(
     Ok(reached)
 }
 
-/// `body` with the callees `replacements` names replaced.
-fn replaced(body: &FunctionBody, replacements: &BTreeMap<FunctionId, FunctionId>) -> FunctionBody {
+/// The body of `function` with the functions `replacements` names
+/// replaced.
+fn replaced(
+    function: FunctionId,
+    body: &FunctionBody,
+    replacements: &BTreeMap<FunctionId, FunctionId>,
+) -> FunctionBody {
     let mut body = body.clone();
-    replace_in_block(&mut body.block, replacements);
-    body.functions = std::mem::take(&mut body.functions)
-        .into_iter()
-        .map(|(id, name)| (replacements.get(&id).copied().unwrap_or(id), name))
-        .collect();
+    replace_in_body(function, &mut body, replacements);
     body
 }

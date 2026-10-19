@@ -1048,3 +1048,92 @@ fn child() { return null }
         document
     );
 }
+
+/// K-DOC-002, K-ITER-005 (FIG-6865): what code reads of the library is
+/// every function it holds, so a crossing function whose only use of a
+/// helper is a loop protocol hook or a nested closure's start adapter lists
+/// that helper.
+#[test]
+fn code_reads_list_protocol_hooks_and_start_adapters() {
+    let [open, next, item, check, await_fn] = ['a', 'b', 'c', 'd', 'e']
+        .map(|digit| FunctionId::parse(&digit.to_string().repeat(64)).unwrap());
+    let document = parse_document(&format!(
+        "kernel 1\nnumbers float\nmain {{\n\
+         for x in [1] via (open @{open}, next @{next}, item @{item}, check @{check}) {{}}\n\
+         let f = fn(a) start (a: Any) -> Any bare ts_direct(@{await_fn}) {{ return a }}\n\
+         }}\n"
+    ))
+    .unwrap();
+    assert_eq!(
+        crate::snapshot::CodeReads::of(&[], &document.main).library,
+        std::collections::BTreeSet::from([open, next, item, check, await_fn])
+    );
+}
+
+/// K-DOC-002 (FIG-6865): the slot inventory is every place a document holds
+/// a library function. Reading it finds each identity a document with one
+/// in every kind of slot holds, and rewriting the slots it lists leaves no
+/// listed identity anywhere in a document, the corpus's included.
+#[test]
+fn the_slot_inventory_holds_every_library_reference() {
+    let ids: Vec<FunctionId> = (1..=17u8)
+        .map(|n| FunctionId::parse(&format!("{n:064x}")).unwrap())
+        .collect();
+    let uses: String = ids
+        .iter()
+        .enumerate()
+        .map(|(at, id)| format!("use h.f{at} = @{id}\n"))
+        .collect();
+    let every_slot = format!(
+        "kernel 1\nnumbers float\n{uses}\
+         entry run(x: Any) -> Any ts_args(h.f0, h.f1)\n\
+         entry other(x: Any) -> Any ts_direct(h.f2)\n\
+         fn other(x) {{ return x }}\n\
+         fn run(x) start (x: Any) -> Any bare py_direct(h.f3) {{\n\
+         let awaited = await x via h.f4\n\
+         let nested = (await x via h.f5,)\n\
+         let called = invoke h.f6(x)\n\
+         let spawned = spawn invoke h.f7(x)\n\
+         let nested_calls = [invoke h.f8(x), spawn invoke h.f9(x)]\n\
+         let direct = h.f10(x)\n\
+         for item in x via (open h.f11, next h.f12, item h.f13, check h.f14) {{}}\n\
+         let f = fn(a) start (a: Any) -> Any bare ts_direct(h.f15) {{ return a }}\n\
+         return x via h.f16\n\
+         }}\nmain {{}}\n"
+    );
+    let held = |document: &Document| {
+        let mut held: std::collections::BTreeSet<FunctionId> = document
+            .header_functions()
+            .into_iter()
+            .map(|(_, function)| *function)
+            .collect();
+        for body in std::iter::once(&document.main)
+            .chain(document.functions.values().map(|function| &function.body))
+        {
+            held.extend(Node::Block(body).functions_within());
+        }
+        held
+    };
+    let sentinel = FunctionId::parse(&"f".repeat(64)).unwrap();
+    for text in std::iter::once(every_slot).chain(every_form_corpus()) {
+        let mut document = parse_document(&text).unwrap();
+        let read = held(&document);
+        if text.contains("h.f16") {
+            assert_eq!(read, ids.iter().copied().collect());
+        }
+        let mut written = std::collections::BTreeSet::new();
+        document
+            .try_each_function_mut(|_, function| {
+                written.insert(*function);
+                *function = sentinel;
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(written, read);
+        let listed = std::mem::take(&mut document.manifest.functions);
+        let json = document.to_json().unwrap();
+        for function in listed.keys() {
+            assert!(!json.contains(&function.to_string()), "{json}");
+        }
+    }
+}

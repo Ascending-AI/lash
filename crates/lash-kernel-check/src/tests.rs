@@ -1150,6 +1150,41 @@ fn admission_reuses_registered_library_validation_identity_and_graphs() {
     );
 }
 
+/// K-DOC-002 (FIG-6865): a registered body's callees are every library
+/// reference its code holds, so a registry derives the requirements its
+/// definitions alone do: a statement `await` and a closure's start adapter
+/// included.
+#[test]
+fn registered_callees_follow_every_library_reference_slot() {
+    let library = library();
+    let slots = parse_definition(&format!(
+        "function helper.slots(x: Any) -> Any\nkernel 1\ncharge 1\n\
+         use helper.twice = @{twice}\nuse helper.outer = @{outer}\nbody {{\n\
+         let y = await x via helper.twice\n\
+         let f = fn(a) start (a: Any) -> Any bare ts_direct(helper.outer) {{ return a }}\n\
+         return f\n}}\n",
+        twice = library.twice,
+        outer = library.outer,
+    ))
+    .unwrap();
+    let mut catalog = library.catalog.clone();
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    for function in [library.neg, library.twice, library.outer] {
+        registry.register(catalog[&function].clone(), None).unwrap();
+    }
+    let function = registry.register(slots.clone(), None).unwrap();
+    catalog.insert(function, slots);
+    let document = document(&format!(
+        "kernel 1\nnumbers float\nuse helper.slots = @{function}\nmain {{ let x = invoke helper.slots(1) }}\n",
+    ));
+    let declared = requirements(&document, &catalog).functions;
+    assert_eq!(
+        declared.keys().copied().collect::<BTreeSet<_>>(),
+        BTreeSet::from([function, library.twice, library.outer])
+    );
+    assert_eq!(requirements(&document, &registry).functions, declared);
+}
+
 /// FIG-6255, K-FORM-003: cached library faults keep their sites and order,
 /// including in a registry clone and in the structural view.
 #[test]

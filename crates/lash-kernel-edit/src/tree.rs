@@ -8,15 +8,7 @@
 //! so a node's shadow travels with it. The document alone says which nodes
 //! there are: [`Shadow::find`] and [`Shadow::walk`] follow it.
 
-use lash_kernel_doc::{Action, Block, Expr, Member, Node, Place, Rhs, Site, Stmt};
-
-/// Any node of the tree, for writing.
-pub(crate) enum NodeMut<'a> {
-    Block(&'a mut Block),
-    Stmt(&'a mut Stmt),
-    Action(&'a mut Action),
-    Expr(&'a mut Expr),
-}
+use lash_kernel_doc::{Node, Site};
 
 /// What a site addresses, for a diagnostic.
 #[derive(
@@ -30,160 +22,13 @@ pub enum NodeClass {
     Expression,
 }
 
-impl<'a> NodeMut<'a> {
-    pub(crate) fn class(&self) -> NodeClass {
-        match self {
-            Self::Block(_) => NodeClass::Block,
-            Self::Stmt(_) => NodeClass::Statement,
-            Self::Action(_) => NodeClass::Action,
-            Self::Expr(_) => NodeClass::Expression,
-        }
-    }
-
-    pub(crate) fn as_node(&self) -> Node<'_> {
-        match self {
-            Self::Block(block) => Node::Block(block),
-            Self::Stmt(stmt) => Node::Stmt(stmt),
-            Self::Action(action) => Node::Action(action),
-            Self::Expr(expr) => Node::Expr(expr),
-        }
-    }
-
-    /// The node's children, in the order of
-    /// [`lash_kernel_doc::Node::children`] (`K-ID-004`).
-    pub(crate) fn children(self) -> Vec<NodeMut<'a>> {
-        let mut out = Vec::new();
-        match self {
-            Self::Block(block) => out.extend(block.iter_mut().map(NodeMut::Stmt)),
-            Self::Action(_) => {}
-            Self::Stmt(stmt) => match stmt {
-                Stmt::Let { value, .. } => out.push(rhs(value)),
-                Stmt::Assign { place, value, .. } => {
-                    if let Place::Member(member) = place {
-                        push_member(member, &mut out);
-                    }
-                    out.push(rhs(value));
-                }
-                Stmt::Remove { member } => push_member(member, &mut out),
-                Stmt::Do { value } => out.push(NodeMut::Expr(value)),
-                Stmt::If {
-                    condition,
-                    then_block,
-                    else_block,
-                } => {
-                    out.push(NodeMut::Expr(condition));
-                    out.push(NodeMut::Block(then_block));
-                    out.push(NodeMut::Block(else_block));
-                }
-                // As `Node::children`: an empty `else` is no child.
-                Stmt::For {
-                    iterable,
-                    body,
-                    else_block,
-                    ..
-                } => {
-                    out.push(NodeMut::Expr(iterable));
-                    out.push(NodeMut::Block(body));
-                    if !else_block.is_empty() {
-                        out.push(NodeMut::Block(else_block));
-                    }
-                }
-                Stmt::While {
-                    condition,
-                    body,
-                    else_block,
-                    ..
-                } => {
-                    out.push(NodeMut::Expr(condition));
-                    out.push(NodeMut::Block(body));
-                    if !else_block.is_empty() {
-                        out.push(NodeMut::Block(else_block));
-                    }
-                }
-                Stmt::Break | Stmt::Continue => {}
-                Stmt::Return { value }
-                | Stmt::ReturnVia { value, .. }
-                | Stmt::Throw { value }
-                | Stmt::Print { value }
-                | Stmt::Finish { value }
-                | Stmt::Fail { value } => out.push(NodeMut::Expr(value)),
-                Stmt::Try(scope) => {
-                    out.push(NodeMut::Block(&mut scope.body));
-                    if let Some(catch) = &mut scope.catch {
-                        out.push(NodeMut::Block(&mut catch.body));
-                    }
-                    if let Some(finally) = &mut scope.finally {
-                        out.push(NodeMut::Block(finally));
-                    }
-                }
-            },
-            Self::Expr(expr) => match expr {
-                Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
-                Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
-                    out.extend(items.iter_mut().map(NodeMut::Expr));
-                }
-                Expr::Map(entries) => {
-                    for entry in entries {
-                        out.push(NodeMut::Expr(&mut entry.key));
-                        out.push(NodeMut::Expr(&mut entry.value));
-                    }
-                }
-                Expr::Record(entries) => {
-                    out.extend(
-                        entries
-                            .iter_mut()
-                            .map(|entry| NodeMut::Expr(&mut entry.value)),
-                    );
-                }
-                Expr::Member(member) => push_member(member, &mut out),
-                Expr::Closure(closure) => out.push(NodeMut::Block(&mut closure.body)),
-                Expr::Call { args, .. } => out.extend(args.iter_mut().map(NodeMut::Expr)),
-                Expr::If { cond, then, r#else } => {
-                    out.extend([
-                        NodeMut::Expr(cond),
-                        NodeMut::Expr(then),
-                        NodeMut::Expr(r#else),
-                    ]);
-                }
-                Expr::Let { value, body, .. } => {
-                    out.extend([NodeMut::Expr(value), NodeMut::Expr(body)]);
-                }
-                Expr::Read(read) => {
-                    out.push(NodeMut::Expr(&mut read.handle));
-                    out.push(NodeMut::Expr(&mut read.request));
-                }
-                Expr::Act(act) => out.extend(act.args.iter_mut().map(NodeMut::Expr)),
-            },
-        }
-        out
-    }
-
-    /// The node `path` reaches from this one.
-    pub(crate) fn descend(self, path: &[u32]) -> Option<NodeMut<'a>> {
-        let mut node = self;
-        for step in path {
-            node = node
-                .children()
-                .into_iter()
-                .nth(usize::try_from(*step).ok()?)?;
-        }
-        Some(node)
-    }
-}
-
-fn rhs(rhs: &mut Rhs) -> NodeMut<'_> {
-    match rhs {
-        Rhs::Expr(expr) => NodeMut::Expr(expr),
-        Rhs::Action(action) => NodeMut::Action(action),
-    }
-}
-
-fn push_member<'a>(member: &'a mut Member, out: &mut Vec<NodeMut<'a>>) {
-    match member {
-        Member::Field { target, .. } => out.push(NodeMut::Expr(target)),
-        Member::Index { target, index } => {
-            out.push(NodeMut::Expr(target));
-            out.push(NodeMut::Expr(index));
+impl NodeClass {
+    pub(crate) fn of(node: Node<'_>) -> Self {
+        match node {
+            Node::Block(_) => Self::Block,
+            Node::Stmt(_) => Self::Statement,
+            Node::Action(_) => Self::Action,
+            Node::Expr(_) => Self::Expression,
         }
     }
 }

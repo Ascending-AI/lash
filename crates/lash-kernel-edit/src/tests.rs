@@ -1,14 +1,13 @@
 //! CANVAS and EXTRACT laws for the public boundary.
 use crate::apply::Working;
 use crate::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
-use crate::tree::NodeMut;
 use crate::{Draft, EditDiagnosticKind as Cause, EditRefusal, Position, Transaction};
 use lash_kernel_check::{Environment, RefusalReason};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
     ActExpr, ActKind, Datum, Document, DocumentId, EffectName, ErrorDatum, Expr, FunctionRegistry,
-    Handle, Integer, InvalidReason, Literal, Name, Node, Param, Signature, Site, Stmt, Timestamp,
-    Type, Unit, parse_document, print_document,
+    Handle, Integer, InvalidReason, Literal, Name, Node, NodeMut, Param, Signature, Site, Stmt,
+    Timestamp, Type, Unit, parse_document, print_document,
 };
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
@@ -138,6 +137,73 @@ fn relink_transitive_manifest_closure() {
     assert_eq!(
         draft.document().manifest.functions,
         lash_kernel_check::requirements(draft.document(), &current).functions
+    );
+}
+
+/// The helpers a document holds outside its calls: a returning policy and
+/// a cleanup, each returning `value`.
+fn slot_library(value: &str) -> (FunctionRegistry, String) {
+    let mut registry = FunctionRegistry::new();
+    let mut header = String::new();
+    for (name, params) in [("helper.policy", "x: Any"), ("helper.cleanup", "")] {
+        let function = registry
+            .register(
+                lash_kernel_doc::parse_definition(&format!(
+                    "function {name}({params}) -> Any\nkernel 1\ncharge 1\nbody {{ return {value} }}"
+                ))
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        header.push_str(&format!("use {name} = @{function}\n"));
+    }
+    (registry, header)
+}
+
+fn slot_document(registry: &FunctionRegistry, header: &str) -> Document {
+    let mut document = parse_document(&format!(
+        "kernel 1\nnumbers float\n{header}\
+         entry run(x: Any) -> Any py_direct(helper.cleanup)\n\
+         fn run(x) {{ return x via helper.policy }}\n\
+         fn held(x) start (x: Any) -> Any bare ts_direct(helper.policy) {{ return x }}\n\
+         main {{ let f = fn(a) start (a: Any) -> Any bare py_direct(helper.cleanup) {{ return a }} }}"
+    ))
+    .unwrap();
+    document.manifest.functions = lash_kernel_check::requirements(&document, registry).functions;
+    document
+}
+
+/// RELINK-CLOSURE (FIG-6865): a re-link rebinds every slot that holds a
+/// library function, not only calls: a returning policy, an entry's
+/// convention and the start adapters of a declared function and a closure.
+#[test]
+fn relink_rebinds_every_library_reference_slot() {
+    let (old, old_header) = slot_library("null");
+    let original = slot_document(&old, &old_header);
+    let (current, current_header) = slot_library("true");
+    let expected = slot_document(&current, &current_header);
+    let mut draft = Draft::open(original.clone()).unwrap();
+    let correspondence = draft.relink(&current).unwrap();
+    assert_eq!(draft.document(), &expected);
+    let json = draft.document().to_json().unwrap();
+    for function in original.manifest.functions.keys() {
+        assert!(!json.contains(&function.to_string()), "{json}");
+    }
+    let edited: BTreeSet<Site> = correspondence
+        .entries()
+        .iter()
+        .filter(|survivor| survivor.edited)
+        .map(|survivor| survivor.to.clone())
+        .collect();
+    let run = Unit::Function(Name::new("run"));
+    assert_eq!(
+        edited,
+        BTreeSet::from([
+            Site::new(run.clone(), []),
+            Site::new(run, [0]),
+            Site::new(Unit::Function(Name::new("held")), []),
+            Site::new(Unit::Main, [0, 0]),
+        ])
     );
 }
 

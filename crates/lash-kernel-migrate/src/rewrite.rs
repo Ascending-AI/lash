@@ -4,10 +4,11 @@
 
 use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 
 use lash_kernel_doc::{
-    ActKind, Action, Block, Callee, Document, Expr, FunctionCatalog, FunctionDefinition,
-    FunctionId, Implementation, Member, Node, Place, Rhs, Site, Stmt, Unit,
+    Block, Document, FunctionBody, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
+    Implementation, Node, NodeMut, Site, Unit,
 };
 
 use crate::migration::DocumentRefusal;
@@ -61,11 +62,7 @@ fn redeclare_one(
     let mut redeclared = definition(written)?;
     if let Implementation::Body(body) | Implementation::Both(body) = &mut redeclared.implementation
     {
-        body.functions = std::mem::take(&mut body.functions)
-            .into_iter()
-            .map(|(id, name)| (done.get(&id).copied().unwrap_or(id), name))
-            .collect();
-        replace_in_block(&mut body.block, done);
+        replace_in_body(function, body, done);
     }
     let to = redeclared.identity();
     done.insert(function, to);
@@ -77,217 +74,46 @@ fn redeclare_one(
     Ok(to)
 }
 
-/// Replaces each library function `document` lists and calls with the one
-/// `functions` maps it to. A function the map does not name is kept.
+/// Replaces each library function `document` lists and holds, in any slot,
+/// with the one `functions` maps it to. A function the map does not name is
+/// kept.
 pub fn replace_functions(document: &mut Document, functions: &BTreeMap<FunctionId, FunctionId>) {
-    document.manifest.functions = std::mem::take(&mut document.manifest.functions)
+    document.manifest.functions = replace_listed(&mut document.manifest.functions, functions);
+    let Ok(()) = document.try_each_function_mut(|_, function| replace(function, functions));
+}
+
+/// Replaces each library function the body of `function` lists and holds,
+/// as [`replace_functions`] does a document's.
+pub(crate) fn replace_in_body(
+    function: FunctionId,
+    body: &mut FunctionBody,
+    functions: &BTreeMap<FunctionId, FunctionId>,
+) {
+    body.functions = replace_listed(&mut body.functions, functions);
+    let Ok(()) = NodeMut::Block(&mut body.block)
+        .try_each_function_mut(Site::new(Unit::Library(function), []), &mut |_, held| {
+            replace(held, functions)
+        });
+}
+
+fn replace_listed(
+    listed: &mut BTreeMap<FunctionId, FunctionName>,
+    functions: &BTreeMap<FunctionId, FunctionId>,
+) -> BTreeMap<FunctionId, FunctionName> {
+    std::mem::take(listed)
         .into_iter()
         .map(|(id, name)| (functions.get(&id).copied().unwrap_or(id), name))
-        .collect();
-    for entry in document.entries.values_mut() {
-        replace_in_convention(&mut entry.convention, functions);
-    }
-    replace_in_block(&mut document.main, functions);
-    for function in document.functions.values_mut() {
-        replace_in_start(function.start.as_mut(), functions);
-        replace_in_block(&mut function.body, functions);
-    }
+        .collect()
 }
 
-/// The library functions a start adapter's convention calls, replaced as
-/// the code that holds it is.
-fn replace_in_start(
-    start: Option<&mut lash_kernel_doc::StartAdapter>,
+fn replace(
+    function: &mut FunctionId,
     functions: &BTreeMap<FunctionId, FunctionId>,
-) {
-    if let Some(start) = start {
-        replace_in_convention(&mut start.convention, functions);
-    }
-}
-
-fn replace_in_convention(
-    convention: &mut lash_kernel_doc::StartConvention,
-    functions: &BTreeMap<FunctionId, FunctionId>,
-) {
-    if let lash_kernel_doc::StartConvention::TsDirect { await_fn }
-    | lash_kernel_doc::StartConvention::PyDirect { cleanup: await_fn } = convention
-        && let Some(to) = functions.get(await_fn)
-    {
-        *await_fn = *to;
-    }
-    if let lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } = convention {
-        for function in [await_fn, same_fn] {
-            if let Some(to) = functions.get(function) {
-                *function = *to;
-            }
-        }
-    }
-}
-
-pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionId, FunctionId>) {
-    for stmt in block {
-        match stmt {
-            Stmt::Let { value, .. } => replace_in_rhs(value, functions),
-            Stmt::Assign { place, value, .. } => {
-                if let Place::Member(member) = place {
-                    replace_in_member(member, functions);
-                }
-                replace_in_rhs(value, functions);
-            }
-            Stmt::Remove { member } => replace_in_member(member, functions),
-            Stmt::Do { value } => replace_in_expr(value, functions),
-            Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                replace_in_expr(condition, functions);
-                replace_in_block(then_block, functions);
-                replace_in_block(else_block, functions);
-            }
-            Stmt::For {
-                iterable,
-                via,
-                body,
-                else_block,
-                ..
-            } => {
-                replace_in_expr(iterable, functions);
-                if let Some(via) = via {
-                    let replace = |id: &mut FunctionId| {
-                        if let Some(to) = functions.get(id) {
-                            *id = *to;
-                        }
-                    };
-                    replace(&mut via.open);
-                    for hook in [&mut via.next, &mut via.item, &mut via.check]
-                        .into_iter()
-                        .flatten()
-                    {
-                        replace(hook);
-                    }
-                }
-                replace_in_block(body, functions);
-                replace_in_block(else_block, functions);
-            }
-            Stmt::While {
-                condition,
-                body,
-                else_block,
-                ..
-            } => {
-                replace_in_expr(condition, functions);
-                replace_in_block(body, functions);
-                replace_in_block(else_block, functions);
-            }
-            Stmt::Break | Stmt::Continue => {}
-            Stmt::ReturnVia { value, policy } => {
-                if let Some(next) = functions.get(policy) {
-                    *policy = *next;
-                }
-                replace_in_expr(value, functions);
-            }
-            Stmt::Return { value }
-            | Stmt::Throw { value }
-            | Stmt::Print { value }
-            | Stmt::Finish { value }
-            | Stmt::Fail { value } => replace_in_expr(value, functions),
-            Stmt::Try(scope) => {
-                replace_in_block(&mut scope.body, functions);
-                if let Some(catch) = &mut scope.catch {
-                    replace_in_block(&mut catch.body, functions);
-                }
-                if let Some(finally) = &mut scope.finally {
-                    replace_in_block(finally, functions);
-                }
-            }
-        }
-    }
-}
-
-fn replace_in_rhs(rhs: &mut Rhs, functions: &BTreeMap<FunctionId, FunctionId>) {
-    match rhs {
-        Rhs::Expr(expr) => replace_in_expr(expr, functions),
-        Rhs::Action(action) => replace_in_action(action, functions),
-    }
-}
-
-fn replace_in_action(action: &mut Action, functions: &BTreeMap<FunctionId, FunctionId>) {
-    if let Action::Call { callee, .. } | Action::Spawn { callee, .. } = action
-        && let Callee::Library(function) = callee
-        && let Some(to) = functions.get(function)
-    {
+) -> Result<(), Infallible> {
+    if let Some(to) = functions.get(function) {
         *function = *to;
     }
-}
-
-fn replace_in_member(member: &mut Member, functions: &BTreeMap<FunctionId, FunctionId>) {
-    match member {
-        Member::Field { target, .. } => replace_in_expr(target, functions),
-        Member::Index { target, index } => {
-            replace_in_expr(target, functions);
-            replace_in_expr(index, functions);
-        }
-    }
-}
-
-fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>) {
-    match expr {
-        Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
-        Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
-            for item in items {
-                replace_in_expr(item, functions);
-            }
-        }
-        Expr::Map(entries) => {
-            for entry in entries {
-                replace_in_expr(&mut entry.key, functions);
-                replace_in_expr(&mut entry.value, functions);
-            }
-        }
-        Expr::Record(entries) => {
-            for entry in entries {
-                replace_in_expr(&mut entry.value, functions);
-            }
-        }
-        Expr::Member(member) => replace_in_member(member, functions),
-        Expr::Closure(closure) => {
-            replace_in_start(closure.start.as_mut(), functions);
-            replace_in_block(&mut closure.body, functions);
-        }
-        Expr::Call { function, args } => {
-            if let Some(to) = functions.get(function) {
-                *function = *to;
-            }
-            for arg in args {
-                replace_in_expr(arg, functions);
-            }
-        }
-        Expr::If { cond, then, r#else } => {
-            replace_in_expr(cond, functions);
-            replace_in_expr(then, functions);
-            replace_in_expr(r#else, functions);
-        }
-        Expr::Let { value, body, .. } => {
-            replace_in_expr(value, functions);
-            replace_in_expr(body, functions);
-        }
-        Expr::Read(read) => {
-            replace_in_expr(&mut read.handle, functions);
-            replace_in_expr(&mut read.request, functions);
-        }
-        Expr::Act(act) => {
-            if let ActKind::Call(Callee::Library(function))
-            | ActKind::Spawn(Callee::Library(function)) = &mut act.kind
-                && let Some(to) = functions.get(function)
-            {
-                *function = *to;
-            }
-            for arg in &mut act.args {
-                replace_in_expr(arg, functions);
-            }
-        }
-    }
+    Ok(())
 }
 
 /// The correspondence of a rewrite that moved no node of `main` or of a
@@ -324,5 +150,41 @@ pub(crate) fn same_sites(from: Unit, to: Unit, body: &Block, entries: &mut Vec<S
             to: Site::new(to.clone(), path),
             edited: false,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use lash_kernel_doc::{FunctionId, parse_document};
+
+    /// K-DOC-002 (FIG-6865): replacing a library function rewrites every
+    /// slot that holds it, so no slot keeps the old identity: an `await` in
+    /// either spelling, a call, a spawn, a native call, a returning policy,
+    /// a loop protocol, start adapters and an entry's convention.
+    #[test]
+    fn replacing_a_function_leaves_no_slot_holding_the_old_identity() {
+        let old = FunctionId::parse(&"a".repeat(64)).unwrap();
+        let new = FunctionId::parse(&"b".repeat(64)).unwrap();
+        let mut document = parse_document(&format!(
+            "kernel 1\nnumbers float\nuse helper.old = @{old}\n\
+             entry run(x: Any) -> Any ts_args(helper.old, helper.old)\n\
+             fn run(x) start (x: Any) -> Any bare py_direct(helper.old) {{\n\
+             let awaited = await x via helper.old\n\
+             let nested = (await x via helper.old,)\n\
+             let called = invoke helper.old(x)\n\
+             let spawned = spawn invoke helper.old(x)\n\
+             let direct = helper.old(x)\n\
+             for item in x via (open helper.old, next helper.old, item helper.old, check helper.old) {{}}\n\
+             let f = fn(a) start (a: Any) -> Any bare ts_direct(helper.old) {{ return a }}\n\
+             return x via helper.old\n\
+             }}\nmain {{}}\n"
+        ))
+        .unwrap();
+        super::replace_functions(&mut document, &BTreeMap::from([(old, new)]));
+        let json = document.to_json().unwrap();
+        assert!(!json.contains(&old.to_string()), "{json}");
+        assert_eq!(json.matches(&new.to_string()).count(), 15, "{json}");
     }
 }

@@ -70,7 +70,7 @@ pub struct StartAdapter {
 impl StartAdapter {
     /// The library functions starting through this adapter calls: code
     /// that holds it reaches them (`K-DOC-002`).
-    pub fn functions(&self) -> Vec<FunctionId> {
+    pub fn functions(&self) -> Vec<&FunctionId> {
         self.convention.functions()
     }
 }
@@ -123,18 +123,6 @@ pub enum StartConvention {
     /// raise does instead. Python's `asyncio.run` cancels and waits for the
     /// tasks still running this way (`K-TASK-019`).
     PyDirect { cleanup: FunctionId },
-}
-
-impl StartConvention {
-    /// Library identities reached by this convention.
-    pub fn functions(&self) -> Vec<FunctionId> {
-        match self {
-            Self::Direct => Vec::new(),
-            Self::TsDirect { await_fn } => vec![*await_fn],
-            Self::TsArgsList { await_fn, same_fn } => vec![*await_fn, *same_fn],
-            Self::PyDirect { cleanup } => vec![*cleanup],
-        }
-    }
 }
 
 /// The bound on one function value: its canonical tagged JSON, counting its
