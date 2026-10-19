@@ -30,6 +30,60 @@ fn site(entry: &str, path: &[u32]) -> Site {
     Site::new(Unit::Function(Name::new(entry)), path)
 }
 
+/// FIG-6894: operations, real edit refusals and derived views share Site's
+/// spelling, so a host can join their root addresses without normalising JSON.
+#[test]
+fn a_root_site_omits_its_path_in_operations_refusals_and_views() {
+    let document = parse_document(
+        "kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { return null }\nmain { finish null }",
+    )
+    .expect("workflow");
+    let root = site("demo", &[]);
+    let spelled = serde_json::json!({"unit": {"function": "demo"}});
+    let mut draft = Draft::open(document.clone()).expect("draft");
+    let operation = Operation::RemoveStep {
+        base: draft.identity(),
+        action: root.clone(),
+    };
+    let encoded = serde_json::to_value(&operation).unwrap();
+    assert_eq!(encoded["remove_step"]["action"], spelled);
+
+    let functions = FunctionRegistry::default();
+    let refusal = draft
+        .apply(
+            &Transaction {
+                base: draft.identity(),
+                edits: vec![operation],
+            },
+            &Environment::new(&functions),
+        )
+        .expect_err("a root block is not a removable perform step");
+    assert_eq!(
+        refusal.diagnostics[0].location,
+        Some(lash_kernel_edit::Location::Base(root.clone())),
+    );
+    let encoded = serde_json::to_value(refusal).unwrap();
+    assert_eq!(encoded["diagnostics"][0]["location"]["base"], spelled);
+
+    let view = view_of(&document, "demo");
+    let encoded = serde_json::to_value(&view).unwrap();
+    for (scope, encoded) in view
+        .scopes
+        .iter()
+        .zip(encoded["scopes"].as_array().unwrap())
+    {
+        if scope.block == root {
+            assert_eq!(encoded["block"], spelled);
+        }
+    }
+    assert_eq!(view.scopes[0].block, root);
+    // Non-root sites keep their child positions; omission denotes only the root.
+    assert_eq!(
+        serde_json::to_value(site("demo", &[0])).unwrap(),
+        serde_json::json!({"unit": {"function": "demo"}, "path": [0]}),
+    );
+}
+
 /// A nested block's scope is one deeper than the scope holding the
 /// statement that opens it, at the same depth convention the block's own
 /// statements carry.

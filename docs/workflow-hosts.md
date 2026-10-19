@@ -87,6 +87,17 @@ where a diagnostic points, and what a run reports against. A site belongs to
 one document: an edit moves the nodes after it, so never carry a site from
 one document to another without a correspondence.
 
+Every JSON site uses `Site`'s serialization: a unit's root body omits `path`;
+child sites carry a nonempty `path` array. Operations, refusal diagnostics and
+views use that same spelling, so hosts can compare their serialized sites
+directly. Treat an omitted path as the empty path when constructing an edit.
+
+Cell memory refusals report `memory limit exceeded (arena capacity in bytes)`.
+The numeric limit is in bytes counted by the arena capacity meter, including
+counted control state; it is not a logical value size or the worker's RSS.
+The refusal still identifies the library function when the bound was crossed
+inside one, and retains the `CELL_BOUND_EXCEEDED` code and heap-limit cause.
+
 ### What is derived
 
 `lash::workflow::WorkflowDocument` is the checked holder: a document with

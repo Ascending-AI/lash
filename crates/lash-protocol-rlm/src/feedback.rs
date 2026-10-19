@@ -435,7 +435,7 @@ impl CellObservation {
                         Some(lash_vm_client::WorkerLimit::Fuel),
                     ),
                     Bound::Memory => (
-                        "logical memory limit exceeded".to_owned(),
+                        "memory limit exceeded (arena capacity in bytes)".to_owned(),
                         Some(lash_vm_client::WorkerLimit::Heap),
                     ),
                     Bound::CallDepth => (
@@ -590,6 +590,36 @@ mod tests {
     use lash_kernel_vm::{Bounds, CellStart, End, Host, KernelMachine, Machine, Program, Target};
 
     use super::*;
+
+    /// FIG-6894: the refusal names the capacity meter and its byte unit,
+    /// whether the run crossed its bound in a library call or in guest code.
+    #[test]
+    fn a_memory_refusal_names_arena_capacity_in_bytes() {
+        let prompts = crate::CellDialect::typescript().prompts();
+        for function in [None, Some("ts.string.repeat"), Some("ts.array.construct")] {
+            let observation = CellObservation::Bound(BoundExceeded {
+                bound: Bound::Memory,
+                limit: 67_108_864,
+                function: function
+                    .map(|name| lash_kernel_doc::FunctionName::new(name).expect("function name")),
+            });
+            let failure =
+                observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
+            let context = function
+                .map(|name| format!(" in library function `{name}`"))
+                .unwrap_or_default();
+            assert_eq!(
+                failure.message.lines().next(),
+                Some(format!(
+                    "CELL_BOUND_EXCEEDED: memory limit exceeded (arena capacity in bytes){context} (limit 67108864)"
+                ).as_str()),
+            );
+            assert_eq!(
+                failure.worker_limit,
+                Some(lash_vm_client::WorkerLimit::Heap)
+            );
+        }
+    }
 
     struct Guarded {
         memory: bool,
