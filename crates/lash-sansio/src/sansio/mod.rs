@@ -29,7 +29,7 @@ use lash_protocol_types::{
 
 pub trait TurnProtocol: Send + Sync + 'static {
     type IntentOutcome: Clone + Serialize + DeserializeOwned + Debug + Send + Sync + 'static;
-    type Event: Clone + Serialize + DeserializeOwned + Debug + Send + Sync + 'static;
+    type Event: Clone + PartialEq + Serialize + DeserializeOwned + Debug + Send + Sync + 'static;
     type Termination: Clone + Default + Debug + Send + Sync + 'static;
     type DriverState: Clone + Default + Serialize + DeserializeOwned + Debug + Send + Sync + 'static;
 }

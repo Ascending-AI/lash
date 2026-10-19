@@ -908,9 +908,10 @@ impl RuntimeSessionState {
     /// Marks the pending conversation node carrying `message_id` as its
     /// turn's reply. A durable node is immutable history and is never
     /// rewritten, so the marker lands only on a node this commit still
-    /// appends; returns whether it landed.
+    /// appends; returns whether it landed. Pending nodes are the newest, so
+    /// the search starts at the leaf end (FIG-6889).
     pub fn mark_pending_turn_reply(&mut self, message_id: &str, marker: crate::TurnReply) -> bool {
-        let Some(index) = self.session_graph.nodes.iter().position(|node| {
+        let Some(index) = self.session_graph.nodes.iter().rposition(|node| {
             node.message_id() == Some(message_id)
                 && !self.persisted_node_ids.contains(&node.node_id)
         }) else {
@@ -1331,11 +1332,7 @@ pub fn adopt_durable_head(
         checkpoint,
     } = head;
     state.session_id = session_id;
-    state.persisted_node_ids = window
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect();
+    state.persisted_node_ids = window.try_node_ids()?;
     state.session_graph = window;
     state.agent_frames = state
         .session_graph

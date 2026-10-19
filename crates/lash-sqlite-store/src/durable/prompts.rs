@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{
     DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
-    request_roots,
+    RequestTexts,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_protocol_types::{SessionId, TurnId};
@@ -209,15 +209,19 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     DomainRefusal::PromptCallRecorded { call: call.clone() },
                 )));
             }
-            let distinct: BTreeMap<_, _> = snapshot_texts
+            let snapshot_by_hash: BTreeMap<_, _> = snapshot_texts
                 .iter()
-                .chain(request_texts)
                 .map(|text| (text.hash.as_str(), text))
                 .collect();
+            let text = |hash: &str| {
+                request_texts
+                    .get(hash)
+                    .or_else(|| snapshot_by_hash.get(hash).copied())
+            };
             let mut frontier: BTreeSet<&str> = snapshot_texts
                 .iter()
                 .map(|text| text.hash.as_str())
-                .chain(request_roots(request_texts))
+                .chain(request_texts.roots().iter().map(String::as_str))
                 .chain(prefix.as_deref())
                 .collect();
             let mut unheld = BTreeMap::new();
@@ -230,7 +234,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     if held.contains(hash) || unheld.contains_key(hash) {
                         continue;
                     }
-                    let Some(text) = distinct.get(hash) else {
+                    let Some(text) = text(hash) else {
                         return Ok(Err(DurableError::Domain(
                             DomainRefusal::PromptFragmentMissing {
                                 hash: hash.to_owned(),
@@ -406,15 +410,16 @@ pub(crate) fn release_unretained(
 /// `request_texts`.
 fn edges<'a>(
     snapshot_texts: &'a [PromptText],
-    request_texts: &'a [PromptText],
+    request_texts: &'a RequestTexts,
 ) -> BTreeSet<(&'static str, &'a str)> {
-    let part =
-        |part, texts: &'a [PromptText]| texts.iter().map(move |text| (part, text.hash.as_str()));
-    part(SNAPSHOT_PART, snapshot_texts)
+    snapshot_texts
+        .iter()
+        .map(|text| (SNAPSHOT_PART, text.hash.as_str()))
         .chain(
-            request_roots(request_texts)
-                .into_iter()
-                .map(|hash| (REQUEST_PART, hash)),
+            request_texts
+                .roots()
+                .iter()
+                .map(|hash| (REQUEST_PART, hash.as_str())),
         )
         .collect()
 }
@@ -594,7 +599,7 @@ mod tests {
                 snapshot: Some(format!("audit-{ordinal}")),
                 request: format!("exact-request-{ordinal}"),
                 snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
-                request_texts: vec![text("request"), text("prefix")],
+                request_texts: vec![text("request"), text("prefix")].into(),
                 prefix: Some("prefix".to_owned()),
             }));
         }
@@ -705,7 +710,7 @@ mod tests {
             snapshot: None,
             request: "changed".to_owned(),
             snapshot_texts: Vec::new(),
-            request_texts: Vec::new(),
+            request_texts: Default::default(),
             prefix: None,
         }));
         assert!(matches!(

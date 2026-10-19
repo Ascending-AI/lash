@@ -221,6 +221,25 @@ enum Command {
     /// Functional loopback HTTP phases, retry/body-size and arrival-rate sweeps.
     ProviderHttp(lash_perf::runtime_perf::http_population::HttpPopulationArgs),
 
+    /// Count each plain turn's instructions as one session's history grows (FIG-6889).
+    History {
+        /// Write the per-turn JSON report to this file.
+        #[arg(long, value_name = "OUT.json")]
+        out: std::path::PathBuf,
+        /// Directory for the run's SQLite store set; emptied first.
+        #[arg(long, value_name = "DIR")]
+        store_dir: std::path::PathBuf,
+        /// Sequential turns on the one session.
+        #[arg(long, default_value_t = 600)]
+        turns: usize,
+        /// `perf record -D -1 --control fifo:<FIFO>`'s control FIFO.
+        #[arg(long, value_name = "FIFO", requires = "profile_from")]
+        perf_control: Option<std::path::PathBuf>,
+        /// Enable the perf recording as this turn starts.
+        #[arg(long, requires = "perf_control")]
+        profile_from: Option<usize>,
+    },
+
     /// Run the send-to-completion latency gate (FIG-3843) on lash's durable
     /// engine over SQLite store sets under `--store-dir`.
     Latency {
@@ -466,6 +485,29 @@ fn run_main() -> anyhow::Result<()> {
                 .worker_threads(2)
                 .build()?;
             return runtime.block_on(lash_perf::runtime_perf::http_population::run(options));
+        }
+        Some(Command::History {
+            out,
+            store_dir,
+            turns,
+            perf_control,
+            profile_from,
+        }) => {
+            // Opened before the runtime's threads exist, so it counts them all.
+            let counter =
+                lash_perf::perf_support::instructions::InstructionCounter::open_inherited()?;
+            let run = lash_perf::latency::history::HistoryRun {
+                store_dir: store_dir.clone(),
+                turns: *turns,
+                out: out.clone(),
+                perf_control: perf_control.clone().zip(*profile_from),
+            };
+            let mut runtime = tokio::runtime::Builder::new_multi_thread();
+            runtime.enable_all();
+            runtime.thread_stack_size(tokio_thread_stack_bytes(&args));
+            return runtime
+                .build()?
+                .block_on(lash_perf::latency::history::run(run, counter));
         }
         Some(Command::Latency {
             out,

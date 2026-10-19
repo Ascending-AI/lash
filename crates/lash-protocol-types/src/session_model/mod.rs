@@ -332,9 +332,9 @@ pub enum SessionHistoryRecord<PE = ()> {
 /// Whether `existing` and `value` are the same history record, for
 /// [`crate::AppendVec::push_adopting`]: a read state that appends a record
 /// another holder of its buffer already appended adopts that slot.
-pub fn same_history_record(
-    existing: &SessionHistoryRecord<ProtocolEvent>,
-    value: &SessionHistoryRecord<ProtocolEvent>,
+pub fn same_history_record<PE: PartialEq>(
+    existing: &SessionHistoryRecord<PE>,
+    value: &SessionHistoryRecord<PE>,
 ) -> bool {
     match (existing, value) {
         (

@@ -619,14 +619,87 @@ impl<Text, Slot> RequestFragment<Text, Slot> {
     }
 }
 
-/// A fresh fragment's encoding and the edges known by its builder.
-/// Admission installs both without decoding the encoding again. The text
-/// is shared: an item's fragments are encoded once and every admission that
-/// holds the item hands the same text to the store.
-#[derive(Clone, Debug)]
-pub struct EncodedRequestFragment {
+/// One stored prompt text (a section text, or a chunk or index node of a
+/// request) under the content address its owner computed. A fresh
+/// fragment's builder knows its edges, so admission installs it without
+/// decoding it again; the text is shared, so every admission that holds
+/// the fragment hands the same allocation to the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptText {
+    /// The text's content address.
+    pub hash: String,
+    /// The exact UTF-8 text.
     pub text: std::sync::Arc<str>,
+    /// Outgoing index edges; empty for section text and literal leaves.
     pub children: Vec<String>,
+}
+
+/// The texts a request references: the roots its record holds edges to, and
+/// every text under them, each once, ordered by content address.
+///
+/// A turn's history fragments are shared with the session's carried prefix
+/// and its roots are known to its builder (FIG-6889), so an admission names
+/// them without a pass over the forest, and a store finds a text by address
+/// without indexing the forest again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RequestTexts {
+    roots: Vec<String>,
+    texts: Vec<std::sync::Arc<PromptText>>,
+}
+
+impl RequestTexts {
+    /// The texts of a forest given in any order: each address once, its
+    /// roots the texts no other text names as a child.
+    pub fn from_texts(texts: impl IntoIterator<Item = PromptText>) -> Self {
+        let mut texts = texts
+            .into_iter()
+            .map(std::sync::Arc::new)
+            .collect::<Vec<_>>();
+        texts.sort_by(|left, right| left.hash.cmp(&right.hash));
+        texts.dedup_by(|later, earlier| later.hash == earlier.hash);
+        let children = texts
+            .iter()
+            .flat_map(|text| text.children.iter().map(String::as_str))
+            .collect::<std::collections::BTreeSet<_>>();
+        let roots = texts
+            .iter()
+            .filter(|text| !children.contains(text.hash.as_str()))
+            .map(|text| text.hash.clone())
+            .collect();
+        Self { roots, texts }
+    }
+
+    /// The texts the record roots, in address order.
+    pub fn roots(&self) -> &[String] {
+        &self.roots
+    }
+
+    /// The text stored under `hash`.
+    pub fn get(&self, hash: &str) -> Option<&PromptText> {
+        self.texts
+            .binary_search_by(|text| text.hash.as_str().cmp(hash))
+            .ok()
+            .map(|index| self.texts[index].as_ref())
+    }
+
+    /// Every text, in address order.
+    pub fn iter(&self) -> impl Iterator<Item = &PromptText> {
+        self.texts.iter().map(std::sync::Arc::as_ref)
+    }
+
+    pub fn len(&self) -> usize {
+        self.texts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.texts.is_empty()
+    }
+}
+
+impl From<Vec<PromptText>> for RequestTexts {
+    fn from(texts: Vec<PromptText>) -> Self {
+        Self::from_texts(texts)
+    }
 }
 
 /// Why a recorded template could not be assembled as admitted.
@@ -664,7 +737,7 @@ fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextR
     chunks
 }
 
-type Leaf = (PromptTextRef, EncodedRequestFragment);
+type Leaf = (PromptTextRef, std::sync::Arc<PromptText>);
 
 /// Store a fragment by its exact encoding, never by re-rendered JSON.
 fn encode_fragment(
@@ -672,18 +745,17 @@ fn encode_fragment(
 ) -> Leaf {
     let body = serde_json::to_string(fragment).expect("wire fragments encode");
     let reference = RequestFragment::reference(&body);
-    (
-        reference,
-        EncodedRequestFragment {
-            text: body.into(),
-            children: fragment.children(),
-        },
-    )
+    let text = PromptText {
+        hash: reference.blob.as_str().to_owned(),
+        text: body.into(),
+        children: fragment.children(),
+    };
+    (reference, std::sync::Arc::new(text))
 }
 
 fn keep_fragment(
     fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
-    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
+    texts: &mut Vec<(BlobRef, std::sync::Arc<PromptText>)>,
 ) -> PromptTextRef {
     let (reference, encoded) = encode_fragment(fragment);
     texts.push((reference.blob.clone(), encoded));
@@ -847,7 +919,7 @@ fn item_leaves(
 /// keeps its address when the sequence grows.
 fn fragment_tree(
     fragments: &[PromptTextRef],
-    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
+    texts: &mut Vec<(BlobRef, std::sync::Arc<PromptText>)>,
 ) -> PromptTextRef {
     if fragments.len() == 1 {
         return fragments[0].clone();
@@ -864,7 +936,7 @@ fn fragment_tree(
 struct PreparedPrefix {
     leaves: Vec<PromptTextRef>,
     tree: Option<PreparedTree>,
-    texts: std::collections::BTreeMap<BlobRef, (EncodedRequestFragment, usize)>,
+    texts: std::collections::BTreeMap<BlobRef, (std::sync::Arc<PromptText>, usize)>,
 }
 
 struct PreparedTree {
@@ -917,7 +989,7 @@ impl PreparedTree {
 }
 
 impl PreparedPrefix {
-    fn keep(&mut self, reference: &PromptTextRef, encoded: EncodedRequestFragment) {
+    fn keep(&mut self, reference: &PromptTextRef, encoded: std::sync::Arc<PromptText>) {
         self.texts
             .entry(reference.blob.clone())
             .and_modify(|(_, uses)| *uses += 1)
@@ -990,10 +1062,11 @@ impl ChunkedRequestTemplate {
     /// Prepare the history prefix incrementally beside its first shared item.
     /// A call supplies the complete distinct fragment set even on a cache hit:
     /// reuse never assumes that a different call/session installed its bodies.
-    /// The result is sorted by address, with each body listed once.
+    /// The set is the carried prefix tree's, rooted at that tree's root, and
+    /// shares every text with it.
     pub fn chunk(
         template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
-    ) -> (Self, Vec<(BlobRef, EncodedRequestFragment)>) {
+    ) -> (Self, RequestTexts) {
         use lash_protocol_types::sync::MutexExt;
         let mut groups = Vec::with_capacity(template.segments().len());
         let mut envelope = TextChunker::new(true);
@@ -1077,11 +1150,16 @@ impl ChunkedRequestTemplate {
             .filter(|(hash, _)| !prepared.texts.contains_key(hash))
             .map(|(hash, fragment)| (hash, fragment.text.to_string()))
             .collect();
-        let texts = prepared
-            .texts
-            .iter()
-            .map(|(hash, (text, _))| (hash.clone(), text.clone()))
-            .collect();
+        // The carried texts are exactly the prefix tree's nodes, each held
+        // by its parent, so the tree's root is the forest's one root.
+        let texts = RequestTexts {
+            roots: vec![tree.reference.blob.as_str().to_owned()],
+            texts: prepared
+                .texts
+                .values()
+                .map(|(text, _)| std::sync::Arc::clone(text))
+                .collect(),
+        };
         (
             Self {
                 fetch_horizon: template.fetch_horizon,

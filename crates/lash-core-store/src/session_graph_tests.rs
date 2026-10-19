@@ -878,7 +878,7 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
         .iter()
         .map(|node| node.node_id.clone())
         .filter(|node_id| *node_id != pending)
-        .collect::<HashSet<_>>();
+        .collect::<crate::PersistedNodeIds>();
     let retired = graph
         .retire_below_current_frame(&durable)
         .expect("the durable frame switch retires the old frame");
@@ -925,7 +925,7 @@ fn a_pending_frame_switch_retires_nothing() {
         .nodes
         .iter()
         .map(|node| node.node_id.clone())
-        .collect::<HashSet<_>>();
+        .collect::<crate::PersistedNodeIds>();
     open_test_frame(
         &mut graph,
         &session,
@@ -1193,6 +1193,66 @@ mod window_anchor {
             violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
             WindowAnchorViolation::InnerParentOutsideWindow
         );
+    }
+
+    /// FIG-6889: a window proven once keeps its proof across appends that
+    /// cannot break it, and validating it after any append refuses exactly
+    /// what validating the same nodes from scratch refuses: the corruptions
+    /// a store's rows or a commit can carry (a duplicate id, a dangling
+    /// parent, a parent cycle, a node claiming the anchor's external
+    /// parent) and well-formed batches alike.
+    #[test]
+    fn a_proven_window_validates_appends_as_a_fresh_graph_does() {
+        let parentless = |id: &str| SessionNodeRecord {
+            parent_node_id: None,
+            ..plugin(id, "unused")
+        };
+        let cases: Vec<(&str, Vec<SessionNodeRecord>)> = vec![
+            ("one well-formed node", vec![plugin("c", "b")]),
+            (
+                "a well-formed batch",
+                vec![plugin("c", "b"), plugin("d", "c"), plugin("e", "a")],
+            ),
+            ("a parentless node", vec![parentless("c")]),
+            ("a duplicate of a resident id", vec![plugin("a", "b")]),
+            (
+                "a duplicate inside the batch",
+                vec![plugin("c", "b"), plugin("c", "c")],
+            ),
+            ("a dangling parent", vec![plugin("c", "missing")]),
+            ("its own parent", vec![plugin("c", "c")]),
+            (
+                "a parent appended after it",
+                vec![plugin("c", "d"), plugin("d", "b")],
+            ),
+            ("the anchor's external parent", vec![plugin("outside", "b")]),
+        ];
+        for (case, appended) in cases {
+            let (nodes, anchor) = window();
+            let mut graph =
+                SessionGraph::from_window(nodes, "b".into(), anchor).expect("a well-formed window");
+            graph
+                .validate_resident_integrity()
+                .expect("the window is proven before the append");
+            graph.append_prebuilt_nodes(appended);
+            let incremental = graph.validate_resident_integrity();
+            let fresh = SessionGraph {
+                inner: Arc::clone(&graph.inner),
+                cache: Arc::default(),
+            }
+            .validate_resident_integrity();
+            assert_eq!(
+                format!("{incremental:?}"),
+                format!("{fresh:?}"),
+                "{case}: the proven window and a fresh graph disagree"
+            );
+            if fresh.is_ok() {
+                assert!(
+                    graph.cache().proven(),
+                    "{case}: a well-formed append keeps the proof"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1533,4 +1593,123 @@ fn transcript_nonempty_reasoning_remains_a_reasoning_entry() {
             }],
         })
     );
+}
+
+/// FIG-6889: the entries a commit adds to the transcript, decoded from the
+/// nodes after the base's leaf with the turn the base's path last named,
+/// are exactly what decoding the head's whole active path and dropping the
+/// base's entries yields: across protocol events that inherit a turn from
+/// a message before the base, reply markers, plugin nodes, and a head that
+/// branched away from the base's leaf.
+#[test]
+fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
+    use lash_protocol_types::core_support::TurnReplyCoreSupport;
+    let decoders = crate::transcript::TranscriptDecoders::default();
+    let turn = |name: &str| crate::TurnId::parse(name).expect("turn id");
+    let message = |id: &str, role, origin| Message {
+        origin,
+        ..text_message(id, role, id)
+    };
+    let input = |id: &str, run: &str| {
+        message(
+            id,
+            MessageRole::User,
+            Some(crate::MessageOrigin::TurnInput {
+                turn_id: turn(run),
+                input_id: None,
+            }),
+        )
+    };
+    let output = |id: &str, run: &str| {
+        message(
+            id,
+            MessageRole::Assistant,
+            Some(crate::MessageOrigin::TurnOutput {
+                turn_id: turn(run),
+                source: crate::TurnOutputSource::Runtime,
+                cell_id: None,
+            }),
+        )
+    };
+    let reply = |id: &str, run: &str| {
+        let mut reply = message(id, MessageRole::Assistant, None);
+        reply.reply_marker = Some(crate::TurnReply::mint(
+            turn(run),
+            reply.parts[0].id().to_owned(),
+        ));
+        reply
+    };
+    let event = || SessionNodeDraft::event(SessionHistoryRecord::Protocol(protocol_event()));
+    let decode = |graph: &SessionGraph| {
+        crate::transcript::SessionTranscript::from_records(graph.active_path_nodes(), &decoders)
+            .expect("decode the active path")
+            .into_entries()
+    };
+    let full_less_base = |base: &SessionGraph, head: &SessionGraph| {
+        let held = decode(base)
+            .into_iter()
+            .map(|entry| entry.entry_id)
+            .collect::<HashSet<_>>();
+        decode(head)
+            .into_iter()
+            .filter(|entry| !held.contains(&entry.entry_id))
+            .collect::<Vec<_>>()
+    };
+    let check = |case: &str, base: &SessionGraph, head: &SessionGraph| {
+        let added = crate::transcript::SessionTranscript::added_since(base, head, &decoders)
+            .expect("decode the commit")
+            .into_entries();
+        assert_eq!(added, full_less_base(base, head), "{case}");
+    };
+
+    let empty = SessionGraph::default();
+    let mut graph = SessionGraph::default();
+    graph.append_message(input("first-input", "turn-1"));
+    check("a first commit", &empty, &graph);
+
+    let base = graph.clone();
+    graph.append_node_draft(event());
+    graph.append_node_draft(event());
+    check(
+        "events inherit the turn of the base's last input",
+        &base,
+        &graph,
+    );
+
+    let base = graph.clone();
+    graph.append_node_draft(event());
+    graph.append_plugin("history-test", serde_json::json!({"n": 1}));
+    graph.append_message(reply("first-reply", "turn-1"));
+    graph.append_message(input("second-input", "turn-2"));
+    check("a reply then a new turn's input", &base, &graph);
+
+    let base = graph.clone();
+    graph.append_message(output("second-output", "turn-2"));
+    graph.append_node_draft(event());
+    check("events after an output", &base, &graph);
+
+    let base = graph.clone();
+    graph.append_plugin("history-test", serde_json::json!({"n": 2}));
+    graph.append_node_draft(event());
+    check("only plugin nodes since the turn's message", &base, &graph);
+
+    let branch_point = graph
+        .active_path_nodes()
+        .into_iter()
+        .find(|node| node.message_id() == Some("first-reply"))
+        .map(|node| node.node_id.clone())
+        .expect("the first reply is on the path");
+    let base = graph.clone();
+    let mut graph = SessionGraph::from_nodes(
+        graph
+            .nodes
+            .iter()
+            .map(|node| node.as_ref().clone())
+            .collect(),
+        Some(branch_point),
+    )
+    .expect("the same nodes under an earlier leaf");
+    graph.append_node_draft(event());
+    graph.append_message(input("branch-input", "turn-3"));
+    check("a head branched away from the base's leaf", &base, &graph);
 }

@@ -24,12 +24,12 @@
 //! an earlier revision cannot apply it and rebuilds from the durable head,
 //! as a replay gap.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub use super::publication_window::{PublicationMark, PublicationMarks, PublicationWindow};
 
-use lash_core_store::transcript::{EntryId, TranscriptDecoders};
+use lash_core_store::transcript::{SessionTranscript, TranscriptDecoders};
 use lash_protocol_types::sync::MutexExt as _;
 
 use crate::{
@@ -81,13 +81,13 @@ impl PublishedHeads {
 
 /// What a session's subscribers hold before a commit, read off the runtime
 /// opened at the committed head: its revision, its current frame and the
-/// entries of its transcript.
+/// graph whose active path is its transcript.
 pub(in crate::runtime) struct CommitBase {
     session: SessionId,
     store: crate::store::SessionStore,
     revision: SessionRevision,
     frame: FrameNodeId,
-    entries: HashSet<EntryId>,
+    graph: crate::SessionGraph,
     decoders: TranscriptDecoders,
 }
 
@@ -96,18 +96,6 @@ impl CommitBase {
     /// on; `None` for a runtime with no store, which commits nothing.
     pub(in crate::runtime) fn of(runtime: &LashRuntime) -> Option<Self> {
         let store = runtime.services.store.clone()?;
-        let decoders = runtime.services.plugins.transcript_decoders();
-        let entries = crate::SessionReadView::recorded_from_runtime_state(&runtime.state)
-            .with_transcript_decoders(decoders.clone())
-            .transcript()
-            .map(|transcript| {
-                transcript
-                    .into_entries()
-                    .into_iter()
-                    .map(|entry| entry.entry_id)
-                    .collect()
-            })
-            .unwrap_or_default();
         Some(Self {
             session: runtime.session_id().clone(),
             store,
@@ -117,8 +105,8 @@ impl CommitBase {
                 .current_frame_node_id
                 .clone()
                 .unwrap_or_else(|| runtime.state.initial_frame_node_id()),
-            entries,
-            decoders,
+            graph: runtime.state.session_graph.clone(),
+            decoders: runtime.services.plugins.transcript_decoders(),
         })
     }
 
@@ -149,17 +137,13 @@ impl CommitBase {
         if revision <= self.revision {
             return;
         }
-        let entries = crate::SessionReadView::recorded_from_runtime_state(&loaded.state)
-            .with_transcript_decoders(self.decoders.clone())
-            .transcript()
-            .map(|transcript| {
-                transcript
-                    .into_entries()
-                    .into_iter()
-                    .filter(|entry| !self.entries.contains(&entry.entry_id))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let entries = SessionTranscript::added_since(
+            &self.graph,
+            &loaded.state.session_graph,
+            &self.decoders,
+        )
+        .map(SessionTranscript::into_entries)
+        .unwrap_or_default();
         let mut drafts = Vec::with_capacity(2);
         if let Some(frame_id) = loaded.state.current_frame_node_id.clone()
             && frame_id != self.frame

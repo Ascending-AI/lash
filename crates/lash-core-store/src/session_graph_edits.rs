@@ -78,8 +78,11 @@ impl SessionGraph {
             && let Some(cache) = cache_lock.get_mut()
         {
             for (draft, derived, index) in renamed {
+                cache.node_ids.remove(&draft);
+                cache.node_ids.insert(derived.clone());
                 cache.by_id.rename(&draft, derived, index);
             }
+            cache.withdraw_proof();
         } else {
             self.invalidate_cache();
         }

@@ -1,6 +1,7 @@
 pub mod async_operations;
 pub mod dhat;
 pub mod git;
+pub mod instructions;
 pub mod memory;
 pub mod metrics;
 pub mod paths;

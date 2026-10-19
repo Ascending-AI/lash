@@ -262,9 +262,8 @@ pub fn admission_record(
             .map(|(hash, text)| PromptText {
                 hash: hash.as_str().to_owned(),
                 children: request_texts
-                    .binary_search_by(|(candidate, _)| candidate.cmp(hash))
-                    .ok()
-                    .map(|index| request_texts[index].1.children.clone())
+                    .get(hash.as_str())
+                    .map(|text| text.children.clone())
                     .unwrap_or_default(),
                 text: text.as_str().into(),
             })
@@ -277,14 +276,7 @@ pub fn admission_record(
             .transpose()?,
         request: serde_json::to_string(&request)?,
         snapshot_texts,
-        request_texts: request_texts
-            .into_iter()
-            .map(|(hash, fragment)| PromptText {
-                hash: hash.0,
-                text: fragment.text,
-                children: fragment.children,
-            })
-            .collect(),
+        request_texts,
         prefix,
     }))
 }

@@ -259,6 +259,54 @@ impl SessionTranscript {
         Self::fold(records, decoders, None)
     }
 
+    /// The entries of `head`'s active path whose nodes are not on `base`'s:
+    /// what a session holding `base` adds to its transcript to hold `head`,
+    /// exactly as decoding the whole of `head`'s path and dropping `base`'s
+    /// entries yields them. While `head`'s path still runs through `base`'s
+    /// leaf, only the nodes after it are decoded, and the nearest earlier
+    /// message that names its turn (FIG-6889).
+    pub fn added_since(
+        base: &crate::SessionGraph,
+        head: &crate::SessionGraph,
+        decoders: &TranscriptDecoders,
+    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+        use crate::session_graph::facade_ops::SessionGraphFacadeOps;
+        let Some(base_leaf) = base.leaf_node_id.as_ref() else {
+            return Self::from_records(head.active_path_nodes(), decoders);
+        };
+        let mut path = head.active_path_from_leaf();
+        let mut after = Vec::new();
+        let base_node = loop {
+            let Some(node) = path.next() else {
+                let held = base
+                    .active_path_nodes()
+                    .into_iter()
+                    .map(|node| node.node_id.as_str())
+                    .collect::<std::collections::HashSet<_>>();
+                let mut transcript = Self::from_records(head.active_path_nodes(), decoders)?;
+                transcript
+                    .entries
+                    .retain(|entry| !held.contains(entry.entry_id.0.as_str()));
+                return Ok(transcript);
+            };
+            if node.node_id == *base_leaf {
+                break node;
+            }
+            after.push(node);
+        };
+        let current_turn =
+            std::iter::once(base_node)
+                .chain(path)
+                .find_map(|node| match &node.payload {
+                    SessionNodePayload::Event {
+                        event: SessionHistoryRecord::Conversation(record),
+                    } => message_turn(&record.to_message()),
+                    _ => None,
+                });
+        after.reverse();
+        Self::fold(after, decoders, current_turn)
+    }
+
     /// Fold `records` with `current_turn` as the turn a protocol event
     /// belongs to until a message names one.
     fn fold<'a>(
@@ -355,6 +403,20 @@ impl SessionTranscript {
         self.visible().find(|entry| {
             entry.provenance.is_turn_reply && entry.provenance.turn_id.as_ref() == Some(turn_id)
         })
+    }
+}
+
+/// The turn a message names, which every later protocol event belongs to
+/// until another message names one: its reply marker's, else its origin's.
+fn message_turn(message: &Message) -> Option<TurnId> {
+    if let Some(marker) = &message.reply_marker {
+        return Some(marker.turn_id().clone());
+    }
+    match message.origin.as_ref() {
+        Some(
+            MessageOrigin::TurnInput { turn_id, .. } | MessageOrigin::TurnOutput { turn_id, .. },
+        ) => Some(turn_id.clone()),
+        _ => None,
     }
 }
 

@@ -151,7 +151,7 @@ impl HeldTexts {
             else {
                 continue;
             };
-            for text in snapshot_texts.iter().chain(request_texts) {
+            for text in snapshot_texts.iter().chain(request_texts.iter()) {
                 if set.insert(text.hash.clone()) {
                     order.push_back(text.hash.clone());
                 }

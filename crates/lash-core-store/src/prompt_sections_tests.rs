@@ -117,12 +117,7 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
         let encoded = serde_json::to_value(&chunked).unwrap();
         assert!(encoded.get("stream").is_none());
         let mut decoded: ChunkedRequestTemplate = serde_json::from_value(encoded).unwrap();
-        let read = |reference: &BlobRef| {
-            texts
-                .iter()
-                .find(|(blob, _)| blob == reference)
-                .map(|(_, text)| &*text.text)
-        };
+        let read = |reference: &BlobRef| texts.get(reference.as_str()).map(|text| &*text.text);
         let assembled = decoded.assemble(read).unwrap();
         assert_eq!(assembled, template);
         let live = LiveRequestBody::fill(std::sync::Arc::new(assembled), vec![]).unwrap();
@@ -164,10 +159,10 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
             let (index, texts) = ChunkedRequestTemplate::chunk(&template);
             let fresh: Vec<_> = texts
                 .iter()
-                .filter(|(hash, _)| !held.contains(hash))
+                .filter(|text| !held.contains(&text.hash))
                 .collect();
             let logarithm = (ordinal + 1usize).ilog2() as usize + 1;
-            let submitted = fresh.iter().map(|(_, text)| text.text.len()).sum::<usize>();
+            let submitted = fresh.iter().map(|text| text.text.len()).sum::<usize>();
             assert!(
                 submitted <= 8192 + 4096 * logarithm,
                 "call {ordinal} submitted {submitted} bytes for one new message"
@@ -177,14 +172,9 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
                 metadata <= 1024,
                 "call {ordinal} relisted {metadata} bytes of fragment index"
             );
-            let read = |reference: &BlobRef| {
-                texts
-                    .iter()
-                    .find(|(hash, _)| hash == reference)
-                    .map(|(_, text)| &*text.text)
-            };
+            let read = |reference: &BlobRef| texts.get(reference.as_str()).map(|text| &*text.text);
             assert_eq!(index.assemble(read).unwrap(), template);
-            held.extend(texts.into_iter().map(|(hash, _)| hash));
+            held.extend(texts.iter().map(|text| text.hash.clone()));
         }
     }
 }
@@ -267,17 +257,18 @@ fn carried_prefix_matches_rebuild_across_appends_compaction_and_cache_break() {
             serde_json::to_vec(&rebuilt).unwrap(),
             "fragment and tree identities at step {step}"
         );
-        let bodies = |texts: Vec<(BlobRef, EncodedRequestFragment)>| {
-            texts
+        let rebuilt_texts = RequestTexts::from_texts(
+            rebuilt_texts
                 .into_iter()
-                .map(|(hash, body)| (hash, (body.text, body.children)))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        };
-        let texts = bodies(texts);
-        assert_eq!(texts, bodies(rebuilt_texts), "active forest at step {step}");
+                .map(|(_, text)| text.as_ref().clone()),
+        );
+        assert_eq!(texts, rebuilt_texts, "active forest at step {step}");
+        // The carried prefix tree's root is the forest's only root: what a
+        // full pass over the forest finds (FIG-6889).
+        assert_eq!(texts.roots(), rebuilt_texts.roots(), "roots at step {step}");
         assert_eq!(
             carried
-                .assemble(|hash| texts.get(hash).map(|(text, _)| text.as_ref()))
+                .assemble(|hash| texts.get(hash.as_str()).map(|text| text.text.as_ref()))
                 .unwrap(),
             template
         );
@@ -289,7 +280,7 @@ fn rebuild_fragments(
     template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
 ) -> (
     ChunkedRequestTemplate,
-    Vec<(BlobRef, EncodedRequestFragment)>,
+    Vec<(BlobRef, std::sync::Arc<PromptText>)>,
 ) {
     let mut leaves: Vec<Leaf> = Vec::new();
     let mut envelope = TextChunker::new(true);

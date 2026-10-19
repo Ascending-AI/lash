@@ -312,7 +312,11 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             snapshot: Some(format!("snapshot of call {ordinal}")),
             request: format!("request of call {ordinal}"),
             snapshot_texts: snapshot.iter().map(|name| text(name)).collect(),
-            request_texts: request.iter().map(|name| text(name)).collect(),
+            request_texts: request
+                .iter()
+                .map(|name| text(name))
+                .collect::<Vec<_>>()
+                .into(),
             prefix: None,
         })
     };
@@ -904,7 +908,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             snapshot: None,
             request: run.to_owned(),
             snapshot_texts: Vec::new(),
-            request_texts,
+            request_texts: request_texts.into(),
             prefix: None,
         }));
     }
@@ -996,7 +1000,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
         snapshot: None,
         request: "batch read".to_owned(),
         snapshot_texts: Vec::new(),
-        request_texts: texts.clone(),
+        request_texts: texts.clone().into(),
         prefix: None,
     }));
     store

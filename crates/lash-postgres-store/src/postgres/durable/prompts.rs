@@ -27,7 +27,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{
     DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
-    request_roots,
+    RequestTexts,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_protocol_types::{SessionId, TurnId};
@@ -336,7 +336,7 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
         || matches!(&call.call, ModelCallId::Turn { .. })
         || snapshot_texts
             .iter()
-            .chain(request_texts)
+            .chain(request_texts.iter())
             .any(|text| !text.children.is_empty())
     {
         return None;
@@ -354,7 +354,7 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     )];
     // The first text under each address stands for it.
     let mut distinct = BTreeMap::new();
-    for text in snapshot_texts.iter().chain(request_texts) {
+    for text in snapshot_texts.iter().chain(request_texts.iter()) {
         distinct.entry(text.hash.as_str()).or_insert(&*text.text);
     }
     if distinct.is_empty() {
@@ -430,15 +430,19 @@ pub(super) async fn apply(
                     call: call.clone(),
                 }));
             }
-            let distinct: BTreeMap<_, _> = snapshot_texts
+            let snapshot_by_hash: BTreeMap<_, _> = snapshot_texts
                 .iter()
-                .chain(request_texts)
                 .map(|text| (text.hash.as_str(), text))
                 .collect();
+            let text = |hash: &str| {
+                request_texts
+                    .get(hash)
+                    .or_else(|| snapshot_by_hash.get(hash).copied())
+            };
             let mut frontier: BTreeSet<&str> = snapshot_texts
                 .iter()
                 .map(|text| text.hash.as_str())
-                .chain(request_roots(request_texts))
+                .chain(request_texts.roots().iter().map(String::as_str))
                 .chain(prefix.as_deref())
                 .collect();
             let mut unheld = BTreeMap::new();
@@ -467,7 +471,7 @@ pub(super) async fn apply(
                     if held.contains(hash) || unheld.contains_key(hash) {
                         continue;
                     }
-                    let Some(text) = distinct.get(hash) else {
+                    let Some(text) = text(hash) else {
                         return Err(DurableError::Domain(DomainRefusal::PromptFragmentMissing {
                             hash: hash.to_owned(),
                         }));
@@ -552,15 +556,16 @@ pub(super) async fn apply(
 /// `request_texts`.
 fn edges<'a>(
     snapshot_texts: &'a [PromptText],
-    request_texts: &'a [PromptText],
+    request_texts: &'a RequestTexts,
 ) -> BTreeSet<(&'static str, &'a str)> {
-    let part =
-        |part, texts: &'a [PromptText]| texts.iter().map(move |text| (part, text.hash.as_str()));
-    part(SNAPSHOT_PART, snapshot_texts)
+    snapshot_texts
+        .iter()
+        .map(|text| (SNAPSHOT_PART, text.hash.as_str()))
         .chain(
-            request_roots(request_texts)
-                .into_iter()
-                .map(|hash| (REQUEST_PART, hash)),
+            request_texts
+                .roots()
+                .iter()
+                .map(|hash| (REQUEST_PART, hash.as_str())),
         )
         .collect()
 }
@@ -782,7 +787,7 @@ mod tests {
                 snapshot: Some(format!("audit-{ordinal}")),
                 request: format!("exact-request-{ordinal}"),
                 snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
-                request_texts: vec![text("request"), text("prefix")],
+                request_texts: vec![text("request"), text("prefix")].into(),
                 prefix: Some("prefix".to_owned()),
             }));
         }
@@ -1014,7 +1019,7 @@ mod tests {
             snapshot: None,
             request: "changed".to_owned(),
             snapshot_texts: Vec::new(),
-            request_texts: Vec::new(),
+            request_texts: Default::default(),
             prefix: None,
         }));
         assert!(matches!(

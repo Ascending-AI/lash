@@ -16,6 +16,7 @@
 //! the retired live-report grace is no longer part of the measured engine.
 
 mod chat_loop;
+pub mod history;
 mod loop_spans;
 mod provider;
 pub(crate) mod runner;

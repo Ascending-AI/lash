@@ -463,7 +463,7 @@ fn prompt_admission_never_decodes_fresh_fragments() {
             snapshot,
             request,
             texts(snapshot_texts),
-            texts(request_texts),
+            texts(request_texts.iter().cloned().collect()),
             prefix,
         ))
         .unwrap();

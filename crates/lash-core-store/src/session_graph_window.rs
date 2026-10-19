@@ -128,7 +128,7 @@ impl SessionGraph {
     /// parent's frame cannot be resolved from the graph.
     pub(crate) fn retire_below_current_frame(
         &mut self,
-        durable: &HashSet<NodeId>,
+        durable: &crate::PersistedNodeIds,
     ) -> Option<Vec<NodeId>> {
         let path = crate::facade_support::SessionGraphFacadeOps::active_path_nodes(self);
         let frame_offset = path.iter().rposition(|node| node.frame_open().is_some())?;

@@ -55,10 +55,11 @@ impl RecordedFrameSwitch {}
 
 #[derive(Clone, Debug)]
 struct TurnGraphAppendDraftInner {
-    /// Node ids on the resident active path when the turn began, plus every
-    /// node minted by a recorded append: the set an ancestor requirement is
-    /// resolved against.
-    active_node_ids: HashSet<crate::NodeId>,
+    /// The resident graph when the turn began, whose active path an
+    /// ancestor requirement resolves against, together with `minted`.
+    base: crate::SessionGraph,
+    /// Every node minted by a recorded append.
+    minted: HashSet<crate::NodeId>,
     leaf_node_id: Option<crate::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
     /// The turn's one frame switch (FIG-3303): its own switch outcome.
@@ -92,16 +93,10 @@ impl TurnGraphAppendDraft {
         state: &RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
-        use crate::facade_support::SessionGraphFacadeOps;
-        let active_node_ids = state
-            .session_graph
-            .active_path_nodes()
-            .into_iter()
-            .map(|node| node.node_id.clone())
-            .collect();
         Self {
             inner: Arc::new(StdMutex::new(TurnGraphAppendDraftInner {
-                active_node_ids,
+                base: state.session_graph.clone(),
+                minted: HashSet::new(),
                 leaf_node_id: state.session_graph.leaf_node_id.clone(),
                 recorded: Vec::new(),
                 frame_switch: None,
@@ -165,7 +160,8 @@ impl TurnGraphAppendDraft {
             });
         }
         if let Some(required_node_id) = request.requires_ancestor_node_id.as_ref()
-            && !inner.active_node_ids.contains(required_node_id)
+            && !inner.minted.contains(required_node_id)
+            && !inner.base.active_path_contains(required_node_id)
         {
             return Ok(crate::AppendSessionNodesOutcome::StaleBranch {
                 required_node_id: required_node_id.clone(),
@@ -177,7 +173,7 @@ impl TurnGraphAppendDraft {
         if let Some(leaf) = node_ids.last() {
             inner.leaf_node_id = Some(leaf.clone());
         }
-        inner.active_node_ids.extend(node_ids.iter().cloned());
+        inner.minted.extend(node_ids.iter().cloned());
         let outcome = crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: inner.leaf_node_id.clone(),

@@ -666,7 +666,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             request: format!("request of call {}", call.call),
             call,
             snapshot_texts: hashes.iter().map(|hash| text(hash)).collect(),
-            request_texts: Vec::new(),
+            request_texts: Default::default(),
             prefix: None,
         })
     };

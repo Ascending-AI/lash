@@ -788,7 +788,7 @@ impl TurnDrive for L3Drive {
                         snapshot: None,
                         request: r#"{"left_by_another_build":true}"#.to_owned(),
                         snapshot_texts: Vec::new(),
-                        request_texts: Vec::new(),
+                        request_texts: Default::default(),
                         prefix: None,
                     }));
                 }

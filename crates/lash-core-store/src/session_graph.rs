@@ -24,9 +24,7 @@ use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
 use crate::session_graph_cache::{NodeIdIndex, SessionGraphCache};
-use crate::session_graph_integrity::{
-    ancestry_indices, graph_node_indices, validate_graph_parent_topology,
-};
+use crate::session_graph_integrity::graph_node_indices;
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, ClockWallTime, LlmUsage, Message};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
@@ -956,18 +954,34 @@ impl SessionGraph {
         self.validate_structural_integrity()
     }
 
+    /// The full check runs once per graph lineage: a graph that passed it
+    /// keeps the proof across appends that keep it (FIG-6889), so a store
+    /// window extended by a turn's rows is not walked again.
     fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
-        let by_id = graph_node_indices(self)?;
-        if let Some(anchor) = self.anchor()
-            && !by_id.contains_key(anchor.base_node_id().as_str())
-        {
-            return Err(crate::StoreError::InvalidWindowAnchor {
-                frame_node_id: anchor.base_node_id().clone(),
-                violation: crate::store::WindowAnchorViolation::BaseIsNotLeafFrame,
-            });
+        if let Some(cache) = self.cache.get() {
+            if !cache.proven() {
+                crate::session_graph_integrity::validate_structure(self)?;
+                cache.prove();
+            }
+            return Ok(());
         }
-        ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
-        validate_graph_parent_topology(self, &by_id)
+        let _ = self.cache.set(SessionGraphCache::build_validated(self)?);
+        Ok(())
+    }
+
+    /// The active path's nodes from the leaf toward the root.
+    pub(crate) fn active_path_from_leaf(&self) -> impl Iterator<Item = &SessionNodeRecord> {
+        self.cache()
+            .active_path_indices
+            .iter()
+            .rev()
+            .map(|index| self.nodes[*index].as_ref())
+    }
+
+    /// Every resident node id, as the graph's cache keeps it: what a state
+    /// adopting this graph as its durable window knows persisted.
+    pub(crate) fn try_node_ids(&self) -> Result<crate::PersistedNodeIds, crate::StoreError> {
+        Ok(self.try_cache()?.node_ids.clone())
     }
 
     pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {
@@ -1073,6 +1087,17 @@ impl SessionGraph {
             let data = &mut Arc::make_mut(&mut self.inner).data;
             for node in nodes {
                 let extends_leaf = node.parent_node_id == data.leaf_node_id;
+                if cache.proven()
+                    && !cache.append_keeps_proof(
+                        &node.node_id,
+                        node.parent_node_id.as_ref(),
+                        data.anchor
+                            .as_ref()
+                            .and_then(|anchor| anchor.external_parent.as_ref()),
+                    )
+                {
+                    cache.withdraw_proof();
+                }
                 let node_id = node.node_id.clone();
                 data.nodes.push(Arc::new(node));
                 cache.append_node(

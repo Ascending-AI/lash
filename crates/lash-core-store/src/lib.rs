@@ -41,6 +41,7 @@ pub mod input_normalization;
 pub mod message_projection;
 pub mod obligations;
 mod persisted_node_ids;
+mod persistent_map;
 pub mod plugin_state;
 pub mod process_env;
 pub mod process_identity;
@@ -52,6 +53,8 @@ pub mod run_spec;
 pub mod runtime_owner;
 pub mod scope_identity;
 pub use runtime_owner::RuntimeOwner;
+#[cfg(test)]
+mod history_growth_law;
 mod persisted_session_config;
 pub mod runtime_error;
 #[cfg(test)]
@@ -69,7 +72,6 @@ pub mod session_read_view;
 pub use persisted_node_ids::PersistedNodeIds;
 pub mod session_state;
 pub mod session_store_factory_types;
-mod snapshot_index;
 pub mod store;
 pub mod store_failure;
 pub mod tool_run;

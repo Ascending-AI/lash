@@ -62,7 +62,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
             snapshot: Some(format!("snapshot of {run}")),
             request: format!("request of {run}"),
             snapshot_texts: names.iter().map(|name| text(name)).collect(),
-            request_texts: Vec::new(),
+            request_texts: Default::default(),
             prefix: None,
         })
     };
@@ -267,7 +267,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
             snapshot,
             request: format!("request of {}", call.call),
             snapshot_texts,
-            request_texts,
+            request_texts: request_texts.into(),
             prefix: None,
         }));
         store.commit(tx, LABEL).await?;
@@ -342,7 +342,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
             snapshot: (!snapshot.is_empty()).then(|| format!("snapshot of {}", key.call)),
             request: format!("request of {}", key.call),
             snapshot_texts: names(snapshot),
-            request_texts: names(request),
+            request_texts: names(request).into(),
             prefix: None,
             call: key,
         })

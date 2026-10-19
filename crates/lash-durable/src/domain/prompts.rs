@@ -84,19 +84,9 @@ impl std::fmt::Display for ModelCallId {
     }
 }
 
-/// One stored text (a section text, or a chunk of a body or contract),
-/// under the content address its owner computed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PromptText {
-    /// The text's content address.
-    pub hash: String,
-    /// The exact UTF-8 text, shared with its writer: a request's history
-    /// fragments are encoded once and handed to every admission that holds
-    /// them without a copy.
-    pub text: std::sync::Arc<str>,
-    /// Outgoing index edges; empty for section text and literal leaves.
-    pub children: Vec<String>,
-}
+/// One stored text, and a request's texts under the roots its record holds
+/// edges to.
+pub use lash_core_store::prompt_sections::{PromptText, RequestTexts};
 
 /// One call's root, as its admission recorded it, while it is retained.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,8 +126,8 @@ pub enum PromptWrite {
         request: String,
         /// Every distinct text the snapshot references.
         snapshot_texts: Vec<PromptText>,
-        /// Every distinct text the request references.
-        request_texts: Vec<PromptText>,
+        /// The request's root texts and every text under them.
+        request_texts: RequestTexts,
         /// The session-owned lowered history prefix, replaced atomically.
         prefix: Option<String>,
     },
@@ -169,18 +159,4 @@ pub enum PromptWrite {
         /// The one turn released, or `None` for every turn of the session.
         run: Option<TurnId>,
     },
-}
-
-/// The roots of a supplied fragment forest. Children are owned by immutable
-/// nodes, rather than relisted as call-to-text edges on every admission.
-pub fn request_roots(texts: &[PromptText]) -> std::collections::BTreeSet<&str> {
-    let children: std::collections::BTreeSet<_> = texts
-        .iter()
-        .flat_map(|text| text.children.iter().map(String::as_str))
-        .collect();
-    texts
-        .iter()
-        .map(|text| text.hash.as_str())
-        .filter(|hash| !children.contains(hash))
-        .collect()
 }

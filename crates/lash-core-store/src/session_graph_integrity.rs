@@ -13,6 +13,27 @@ use std::collections::{HashMap, HashSet};
 use crate::NodeId;
 use crate::session_graph::SessionGraph;
 
+/// The full structural-integrity check: unique ids, the anchor's base
+/// resident, an acyclic ancestry from a resolvable leaf, and a parent
+/// topology with no dangling edge but the anchor's. Answers the id index
+/// and the leaf's ancestry, leaf first, for the graph's cache.
+pub(crate) fn validate_structure(
+    graph: &SessionGraph,
+) -> Result<(HashMap<NodeId, usize>, Vec<usize>), crate::StoreError> {
+    let by_id = graph_node_indices(graph)?;
+    if let Some(anchor) = graph.anchor()
+        && !by_id.contains_key(anchor.base_node_id().as_str())
+    {
+        return Err(crate::StoreError::InvalidWindowAnchor {
+            frame_node_id: anchor.base_node_id().clone(),
+            violation: crate::store::WindowAnchorViolation::BaseIsNotLeafFrame,
+        });
+    }
+    let path = ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
+    validate_graph_parent_topology(graph, &by_id)?;
+    Ok((by_id, path))
+}
+
 pub fn graph_node_indices(
     graph: &SessionGraph,
 ) -> Result<HashMap<NodeId, usize>, crate::StoreError> {

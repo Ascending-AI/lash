@@ -130,9 +130,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         turn_events: Vec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
+        // The resident graph the turn's input was appended to wrote the
+        // same records past the window into the shared buffer: adopting
+        // them keeps the window's history uncopied (FIG-6889).
         let mut events = window.events().clone();
         for event in turn_events {
-            events.push(event);
+            events.push_adopting(event, lash_protocol_types::same_history_record);
         }
         let mut machine = Self::new_shared(config, messages, events, protocol_run_offset);
         machine.window = Some(window);

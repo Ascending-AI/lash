@@ -1,35 +1,37 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
+use crate::persistent_map::PersistentMap;
 use crate::session_graph::facade_ops::SessionNodeProjection;
 use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, SessionReadModel};
-use crate::session_graph_integrity::{ancestry_indices, graph_node_indices};
+use crate::session_graph_integrity::{ancestry_indices, graph_node_indices, validate_structure};
 use crate::session_model::SessionHistoryRecord;
-use crate::snapshot_index::SnapshotIndex;
-use crate::{BaseRenderCache, Message, NodeId};
+use crate::{BaseRenderCache, Message, NodeId, PersistedNodeIds};
 use lash_protocol_types::{AppendVec, same_history_record, same_message};
 
+/// Every resident node's position by id. Persistent: every snapshot of the
+/// graph shares it, and the store's window and each runtime that adopted it
+/// extend their copies independently without copying it (FIG-6889).
 #[derive(Clone, Debug)]
-pub(crate) struct NodeIdIndex(SnapshotIndex<NodeId, Option<usize>>);
+pub(crate) struct NodeIdIndex(PersistentMap<NodeId, usize>);
 
 impl NodeIdIndex {
     fn from_resident(by_id: HashMap<NodeId, usize>) -> Self {
-        Self(SnapshotIndex::from_entries(
-            by_id.into_iter().map(|(id, index)| (id, Some(index))),
-        ))
+        Self(by_id.into_iter().collect())
     }
 
     pub(crate) fn get(&self, node_id: &str) -> Option<usize> {
-        self.0.get(node_id).flatten()
+        self.0.get(node_id).copied()
     }
 
     fn insert(&mut self, node_id: NodeId, index: usize) {
-        self.0.insert(node_id, Some(index));
+        self.0.insert(node_id, index);
     }
 
     pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
-        self.0.insert(from.clone(), None);
-        self.0.insert(to, Some(index));
+        self.0.remove(from.as_str());
+        self.0.insert(to, index);
     }
 }
 
@@ -57,9 +59,16 @@ pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
     pub(crate) active_path_indices: AppendVec<usize>,
     pub(crate) active_frame_indices: AppendVec<usize>,
-    /// Every child edge, as one write of the child's position under its
-    /// parent's.
-    children: SnapshotIndex<usize, usize>,
+    /// Every child edge: each parent's children's positions, in append
+    /// order.
+    children: PersistentMap<usize, Vec<usize>>,
+    /// Every resident node id, shared with each state that adopts this
+    /// graph as its durable window (FIG-6889).
+    pub(crate) node_ids: PersistedNodeIds,
+    /// The graph passed the full structural-integrity check, and every
+    /// append since kept it (FIG-6889): an append whose id is fresh and
+    /// whose parent is resident keeps it, any other edit withdraws it.
+    proven: AtomicBool,
     /// The one memoized projection, of the active path from its last
     /// `FrameOpen` (ADR 0112 §9).
     ///
@@ -81,6 +90,8 @@ impl Clone for SessionGraphCache {
             active_path_indices: self.active_path_indices.clone(),
             active_frame_indices: self.active_frame_indices.clone(),
             children: self.children.clone(),
+            node_ids: self.node_ids.clone(),
+            proven: AtomicBool::new(self.proven()),
             active_read: StdMutex::new(
                 self.active_read
                     .lock()
@@ -94,8 +105,23 @@ impl Clone for SessionGraphCache {
 impl SessionGraphCache {
     pub(crate) fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
         let by_id = graph_node_indices(graph)?;
-        let mut active_path_indices =
-            ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
+        let active_path_indices = ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
+        Ok(Self::from_indices(graph, by_id, active_path_indices, false))
+    }
+
+    /// The cache of a graph that passes the full structural-integrity check
+    /// ([`validate_structure`]), holding the proof.
+    pub(crate) fn build_validated(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
+        let (by_id, active_path_indices) = validate_structure(graph)?;
+        Ok(Self::from_indices(graph, by_id, active_path_indices, true))
+    }
+
+    fn from_indices(
+        graph: &SessionGraph,
+        by_id: HashMap<NodeId, usize>,
+        mut active_path_indices: Vec<usize>,
+        proven: bool,
+    ) -> Self {
         active_path_indices.reverse();
 
         let active_frame_indices = active_path_indices
@@ -108,16 +134,22 @@ impl SessionGraphCache {
                 )
             })
             .collect::<Vec<_>>();
-        let children = graph.nodes.iter().enumerate().filter_map(|(index, node)| {
-            let parent = node.parent_node_id.as_ref().and_then(|id| by_id.get(id))?;
-            Some((*parent, index))
-        });
-        let children = SnapshotIndex::from_entries(children);
+        let mut children = PersistentMap::default();
+        for (index, node) in graph.nodes.iter().enumerate() {
+            if let Some(parent) = node.parent_node_id.as_ref().and_then(|id| by_id.get(id)) {
+                children.upsert(*parent, vec![index], |held: &mut Vec<usize>, _| {
+                    held.push(index);
+                });
+            }
+        }
+        let node_ids = by_id.keys().cloned().collect();
         let mut cache = Self {
             by_id: NodeIdIndex::from_resident(by_id),
             active_path_indices: AppendVec::from(active_path_indices),
             active_frame_indices: AppendVec::from(active_frame_indices),
             children,
+            node_ids,
+            proven: AtomicBool::new(proven),
             active_read: StdMutex::new(ActiveReadModel {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
@@ -127,7 +159,38 @@ impl SessionGraphCache {
             }),
         };
         cache.rebuild_read_model(graph);
-        Ok(cache)
+        cache
+    }
+
+    /// Whether the graph holds the structural-integrity proof.
+    pub(crate) fn proven(&self) -> bool {
+        self.proven.load(Ordering::Acquire)
+    }
+
+    /// Record that the graph just passed the full check.
+    pub(crate) fn prove(&self) {
+        self.proven.store(true, Ordering::Release);
+    }
+
+    /// Withdraw the proof: the next check runs in full.
+    pub(crate) fn withdraw_proof(&mut self) {
+        *self.proven.get_mut() = false;
+    }
+
+    /// Whether appending a node with `node_id` under `parent` keeps the
+    /// proof. The id must be fresh and the parent resident (or absent, a
+    /// new root), and the id must not be the anchor's external parent, the
+    /// one edge a proven graph leaves dangling: then no resident node names
+    /// the new one, so no cycle or dangling edge can form.
+    pub(crate) fn append_keeps_proof(
+        &self,
+        node_id: &NodeId,
+        parent: Option<&NodeId>,
+        external_parent: Option<&NodeId>,
+    ) -> bool {
+        self.by_id.get(node_id).is_none()
+            && parent.is_none_or(|parent| self.by_id.get(parent).is_some())
+            && external_parent != Some(node_id)
     }
 
     pub(crate) fn rebuild_read_model(&mut self, graph: &SessionGraph) {
@@ -207,7 +270,8 @@ impl SessionGraphCache {
             .active_read
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(index) = read.active_events.iter().position(|existing| matches!(
+        // The marked reply is one of the newest records (FIG-6889).
+        if let Some(index) = read.active_events.iter().rposition(|existing| matches!(
             existing, SessionHistoryRecord::Conversation(existing) if existing.id == conversation.id
         )) {
             let mut tail = read.active_events[index..].to_vec();
@@ -217,7 +281,7 @@ impl SessionGraphCache {
         if let Some(index) = read
             .active_messages
             .iter()
-            .position(|existing| existing.id == message.id)
+            .rposition(|existing| existing.id == message.id)
         {
             let mut tail = read.active_messages[index..].to_vec();
             tail[0] = message.clone();
@@ -247,9 +311,13 @@ impl SessionGraphCache {
             .as_deref()
             .and_then(|id| self.by_id.get(id))
         {
-            self.children.insert(parent_index, node_index);
+            self.children
+                .upsert(parent_index, vec![node_index], |held, _| {
+                    held.push(node_index)
+                });
         }
         self.by_id.insert(node.node_id.clone(), node_index);
+        self.node_ids.insert(node.node_id.clone());
         if !extends_leaf {
             return;
         }
@@ -283,7 +351,7 @@ impl SessionGraphCache {
     }
 
     pub(crate) fn children_of(&self, node_index: usize) -> Vec<usize> {
-        self.children.all(&node_index)
+        self.children.get(&node_index).cloned().unwrap_or_default()
     }
 
     pub(crate) fn reserve_append_capacity(
@@ -299,37 +367,5 @@ impl SessionGraphCache {
                 .pending_messages
                 .reserve(additional_messages);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn index_snapshots_keep_their_version_across_appends_and_renames() {
-        let mut index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
-        let initial = index.clone();
-        for ordinal in 1..2000 {
-            let draft = NodeId::fixture(format!("draft-{ordinal}"));
-            index.insert(draft.clone(), ordinal);
-            let before_rename = index.clone();
-            index.rename(
-                &draft,
-                NodeId::fixture(format!("derived-{ordinal}")),
-                ordinal,
-            );
-            assert_eq!(before_rename.get(draft.as_str()), Some(ordinal));
-            assert_eq!(before_rename.get(&format!("derived-{ordinal}")), None);
-        }
-        assert!(
-            initial.0.shares_writes_with(&index.0),
-            "advancing commits never copy the base"
-        );
-        assert_eq!(initial.get("root"), Some(0));
-        assert_eq!(initial.get("derived-1"), None);
-        assert_eq!(index.get("draft-1"), None);
-        assert_eq!(index.get("derived-1"), Some(1));
-        assert_eq!(index.get("derived-1999"), Some(1999));
     }
 }

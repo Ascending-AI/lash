@@ -903,6 +903,7 @@ impl LiveReplaySessionBuffer {
         self.events.push_back(StoredObservationEvent {
             retained_bytes,
             position,
+            revision: event.revision(),
             appended_at: now,
             event: clone_event(event),
         });
@@ -954,6 +955,9 @@ impl LiveReplaySessionBuffer {
 struct StoredObservationEvent {
     retained_bytes: usize,
     position: u64,
+    /// The revision the event's cursor names, read once at append: a
+    /// cursor lookup compares it for every retained event (FIG-6889).
+    revision: SessionRevision,
     appended_at: Instant,
     event: Arc<SessionObservationEvent>,
 }
@@ -1275,7 +1279,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 let live_position = buffer
                     .events
                     .iter()
-                    .find(|stored| stored.event.revision() > revision)
+                    .find(|stored| stored.revision > revision)
                     .map_or(buffer.tail_position, |stored| {
                         stored.position.saturating_sub(1)
                     });
