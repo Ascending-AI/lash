@@ -283,7 +283,8 @@ mod tools;
 mod tests;
 
 pub(crate) use profiles::benchmark_stream_profile;
-use profiles::{benchmark_stream_profile_for_request, latest_request_item_contains};
+use profiles::benchmark_stream_profile_for_request;
+pub(crate) use profiles::latest_request_item_contains;
 pub(crate) use tools::{
     BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkToolCatalogObservation,
     BenchmarkToolCatalogObserver,

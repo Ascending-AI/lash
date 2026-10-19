@@ -15,6 +15,8 @@
 //! remote terminal wait. The historical `grace` name remains a CLI case;
 //! the retired live-report grace is no longer part of the measured engine.
 
+mod chat_loop;
+mod loop_spans;
 mod provider;
 pub(crate) mod runner;
 pub mod startup;
@@ -53,9 +55,10 @@ impl FollowerMode {
     }
 }
 
-/// Serve a durable node in the latency instrument's child process until stdin closes.
-pub async fn run_worker(store_dir: &std::path::Path) -> anyhow::Result<()> {
-    runner::run_worker(store_dir).await
+/// Serve a durable node in the latency instrument's child process until
+/// stdin closes, answering with the named provider fixture (`text`, `tool`).
+pub async fn run_worker(store_dir: &std::path::Path, provider: &str) -> anyhow::Result<()> {
+    runner::run_worker(store_dir, LatencyProviderKind::from_cli_name(provider)?).await
 }
 
 /// The gate's budget, fixed before measurement (FIG-3843): same-process,
@@ -66,6 +69,9 @@ pub const GATE_OVERHEAD_P99_MS: f64 = 250.0;
 pub const GATE_MIN_SAMPLES: usize = 10_000;
 /// The case the budget binds.
 pub const GATE_CASE: &str = "fast";
+/// Cases that run only when named: `cell` needs the kernel worker
+/// executable (`LASH_VM_WORKER`), which the gate recipe does not build.
+const ON_REQUEST_CASES: &[&str] = &["cell"];
 /// Why `--dhat-out` is refused by a build without the dhat allocator.
 const DHAT_FEATURE_ERROR: &str =
     "latency --dhat-out requires a lash-perf build with --features dhat-heap";
@@ -86,6 +92,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             // multiplies every phase). `busy` below owns the loaded variant.
             lanes: 16.min(lanes),
             busy: false,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "stream",
@@ -95,6 +102,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 500,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "tool",
@@ -104,6 +112,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 500,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "failure",
@@ -113,6 +122,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 200,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "busy",
@@ -122,6 +132,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 300,
             lanes,
             busy: true,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "provider-http",
@@ -131,6 +142,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 200,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         CaseSpec {
             name: "cross-worker",
@@ -140,6 +152,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 500,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         // Delay the terminal wait so the normal follow poll observes settlement.
         CaseSpec {
@@ -150,6 +163,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 300,
             lanes,
             busy: false,
+            fresh_sessions: false,
         },
         // Historical grace case: extend follow backoff while retaining binding
         // probes. The current follower has no live-report grace.
@@ -161,6 +175,62 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             samples: 16,
             lanes: 16,
             busy: false,
+            fresh_sessions: false,
+        },
+        // The chat-loop cases (FIG-6841): measured and reported, never gated.
+        // Every send opens a fresh session: the cold first turn.
+        CaseSpec {
+            name: "cold",
+            topology: Topology::SameProcess,
+            provider: LatencyProviderKind::Text,
+            follower: FollowerMode::Standard,
+            samples: 300,
+            lanes,
+            busy: false,
+            fresh_sessions: true,
+        },
+        // Deltas paced like a model's tokens: per-delta delivery to the host.
+        CaseSpec {
+            name: "delivery",
+            topology: Topology::SameProcess,
+            provider: LatencyProviderKind::Delivery,
+            follower: FollowerMode::Standard,
+            samples: 300,
+            lanes,
+            busy: false,
+            fresh_sessions: false,
+        },
+        // An RLM code cell whose kernel execution calls the tool.
+        CaseSpec {
+            name: "cell",
+            topology: Topology::SameProcess,
+            provider: LatencyProviderKind::Cell,
+            follower: FollowerMode::Standard,
+            samples: 300,
+            lanes,
+            busy: false,
+            fresh_sessions: false,
+        },
+        // A user message steered into the running turn.
+        CaseSpec {
+            name: "steer",
+            topology: Topology::SameProcess,
+            provider: LatencyProviderKind::Steer,
+            follower: FollowerMode::Standard,
+            samples: 300,
+            lanes,
+            busy: false,
+            fresh_sessions: false,
+        },
+        CaseSpec {
+            name: "cross-worker-tool",
+            topology: Topology::CrossWorker,
+            provider: LatencyProviderKind::Tool,
+            follower: FollowerMode::Standard,
+            samples: 300,
+            lanes,
+            busy: false,
+            fresh_sessions: false,
         },
     ]
 }
@@ -202,7 +272,9 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
             known.iter().copied().collect::<Vec<_>>().join(", ")
         );
     }
-    if !run.cases.is_empty() {
+    if run.cases.is_empty() {
+        specs.retain(|spec| !ON_REQUEST_CASES.contains(&spec.name));
+    } else {
         specs.retain(|spec| run.cases.iter().any(|name| name == spec.name));
     }
     if run.scale_down {
@@ -349,6 +421,9 @@ fn print_summary(report: &runner::LatencyReport) {
         row("provider ms", &phases.provider);
         row("overhead ms", &phases.overhead);
         row("poll-detect ms", &phases.poll_detect);
+        for (label, summary) in case.loop_ms.rows() {
+            row(label, &Some(summary.clone()));
+        }
         println!(
             "  lanes configured={} actual={}; baseline={}",
             case.lanes, case.actual_lanes, case.baseline

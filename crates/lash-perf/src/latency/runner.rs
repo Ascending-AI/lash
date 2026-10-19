@@ -19,6 +19,9 @@ use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 
 use super::FollowerMode;
+use super::loop_spans::{
+    HostEvent, LoopClocks, LoopShape, LoopSpans, LoopSummaries, SessionStamps, delta_ordinals,
+};
 use super::provider::{
     HoldRegistry, LaneHold, LatencyProviderKind, ProviderTiming, latency_provider,
 };
@@ -39,7 +42,7 @@ use crate::runtime_perf::providers::BenchmarkStreamProfile;
 const STORE_POLL_FLOOR: Duration = Duration::from_millis(2);
 pub(crate) const STORE_POLL_CEILING: Duration = Duration::from_millis(50);
 /// A sample's store poller gives up here; its marks stay `None`.
-const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The follower poll schedule the `poll_detect` phase simulates.
 const POLL_FLOOR_MS: f64 = 25.0;
 const POLL_CEILING_MS: f64 = 1_000.0;
@@ -67,6 +70,25 @@ pub(crate) struct CaseSpec {
     pub(crate) lanes: usize,
     /// Queue each measured input behind a held sibling run.
     pub(crate) busy: bool,
+    /// Open a fresh session for every sample: each send is a cold first turn.
+    pub(crate) fresh_sessions: bool,
+}
+
+impl CaseSpec {
+    /// The chat loop this case's samples run (FIG-6841).
+    pub(crate) fn loop_shape(&self) -> LoopShape {
+        if self.busy {
+            LoopShape::Held
+        } else if self.fresh_sessions {
+            LoopShape::Cold
+        } else {
+            match self.provider {
+                LatencyProviderKind::Steer => LoopShape::Steer,
+                LatencyProviderKind::Tool | LatencyProviderKind::Cell => LoopShape::ToolLoop,
+                _ => LoopShape::BackToBack,
+            }
+        }
+    }
 }
 
 /// Shared run environment: the store root.
@@ -153,6 +175,9 @@ pub(crate) struct Sample {
     pub(crate) process_rss_kb_at_end: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
+    /// The chat-loop clocks and the spans derived from them (FIG-6841).
+    pub(crate) loop_clocks: LoopClocks,
+    pub(crate) loop_spans: LoopSpans,
 }
 
 /// Absolute clocks use a shared host monotonic clock for intervals and Unix
@@ -160,13 +185,13 @@ pub(crate) struct Sample {
 /// admission; it is retained separately from durable acceptance.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SampleClocks {
-    request: Stamp,
+    pub(crate) request: Stamp,
     accepted: Option<Stamp>,
     acceptance_acknowledged: Stamp,
     admission: Option<Stamp>,
     terminal: Option<Stamp>,
     terminal_commit_returned: Option<Stamp>,
-    completion: Stamp,
+    pub(crate) completion: Stamp,
     first_activity: Option<Stamp>,
     first_visible: Option<Stamp>,
     first_delta: Option<Stamp>,
@@ -174,7 +199,7 @@ pub(crate) struct SampleClocks {
     terminal_observed: Option<Stamp>,
     host_first_activity: Option<Stamp>,
     host_first_visible: Option<Stamp>,
-    host_first_delta: Option<Stamp>,
+    pub(crate) host_first_delta: Option<Stamp>,
 }
 #[derive(Default)]
 pub(crate) struct PollMarks {
@@ -197,6 +222,7 @@ struct TimingSinkState {
     first_visible: Option<Stamp>,
     model_started_ms: Option<f64>,
     model_span_ms: f64,
+    host_events: Vec<HostEvent>,
 }
 
 impl TimingSink {
@@ -222,14 +248,30 @@ impl lash::TurnActivitySink for TimingSink {
         match activity.event {
             lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
                 kind: StreamBlockKind::AssistantText,
+                text,
                 ..
-            })
-            | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            }) => {
+                state.first_delta.get_or_insert(stamp);
+                state.first_visible.get_or_insert(stamp);
+                let ordinals = delta_ordinals(&text);
+                if !ordinals.is_empty() {
+                    state.host_events.push(HostEvent::Delta {
+                        at: stamp,
+                        ordinals,
+                    });
+                }
+            }
+            lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
                 kind: StreamBlockKind::Reasoning,
                 ..
             }) => {
                 state.first_delta.get_or_insert(stamp);
                 state.first_visible.get_or_insert(stamp);
+            }
+            lash_core::TurnEvent::CheckpointRecorded { .. } => {
+                state
+                    .host_events
+                    .push(HostEvent::CheckpointRecorded { at: stamp });
             }
             lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
             | lash_core::TurnEvent::ToolCallStarted { .. }
@@ -293,11 +335,12 @@ impl CaseTopology {
     /// only sends and follows.
     pub(crate) async fn cross_worker(
         stores_dir: &Path,
+        provider: LatencyProviderKind,
         follower: FollowerMode,
         dhat_out: Option<&Path>,
         dhat_frames: Option<usize>,
     ) -> Result<Self> {
-        let worker = start_worker(stores_dir, dhat_out, dhat_frames).await?;
+        let worker = start_worker(stores_dir, provider, dhat_out, dhat_frames).await?;
         let core = build_observer_with_mode(stores_dir, follower).await?;
         let observer = build_observer(stores_dir).await?;
         Ok(Self {
@@ -333,7 +376,8 @@ pub(crate) async fn run_case(
     let collector =
         Collector::install().map_err(|_| anyhow::anyhow!("latency witness already installed"))?;
     let timing = Arc::new(ProviderTiming::default());
-    let holds = spec.busy.then(|| Arc::new(HoldRegistry::default()));
+    let holds = (spec.busy || spec.provider == LatencyProviderKind::Steer)
+        .then(|| Arc::new(HoldRegistry::default()));
     let compat_server = if spec.provider == LatencyProviderKind::OpenAiCompat {
         Some(OpenAiCompatBenchServer::start(compat_profile()).await?)
     } else {
@@ -378,6 +422,7 @@ pub(crate) async fn run_case(
             });
             CaseTopology::cross_worker(
                 &case_dir.join("worker"),
+                spec.provider,
                 spec.follower,
                 child_profile.as_deref(),
                 env.dhat_frames,
@@ -431,6 +476,10 @@ pub(crate) async fn run_case(
         }
         witness.runs.extend(child.runs);
         witness.dropped_records += child.dropped_records;
+        let stamps: std::collections::HashMap<String, SessionStamps> = serde_json::from_slice(
+            &std::fs::read(case_dir.join("worker").join(LOOP_STAMPS_FILE))?,
+        )?;
+        timing.stamps.merge(stamps);
     }
     anyhow::ensure!(
         witness.dropped_records == 0,
@@ -440,6 +489,7 @@ pub(crate) async fn run_case(
     for sample in &mut samples {
         fill_engine_phases(sample, &witness)?;
     }
+    super::loop_spans::fill(spec.loop_shape(), &mut samples, &timing);
     let mut report = CaseReport::assemble(spec, &samples, errors, wall);
     report.actual_lanes = lane_count;
     report.sqlite_work = SqliteWork::assemble(workers, samples.len(), spec.busy);
@@ -475,19 +525,25 @@ pub(super) fn build_core(
         }
         lash::provider::ProviderHandle::new(compat.into_components())
     } else {
-        latency_provider(spec.provider, timing, holds).into_handle()
+        latency_provider(spec.provider, Arc::clone(&timing), holds).into_handle()
     };
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("latency_tools"),
         lash::plugins::PluginSpec::new().with_tool_provider(
             lash::tool_provider_key!("tools"),
-            Arc::new(crate::runtime_perf::providers::BenchmarkEchoTool::new(
-                effect_host.clone(),
+            Arc::new(super::chat_loop::StampedTools::new(
+                crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
+                timing,
             )),
         ),
     )));
-    lash::LashCore::standard_builder(backend)
+    let builder = if spec.provider == LatencyProviderKind::Cell {
+        lash::LashCore::rlm_builder(backend, super::chat_loop::cell_protocol()?)
+    } else {
+        lash::LashCore::standard_builder(backend)
+    };
+    builder
         .serve_sessions(spec.topology == Topology::SameProcess && spec.name != "observer")
         .observer_pacing(spec.follower.pacing()?)
         .serve_test_llm_profile(provider, latency_llm_profile_spec()?)
@@ -527,6 +583,7 @@ async fn build_observer_with_mode(
         samples: 0,
         lanes: 0,
         busy: false,
+        fresh_sessions: false,
     };
     build_core(
         backend,
@@ -627,6 +684,9 @@ async fn run_lane(
     timing: Arc<ProviderTiming>,
     holds: Option<Arc<HoldRegistry>>,
 ) -> Result<Vec<Sample>> {
+    if spec.fresh_sessions {
+        return super::chat_loop::cold_lane(spec, topology, lane, count, &timing).await;
+    }
     let session_id = SessionId::fixture(format!("latency-{}-{lane}", spec.name));
     let session = create_lane_session(topology, spec.topology, &session_id).await?;
     let poll_store = observer_poll_store(&topology.observer, &session_id).await?;
@@ -640,7 +700,13 @@ async fn run_lane(
     };
     let mut samples = Vec::with_capacity(count);
     for index in 0..count {
-        samples.push(run_sample(&ctx, lane, index, hold.as_deref()).await?);
+        let sample = match (&hold, spec.provider) {
+            (Some(hold), LatencyProviderKind::Steer) => {
+                super::chat_loop::steer_sample(&ctx, lane, index, hold).await?
+            }
+            _ => run_sample(&ctx, lane, index, hold.as_deref()).await?,
+        };
+        samples.push(sample);
     }
     // Teardown only: a close refusal leaves the quiesce wait below to finish
     // the shift; it must not cost the lane its measured samples.
@@ -649,12 +715,12 @@ async fn run_lane(
 }
 
 /// The immutable context every measured send in a lane shares.
-struct SampleCtx<'a> {
-    spec: &'a CaseSpec,
-    session: &'a LaneSession,
-    poll_store: &'a Arc<dyn lash::persistence::RuntimeStore>,
-    session_id: &'a SessionId,
-    timing: &'a Arc<ProviderTiming>,
+pub(crate) struct SampleCtx<'a> {
+    pub(crate) spec: &'a CaseSpec,
+    pub(crate) session: &'a LaneSession,
+    pub(crate) poll_store: &'a Arc<dyn lash::persistence::RuntimeStore>,
+    pub(crate) session_id: &'a SessionId,
+    pub(crate) timing: &'a Arc<ProviderTiming>,
 }
 
 /// One measured send. `busy` lanes first park a sibling input's provider
@@ -684,7 +750,7 @@ async fn run_sample(
     } else {
         None
     };
-    let sample = measure_send(ctx, lane, index, || {
+    let sample = measure_send(ctx, lane, index, None, LoopClocks::default(), || {
         if let Some((_, hold)) = &held {
             hold.release_one();
         }
@@ -698,25 +764,30 @@ async fn run_sample(
 
 /// The measured send itself: acceptance, the store poller, the tapped
 /// outcome and the provider-side duration. `after_accept` runs the moment
-/// the input is durably accepted — the `busy` case's release point.
-async fn measure_send(
+/// the input is durably accepted — the `busy` case's release point. `id`
+/// names the input's run when another send must address it (`steer`).
+pub(crate) async fn measure_send(
     ctx: &SampleCtx<'_>,
     lane: usize,
     index: usize,
+    id: Option<lash::TurnId>,
+    mut loop_clocks: LoopClocks,
     after_accept: impl FnOnce(),
 ) -> Result<Sample> {
     let sqlite_workers_at_request = lash_core::perf_witness::latency::workers();
+    let text = if ctx.spec.provider == LatencyProviderKind::Cell {
+        format!("{} {lane}/{index}", super::provider::CELL_SAMPLE_TEXT)
+    } else {
+        format!("latency {} sample {lane}/{index}", ctx.spec.name)
+    };
     let request = Stamp::now();
     let t_request = Instant::now();
-    let handle = ctx
-        .session
-        .send(lash::TurnInput::text(format!(
-            "latency {} sample {lane}/{index}",
-            ctx.spec.name
-        )))
-        .into_future()
-        .await
-        .map_err(anyhow::Error::from)?;
+    let send = ctx.session.send(lash::TurnInput::text(text));
+    let send = match id {
+        Some(id) => send.id(id),
+        None => send,
+    };
+    let handle = send.into_future().await.map_err(anyhow::Error::from)?;
     let acceptance_acknowledged = Stamp::now();
     let request_to_accept_ms = acceptance_acknowledged.since(request);
     after_accept();
@@ -737,11 +808,12 @@ async fn measure_send(
     let process_cpu_ms_at_end = process_cpu_ms();
     let process_rss_kb_at_end = process_memory_sample().rss_kb;
     let marks = poller.await.unwrap_or_default();
-    let sink_state = sink.state.lock_recover();
+    let mut sink_state = sink.state.lock_recover();
     let model_span_ms = (sink_state.model_span_ms > 0.0).then_some(sink_state.model_span_ms);
     let host_first_activity = sink_state.first_activity;
     let host_first_visible = sink_state.first_visible;
     let host_first_delta = sink_state.first_delta;
+    loop_clocks.host_events = std::mem::take(&mut sink_state.host_events);
     drop(sink_state);
     let provider_ms = ctx.timing.take_ms(ctx.session_id);
     let overhead_ms = provider_ms
@@ -794,6 +866,8 @@ async fn measure_send(
         process_cpu_ms_at_end,
         process_rss_kb_at_end,
         error: outcome_error,
+        loop_clocks,
+        loop_spans: LoopSpans::default(),
     })
 }
 
@@ -988,7 +1062,7 @@ pub(crate) struct LatencySummary {
     pub(crate) mean: f64,
 }
 
-fn summarize(values: impl Iterator<Item = f64>) -> Option<LatencySummary> {
+pub(crate) fn summarize(values: impl Iterator<Item = f64>) -> Option<LatencySummary> {
     let mut values: Vec<f64> = values.collect();
     if values.is_empty() {
         return None;
@@ -1074,6 +1148,8 @@ pub(crate) struct CaseReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) errors: Vec<String>,
     pub(crate) phases_ms: PhaseSummaries,
+    /// The chat-loop spans (FIG-6841); rows the case does not exercise are null.
+    pub(crate) loop_ms: LoopSummaries,
     pub(crate) population_refusals: Vec<GateRefusal>,
     /// The cold/warm split on every phase.
     pub(crate) cold: Option<PhaseSummaries>,
@@ -1122,6 +1198,7 @@ impl CaseReport {
                 .count(),
             errors,
             phases_ms: phases_of(&all),
+            loop_ms: LoopSummaries::of(all.iter().map(|sample| &sample.loop_spans)),
             population_refusals: certificate::population_refusals(samples),
             cold: (!cold.is_empty()).then(|| phases_of(&cold)),
             warm: (!warm.is_empty()).then(|| phases_of(&warm)),
@@ -1136,6 +1213,7 @@ pub(crate) use certificate::{GateRefusal, LatencyReport, build_report};
 
 async fn start_worker(
     stores_dir: &Path,
+    provider: LatencyProviderKind,
     dhat_out: Option<&Path>,
     dhat_frames: Option<usize>,
 ) -> Result<tokio::process::Child> {
@@ -1144,7 +1222,9 @@ async fn start_worker(
     command
         .arg("latency-worker")
         .arg("--store-dir")
-        .arg(stores_dir);
+        .arg(stores_dir)
+        .arg("--provider")
+        .arg(provider.cli_name());
     if let Some(path) = dhat_out {
         command.arg("--dhat-out").arg(path);
         if let Some(frames) = dhat_frames {
@@ -1178,7 +1258,10 @@ pub(super) fn announce_ready() -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
+/// The child's fixture stamps, beside its witness, for the parent's spans.
+const LOOP_STAMPS_FILE: &str = "latency-loop-stamps.json";
+
+pub(super) async fn run_worker(stores_dir: &Path, provider: LatencyProviderKind) -> Result<()> {
     std::fs::create_dir_all(stores_dir)?;
     let stores = lash::sqlite::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
@@ -1188,16 +1271,18 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
     let spec = CaseSpec {
         name: "worker",
         topology: Topology::SameProcess,
-        provider: LatencyProviderKind::Text,
+        provider,
         follower: FollowerMode::Standard,
         samples: 0,
         lanes: 0,
         busy: false,
+        fresh_sessions: false,
     };
+    let timing = Arc::new(ProviderTiming::default());
     let core = build_core(
         durable_backend(stores)?,
         &spec,
-        Arc::new(ProviderTiming::default()),
+        Arc::clone(&timing),
         None,
         &None,
         None,
@@ -1213,6 +1298,10 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
     std::fs::write(
         stores_dir.join("latency-witness.json"),
         serde_json::to_vec(&collector.snapshot())?,
+    )?;
+    std::fs::write(
+        stores_dir.join(LOOP_STAMPS_FILE),
+        serde_json::to_vec(&timing.stamps.export())?,
     )?;
     core.shutdown().await?;
     Ok(())
@@ -1274,6 +1363,8 @@ mod tests {
             process_cpu_ms_at_end: None,
             process_rss_kb_at_end: None,
             error: None,
+            loop_clocks: LoopClocks::default(),
+            loop_spans: LoopSpans::default(),
         }
     }
 

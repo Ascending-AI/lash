@@ -202,6 +202,9 @@ enum Command {
     LatencyWorker {
         #[arg(long)]
         store_dir: std::path::PathBuf,
+        /// The provider fixture the child serves (`text` or `tool`).
+        #[arg(long, default_value = "text")]
+        provider: String,
         #[arg(long)]
         startup_out: Option<std::path::PathBuf>,
         #[command(flatten)]
@@ -418,6 +421,7 @@ fn run_main() -> anyhow::Result<()> {
         }
         Some(Command::LatencyWorker {
             store_dir,
+            provider,
             startup_out,
             profile,
         }) => {
@@ -443,7 +447,7 @@ fn run_main() -> anyhow::Result<()> {
                     store_dir, out, recorder,
                 ))
             } else {
-                runtime.block_on(lash_perf::latency::run_worker(store_dir))
+                runtime.block_on(lash_perf::latency::run_worker(store_dir, provider))
             };
             drop(runtime);
             window.finish(result.is_ok())?;

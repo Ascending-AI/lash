@@ -141,3 +141,95 @@ async fn grace_case_probes_binding_before_remote_terminal_wait() {
         serde_json::json!([{ "reason": "missing-case" }])
     );
 }
+
+/// FIG-6841: each chat-loop case derives its own spans for every sample from
+/// the fixtures' absolute clocks, in both topologies, and every causal span
+/// is non-negative.
+#[test]
+fn chat_loop_cases_derive_their_spans_for_every_sample() {
+    let dir = tempfile::tempdir().unwrap();
+    let report = dir.path().join("report.json");
+    let samples = dir.path().join("samples.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .args([
+            "latency",
+            "--cases",
+            "cold,delivery,tool,cell,steer,cross-worker-tool",
+            "--lanes",
+            "2",
+            "--scale-down",
+        ])
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&report)
+        .arg("--samples-out")
+        .arg(&samples)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(samples).unwrap()).unwrap();
+    let expected: &[(&str, &[&str])] = &[
+        ("cold", &["session_open", "request_to_provider"]),
+        ("delivery", &["first_delta_overhead", "request_to_provider"]),
+        (
+            "tool",
+            &[
+                "model_to_tool_start",
+                "tool",
+                "tool_to_recorded",
+                "tool_to_next_request",
+            ],
+        ),
+        (
+            "cell",
+            &["model_to_tool_start", "tool", "tool_to_next_request"],
+        ),
+        (
+            "steer",
+            &[
+                "steer_request_to_accept",
+                "boundary_to_steer_seen",
+                "steer_send_to_model",
+            ],
+        ),
+        (
+            "cross-worker-tool",
+            &["model_to_tool_start", "tool", "tool_to_next_request"],
+        ),
+    ];
+    for (case, spans) in expected {
+        let case_rows: Vec<_> = rows.iter().filter(|row| row["case"] == *case).collect();
+        assert_eq!(case_rows.len(), 64, "{case}");
+        for row in case_rows {
+            assert_eq!(row["status"], "answered", "{row}");
+            for span in *spans {
+                assert!(
+                    row["loop_spans"][span].as_f64().unwrap() >= 0.0,
+                    "{case} {span}: {row}"
+                );
+            }
+            if *case == "delivery" {
+                let delivered = row["loop_spans"]["delta_delivery"].as_array().unwrap();
+                assert_eq!(delivered.len(), 32, "{row}");
+                assert!(delivered.iter().all(|ms| ms.as_f64().unwrap() >= 0.0));
+            }
+            if *case != "cold" && *case != "steer" && row["index"] != 0 {
+                assert!(
+                    row["loop_spans"]["previous_completion_to_provider"]
+                        .as_f64()
+                        .unwrap()
+                        >= 0.0,
+                    "{row}"
+                );
+            }
+        }
+    }
+}

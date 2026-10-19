@@ -15,11 +15,11 @@ use lash_protocol_types::SessionId;
 
 use super::ledger::{Arrival, ServiceMarks};
 use super::{Backend, Marks, Population};
-use crate::latency::FollowerMode;
 use crate::latency::runner::{
     CaseTopology, LaneSession, PollMarks, STORE_POLL_CEILING, Topology, create_lane_session,
     observer_poll_store, poll_marks, status_name,
 };
+use crate::latency::{FollowerMode, LatencyProviderKind};
 use crate::runtime_perf::{HighTrafficMix, HighTrafficPopulation, high_traffic_prompt};
 
 pub(super) const MARKS: Marks = Marks {
@@ -119,9 +119,14 @@ impl Opened {
                 })
             }
             Population::CrossWorker => {
-                let topology =
-                    CaseTopology::cross_worker(store_dir, FollowerMode::Standard, None, None)
-                        .await?;
+                let topology = CaseTopology::cross_worker(
+                    store_dir,
+                    LatencyProviderKind::Text,
+                    FollowerMode::Standard,
+                    None,
+                    None,
+                )
+                .await?;
                 for index in 0..sessions {
                     let session_id = SessionId::fixture(format!("offered-load-{index}"));
                     targets.push(Target {

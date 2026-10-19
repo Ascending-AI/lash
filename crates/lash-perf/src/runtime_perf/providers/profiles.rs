@@ -571,7 +571,7 @@ pub(super) fn request_has_tool_result(request: &LlmRequest) -> bool {
     })
 }
 
-pub(super) fn latest_request_item_contains(request: &LlmRequest, needle: &str) -> bool {
+pub(crate) fn latest_request_item_contains(request: &LlmRequest, needle: &str) -> bool {
     // RLM appends its synthetic iteration prompt after history. The rolling
     // cache fence identifies the newest real request item before that suffix.
     request

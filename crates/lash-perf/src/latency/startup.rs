@@ -124,6 +124,7 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
         samples: 0,
         lanes: 0,
         busy: false,
+        fresh_sessions: false,
     };
     let compat_server = Some(server);
     let core = super::runner::build_core(

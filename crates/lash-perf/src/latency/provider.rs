@@ -27,6 +27,9 @@ use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
 
+use super::loop_spans::CallStamp;
+use lash_core_ids::perf_witness::latency::Stamp;
+
 /// The provider fixtures the latency cases select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -42,6 +45,13 @@ pub(crate) enum LatencyProviderKind {
     /// The real `OpenAiCompatibleProvider` over loopback HTTP against the
     /// local SSE fixture — the "controlled real provider" leg.
     OpenAiCompat,
+    /// Streamed deltas paced [`DELIVERY_GAP`] apart, so each delta's
+    /// emit→host delivery is measured on its own rather than in a burst.
+    Delivery,
+    /// A held answer, then the call that carries the steered input.
+    Steer,
+    /// An RLM code cell calling `benchmark_echo`, then a finishing cell.
+    Cell,
 }
 
 /// Provider-side call durations, keyed by session id so concurrent lanes
@@ -50,6 +60,8 @@ pub(crate) enum LatencyProviderKind {
 #[derive(Default)]
 pub(crate) struct ProviderTiming {
     calls: Mutex<HashMap<String, Vec<TimedCall>>>,
+    /// Absolute call, delta and tool clocks for the chat-loop spans.
+    pub(crate) stamps: super::loop_spans::LoopStamps,
 }
 
 struct TimedCall {
@@ -153,6 +165,7 @@ pub(crate) fn latency_provider(
             let holds = holds.clone();
             async move {
                 let started = Instant::now();
+                let started_stamp = Stamp::now();
                 let session = request
                     .session_id()
                     .map(ToString::to_string)
@@ -164,12 +177,23 @@ pub(crate) fn latency_provider(
                 if let Some(hold) = hold
                     && hold.take_armed()
                 {
-                    held = true;
+                    // A steer hold is the running call the steered input
+                    // waits behind: provider time, not a parked predecessor.
+                    held = kind != LatencyProviderKind::Steer;
                     hold.started.notify_one();
                     hold.release.notified().await;
                 }
-                kind.emit_stream_events(&request);
+                let deltas = kind.emit_stream_events(&request).await;
                 let response = answer(kind, &request);
+                timing.stamps.call(
+                    &session,
+                    CallStamp {
+                        started: started_stamp,
+                        returned: Stamp::now(),
+                        steered: carries_steer(&request),
+                        deltas,
+                    },
+                );
                 timing.record(&session, started.elapsed().as_secs_f64() * 1000.0, held);
                 response
             }
@@ -185,23 +209,67 @@ fn answer(
         LatencyProviderKind::Fail => Err(LlmTransportError::new(
             "latency gate scripted provider failure",
         )),
-        LatencyProviderKind::Tool if !request_has_tool_result(request) => {
-            Ok(response(vec![LlmOutputPart::ToolCall {
-                call_id: "latency-echo-call".to_string(),
-                tool_name: "benchmark_echo".to_string(),
-                input_json: serde_json::json!({
-                    "value": "latency gate tool reply",
-                    "ordinal": 1,
-                })
-                .to_string(),
-                replay: None,
-            }]))
-        }
+        LatencyProviderKind::Tool if !request_has_tool_result(request) => tool_call(),
+        // A tool call keeps the held turn working, so its after-work
+        // checkpoint applies the steered input; a plain answer would finish
+        // the turn first and defer the input to the next one.
+        LatencyProviderKind::Steer if !carries_steer(request) => tool_call(),
         _ => Ok(response(vec![LlmOutputPart::Text {
-            text: response_text(request),
+            text: kind.text(request),
             response_meta: None,
         }])),
     }
+}
+
+fn tool_call() -> Result<LlmResponse, LlmTransportError> {
+    Ok(response(vec![LlmOutputPart::ToolCall {
+        call_id: "latency-echo-call".to_string(),
+        tool_name: "benchmark_echo".to_string(),
+        input_json: serde_json::json!({
+            "value": "latency gate tool reply",
+            "ordinal": 1,
+        })
+        .to_string(),
+        replay: None,
+    }]))
+}
+
+/// The messages since the model's last reply: the current step's input.
+fn since_last_reply(request: &LlmRequest) -> &[lash_core::llm::types::LlmMessage] {
+    let start = request
+        .messages
+        .iter()
+        .rposition(|message| message.role == lash_core::llm::types::LlmRole::Assistant)
+        .map_or(0, |index| index + 1);
+    &request.messages[start..]
+}
+
+/// The steered input's text, which the `steer` case's provider recognises.
+pub(crate) const STEERED_TEXT: &str = "latency steered input";
+/// The `cell` case's user text prefix.
+pub(crate) const CELL_SAMPLE_TEXT: &str = "latency cell sample";
+
+/// The current step's input carries the steered input.
+fn carries_steer(request: &LlmRequest) -> bool {
+    since_last_reply(request).iter().any(|message| {
+        message.blocks.iter().any(
+            |block| matches!(block, LlmContentBlock::Text { text, .. } if text.contains(STEERED_TEXT)),
+        )
+    })
+}
+
+/// The `cell` case's first call answers the sample's own request with a cell
+/// that calls the tool; the call after that cell finishes the turn.
+fn cell_text(request: &LlmRequest) -> String {
+    let first =
+        crate::runtime_perf::providers::latest_request_item_contains(request, CELL_SAMPLE_TEXT);
+    let source = if first {
+        r#"const echoed = await tools.benchmark_echo({ value: "latency cell", ordinal: 1 });
+console.log(echoed.value);"#
+    } else {
+        r#"await control.finish("latency cell done");"#
+    };
+    format!("<typescript>\n{source}\n</typescript>")
 }
 
 fn response_text(request: &LlmRequest) -> String {
@@ -214,8 +282,10 @@ fn response_text(request: &LlmRequest) -> String {
     )
 }
 
+/// The current step answers a tool call: every `tool` sample's turn makes
+/// one, not only a lane's first (earlier turns' results are history).
 fn request_has_tool_result(request: &LlmRequest) -> bool {
-    request.messages.iter().any(|message| {
+    since_last_reply(request).iter().any(|message| {
         message
             .blocks
             .iter()
@@ -250,30 +320,70 @@ pub(super) fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
 
 /// The deltas the `stream` case emits before its final part.
 const STREAM_DELTAS: usize = 64;
+/// The deltas the `delivery` case emits, and the gap between them: about a
+/// fast model's token cadence.
+const DELIVERY_DELTAS: usize = 32;
+pub(crate) const DELIVERY_GAP: std::time::Duration = std::time::Duration::from_millis(5);
 
 impl LatencyProviderKind {
-    /// Emit this kind's stream events for `request`, when it streams.
-    pub(crate) fn emit_stream_events(&self, request: &LlmRequest) {
+    /// The name a cross-worker child is launched with.
+    pub(crate) fn cli_name(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Tool => "tool",
+            _ => "unsupported",
+        }
+    }
+
+    /// The fixture a cross-worker child serves; only the cross-worker
+    /// cases' fixtures are launched in a child.
+    pub(crate) fn from_cli_name(name: &str) -> anyhow::Result<Self> {
+        match name {
+            "text" => Ok(Self::Text),
+            "tool" => Ok(Self::Tool),
+            other => anyhow::bail!("latency worker cannot serve provider `{other}`"),
+        }
+    }
+
+    /// The text a non-tool answer carries.
+    fn text(self, request: &LlmRequest) -> String {
+        match self {
+            Self::Cell => cell_text(request),
+            _ => response_text(request),
+        }
+    }
+
+    /// Emit this kind's stream events for `request`, when it streams, and
+    /// return each delta's emission clock in order.
+    pub(crate) async fn emit_stream_events(&self, request: &LlmRequest) -> Vec<Stamp> {
         let Some(tx) = request.stream_events.as_ref() else {
-            return;
+            return Vec::new();
         };
+        let delta = |text: String| {
+            let at = Stamp::now();
+            tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                kind: StreamBlockKind::AssistantText,
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text,
+            }));
+            at
+        };
+        let mut deltas = Vec::new();
         match self {
             Self::Stream => {
                 for index in 0..STREAM_DELTAS {
-                    tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::AssistantText,
-                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                        text: format!("delta-{index:03} "),
-                    }));
+                    deltas.push(delta(format!("delta-{index:03} ")));
                 }
             }
-            _ => {
-                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: response_text(request),
-                }));
+            Self::Delivery => {
+                for index in 0..DELIVERY_DELTAS {
+                    if index > 0 {
+                        tokio::time::sleep(DELIVERY_GAP).await;
+                    }
+                    deltas.push(delta(format!("delta-{index:03} ")));
+                }
             }
+            _ => deltas.push(delta(self.text(request))),
         }
         tx.send(LlmStreamEvent::Usage(LlmUsage {
             input_tokens: 1_024,
@@ -283,5 +393,6 @@ impl LatencyProviderKind {
             reasoning_output_tokens: 48,
             unknown_calls: 0,
         }));
+        deltas
     }
 }

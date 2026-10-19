@@ -106,3 +106,57 @@ physical work alongside phase distributions. A short functional receipt is:
 
 This intentionally exits 2 for an undersized fast population. It demonstrates
 populated instruments without certifying latency or changing the full gate.
+
+## Chat-loop spans
+
+Every sample also carries `loop_clocks` and `loop_spans`, and every case
+reports `loop_ms` percentiles for the spans it exercises (FIG-6841). They
+come from absolute `CLOCK_MONOTONIC` stamps the harness's own fixtures take,
+not from engine changes: the deterministic provider stamps each call's start
+(the engine's request reaching it), each delta it emits and its return; the
+benchmark echo tool stamps its own execution; the host's activity sink stamps
+the deltas and recorded checkpoints it receives. A cross-worker child exports
+its stamps beside its witness. A sample owns the stamps that start inside its
+own request→completion window on its session.
+
+| Span | From → to |
+| --- | --- |
+| `request_to_provider` | send → the turn's first provider request |
+| `previous_completion_to_provider` | the lane's previous host completion → this turn's first provider request (back-to-back next turn, harness re-send included) |
+| `session_open` | session create and open → the first send (`cold`) |
+| `first_delta_overhead` | send → first host delta, less the provider's time to emit it |
+| `delta_delivery` | provider emitted a delta → the host received it, per delta |
+| `model_to_tool_start` | the model returned a tool call or cell → the tool started |
+| `tool` | the tool's own execution |
+| `tool_to_recorded` | the tool returned → the host saw the next recorded checkpoint |
+| `tool_to_next_request` | the tool returned → the next provider request |
+| `tool_loop_overhead` | the model's tool call → the next provider request, less `tool` |
+| `steer_request_to_accept` | a steered send → its acceptance acknowledgement |
+| `boundary_to_steer_seen` | the running call returned → the request carrying the steered input |
+| `steer_send_to_model` | the steered send → the request carrying it |
+
+The chat-loop cases are reported, never gated:
+
+- `cold` opens a fresh session for every sample, so each send is a first turn.
+- `delivery` streams 32 deltas 5 ms apart, so each delta's delivery is
+  measured on its own rather than in a burst.
+- `tool` makes one `benchmark_echo` call in every turn, then answers.
+- `cell` serves the RLM protocol: a TypeScript cell calls `benchmark_echo`,
+  then a second cell finishes. It needs the kernel worker executable, so it
+  runs only when named, with `LASH_VM_WORKER` pointing at a built
+  `//crates/lash-vm-worker:lash-vm-worker__bin`.
+- `steer` holds the turn's provider call, sends a second input with
+  `ingress(active_turn(..))`, and releases the call once that input is
+  accepted. The held call answers with a tool call: a steered input joins the
+  running turn at its after-work checkpoint, while a plain final answer would
+  finish the turn first and defer the input to the next turn.
+- `cross-worker-tool` is the `tool` loop served by a child node.
+
+```sh
+LASH_VM_WORKER="$worker" LASH_LATENCY_ARTIFACT_DIR="$E/chat-loop" \
+  just latency-gate --cases fast,cold,stream,delivery,tool,cell,steer,cross-worker,cross-worker-tool \
+    --lanes 1 --fast-samples 1000
+```
+
+This exits 2 for the undersized fast population; it is a diagnostic, not a
+gate run.
