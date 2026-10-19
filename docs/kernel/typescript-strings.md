@@ -19,7 +19,9 @@ type)`, and `__lash_built: Bytes`, the digest of its building artifact.
 `brand.of` reads the tuple; `ts.receiver` derives a dispatch tag from it.
 A brand selects members and is not a capability: a typed decode can create
 one, so package functions still check their arguments. Dialect readers hide
-internal fields. Guest data named `brand` remains ordinary data.
+internal fields. Guest data named `brand` remains ordinary data. The
+[host-package guide](../host-packages.md#sessions-use-the-cells-current-set)
+describes representation checks and stale-value diagnostics.
 
 A guest RegExp and the extension snapshot both carry
 `__lash_brand: ("regex.ecma", "reg_exp")`. Their state is pattern, flags

@@ -21,7 +21,7 @@ subset with kernel semantics; a stock language runtime is not promised to run it
 
 `print(document, PrintOptions { source_map, limits }) -> PrintedSource`
 performs naming and structural rendering only. It does not compile, compare,
-resolve libraries, admit, execute, or select a helper release. `PrintedSource`
+resolve libraries, admit, execute, or select a package set. `PrintedSource`
 holds `source`, `SourceFormat` and an optional `SourceMap`; maps default off.
 
 `read(source, base, GeneratedSourceLimits) -> Document` reads exported source
@@ -179,11 +179,17 @@ quoted data and unrelated unknown names do not trigger this refusal. Source
 without these unresolved references carries no provenance marker and is not
 guaranteed to be distinguishable from newly authored source.
 
+Operations print by canonical path in the dialect's spelling, such as
+`inbox.sendItem` in TypeScript and `inbox.send_item` in Python. The reader
+unspells the path and resolves it against the base manifest. `tools` is an
+ordinary namespace. Code calls keep identity-bound `helper_` aliases unless
+a spelling has an exact inverse. See [host packages](../host-packages.md).
+
 `lash::vm::WorkerService::print(document, captions, format, options)` and
 `::read_exported(source, base, format, limits)` run the same operations in the
 worker crash domain. The read request carries the base Document's JSON; the
 response is a Document with the captions its source spells, without a
-library, helper-release choice or admission.
+library, package-set choice or admission.
 The installed dialect package owns a `read` function pointer alongside its
 authored front end and printer. The worker wire-v1 snapshots change in place
 before the 1.0 cut; no stored shape changes.

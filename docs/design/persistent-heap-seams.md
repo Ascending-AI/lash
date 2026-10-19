@@ -489,9 +489,10 @@ Invariants:
   supplies admissions at open.
 - A committed outcome is a `FrozenRef`, delivered as a fresh family (S8).
 - The waits table root is its digest (D-WAITS amended).
-- `release` and `owner` are the existing ReleaseManifest and OwnerBinding
-  nodes. The parent reads them from this header and never decodes the heap
-  to find a release.
+- The execution closure and owner are graph nodes. The closure names the
+  exact function identities, definitions and native-only requirements;
+  `OwnerBinding` names the execution owner. The parent reads this header
+  without decoding the heap.
 
 Errors: `OpenError::{DocumentMismatch, KernelVersion, Malformed, Heap}` and
 `SealError`. A root of a superseded format (a `KernelWhole`) is refused, not
@@ -893,7 +894,7 @@ symbol together with every caller in its own files.
 The integrator's end state, as ADR 0145 states it:
 
 - **Host graph reads.** `DurableReads::hydrate` and `HydratedGraph` stay the
-  generic reader of host roots: turn phases, release pins, process engine
+  generic reader of host roots: turn phases, execution closures, process engine
   state, execution control nodes and session manifests. A hydrate never
   descends into a semantic page: a host node's semantic child is returned as
   itself, and a read asked to start at one is `GraphRefusal::SemanticPage`.
@@ -919,12 +920,13 @@ The integrator's end state, as ADR 0145 states it:
   `retirement_backlog`; every limit in `DurableSettings.retirement` with a
   default and a hard maximum. Locks follow one global order: digest order,
   with root-catalog and hold rows before a step's peel.
-- **Parked-run carry.** `lash-kernel-migrate`'s whole-image `carry` is
-  deleted. A parked run whose kernel version or helper release a build does
-  not interpret is refused with `ParkedRefusal::StateNotCarried`, kept, and
-  resumable on a build that retains it; the paged migrator is FIG-6233.
-  Session bindings across a release change are covered by `classify_carry`
-  and `adopt`.
+- **Kernel-version carry and package adoption.** A parked run in a kernel
+  version the build does not interpret is refused and kept; a paged
+  kernel-version migrator remains FIG-6233. Package changes retain exact
+  identities through execution closures. Document adoption preserves
+  operation requirements; parked adoption refuses `state_not_carried`.
+  Saved-function relinking is in progress. See the
+  [host-package guide](../host-packages.md).
 
 ### S1/S4/S8 (amended): descriptor summaries and lifecycle attachment
 
@@ -1003,10 +1005,10 @@ use the same normalization and index; a dynamic field lookup materializes no
 text and reserves no guest memory. Moving an existing declaration onto the
 native/doc seam with its existing algorithm for this purpose is pre-approved.
 
-S4 amendment (hp-heap, approved 328942): `Program.release: PageId` holds the
-release selected by composition; the prepared library has no release identity.
+S4 amendment (hp-heap, approved 328942), updated for host packages: the
+program holds its exact execution closure; the prepared library is a cache.
 `CellStart.owner: PageId` holds the activation owner supplied by composition.
-Opening a checkpoint retains its admitted release and owner; sealing copies both
+Opening a checkpoint retains its execution closure and owner; sealing copies both
 exact identities into the next checkpoint without inference or placeholders.
 
 S1 amendment (hp-heap, approved 329218): `NativeHeap.payload_visit` also reads

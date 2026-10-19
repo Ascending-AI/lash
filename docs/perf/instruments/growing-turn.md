@@ -74,7 +74,7 @@ PID; `unix_time_ns`, PID and phase join the two process lifetimes.
   as between cells. Endpoint RSS is not continuous peak capture; HWM is per PID.
 - Store quantities share one read transaction. `history_body_bytes` counts
   SQL history bodies. `blob_bytes` counts all canonical and opaque blob bytes
-  currently present, including shared helper releases and any uncollected
+  currently present, including shared package definitions and any uncollected
   nodes. `canonical_by_kind_nodes_bytes` partitions canonical blobs by kind.
   Stored residency is not an exclusive live-session reachable-byte census.
 - `tool_and_cell_outcome_reachable_bytes` is the deduplicated canonical closure

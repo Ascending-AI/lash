@@ -51,4 +51,4 @@ They are not the default retained runnable host contract.
 
 Internally, the opaque bytes are the existing canonical logical token body;
 its digest is the document id (`K-ID-001..003`). The host wrapper changes no
-checkpoint graph node, parked image, helper release or stored engine format.
+checkpoint graph node, parked image, package artifact or stored engine format.

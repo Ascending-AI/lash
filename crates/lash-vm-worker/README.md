@@ -15,12 +15,23 @@ credentials, opening stores, or constructing providers.
 A host names its dialects (ADR 0140). `dialect-typescript` and
 `dialect-python` are build features, neither a default, and `embed` builds the
 embedding from the ones it names:
-`Embedder::kernel()?.dialect(typescript(tuning))?.dialect(python())?.finish()`.
+`Embedder::new().dialect(typescript(tuning)?)?.dialect(python())`.
+`worker_entry` binds that configuration to the parent's packages; a host
+binding directly calls `finish(&held)` with the same holdings.
 An embedding with no dialect is refused (`EmbedError::NoDialect`). The helper
 executable installs every dialect it was built with, so build it with the
 host's dialect features. A run names the dialect its session or process
 recorded, and a worker that lacks it refuses the run with
 `RunRefusal::DialectNotInstalled` before it reads the document.
+
+The parent installs [host packages](../../docs/host-packages.md) once and
+supplies the worker's complete definition registry, including retained
+artifacts. A single-binary embedding supplies natives by `FunctionId`; it
+does not assemble a second package list. A shipped worker receives the
+registry in one release-image frame at pool start, before serving work.
+The registry stays fixed for the worker's lifetime. A native-only function
+with no implementation refuses pool start; a function with a body can use
+that body without its optional native.
 
 The launcher clears the environment. Immediately after exec, the entry closes
 all inherited descriptors except its socket. Linux uses `close_range` and
@@ -66,12 +77,13 @@ broker admits every effect against its admitted context.
 A cell's lowering and its run share one lease: the worker that lowered the
 document starts the run with no reset between, so a cell that calls a tool and
 finishes crosses the boundary in 22 frames (FIG-5921). A worker compiles its
-helper library before it reports ready, so its first run costs what a warm one
+package library before it reports ready, so its first run costs what a warm one
 does (FIG-5922).
 
 `prepare` runs pure work in a worker: `Request::Lower` lowers source in a
-dialect to a kernel document against the effects the host supplies and the
-session bindings in scope. `Request::Print` renders a document in a selected
+dialect to a kernel document against the offered operations, the selected
+package set and the session bindings in scope. Namespace composition reads
+that set's package view. `Request::Print` renders a document in a selected
 exact source format with host limits and an optional disposable map;
 `Request::Read` separately decodes that source against the base Document it
 was printed from, without admission. Neither printing nor reading resolves

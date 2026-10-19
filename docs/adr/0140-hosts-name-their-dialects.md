@@ -7,11 +7,10 @@ one kernel) and
 
 ## Context
 
-The worker had one embedding it gave every host, `standard`: the kernel
-library, lash's extensions and TypeScript. Python existed only as an
-embedding tests assembled by hand, and its helpers belonged to no helper
-release, so a parked Python run pinned TypeScript's. A host could not choose
-its dialects, and a host that wanted one dialect carried the other's parser.
+Hosts choose which source dialects their workers serve. A host that needs
+one parser should be able to build and install that dialect alone, while
+using the same package installation and execution model as a host that
+serves both.
 
 Ruling (Sam, 2026-10-11): "There should be no default. It should be up to the
 host to choose what dialect it wants, explicitly, and our Rust build should
@@ -26,27 +25,31 @@ default.
 naming each dialect:
 
 ```rust
-Embedder::kernel()?
-    .dialect(typescript(tuning))?
-    .dialect(python())?
-    .finish()
+worker_entry(&|tuning| {
+    Embedder::new()
+        .dialect(typescript(tuning)?)?
+        .dialect(python())
+})?
 ```
 
-`worker_entry` takes that constructor. `finish` refuses an embedding with no
+`worker_entry` takes that constructor and binds it to the parent's
+packages. `finish(&held)` refuses an embedding with no
 dialect (`EmbedError::NoDialect`), and `dialect` refuses one named twice. The
 shipped `lash-vm-worker` executable installs every dialect it was built with
 (`built_dialects`); built with none, it refuses to start.
 
-A dialect is one lash ships. An embedder cannot install a package of its own:
-a run pins a helper release, and only a shipped dialect has one.
+Hosts install code through the [package model](../host-packages.md).
+A host package adds operations, functions and value types that installed
+dialects expose in their own syntax. Installing a package does not add a parser.
 
 ### Dialects are build features, none a default
 
 `dialect-typescript` and `dialect-python` are features of the facade
-(`lash-runtime`), `lash-vm-worker`, `lash-vm-runtime`, `lash-vm-library` and
-`lash-vm-releases`. Each is off unless a host names it. A dialect's feature
-builds its helper releases, and in a worker links its parser and the library
-it ships with. The ECMAScript regular-expression and date extensions and the
+(`lash-runtime`), `lash-vm-worker`, `lash-vm-runtime` and
+`lash-vm-releases`, which builds the package artifacts. Each is off unless a
+host names it. A dialect's feature
+builds its code package, and in a worker links its parser and native
+implementations. The ECMAScript regular-expression and date extensions and the
 WHATWG URL extension are TypeScript's: a Python-only build links none of
 them, and a TypeScript-only build links no Python parser.
 
@@ -67,31 +70,35 @@ A worker whose embedding lacks that dialect refuses the run before it reads
 the document or the parked state:
 `RunRefusal::DialectNotInstalled { dialect }`, a terminal typed refusal.
 
-### One helper release line per dialect
+### One package installation supplies parent and workers
 
-Each built dialect has one current helper release defined by the build from its sources. A new run pins that dialect's exact manifest; a build holding a different manifest refuses resume with a typed release mismatch. Parents and workers read the same generated definitions.
+The parent installs lash's code-only packages and host packages together.
+Every worker derives its registry from that installation; the embedding
+supplies natives by function identity. A shipped worker receives the
+registry in a pool-start frame. The selected dependency-closed package set
+chooses the names in scope for a cell. A parked run keeps an execution
+closure containing its exact function identities.
 
 ## Consequences
 
-- TypeScript's release holds what the single release held, so a TypeScript
-  run's pinned manifest is unchanged.
-- A Python run pins Python's release, which a TypeScript-only build does not
-  hold: it refuses the run by dialect before it would refuse the release.
 - A helper executable is built for its host's dialects. Recipes that build it
   with Cargo pass the dialect features.
-- A stored kernel process records its dialect; the 1.0 process image is
-  re-recorded.
+- A worker must hold the run's recorded dialect and exact code identities.
+  Code-only packages and user-visible package surfaces share installation.
+- New cells lower against the selected set. Saved-function relinking is
+  in progress; changing the set does not relink a parked run or a published
+  workflow.
 
 ## Executable evidence
 
 - `crates/lash-vm-worker/src/embedding.rs`:
-  `an_embedding_with_no_dialect_is_refused`,
-  `an_embedding_holds_only_the_dialects_its_host_named`.
+  `an_embedding_with_no_dialect_is_refused`.
+- `crates/lash-vm-worker/tests/fresh_embedding.rs`:
+  `a_host_package_installs_once_and_runs_in_a_single_binary_worker`.
 - `crates/lash-vm-worker/tests/pool_laws.rs`: every pool law under a
   TypeScript-only and a TypeScript-and-Python embedding;
   `a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name`;
   `a_python_cell_lowered_in_the_worker_runs_under_its_confinement`.
-- `crates/lash-vm-releases/src/tests.rs`:
-  `the_build_holds_the_releases_it_declares_for_each_dialect`,
-  `a_dialects_release_holds_none_of_another_dialects_helpers`.
+- The [host-package guide](../host-packages.md) describes package validation,
+  pinning and worker distribution.
 - `scripts/feature-coverage.toml`, lane `dialects`.

@@ -1,10 +1,15 @@
 # lash-dialect-python
 
-A Python front end and exact generated-source codec for the lash kernel. `lower(source, environment)` turns a
-subset of Python into a kernel document; the kernel machine runs it. The
-crate depends on `lash-kernel-doc` and `lash-kernel-dialect` and on nothing
-else of lash, and the kernel was not changed for it: no form, value kind or
-library function was added.
+A Python front end and exact generated-source codec for the lash kernel.
+`lower(source, environment)` turns a subset of Python into a kernel
+document; the kernel machine runs it.
+
+Hosts install code and operations as [packages](../../docs/host-packages.md).
+Programs use their paths without imports: `dataframe.col(x)`,
+`q.reduce_by_key(keys, values)` and `await inbox.send_item(input)`.
+Package values expose declared members only; indexing, iterating or
+converting one to a dict raises `TypeError`. A changed representation raises
+`package.stale_value` at member use and names the artifacts involved.
 
 ## Parser
 
@@ -47,7 +52,7 @@ reads, an awaited coroutine call is an ordinary call, `asyncio.create_task`
 is `spawn`, `await t` on a task is `await t via py.await`, which takes no
 turn of its own, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer calls a helper: the functions
 named `py.*`, written in kernel text under `src/helpers/` and installed
-with `define_helpers`. Truthiness, operators on values whose kind is not
+as the `python` package. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the
 check that a dict or set did not change size under a `for` or a
 comprehension, `str`, `repr`
@@ -144,7 +149,8 @@ may call it with any arguments.
 
 asyncio: `asyncio.sleep`, `asyncio.gather` over coroutine calls, tasks or
 one `*tasks`, `asyncio.create_task`, and `asyncio.run` at the top level.
-A tool is a name of `environment.effects`, called as `await tool(x)`.
+A tool is a package operation in the offered operations map, called by its
+canonical path, such as `await web.fetch(x)`.
 
 Packages (`src/lower/packages.rs`): a package is in scope by its path and
 nothing is imported. `dataframe.col("x")` calls a function, and

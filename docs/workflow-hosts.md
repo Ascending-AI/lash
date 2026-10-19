@@ -8,6 +8,11 @@ did. `lash::workflow` is the whole surface for all four. The workflow is a
 kernel document; the host never handles bytecode, and never has to print or
 parse a source language to do any of this.
 
+The [host-package guide](host-packages.md) explains the operations and code
+a document can call, their installation, and the identities a published or
+parked workflow retains. New cells select one dependency-closed package
+set; published workflows retain their admitted function identities.
+
 [`examples/workflow-graph-roundtrip`](../examples/workflow-graph-roundtrip/README.md)
 is a host built this way, and the code below is the shape of its backend.
 
@@ -36,8 +41,8 @@ re-lower when longevity across versions matters. See the
 A `lash::workflow::document::Document` is one program. It holds a `main`
 block, the functions it declares, the entries (the declared functions a host
 may start, each with a signature), and a manifest: the kernel version, the
-effects the code performs with the signature it expects of each, every
-library function the code reaches by identity, and how an effect result's
+operations the code performs with the signature and contract id it expects
+of each, every library function the code reaches by identity, and how an effect result's
 bare number decodes.
 
 A block is an ordered list of statements: `let`, `set`, `remove`, `do`,
@@ -57,7 +62,7 @@ kernel notation:
 ```text
 kernel 1
 numbers float
-effect ledger.record(input: Any) -> Any
+effect ledger.record(input: Any) -> Any contract 1
 entry audit(summary: Any) -> Any
 
 fn audit(summary) {
@@ -232,8 +237,8 @@ A stored document is held with the definition of every library function it
 lists, each under its own identity, and every read links it against those:
 never against the reading build's library. A process keeps them for as long
 as it keeps its document, and a code cell's frame keeps them for as long as
-the frame lives, across its cells, so a build that retired the helper
-release a document was written against still reads and draws it. A declaration that is
+the frame lives, across its cells, so a build that removed an artifact from
+its serving package set still reads and draws the document. A declaration that is
 gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
 `WorkflowUnavailable::Corrupt`, not a fallback to another definition.
 
@@ -256,7 +261,7 @@ let environment = core
     .await?
     .expect("an engine that reads workflow documents");
 
-environment.effects();     // each effect a document may perform, with its signature
+environment.effects();     // each operation a document may perform, with its requirement
 environment.functions();   // the library functions, by identity
 ```
 
@@ -512,7 +517,7 @@ attributes on its `lash.process.start` producer. For a published definition:
 | `definition` | Constructing the definition's start payload, or realizing a function supplied inline. |
 
 These are elapsed times, including scheduling and store waits, rather than CPU
-measurements. They do not include worker checkout, helper-release preparation,
+measurements. They do not include worker checkout, package-registry preparation,
 compilation or the first segment: registration does none of those. Retrying an
 already-fenced start can read and resolve again; each field sums its repeated
 operations. A failed operation also records its time before propagating its
@@ -820,7 +825,7 @@ by its node's caption. It is set for TypeScript's
 operation `tools.x` (through its
 reply helper, `py.reply`) and an `await` of a promise or task that only
 performs the call, for a `let` nothing reassigns. A value computed from a
-reply, such as `(await tools.x()).urgent`, has none: it comes from the code.
+reply, such as `(await inbox.lookup()).urgent`, has none: it comes from the code.
 `produced_by` is derived from the document; nothing stores it. A condition
 operand that is the `result` of an action joins to the binding whose
 `value_site` is that action's site.
@@ -859,7 +864,7 @@ None of the above prints or parses a source language. With the `typescript`
 feature, `lash::typescript::print(document.document(), captions, options)` answers
 equivalent TypeScript for a document, keeping every temporary and statement
 boundary. It is a read-only view. `dialect-typescript` and `dialect-python`
-select helper releases and never link a parser into the host's own process:
+select dialect support and never link a parser into the host's own process:
 name `typescript` or `python` to print or lower in-process.
 
 A document can have no TypeScript spelling. The printer then answers a
@@ -870,8 +875,8 @@ runnable.
 takes a whole workflow module in TypeScript or Python
 (`SourceLanguage::TypeScript` or `SourceLanguage::Python`) and the
 `ProcessEnv` you pass to `workflow_environment` and `publish_workflow`. Lash
-builds the dialect environment from the tools that environment admits from
-the process components it names, and the worker's function registry; the
+builds the dialect environment from the operations that environment admits from
+the process components it names and the selected package view; the
 worker lowers the source, and lash admits the document. It runs no effect,
 publishes nothing and links no parser into your process. `limits`
 (`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source

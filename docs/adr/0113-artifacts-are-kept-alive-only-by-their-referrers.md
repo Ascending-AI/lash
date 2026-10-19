@@ -281,7 +281,7 @@ declarations its frame does not hold yet. They go with the frame's end: its
 switch, the session's deletion, or a fork's own frame end for the copies a
 fork took. A frame never drops a declaration while it lives, so a document
 an unsettled execution names still reads once the build that wrote it has
-retired its helper release. A cell of a process has no frame: its execution
+retired its package artifact from the serving set. A cell of a process has no frame: its execution
 holds its declarations beside its document
 (`crates/lash-protocol-rlm/src/executor/processes.rs`,
 `crates/lash-vm-runtime/src/process/documents.rs`).

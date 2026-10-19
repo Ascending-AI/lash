@@ -3,6 +3,15 @@
 The TypeScript dialect of the lash kernel: a front end that lowers TypeScript
 to kernel documents, and the helper functions its documents call.
 
+Hosts install code and operations as [packages](../../docs/host-packages.md).
+Programs call their namespaces directly, without imports: `dataframe.col(x)`
+calls code, `q.reduceByKey(keys, values)` calls a value member and
+`await inbox.sendItem(input)` performs the canonical `inbox.send_item`
+operation. Package values expose only declared members and check their
+representation on use. A new cell uses its selected package set; a
+parked run keeps its exact function identities. Saved-function relinking
+is in progress; see the guide for current saving limitations.
+
 ## How an operation is lowered
 
 Each operation takes the first tier that applies.

@@ -11,6 +11,12 @@ Declare metadata and executable binders together with `PluginRegistrar`.
 Prompt, state reducer, tool and config entries still use the one registrar
 and the production executor.
 
+Tools are package operations served by a `ToolProvider`. A package may also
+export kernel functions and sealed value types; its code calls operations
+without choosing their runner. Declare contracts, install packages and plan
+runner replacements using the [host-package guide](host-packages.md).
+Plugin registration supplies the executable runner and its configuration.
+
 The [compiled specimens](../crates/lash/examples/plugin_authoring.rs) demonstrate:
 
 - `greetings`: two fixed tools sharing a recorded per-session prefix.

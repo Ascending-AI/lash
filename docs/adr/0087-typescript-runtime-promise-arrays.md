@@ -39,7 +39,7 @@ A handle uses `{__handle__: "lash", id}`. The pending id includes the execution
 identity; only a live request in that execution can be settled. Unknown,
 expired, or consumed requests receive typed repairs. Pending handles in tool
 arguments are refused before dispatch. A tool call discarded as an expression
-statement, including `void tools.x(...)`, and a `const` or `let` tool handle
+statement, including `void web.fetch(...)`, and a `const` or `let` tool handle
 whose binding is never read in the cell are refused at lowering with the
 spanned `TS_UNAWAITED_TOOL` diagnostic. Its repair names direct `await` and
 collection into an awaited `Promise.all` or `Promise.allSettled`. Reads resolve

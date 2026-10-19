@@ -206,9 +206,29 @@ affected state while investigating the refusal.
    (re-arm it once its cause is fixed), and keep the ones no build can decode,
    with the listing, in the release record.
 
-## Roll a build that changes the helpers
+## Roll a build that changes packages
 
-Each build defines one current helper release for each installed dialect. Checkpoints pin the exact manifest and resume only on a build holding it; a different manifest produces a typed release mismatch. Finish or cancel development work before replacing its build. Pre-1.0 builds retain no release history or retirement catalog.
+Install the new dependency-closed package set and retain the artifacts
+needed by parked roots, unfinished processes, saved functions and published
+definitions. A node advertises the artifacts it holds. The fleet gate picks
+one complete set every live serving node holds for each new cell; it may
+fall back to an older set when a node rejoins.
+
+Parked runs and published workflows keep their exact function identities.
+Resume requires those definitions and any native-only implementations;
+changing the installed set does not adopt them. Saved functions currently
+retain their library identities and report an unavailable identity or
+incompatible operation signature on install. Relinking them at cell start
+is in progress. A value with an incompatible representation raises
+`package.stale_value` when used. Document adoption refuses a changed operation
+requirement with `operation_contract_changed`; parked adoption refuses
+`state_not_carried`.
+
+Install retained artifacts one deploy before writing with the new set.
+Rolling back to a build that lacks an identity can strand its runs. Retire
+an artifact only after surveying all dependents. The
+[host-package guide](../host-packages.md) covers identities, runner contracts,
+storage and explicit adoption.
 
 ## Finalize the release
 

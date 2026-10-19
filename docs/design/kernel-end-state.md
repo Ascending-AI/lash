@@ -119,7 +119,7 @@ dynamic contents are live state.
 
 **Restore validation (fail closed).** In order:
 
-1. Identity: document, kernel version, helper release and root status
+1. Identity: document, kernel version, execution closure and root status
    (`machine/checkpoint.rs`, `open_with_layout`). A mismatch is an `OpenError`.
 2. Each frame's coordinate against the side table, refusing with a
    `RestoreRefusal`:
@@ -779,7 +779,7 @@ next to the coordinate grammar, with `lash-kernel-exec` gaining a dependency on
 
 ```rust
 /// A helper body's generated plan. It is valid only for the exact body it was
-/// generated from: the release pins `(FunctionId, body digest)`, and admission
+/// generated from: the plan names `(FunctionId, body digest)`, and admission
 /// refuses a plan whose digest differs from the registered body's.
 pub trait HelperPlan: Send + Sync {
     fn function(&self) -> FunctionId;
@@ -1090,4 +1090,5 @@ Three lanes, in order.
   stays a stage-3 measurement. The pinned `Table` (entries in insertion order,
   index behind `Semantics::lookup`) fits both.
 
-The 1.0 cut records and seals the first helper release fresh.
+The 1.0 cut records exact package artifacts and execution closures. The
+[host-package guide](../host-packages.md) describes installation and retention.

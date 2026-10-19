@@ -32,7 +32,11 @@ journals, tool-intent journals and the parked-loop segment. Synthetic adjacent
 migration steps remain. Review the output against the dry run. Refresh literal
 byte and identity pins through their owning generators or laws before committing.
 
-The 1.0 cut records and seals the first helper release fresh; the development tree defines only its current release.
+The 1.0 cut records the package artifacts and dependency-closed sets built
+from the candidate. Parked images pin execution closures by function
+identity. Keep those exact artifacts and required native implementations
+available when verifying the tagged corpus; package release labels do not
+identify its code. See the [host-package guide](../host-packages.md).
 
 The candidate must descend from the checked main tip. Its remaining paths
 must belong to the reset plan, the release channel or gate activation:

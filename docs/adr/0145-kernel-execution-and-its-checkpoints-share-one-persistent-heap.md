@@ -82,8 +82,9 @@ and `paged::laws::root` (`saved_meters_preserve_a_nonzero_next_join_on_decode`,
 
 A `CheckpointRoot` is complete: the machine needs nothing else to resume,
 not an earlier root, not a delta, not a worker cache. It holds the kernel
-version, the document identity, the pinned release (a `ReleaseManifest`
-node) and the execution's `OwnerBinding` node, the cell target (`Main` or
+version, the document identity, the execution closure (exact function
+identities and their definitions) and the execution's `OwnerBinding` node,
+the cell target (`Main` or
 `Entry`), the adopted saved functions, the run's status (parked, or ended
 with its frozen result and carry), the heap header, and tree roots for
 tasks, the ready order, waits, list joins, withdrawn waits and the ones the
@@ -117,8 +118,8 @@ its exact meters. The table is [kernel design §6](../kernel/design.md#6-parked-
   removes the wait in one edit.
 - Task identity is a content-addressed parent-linked descriptor; a spawn
   writes one node. Names and sites are bounded descriptors.
-- `release` and `owner` sit in the root's header, so the parent pins and
-  checks them without decoding the heap.
+- The execution closure and owner sit in the root's header, so the parent
+  pins and checks them without decoding the heap.
 
 A root of a retired format is refused, never read. The whole-image kinds
 16, 27 and 29 are unregistered and their numbers are never reused: a
@@ -441,7 +442,7 @@ bindings that shared an object still share it (`K-SES-002`).
 - A fork shares the session's pages and owns its own directory version, so
   edits never cross forks.
 - A saved function holds its document code, its captures as frozen
-  references by name, and the release page it was written against. Each
+  references by name, and its execution closure. Each
   invocation binds every capture as a fresh family over its frozen
   reference; nothing flattens a capture back into the code.
 
@@ -455,7 +456,7 @@ and `lash-kernel-dialect`'s `saved::laws`.
 ### 10. Host graph reads stop at heap pages
 
 `DurableReads::hydrate` stays the generic reader of a host root's graph:
-turn phases, release pins, process engine state, execution control nodes
+turn phases, execution closures, process engine state, execution control nodes
 and session manifests. It reads every node the root reaches, checked, within
 its decode limits, and it never descends into heap pages. A host node's
 semantic child is returned as itself, a header the host may read, and a
@@ -463,17 +464,22 @@ read asked to start at a semantic page is refused
 (`GraphRefusal::SemanticPage`). Heap pages are read only under a root lease
 through the page exchange, a page at a time.
 
-### 11. A parked run is not carried across a kernel version or release retirement
+### 11. Kernel-version migration and package adoption
 
-`lash-kernel-migrate` carries documents and definitions; it does not carry
-a parked run's heap. Until a paged parked-run migrator ships (FIG-6233), a
-parked run whose kernel version or helper release the build does not
-interpret is refused with `ParkedRefusal::StateNotCarried`, keeps every
-row, and resumes on a build that retains its version and release. Nothing
-deletes it. A session's bindings across a release change are classified and
-adopted as in §9. The version freeze and release retention make the refusal
-unreachable before the first breaking kernel version or helper-release
-retirement after 1.0, and FIG-6233 must land before either ships.
+`lash-kernel-migrate` carries documents and definitions. Until a paged
+kernel-version migrator ships (FIG-6233), a parked run in a kernel version
+the build does not interpret is refused with
+`ParkedRefusal::StateNotCarried`, keeps every row and remains resumable on a
+build that interprets it. That migrator must land before the first breaking
+kernel version after 1.0.
+
+Package changes use identity retention and explicit adoption. A parked run
+pins an execution closure; installing another package set does not replace
+those identities. Document adoption refuses a changed operation contract;
+parked adoption refuses `state_not_carried` because heap pages are not
+carried. Saved-function relinking is in progress; package values check
+their shape on use. The
+[host-package guide](../host-packages.md) gives the host-facing rules.
 
 ## Consequences
 
