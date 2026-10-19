@@ -27,7 +27,8 @@
 //! runs the cell again from its journal on a fresh worker, whose calls
 //! replay rather than run again. Only a cell whose worker is lost on every
 //! one of its attempts is refused, and its refusal does not blame the cell
-//! (FIG-6806).
+//! (FIG-6806). The lost pass publishes no end of the cell, so a follower of
+//! the session's live replay reads one consistent history (FIG-6891).
 //!
 //! A worker names a page it sealed earlier in its activation under the
 //! grant the parent gave it, without sealing it again. What a later park
@@ -784,6 +785,164 @@ async fn a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_withou
     world.shutdown().await;
 }
 
+/// A cell that completes a call and then computes for several slices.
+const CALL_THEN_LOOP: &str = "const first = await tools.count_call({}); let n = 0; \
+     for (let i = 0; i < 500000; i = i + 1) { n = n + 1; } await control.finish({ first, n });";
+
+/// The ends of the cell's execution a follower of `updates` reads, up to
+/// and including its first completed one. A gap is lost continuity, which
+/// this follower never accepts.
+async fn cell_ends(
+    updates: &mut lash::observe::SessionObservationStream,
+) -> Vec<lash::tracing::TraceLanguageExecutionStatus> {
+    use lash::observe::SessionObservationStreamItem;
+    use lash::observe::Stream as _;
+    use lash::tracing::{TraceLanguageExecutionPayload, TraceLanguageExecutionStatus};
+    let mut ends = Vec::new();
+    loop {
+        let update = tokio::time::timeout(
+            served::WATCHDOG,
+            std::future::poll_fn(|cx| std::pin::Pin::new(&mut *updates).poll_next(cx)),
+        )
+        .await
+        .expect("deadlock watchdog: the follower read no end of the cell")
+        .expect("the observation stream stays open")
+        .expect("the observation stream answers");
+        let event = match update {
+            SessionObservationStreamItem::Event(event) => event,
+            SessionObservationStreamItem::Gap { gap, .. } => {
+                panic!("the follower lost continuity after ends {ends:?}: {gap:?}")
+            }
+        };
+        if let lash_core::SessionObservationEventPayload::LanguageExecution(observation) =
+            &event.payload
+            && let TraceLanguageExecutionPayload::ExecutionFinished { status, .. } =
+                &observation.execution.payload
+        {
+            ends.push(*status);
+            if *status == TraceLanguageExecutionStatus::Completed {
+                return ends;
+            }
+        }
+    }
+}
+
+/// FIG-6891: a worker killed from outside while its cell computes, after
+/// the cell's first call completed and its language facts were published,
+/// costs a follower nothing. The pass that lost the worker answers nothing,
+/// so it publishes no end of the cell: the rerun's end is the cell's only
+/// one, every fact the rerun repeats is the fact the lost pass published,
+/// and the live replay keeps its incarnation. Before, the lost pass
+/// published a failed end and the rerun a completed one under the same
+/// key: the store refused the second as a conflicting redelivery and
+/// rotated its incarnation, which reset every follower's replay.
+async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tier) {
+    let receipts = lash::vm::WorkerService::default().with_worker_receipts();
+    let runs = Arc::new(AtomicUsize::new(0));
+    // The cell's worker and the calls it was sent since the call ran: the
+    // first hands it the call's outcome and a slice of the loop, and the
+    // second finds the loop computing and the worker killed.
+    let seen = Mutex::new((None::<u32>, 0_usize));
+    let called = Arc::clone(&runs);
+    let workers = receipts.clone().with_call_hold(Arc::new(move || {
+        if called.load(Ordering::SeqCst) > 0
+            && let Some(last) = receipts.worker_receipts().last()
+            && format!("{:?}", last.path) == "Cell"
+        {
+            let mut seen = seen.lock().unwrap();
+            match seen.0 {
+                None => *seen = (Some(last.pid), 1),
+                Some(pid) if pid == last.pid && seen.1 < 2 => {
+                    seen.1 += 1;
+                    if seen.1 == 2 {
+                        kill_from_outside(pid);
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        Box::new(())
+    }));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let Some(world) = World::with_model(
+        tier,
+        Vec::new(),
+        cell_then_done(CALL_THEN_LOOP, &requests),
+        |backend| {
+            lash::LashCore::rlm_builder(backend.clone(), unbounded_rlm(workers.clone()))
+                .tools(lash::tool_provider_key!("tools"), count(&runs))
+        },
+    )
+    .await
+    else {
+        return;
+    };
+    let input = "worker-lost-mid-cell-replay";
+    let session = world.session(input, served::spec(8)).await;
+    let session_id = lash::SessionId::try_from(input.to_owned()).expect("a session id");
+    let observed = world
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("the session opens for observation");
+    let snapshot = observed
+        .observe()
+        .snapshot()
+        .await
+        .expect("the snapshot reads the durable head");
+    let incarnation = snapshot
+        .cursor
+        .parse()
+        .expect("the snapshot cursor parses")
+        .replay_incarnation_id
+        .to_owned();
+    let mut updates = observed
+        .observe()
+        .subscribe_and_recover(snapshot.cursor.clone());
+    let (settled, ends) = tokio::join!(
+        settled_or_parked(&world, &session, input),
+        cell_ends(&mut updates),
+    );
+    let output =
+        settled.unwrap_or_else(|park| panic!("the turn parked instead of answering: {park}"));
+    let cells = workers
+        .worker_receipts()
+        .iter()
+        .filter(|receipt| format!("{:?}", receipt.path) == "Cell")
+        .count();
+    assert!(
+        cells >= 2,
+        "the cell ran again on a fresh worker: {cells} runs"
+    );
+    assert_eq!(
+        ends,
+        vec![lash::tracing::TraceLanguageExecutionStatus::Completed],
+        "the follower reads one end of the cell, the rerun's"
+    );
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        1,
+        "the call's effect is not repeated"
+    );
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!({ "first": { "result": "counted" }, "n": 500000 }))
+    );
+    let head = world.core.observation_cursor(
+        &session_id,
+        snapshot.cursor.parse().expect("parses").revision,
+    );
+    assert_eq!(
+        head.parse()
+            .expect("the head cursor parses")
+            .replay_incarnation_id,
+        incarnation,
+        "the live replay keeps its incarnation"
+    );
+    world.shutdown().await;
+}
+
 async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
     setup_crash_case(tier, Request::Lower).await;
 }
@@ -924,4 +1083,5 @@ tiered_laws!(
     a_cell_that_kills_its_worker_is_refused_once_and_the_model_reads_it,
     a_worker_killed_from_outside_across_a_held_tool_call_reruns_the_cell_on_a_fresh_worker,
     a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_without_blaming_the_cell,
+    a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity,
 );

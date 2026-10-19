@@ -1214,8 +1214,13 @@ async fn run_linked_cell(
     {
         lash_vm_broker::kernel::end_activation(store.as_ref(), &pages).await;
     }
+    // Only the pass that answers the cell publishes its end. A pass that
+    // aborts, as one whose worker was lost from outside does, journals no
+    // response: the cell has not ended, and the pass that runs it again
+    // publishes its end under the same key (FIG-6891).
     if let Some(trace) = &host.trace
         && !response.suspended
+        && !ctx.has_nested_effect_error()
     {
         use lash_trace::TraceLanguageExecutionStatus as Status;
         match &response.result {

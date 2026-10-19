@@ -372,7 +372,12 @@ kill, is a loss from outside the cell. It spends one of the cell's
 serves it, and fails the attempt as a host verdict while one is left. The
 next pass runs the cell again on a fresh worker from its last park, whose
 journal replays the calls that ran, so no completed call runs again and the
-model never reads the loss. A cell whose worker is lost on every run
+model never reads the loss. Nor does a follower of the session's live
+replay (FIG-6891). A pass that fails as a host verdict journals no answer,
+so it publishes no end of the cell's language execution. The pass that runs
+the cell again publishes its facts under the same keys, each the fact the
+lost pass published, and its end is the cell's only one. The loss is no
+continuity break: the live replay keeps its incarnation. A cell whose worker is lost on every run
 records `CELL_WORKER_DIED` once they are spent, as a Host failure. Its
 advice does not blame the cell; it says whether running the cell again is
 safe, naming the tool calls of it that completed and took effect. The
