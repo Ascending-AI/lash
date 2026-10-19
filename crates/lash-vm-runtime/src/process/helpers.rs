@@ -1,34 +1,42 @@
-//! The carry of a kernel process onto a successor pair whose document
-//! names other library functions (FIG-6121): [`plan_carry`] replaces each
-//! library function a document lists with the function the successor names
-//! under the same name and rewrites the document
-//! (`lash_kernel_migrate::adopt`). A parked run is never carried: its heap
-//! pages are carried by no migrator this build ships, so it is refused,
-//! typed ([`ParkedRefusal::StateNotCarried`]), stays parked with its rows
-//! intact, and resumes on a node that holds what it pins (FIG-6193).
+//! Kernel processes and published definitions adopted onto a successor
+//! release of the packages they call (`K-LIB-009`).
+//!
+//! A package fix is a new function, and so is every function that calls
+//! it: a document written against an earlier release pins that release's
+//! functions by identity, and runs on exactly them while they are held.
+//! Nothing moves it off them on its own. Adoption relinks it by name
+//! ([`lash_kernel_migrate::relink`]): each function its code calls that the
+//! earlier release holds is replaced by the successor's function of the
+//! same name, unless that moves it onto a changed operation contract
+//! (ADOPT-CONTRACT), which refuses naming the operation.
+//!
+//! [`plan_adoption`] plans that relink for a published definition's
+//! document or a process that is not parked, and [`plan_carry`] carries a
+//! process onto a successor pair its host names (`Processes::succeed`,
+//! FIG-6121). A parked run is never adopted: its heap pages are carried by
+//! no migrator this build ships (FIG-6233), so it is refused, typed
+//! ([`ParkedRefusal::StateNotCarried`]), and stays parked on the release it
+//! pins, with its rows intact.
 
-use std::collections::BTreeMap;
+use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, validate_document};
+use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Relink, Rewritten};
 
-use lash_kernel_doc::{
-    Document, DocumentId, FunctionId, FunctionName, FunctionRegistry, validate_document,
-};
-use lash_kernel_migrate::{ParkedRefusal, Rewritten};
-
-/// Why a run is not carried onto other library functions: the build's own
-/// helpers, or the document a successor pair names.
+/// Why a document or a run is not adopted onto other library functions:
+/// a successor release's, or those of the document a successor pair names.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "refused")]
 #[non_exhaustive]
 pub enum HelperAdoptionRefusal {
-    /// The document reaches `function`, and the build has no function of
-    /// its name to adopt.
-    #[error("helper `{name}` ({function}) has no counterpart in this build")]
-    NoCounterpart {
-        function: FunctionId,
-        name: FunctionName,
-    },
     #[error("document {document} is not retained")]
     DocumentMissing { document: DocumentId },
+    /// The relink refused the document: a function it calls has no
+    /// successor or is not held, or the relink would change the contract of
+    /// an operation it performs.
+    #[error("document {document} is not adopted: {refusal}")]
+    Document {
+        document: DocumentId,
+        refusal: DocumentRefusal,
+    },
     /// The adopted document is not one this build runs.
     #[error("document {document}, adopted, is not admitted: {reason}")]
     NotAdmitted {
@@ -42,9 +50,9 @@ pub enum HelperAdoptionRefusal {
     },
     #[error("the process's stored state does not decode: {message}")]
     State { message: String },
-    /// The successor's document is not the process's document with each
-    /// library function it lists replaced by the successor's function of
-    /// the same name: no correspondence carries the run onto it.
+    /// The successor's document is not the process's document relinked
+    /// onto the successor's functions of the same names: no correspondence
+    /// carries the run onto it.
     #[error("no correspondence carries document {document} onto {successor}")]
     NoCorrespondence {
         document: DocumentId,
@@ -56,18 +64,45 @@ pub enum HelperAdoptionRefusal {
     OtherEntry { entry: lash_kernel_doc::Name },
 }
 
-/// A document adopted onto a build's helpers.
+/// A document adopted onto a successor release.
 #[derive(Clone, Debug)]
 pub struct AdoptedRun {
     pub from: DocumentId,
     pub rewritten: Rewritten,
 }
 
-/// `document` carried onto `replacements`: each library function it names
-/// replaced by its counterpart. `functions` holds every function the
-/// document reaches and every replacement. A run `parked` under the
-/// document is refused, typed: its pages stay as they are, and it resumes
-/// only on a build that retains what it pins.
+/// `document`, a published definition's or a process's, adopted by
+/// `relink`; `None` when it lists no function `relink` names. With a run
+/// `parked` under it, the adoption is refused: no migrator carries a
+/// parked run's pages, so it stays on the release it pins. `functions`
+/// holds both releases.
+///
+/// # Errors
+///
+/// The typed refusal of a document or run that is not adopted.
+pub fn plan_adoption(
+    document: &Document,
+    parked: bool,
+    functions: &FunctionRegistry,
+    relink: &Relink,
+) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
+    // A document lists every function it reaches, through bodies too.
+    if !document
+        .manifest
+        .functions
+        .keys()
+        .any(|function| relink.contains_key(function))
+    {
+        return Ok(None);
+    }
+    plan_carry(document, parked, functions, relink).map(Some)
+}
+
+/// `document` carried onto `relink`: each library function it calls
+/// replaced by its successor. `functions` holds every function the
+/// document reaches and every successor. A run `parked` under the document
+/// is refused, typed: its pages stay as they are, and it resumes only on a
+/// node that holds what it pins.
 ///
 /// # Errors
 ///
@@ -76,9 +111,8 @@ pub fn plan_carry(
     document: &Document,
     parked: bool,
     functions: &FunctionRegistry,
-    replacements: &BTreeMap<FunctionId, FunctionId>,
+    relink: &Relink,
 ) -> Result<AdoptedRun, HelperAdoptionRefusal> {
-    let state = |message: String| HelperAdoptionRefusal::State { message };
     let from = document.identity();
     if parked {
         return Err(HelperAdoptionRefusal::Parked {
@@ -86,8 +120,12 @@ pub fn plan_carry(
             refusal: parked_not_carried(),
         });
     }
-    let rewritten = lash_kernel_migrate::adopt(document, replacements, functions, &BTreeMap::new())
-        .map_err(|refusal| state(refusal.to_string()))?;
+    let rewritten = lash_kernel_migrate::adopt(document, relink, functions).map_err(|refusal| {
+        HelperAdoptionRefusal::Document {
+            document: from,
+            refusal,
+        }
+    })?;
     validate_document(&rewritten.document, functions).map_err(|invalid| {
         HelperAdoptionRefusal::NotAdmitted {
             document: from,
@@ -98,11 +136,11 @@ pub fn plan_carry(
 }
 
 /// Why a parked run is not carried onto another document: no migrator
-/// this build ships carries its heap pages (FIG-6193).
+/// this build ships carries its heap pages (FIG-6233).
 pub(crate) fn parked_not_carried() -> ParkedRefusal {
     ParkedRefusal::StateNotCarried {
-        detail: "a parked run's heap pages are carried by no migrator this build ships; \
-                 it stays parked and resumes on a node that holds what it pins"
+        detail: "a parked run's heap pages are carried by no migrator this build ships \
+                 (FIG-6233); it stays parked and resumes on a node that holds what it pins"
             .to_owned(),
     }
 }

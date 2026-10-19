@@ -3332,6 +3332,7 @@ dependencies = [
 name = "lash-kernel-migrate"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "schemars",

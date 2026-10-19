@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::{
-    Document, DocumentId, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
-    FunctionRegistry, KernelVersion, RegistryError, Site,
+    Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, FunctionId,
+    FunctionName, FunctionRegistry, KernelVersion, RegistryError, Site,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -54,11 +54,18 @@ pub enum DocumentRefusal {
     Version { found: u32, from: u32 },
     #[error("the document lists library function {function}, which no definition here states")]
     FunctionNotHeld { function: FunctionId },
-    #[error("library function `{name}` ({function}) has no counterpart in the next version")]
+    #[error(
+        "library function `{name}` ({function}) has no counterpart in the next version or release"
+    )]
     FunctionRetired {
         function: FunctionId,
         name: FunctionName,
     },
+    /// The rewrite performs `operation` under another requirement than the
+    /// document did: adoption never moves code onto a changed operation
+    /// contract.
+    #[error("the rewrite performs `{operation}` under another contract than the document does")]
+    OperationContractChanged { operation: EffectName },
     #[error("the node at {site} has no form in the next version: {detail}")]
     FormNotCarried { site: Site, detail: String },
     #[error("the rewrite states two nodes at one site")]

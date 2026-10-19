@@ -3,11 +3,11 @@
 //!
 //! The successor's payload names the same entry and arguments over another
 //! document. Each library function the process's document lists and the
-//! successor's does not is replaced by the successor's function of the same
-//! name; [`plan_carry`] rewrites the document over those replacements, and
-//! the rewrite must be the successor's document, or no correspondence
-//! carries the process. A parked run is refused, typed: no migrator carries
-//! its pages (FIG-6193). The waits the state holds move to the identities
+//! successor's does not is relinked to the successor's function of the same
+//! name; [`plan_carry`] rewrites the document over that relink, and the
+//! rewrite must be the successor's document, or no correspondence carries
+//! the process. A parked run is refused, typed: no migrator carries its
+//! pages (FIG-6233). The waits the state holds move to the identities
 //! the rewrite gives their effects. Their admissions
 //! keep the requests they recorded, so a step already admitted keeps its
 //! call and the match its admission recorded, and nothing is re-matched. A
@@ -21,6 +21,7 @@ use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::SuccessionError;
 use lash_execution_contracts::process::SuccessorCarry;
 use lash_kernel_doc::{FunctionId, FunctionName};
+use lash_kernel_migrate::Relink;
 
 use super::helpers::{HelperAdoptionRefusal, plan_carry};
 use super::state::{KernelProcessInput, Phase};
@@ -102,15 +103,10 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
         };
         let base = read(input.document).await?;
         let next = read(successor.document).await?;
-        let replacements =
-            replacements(&base, &next, &engine.functions).map_err(|refusal| refused(&refusal))?;
-        let carried = plan_carry(
-            &base,
-            state.parked.is_some(),
-            &engine.functions,
-            &replacements,
-        )
-        .map_err(|refusal| refused(&refusal))?;
+        let relink =
+            relink(&base, &next, &engine.functions).map_err(|refusal| refused(&refusal))?;
+        let carried = plan_carry(&base, state.parked.is_some(), &engine.functions, &relink)
+            .map_err(|refusal| refused(&refusal))?;
         if carried.rewritten.identity() != successor.document {
             return Err(refused(&HelperAdoptionRefusal::NoCorrespondence {
                 document: input.document,
@@ -139,35 +135,32 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
 }
 
 /// Each library function `base` lists and `next` does not, with the
-/// function `next` lists under the same name.
-fn replacements(
+/// function `next` lists under the same name, if it lists one.
+fn relink(
     base: &lash_kernel_doc::Document,
     next: &lash_kernel_doc::Document,
     functions: &lash_kernel_doc::FunctionRegistry,
-) -> Result<BTreeMap<FunctionId, FunctionId>, HelperAdoptionRefusal> {
+) -> Result<Relink, HelperAdoptionRefusal> {
     let by_name: BTreeMap<&FunctionName, FunctionId> = next
         .manifest
         .functions
         .iter()
         .map(|(function, name)| (name, *function))
         .collect();
-    let mut replacements = BTreeMap::new();
+    let mut relink = Relink::new();
     for (function, name) in &base.manifest.functions {
         if next.manifest.functions.contains_key(function) {
             continue;
         }
-        let Some(counterpart) = by_name.get(name).copied() else {
-            return Err(HelperAdoptionRefusal::NoCounterpart {
-                function: *function,
-                name: name.clone(),
-            });
-        };
-        if functions.get(&counterpart).is_none() {
+        let counterpart = by_name.get(name).copied();
+        if let Some(counterpart) = counterpart
+            && functions.get(&counterpart).is_none()
+        {
             return Err(HelperAdoptionRefusal::State {
-                message: format!("helper {counterpart} is not held"),
+                message: format!("library function {counterpart} is not held"),
             });
         }
-        replacements.insert(*function, counterpart);
+        relink.insert(*function, counterpart);
     }
-    Ok(replacements)
+    Ok(relink)
 }

@@ -42,7 +42,7 @@ pub use documents::{
     DocumentStoreError, ExecutionDocument, KernelDocuments, StoredSourceMap, StoredWorkflow,
     Unretained,
 };
-pub use helpers::{AdoptedRun, HelperAdoptionRefusal};
+pub use helpers::{AdoptedRun, HelperAdoptionRefusal, plan_adoption};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,

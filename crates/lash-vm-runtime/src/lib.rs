@@ -62,8 +62,8 @@ pub use process::{
     WorkflowAdmissionRefusal, WorkflowAdmissionRequest, WorkflowDocument, WorkflowDocumentError,
     WorkflowEnvironment, WorkflowEnvironmentRequest, admit_kernel_process, definition_draft,
     definition_of_entry, entry_signature, kernel_process_engine_registration,
-    migrate_function_value, migrate_saved_function, migration_refusal, plan_migration,
-    retained_processes, survey_kernel_processes,
+    migrate_function_value, migrate_saved_function, migration_refusal, plan_adoption,
+    plan_migration, retained_processes, survey_kernel_processes,
 };
 pub use process_plugin::KernelProcessPluginFactory;
 

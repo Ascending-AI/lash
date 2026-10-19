@@ -68,6 +68,23 @@
           "type": "object"
         },
         {
+          "description": "The rewrite performs `operation` under another requirement than the\ndocument did: adoption never moves code onto a changed operation\ncontract.",
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/QualifiedName"
+            },
+            "reason": {
+              "const": "operation_contract_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "detail": {
               "type": "string"

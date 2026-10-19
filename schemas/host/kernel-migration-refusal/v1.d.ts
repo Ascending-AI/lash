@@ -49,6 +49,10 @@ export type DocumentRefusal = ({
   "reason": "function_retired";
   [key: string]: unknown;
 } | {
+  "operation": QualifiedName;
+  "reason": "operation_contract_changed";
+  [key: string]: unknown;
+} | {
   "detail": string;
   "reason": "form_not_carried";
   "site": Site;

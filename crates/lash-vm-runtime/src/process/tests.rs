@@ -900,3 +900,93 @@ fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refu
         "{refusal:?}"
     );
 }
+
+/// Two releases of package `p` in one registry, `p.outer` calling `p.fix`
+/// in each, with R2's `p.fix` corrected, and a workflow over each.
+fn releases() -> (
+    lash_kernel_doc::FunctionRegistry,
+    lash_kernel_migrate::Relink,
+    [lash_kernel_doc::Document; 2],
+) {
+    let release = |fixed: bool| {
+        let body = if fixed {
+            "let y = [x]\n  return y"
+        } else {
+            "return x"
+        };
+        let fix = lash_kernel_doc::parse_definition(&format!(
+            "function p.fix(x: Any) -> Any\nkernel 1\ncharge 1\nbody {{\n  {body}\n}}\n"
+        ))
+        .unwrap();
+        let outer = lash_kernel_doc::parse_definition(&format!(
+            "function p.outer(x: Any) -> Any\nkernel 1\ncharge 1\nuse p.fix = @{}\n\
+             body {{\n  let y = invoke p.fix(x)\n  return y\n}}\n",
+            fix.identity()
+        ))
+        .unwrap();
+        [fix, outer]
+    };
+    let workflow = |[fix, outer]: &[lash_kernel_doc::FunctionDefinition; 2]| {
+        lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers float\nuse p.fix = @{}\nuse p.outer = @{}\n\
+             entry run(x: Any) -> Any\n\
+             fn run(x) {{\nlet got = invoke p.outer(x)\nreturn got\n}}\nmain {{}}\n",
+            fix.identity(),
+            outer.identity()
+        ))
+        .unwrap()
+    };
+    let (r1, r2) = (release(false), release(true));
+    let mut registry = lash_kernel_doc::FunctionRegistry::default();
+    for definition in r1.iter().chain(&r2) {
+        registry.register(definition.clone(), None).unwrap();
+    }
+    let relink = lash_kernel_migrate::relink(&r1, &r2);
+    (registry, relink, [workflow(&r1), workflow(&r2)])
+}
+
+/// K-LIB-009 through the runtime: a published definition's document, or
+/// a process that is not parked, written over release R1 of `p` is adopted
+/// onto R2 as exactly the workflow written over R2, admitted on the
+/// library that holds both; one that reaches nothing R1 holds is left as it
+/// is.
+#[test]
+fn a_definition_or_unparked_process_is_adopted_onto_the_successor_release() {
+    let (registry, relink, [over_r1, over_r2]) = releases();
+    let adopted = super::plan_adoption(&over_r1, false, &registry, &relink)
+        .expect("the workflow adopts")
+        .expect("it reaches R1");
+    assert_eq!(adopted.from, over_r1.identity());
+    assert_eq!(adopted.rewritten.document, over_r2);
+    assert!(
+        super::plan_adoption(&over_r2, false, &registry, &relink)
+            .expect("an R2 workflow plans")
+            .is_none(),
+        "a workflow already over R2 is not adopted"
+    );
+}
+
+/// An adoption request for a parked run refuses with the typed
+/// `StateNotCarried` (FIG-6233): no migrator carries its heap pages, so it
+/// stays parked on R1, which its document still pins.
+#[test]
+fn a_parked_run_is_not_adopted_and_stays_on_the_release_it_pins() {
+    let (registry, relink, [over_r1, _]) = releases();
+    let refusal = super::plan_adoption(&over_r1, true, &registry, &relink)
+        .expect_err("a parked run is not adopted");
+    let super::HelperAdoptionRefusal::Parked {
+        document,
+        refusal: lash_kernel_migrate::ParkedRefusal::StateNotCarried { detail },
+    } = &refusal
+    else {
+        panic!("{refusal:?}")
+    };
+    assert_eq!(*document, over_r1.identity());
+    assert!(detail.contains("FIG-6233"), "{detail}");
+    assert!(
+        relink
+            .keys()
+            .all(|function| over_r1.manifest.functions.contains_key(function)),
+        "it still pins every R1 function"
+    );
+}
