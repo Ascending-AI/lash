@@ -31,7 +31,17 @@ use lash_execution_contracts::process::WaitKind;
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessWorkflowSiteState {
     Running,
-    Waiting { kind: ProcessWorkflowWaitKind },
+    /// The occurrence is parked on `kind`. A sleep also carries
+    /// `resume_at_ms`: the store-clock millisecond its park resumes at, the
+    /// `until_ms` its `process.waiting` recorded (the live feed reports the
+    /// same instant). It is the park's own instant, so a computed duration
+    /// has one too, and replay and a reload read the same value. Every
+    /// other wait leaves it `None`.
+    Waiting {
+        kind: ProcessWorkflowWaitKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_at_ms: Option<i64>,
+    },
     Completed,
     Failed,
     Recovered,
@@ -378,6 +388,10 @@ impl ProcessWorkflowOverlayAccumulator {
                     ProcessLifecycleFact::Waiting { .. } => (
                         ProcessWorkflowSiteState::Waiting {
                             kind: (&wait.kind).into(),
+                            resume_at_ms: match wait.kind {
+                                WaitKind::Sleep { until_ms } => Some(until_ms),
+                                _ => None,
+                            },
                         },
                         false,
                     ),
@@ -521,6 +535,12 @@ impl ProcessWorkflowOverlayAccumulator {
                         TraceNodeFact::Failed { .. } => ProcessWorkflowSiteState::Failed,
                         TraceNodeFact::Cancelled => ProcessWorkflowSiteState::Cancelled,
                         TraceNodeFact::Waiting { awaited } => ProcessWorkflowSiteState::Waiting {
+                            resume_at_ms: match awaited {
+                                lash_trace::TraceNodeAwaited::Sleep { deadline_ms } => {
+                                    deadline_ms.and_then(|at| i64::try_from(at).ok())
+                                }
+                                _ => None,
+                            },
                             kind: match awaited {
                                 lash_trace::TraceNodeAwaited::Sleep { .. } => {
                                     ProcessWorkflowWaitKind::Sleep

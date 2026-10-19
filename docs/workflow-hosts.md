@@ -550,6 +550,13 @@ Lash stores no wall time on an occurrence, and a row's `first_entered` and
   its `call_id` when it begins, so record the start there if you need it.
 - **Sleeps:** a sleep's `process.waiting` and `process.resumed` are its
   start and end. A sleep that never parks commits neither.
+- **When a sleep resumes:** while a sleep waits, its row's state is
+  `waiting` with `kind: sleep` and `resume_at_ms`, the store-clock
+  millisecond its park resumes at: the instant it parked plus its duration,
+  computed or literal. It is the `until_ms` its `process.waiting` recorded,
+  so replay and a reload read the same value; say "resumes at 11:27" from
+  it, never from the source's duration. Other waits carry no
+  `resume_at_ms`.
 - **Cancelled waits:** a cancel that cuts a parked wait short, a sleep
   included, ends it with `process.wait_cancelled`, never `process.resumed`.
   The fold settles that occurrence `cancelled`, so a cancelled sleep never

@@ -162,9 +162,17 @@
           "type": "object"
         },
         {
+          "description": "The occurrence is parked on `kind`. A sleep also carries\n`resume_at_ms`: the store-clock millisecond its park resumes at, the\n`until_ms` its `process.waiting` recorded (the live feed reports the\nsame instant). It is the park's own instant, so a computed duration\nhas one too, and replay and a reload read the same value. Every\nother wait leaves it `None`.",
           "properties": {
             "kind": {
               "$ref": "#/$defs/ProcessWorkflowWaitKind"
+            },
+            "resume_at_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "state": {
               "const": "waiting",

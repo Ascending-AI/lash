@@ -910,10 +910,14 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 row.occurrences,
                 lash_protocol_types::ObservationReader::counts(at).starts
             );
+            let lash::process::WaitKind::Sleep { until_ms } = wait.kind else {
+                panic!("the loop waits on its sleep: {wait:?}");
+            };
             assert_eq!(
                 row.state,
                 lash::workflow::ProcessWorkflowSiteState::Waiting {
                     kind: lash::workflow::ProcessWorkflowWaitKind::Sleep,
+                    resume_at_ms: Some(until_ms),
                 }
             );
             assert!(state.current_sites.contains(at));
@@ -1960,3 +1964,7 @@ mod returned_lists;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/cancelled_sleep.rs"]
 mod cancelled_sleep;
+
+#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
+#[path = "workflow_laws/sleep_resume_at.rs"]
+mod sleep_resume_at;
