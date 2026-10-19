@@ -658,7 +658,8 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
         }) as Arc<dyn Fn(Duration) -> Duration + Send + Sync>
     };
     let pool = lifecycle.observed_pool();
-    let entry = McpEntry::new(
+    let entry = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         "mock".to_string(),
         mock_config(
             root.path(),
@@ -1724,7 +1725,8 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
     let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
-    let entry = McpEntry::new(
+    let entry = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         "mock".to_string(),
         mock_config(
             root.path(),
