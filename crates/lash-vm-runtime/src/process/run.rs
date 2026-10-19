@@ -321,9 +321,7 @@ async fn kernel_run(
         }
     }
     let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
-    let start = counts
-        .then(|| recorded_start(process_input.document, &input))
-        .flatten();
+    let start = counts.then(|| recorded_start(process_input.document, &input));
     // A recovered wait is reported by the occurrence it was delivered as.
     let delivered: Vec<(lash_protocol_types::WaitId, lash_kernel_doc::EffectId)> = input
         .deliver
@@ -341,7 +339,7 @@ async fn kernel_run(
         segment: input
             .parked
             .as_ref()
-            .map_or_else(|| "entry".to_owned(), |parked| parked.root.to_hex()),
+            .map_or_else(|| "entry".to_owned(), |parked| parked.page.root.to_hex()),
     });
     let machines = lash_vm_client::RemoteMachines::new(
         engine.workers.clone(),
@@ -455,52 +453,39 @@ async fn kernel_run(
     }
 }
 
-/// Where `input` starts, as a segment records it for a replay: everything
-/// a retained record holds by reference to it, and only the rest whole.
-/// A parked page is recorded only by the output that holds it: one no
-/// recorded output holds has no record to be read back under, and the
-/// segment records no start.
-fn recorded_start(
-    document: lash_kernel_doc::DocumentId,
-    input: &KernelRunInput,
-) -> Option<RecordedStart> {
-    let from = match (&input.parked, input.parked_by) {
-        (None, _) => StartedFrom::Entry,
-        (Some(parked), Some(run)) => StartedFrom::Output {
-            run,
-            root: parked.root.to_hex(),
+/// Where `input` starts, as a segment records it for a replay: each part
+/// by reference to the retained record that holds it.
+fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput) -> RecordedStart {
+    let from = match &input.parked {
+        None => StartedFrom::Entry,
+        Some(parked) => StartedFrom::Output {
+            run: parked.by,
+            root: parked.page.root.to_hex(),
         },
-        (Some(_), None) => return None,
     };
     let admissions = input
         .admissions
         .iter()
-        .enumerate()
-        .map(
-            |(index, admission)| match input.admitted_by.get(index).copied().flatten() {
-                Some((wait, run)) => RecordedAdmission::Issued { wait, run },
-                None => RecordedAdmission::Whole(Box::new(admission.clone())),
-            },
-        )
+        .map(|(wait, held)| RecordedAdmission {
+            wait: *wait,
+            run: held.by,
+        })
         .collect();
     let deliver = input
         .deliver
         .iter()
-        .map(|delivery| match &delivery.source {
-            Some(source) => RecordedDelivery::Of {
-                wait: delivery.wait,
-                source: source.clone(),
-                digest: outcome_digest(&delivery.outcome),
-            },
-            None => RecordedDelivery::Whole(Box::new(delivery.clone())),
+        .map(|delivery| RecordedDelivery {
+            wait: delivery.wait,
+            source: delivery.source.clone(),
+            digest: outcome_digest(&delivery.outcome),
         })
         .collect();
-    Some(RecordedStart {
+    RecordedStart {
         document,
         from,
         admissions,
         deliver,
-    })
+    }
 }
 
 /// What driving a run segment reached: its step, the root it sealed at a
@@ -538,11 +523,11 @@ async fn drive(
         process,
         input
             .parked
-            .map(|parked| (parked, super::pages::ParkedUnder::Process(step))),
+            .map(|parked| (parked.page, super::pages::ParkedUnder::Process(step))),
         input
             .admissions
-            .iter()
-            .map(|admission| admission.0.clone())
+            .values()
+            .map(|held| held.admission.0.clone())
             .collect(),
         binding,
         machines.releases()?,

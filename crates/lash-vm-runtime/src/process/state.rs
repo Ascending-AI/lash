@@ -143,6 +143,15 @@ pub(crate) struct ParkedPage {
     pub(crate) kernel: u32,
 }
 
+/// The parked run a process stands on: its page, with the `kernel_run`
+/// whose output published it and whose record owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ParkedRun {
+    pub(crate) page: ParkedPage,
+    pub(crate) by: u64,
+}
+
 /// A page's identity as JSON text: its lowercase hex.
 mod page_hex {
     use super::{Deserialize as _, Deserializer, NodeId, Serializer};
@@ -191,6 +200,15 @@ impl<'de> Deserialize<'de> for Admission {
     }
 }
 
+/// One wait's admission as the parked run holds it, with the `kernel_run`
+/// whose output issued it and holds it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HeldAdmission {
+    pub(crate) admission: Admission,
+    pub(crate) by: u64,
+}
+
 use base64::Engine as _;
 const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -205,8 +223,7 @@ pub(crate) struct Delivery {
     pub(crate) outcome: OutcomeWire,
     /// Which retained record the outcome is read from: what a replay reads
     /// it back from instead of a copy (FIG-6370).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) source: Option<DeliverySource>,
+    pub(crate) source: DeliverySource,
 }
 
 /// The retained record an outcome the machine is handed is read from.
@@ -251,13 +268,13 @@ pub(crate) enum Phase {
 pub(crate) struct KernelEngineState {
     pub(crate) payload: serde_json::Value,
     /// The run as the machine sealed it at its last park; `None` before
-    /// the first.
+    /// the first and once it ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<ParkedPage>,
+    pub(crate) parked: Option<ParkedRun>,
     /// The admission of every wait the parked run holds, by the machine's
     /// wait id, until a committed run has been handed its outcome.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) admissions: BTreeMap<lash_protocol_types::WaitId, Admission>,
+    pub(crate) admissions: BTreeMap<lash_protocol_types::WaitId, HeldAdmission>,
     /// How many `kernel_run` steps the process has asked for.
     pub(crate) runs: u64,
     /// How many effect steps the process has asked for.
@@ -270,15 +287,6 @@ pub(crate) struct KernelEngineState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) settled: Vec<Delivery>,
     pub(crate) phase: Phase,
-    /// Which `kernel_run` answered `parked` with its output, when one did:
-    /// `None` before the first park and once a carry rewrote the run.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked_by: Option<u64>,
-    /// Which `kernel_run` issued each wait in `admissions`, while its
-    /// admission is the one that output holds: a carry that rewrote the
-    /// admissions forgets them.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) issued_by: BTreeMap<lash_protocol_types::WaitId, u64>,
 }
 
 /// The input of one `kernel_run`: everything the step recomputes from.
@@ -287,19 +295,13 @@ pub(crate) struct KernelEngineState {
 pub(crate) struct KernelRunInput {
     pub(crate) payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<ParkedPage>,
-    /// The admission of each wait the parked run holds.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) admissions: Vec<Admission>,
+    pub(crate) parked: Option<ParkedRun>,
+    /// The admission of each wait the parked run holds, by the machine's
+    /// wait id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) admissions: BTreeMap<lash_protocol_types::WaitId, HeldAdmission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) deliver: Vec<Delivery>,
-    /// Which `kernel_run` answered `parked` with its output, when one did.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked_by: Option<u64>,
-    /// For each of `admissions`, in order: its wait and the `kernel_run`
-    /// whose output holds it as issued, when one does.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) admitted_by: Vec<Option<(lash_protocol_types::WaitId, u64)>>,
 }
 
 /// What the host's reads answered one run segment, recorded at
@@ -330,33 +332,26 @@ pub(crate) struct RecordedStart {
     pub(crate) deliver: Vec<RecordedDelivery>,
 }
 
-/// One admission a recorded segment was handed: by reference to the output
-/// that issued it, or whole when a carry rewrote it and no record holds it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum RecordedAdmission {
-    Issued {
-        wait: lash_protocol_types::WaitId,
-        run: u64,
-    },
-    Whole(Box<Admission>),
+/// One admission a recorded segment was handed, by reference to the output
+/// of `kernel_run.{run}` that issued it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordedAdmission {
+    pub(crate) wait: lash_protocol_types::WaitId,
+    pub(crate) run: u64,
 }
 
-/// One outcome a recorded segment was handed: by reference to the record it
-/// is read from, with the digest of the outcome as the machine got it, or
-/// whole when no record names its source.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum RecordedDelivery {
-    Of {
-        wait: lash_protocol_types::WaitId,
-        source: DeliverySource,
-        digest: String,
-    },
-    Whole(Box<Delivery>),
+/// One outcome a recorded segment was handed, by reference to the record it
+/// is read from, with the digest of the outcome as the machine got it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordedDelivery {
+    pub(crate) wait: lash_protocol_types::WaitId,
+    pub(crate) source: DeliverySource,
+    pub(crate) digest: String,
 }
 
-/// The digest a [`RecordedDelivery::Of`] binds its outcome by.
+/// The digest a [`RecordedDelivery`] binds its outcome by.
 pub(crate) fn outcome_digest(outcome: &OutcomeWire) -> String {
     lash_core_ids::stable_hash::sha256_hex(&serde_json::to_vec(outcome).unwrap_or_default())
 }

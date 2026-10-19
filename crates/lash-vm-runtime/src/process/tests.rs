@@ -11,7 +11,8 @@ use lash_vm_client::wire::OutcomeWire;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
-    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage, Phase, refused,
+    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage, ParkedRun,
+    Phase, refused,
 };
 use lash_kernel_doc::KernelVersion;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
@@ -72,8 +73,11 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
     let (run1, input, _) = run_of(&action);
     assert_eq!(
         input.parked,
-        Some(sealed()),
-        "the run resumes from the page"
+        Some(ParkedRun {
+            page: sealed(),
+            by: 0
+        }),
+        "the run resumes from the page the run that parked it published"
     );
     written.push(state.clone());
     let (state, action) = settle(state, &run1, parked(vec![], vec![]));
@@ -105,7 +109,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
         assert_eq!(state.pages, Some(sealed().root), "the state names its page");
         let (decoded, _) = decode(KernelVersion::NEWEST, &state)
             .unwrap_or_else(|error| panic!("a written state decodes: {error:?}"));
-        assert_eq!(decoded.parked, Some(sealed()));
+        assert_eq!(decoded.parked.map(|parked| parked.page), Some(sealed()));
         let mut other = state.clone();
         other.pages = Some(lash_core_store::checkpoint_graph::NodeId([8; 32]));
         decode(KernelVersion::NEWEST, &other)
@@ -224,6 +228,65 @@ fn started() -> (EngineState, StepName) {
     (state, run)
 }
 
+/// FIG-6870: the state holds each parked page, admission and settled
+/// outcome with its origin, the run or record a replay reads it back
+/// from. A stored state missing any one of them is refused, never resumed
+/// with a start recorded whole.
+#[test]
+fn a_state_missing_the_origin_of_its_page_admission_or_outcome_is_refused() {
+    let (state, run0) = started();
+    let (state, action) = settle(
+        state,
+        &run0,
+        parked(vec![effect(10, element(0)), effect(11, element(1))], vec![]),
+    );
+    let EngineAction::Steps { steps, .. } = &action else {
+        panic!("a park on two effects asks for two steps, found {action:?}");
+    };
+    let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
+    let (state, _) = settle(state, &second, completed("\"b\"".to_owned()));
+    // Settles while that run is in flight: the state holds its outcome.
+    let (state, _) = settle(state, &first, completed("\"a\"".to_owned()));
+    let (written, _) = decode(KernelVersion::NEWEST, &state).expect("a written state decodes");
+    assert!(
+        written.parked.is_some() && written.admissions.len() == 2 && written.settled.len() == 1,
+        "the state holds a parked page, two admissions and a settled outcome"
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&state.bytes).expect("a written state is JSON");
+    // Each holder of an origin, by its JSON pointer: the parked run, every
+    // held admission and the settled outcome.
+    let holders = std::iter::once(("a parked page", "/parked".to_owned(), "by"))
+        .chain(
+            json["admissions"]
+                .as_object()
+                .expect("the parked run holds admissions")
+                .keys()
+                .map(|wait| ("an admission", format!("/admissions/{wait}"), "by")),
+        )
+        .chain(std::iter::once((
+            "a settled outcome",
+            "/settled/0".to_owned(),
+            "source",
+        )));
+    for (what, holder, origin) in holders {
+        let mut stripped = json.clone();
+        stripped
+            .pointer_mut(&holder)
+            .and_then(serde_json::Value::as_object_mut)
+            .and_then(|holder| holder.remove(origin))
+            .expect("the written state names the origin");
+        let stripped = EngineState {
+            bytes: serde_json::to_vec(&stripped).expect("JSON serializes"),
+            ..state.clone()
+        };
+        assert!(
+            decode(KernelVersion::NEWEST, &stripped).is_err(),
+            "{what} at {holder} without its origin is refused"
+        );
+    }
+}
+
 /// Target 3 and `K-TASK-012`: a body that fans out parks on every element's
 /// effect at once, each its own step at the identity the machine computed
 /// (the task component tells the elements apart), and each outcome is
@@ -266,11 +329,15 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     let held = |input: &KernelRunInput| {
         input
             .admissions
-            .iter()
-            .map(|admission| admission.identity().clone())
+            .values()
+            .map(|held| (held.admission.identity().clone(), held.by))
             .collect::<Vec<_>>()
     };
-    assert_eq!(held(&input), vec![element(0), element(1)]);
+    assert_eq!(
+        held(&input),
+        vec![(element(0), 0), (element(1), 0)],
+        "each admission names the run that issued it"
+    );
 
     // The first settles while that run is in flight: nothing new is asked.
     let (state, action) = settle(state, &first, completed("\"a\"".to_owned()));
@@ -286,7 +353,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     );
     assert_eq!(
         held(&input),
-        vec![element(0)],
+        vec![(element(0), 0)],
         "a consumed wait's admission goes"
     );
     assert_eq!(

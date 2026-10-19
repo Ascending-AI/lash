@@ -312,27 +312,25 @@ impl Journal<'_> {
         let admissions = start
             .admissions
             .iter()
-            .map(|admission| match admission {
-                RecordedAdmission::Issued { wait, run } => self
-                    .issued(*run, *wait)
+            .map(|RecordedAdmission { wait, run }| {
+                self.issued(*run, *wait)
                     .map(|issued| issued.admission().clone())
-                    .ok_or(Unreplayable::Pruned),
-                RecordedAdmission::Whole(admission) => Ok((**admission).clone()),
+                    .ok_or(Unreplayable::Pruned)
             })
             .collect::<Result<_, _>>()?;
         let deliver = start
             .deliver
             .iter()
-            .map(|delivery| match delivery {
-                RecordedDelivery::Of {
-                    wait,
-                    source,
-                    digest,
-                } => self
-                    .delivered(*wait, source, digest)
-                    .map(|outcome| (*wait, outcome)),
-                RecordedDelivery::Whole(delivery) => Ok((delivery.wait, delivery.outcome.clone())),
-            })
+            .map(
+                |RecordedDelivery {
+                     wait,
+                     source,
+                     digest,
+                 }| {
+                    self.delivered(*wait, source, digest)
+                        .map(|outcome| (*wait, outcome))
+                },
+            )
             .collect::<Result<_, _>>()?;
         Ok(Start_ {
             parked,

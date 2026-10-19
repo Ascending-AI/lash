@@ -26,8 +26,8 @@ use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
 use super::state::{
-    Delivery, DeliverySource, Issued, KERNEL_RUN_STEP, KernelEngineState, KernelRunInput,
-    KernelRunOutput, Phase, Wait, refused,
+    Delivery, DeliverySource, HeldAdmission, Issued, KERNEL_RUN_STEP, KernelEngineState,
+    KernelRunInput, KernelRunOutput, ParkedRun, Phase, Wait, refused,
 };
 use super::{KernelProcessFailureCode, failure};
 
@@ -56,10 +56,10 @@ pub(crate) fn encode(
     written: KernelVersion,
 ) -> Result<EngineState, ProcessInfraError> {
     let kernel = match &state.parked {
-        Some(parked) => KernelVersion::of(parked.kernel).ok_or_else(|| {
+        Some(parked) => KernelVersion::of(parked.page.kernel).ok_or_else(|| {
             infra(format!(
                 "the run is parked under kernel version {}, which this build does not interpret",
-                parked.kernel
+                parked.page.kernel
             ))
         })?,
         None => written,
@@ -67,7 +67,7 @@ pub(crate) fn encode(
     Ok(EngineState {
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
-        pages: state.parked.map(|parked| parked.root),
+        pages: state.parked.map(|parked| parked.page.root),
     })
 }
 
@@ -91,7 +91,7 @@ pub(crate) fn decode(
             pre_heap(&state.bytes).map_or_else(|| error.to_string(), |refusal| refusal.to_string()),
         )
     })?;
-    if decoded.parked.map(|parked| parked.root) != state.pages {
+    if decoded.parked.map(|parked| parked.page.root) != state.pages {
         return Err(infra(
             "the state names another run page than the process's root holds",
         ));
@@ -135,8 +135,6 @@ pub(crate) fn advance(
             waits: Default::default(),
             settled: Vec::new(),
             phase: Phase::Ended,
-            parked_by: None,
-            issued_by: Default::default(),
         };
         let action = run(&mut state, Vec::new())?;
         return Ok((encode(&state, writes)?, action));
@@ -179,7 +177,7 @@ fn transition(
                         wait,
                         identity,
                         outcome: OutcomeWire::Elapsed,
-                        source: Some(DeliverySource::Elapsed),
+                        source: DeliverySource::Elapsed,
                     });
                 }
             }
@@ -223,7 +221,7 @@ fn step_settled(
             wait,
             identity,
             outcome: outcome.into(),
-            source: Some(DeliverySource::Step { step: step.clone() }),
+            source: DeliverySource::Step { step: step.clone() },
         });
     }
     resume(state, Vec::new())
@@ -338,7 +336,6 @@ fn run_settled(
         KernelRunOutput::Ended { outcome, .. } => {
             // An ended run stands on no page.
             state.parked = None;
-            state.parked_by = None;
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }
@@ -348,19 +345,25 @@ fn run_settled(
             withdrawn,
             ..
         } => {
-            state.parked = Some(parked);
             // Runs are sequential: the one settling is the last asked for.
             let settling = state.runs.saturating_sub(1);
-            state.parked_by = Some(settling);
+            state.parked = Some(ParkedRun {
+                page: parked,
+                by: settling,
+            });
             state.phase = Phase::Parked;
             for wait in withdrawn {
                 state.waits.remove(&wait);
             }
             let mut steps = Vec::new();
             for issued in issued {
-                let wait = issued.wait();
-                state.admissions.insert(wait, issued.admission().clone());
-                state.issued_by.insert(wait, settling);
+                state.admissions.insert(
+                    issued.wait(),
+                    HeldAdmission {
+                        admission: issued.admission().clone(),
+                        by: settling,
+                    },
+                );
                 match issued {
                     Issued::Effect {
                         wait,
@@ -395,7 +398,7 @@ fn run_settled(
                         wait,
                         identity: admission.identity().clone(),
                         outcome: refused(&kind, message),
-                        source: Some(DeliverySource::Refused { run: settling }),
+                        source: DeliverySource::Refused { run: settling },
                     }),
                     Issued::Sleep {
                         wait,
@@ -416,7 +419,6 @@ fn run_settled(
                 .chain(state.settled.iter().map(|delivery| delivery.wait))
                 .collect();
             state.admissions.retain(|wait, _| held.contains(wait));
-            state.issued_by.retain(|wait, _| held.contains(wait));
             if !state.settled.is_empty() {
                 return run(state, steps);
             }
@@ -481,14 +483,8 @@ fn run(
     let input = KernelRunInput {
         payload: state.payload.clone(),
         parked: state.parked,
-        admitted_by: state
-            .admissions
-            .keys()
-            .map(|wait| state.issued_by.get(wait).map(|run| (*wait, *run)))
-            .collect(),
-        admissions: state.admissions.values().cloned().collect(),
+        admissions: state.admissions.clone(),
         deliver: std::mem::take(&mut state.settled),
-        parked_by: state.parked_by,
     };
     state.phase = Phase::Running { step: step.clone() };
     steps.push(StepRequest::Engine {
