@@ -147,3 +147,69 @@ fn reflective_protocols_and_builtin_global_writes_are_typed_refusals() {
         );
     }
 }
+
+/// BUILTIN-INDEX: the build's immutable indexes project every owning row,
+/// preserving each method's receiver order and all global/member names.
+#[test]
+fn builtin_indexes_project_the_owning_rows() {
+    use std::collections::BTreeMap;
+
+    use crate::builtins::{self, Row};
+    let table = builtins::table();
+    let mut methods = BTreeMap::<_, Vec<_>>::new();
+    let mut properties = BTreeMap::<_, Vec<_>>::new();
+    for row in builtins::objects()
+        .into_iter()
+        .flat_map(|object| object.rows)
+    {
+        match row {
+            Row::Method {
+                path,
+                receivers,
+                function,
+            } => {
+                assert_eq!(table.functions.get(path), Some(&function));
+                let (root, _) = path.split_once('.').unwrap();
+                assert!(builtins::is_global(root));
+                let (_, name) = path.rsplit_once('.').unwrap();
+                assert!(table.member_names.contains(name));
+                methods
+                    .entry(name)
+                    .or_default()
+                    .extend(receivers.iter().map(|receiver| (*receiver, path)));
+            }
+            Row::Property {
+                receiver,
+                name,
+                function,
+            } => {
+                properties
+                    .entry(name)
+                    .or_default()
+                    .push((receiver, function));
+            }
+            Row::Function { path, function } => {
+                assert_eq!(table.functions.get(path), Some(&function));
+                assert!(builtins::is_global(path.split('.').next().unwrap()));
+            }
+            Row::Value { path, function } => assert_eq!(table.values.get(path), Some(&function)),
+            Row::Constructor { class, function } => {
+                assert_eq!(table.constructors.get(class), Some(&function));
+                assert!(builtins::is_global(class));
+            }
+            Row::InstanceOf { class, function } => {
+                assert_eq!(table.instance_tests.get(class), Some(&function));
+                assert!(builtins::is_global(class));
+            }
+        }
+    }
+    for (index, expected) in [(&table.methods, methods), (&table.properties, properties)] {
+        let actual: BTreeMap<_, _> = index
+            .iter()
+            .map(|(name, rows)| (*name, rows.to_vec()))
+            .collect();
+        assert_eq!(actual, expected);
+    }
+    assert!(!builtins::is_global("UserDefined"));
+    assert!(table.builtin("UserDefined").is_none());
+}

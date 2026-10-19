@@ -25,7 +25,10 @@ lash_rust_build_script(
         "default",
         "dhat-heap",
     ],
-    data = ["build.rs"] + glob(["src/**/*.rs"]),
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "workloads/*.json",
+        "workloads/replay/*.json",
+    ]),
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     version = "0.0.0-dev",

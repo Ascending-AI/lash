@@ -28,139 +28,22 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-mod array;
-mod boolean;
-mod console;
-mod date;
-mod error;
-mod function;
-mod json;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the index generator reads row recipes; runtime package generation reads their helper sources"
+    )
+)]
+mod catalog;
 mod lengths;
-mod map;
-mod math;
-mod number;
-mod object;
-mod promise;
-mod regexp;
-mod set;
 mod sorted;
-mod string;
-mod uri;
-mod url;
-mod url_search_params;
 mod values;
 
+pub(crate) use catalog::{Empty, Object, Positional, objects};
+pub use catalog::{Receiver, Row};
 use sorted::{SortedMap, SortedSet};
 pub(crate) use values::{member_reader, sources as value_sources};
-
-/// What a member's receiver is, as `ts.receiver` names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Receiver {
-    List,
-    Record,
-    Text,
-    Number,
-    Bool,
-    Map,
-    Set,
-    Error,
-    Timestamp,
-    Closure,
-    /// An internal record with the kernel tuple marker and this type tag.
-    Brand(&'static str),
-}
-
-impl Receiver {
-    /// The text `ts.receiver` gives a value of this kind.
-    pub(crate) fn tag(self) -> String {
-        match self {
-            Self::Record => "record".into(),
-            Self::List => "list".into(),
-            Self::Text => "text".into(),
-            Self::Number => "number".into(),
-            Self::Bool => "bool".into(),
-            Self::Map => "map".into(),
-            Self::Set => "set".into(),
-            Self::Error => "error".into(),
-            Self::Timestamp => "timestamp".into(),
-            Self::Closure => "closure".into(),
-            Self::Brand(brand) => format!("brand:{brand}"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Row {
-    /// A prototype's method (`Array.prototype.map`): one function object,
-    /// which a read of `path` gives, and which a value of each of
-    /// `receivers` answers for the member named by the path's last segment,
-    /// so `receiver.name(args)` calls it.
-    Method {
-        path: &'static str,
-        receivers: &'static [Receiver],
-        function: &'static str,
-    },
-    /// A read of `receiver.name`: the function is called with the receiver
-    /// alone.
-    Property {
-        receiver: Receiver,
-        name: &'static str,
-        function: &'static str,
-    },
-    /// A call of a global path: `Math.max(...)`, `parseInt(...)`.
-    Function {
-        path: &'static str,
-        function: &'static str,
-    },
-    /// A read of a global path: `Math.PI`. The function is called with no
-    /// arguments.
-    Value {
-        path: &'static str,
-        function: &'static str,
-    },
-    /// `new Class(args)`.
-    Constructor {
-        class: &'static str,
-        function: &'static str,
-    },
-    /// `value instanceof Class`: the function is called with the value as
-    /// its one argument and gives a bool.
-    InstanceOf {
-        class: &'static str,
-        function: &'static str,
-    },
-}
-
-/// A built-in object's helper source and its rows.
-pub(crate) struct Object {
-    pub(crate) source: &'static str,
-    pub(crate) rows: Vec<Row>,
-}
-
-/// Every built-in object, in the order their helpers are defined: an object
-/// may call the helpers of those before it.
-pub(crate) fn objects() -> Vec<Object> {
-    vec![
-        function::object(),
-        map::object(),
-        set::object(),
-        boolean::object(),
-        object::object(),
-        math::object(),
-        number::object(),
-        date::object(),
-        error::object(),
-        url::object(),
-        url_search_params::object(),
-        console::object(),
-        json::object(),
-        array::object(),
-        promise::object(),
-        string::object(),
-        regexp::object(),
-        uri::object(),
-    ]
-}
 
 /// What calling a built-in function value does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,89 +92,18 @@ const ALIASES: &[(&str, &str)] = &[
     ("Set.prototype.keys", "Set.prototype.values"),
 ];
 
-/// A built-in function a direct call reaches without its argument list:
-/// its row's helper reads a fixed number of arguments, `undefined` for
-/// each one missing, and answers what one helper answers over them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Positional {
-    /// The helper the row's helper answers with.
-    pub(crate) helper: &'static str,
-    /// How many arguments it reads.
-    pub(crate) arity: usize,
-    /// The helper a first argument proven a float takes instead.
-    pub(crate) float: Option<&'static str>,
-    /// What a call with no arguments gives, where that is not the helper's
-    /// answer for `undefined`.
-    pub(crate) empty: Option<Empty>,
-}
-
-/// What a positional built-in called with no arguments gives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Empty {
-    /// `String()`.
-    Text,
-    /// `Number()`.
-    Zero,
-}
-
-/// Every positional built-in, by path. Each row's helper is the padded
-/// argument list passed to `helper` (`helpers/*.kernel`):
-/// `ts.boolean.convert`, `ts.math.pow`, `ts.number.convert` and
-/// `ts.string.create`.
-const POSITIONAL: &[(&str, Positional)] = &[
-    (
-        "Boolean",
-        Positional {
-            helper: "ts.to_boolean",
-            arity: 1,
-            float: None,
-            empty: None,
-        },
-    ),
-    (
-        "Math.pow",
-        Positional {
-            helper: "ts.pow",
-            arity: 2,
-            float: None,
-            empty: None,
-        },
-    ),
-    (
-        "Number",
-        Positional {
-            helper: "ts.to_number",
-            arity: 1,
-            float: None,
-            empty: Some(Empty::Zero),
-        },
-    ),
-    (
-        "String",
-        Positional {
-            helper: "ts.to_string",
-            arity: 1,
-            float: Some("ts.number.to_string"),
-            empty: Some(Empty::Text),
-        },
-    ),
-];
-
 /// The rows, indexed the ways the lowerer and the package builder ask.
 ///
-/// Lowering builds this table in every process that lowers TypeScript, so
-/// building it indexes the rows and nothing more: what a built-in path is
-/// as a value is answered from the rows when asked
-/// ([`builtin`](Self::builtin)), and the indexes only the package builder
-/// walks are derived on its first use.
+/// The build projects these indexes from the owning rows. Lowering borrows
+/// them without allocating or sorting; package-only path enumeration is lazy.
 #[derive(Debug, Default)]
 pub(crate) struct Table {
     /// Each method name's receiver kinds, with the path of the function
     /// each kind's member by that name is.
-    pub(crate) methods: SortedMap<Vec<(Receiver, &'static str)>>,
+    pub(crate) methods: SortedMap<Rows>,
     /// Each property name's receiver kinds, with the function each kind's
     /// read calls.
-    pub(crate) properties: SortedMap<Vec<(Receiver, &'static str)>>,
+    pub(crate) properties: SortedMap<Rows>,
     pub(crate) functions: SortedMap<&'static str>,
     pub(crate) positional: SortedMap<Positional>,
     pub(crate) values: SortedMap<&'static str>,
@@ -315,103 +127,6 @@ pub(crate) struct Table {
 }
 
 impl Table {
-    fn build() -> Self {
-        let (mut methods, mut properties) = (Vec::new(), Vec::new());
-        let (mut functions, mut values) = (Vec::new(), Vec::new());
-        let (mut constructors, mut instance_tests) = (Vec::new(), Vec::new());
-        let (mut globals, mut classes) = (Vec::new(), Vec::new());
-        for row in objects().into_iter().flat_map(|object| object.rows) {
-            match row {
-                Row::Method {
-                    path,
-                    receivers,
-                    function,
-                } => {
-                    let Some((_, name)) = path
-                        .rsplit_once('.')
-                        .filter(|(parent, _)| parent.ends_with(".prototype"))
-                    else {
-                        panic!("method `{path}` is no `X.prototype.<name>`");
-                    };
-                    globals.push(root(path));
-                    functions.push((path, function));
-                    methods.extend(receivers.iter().map(|receiver| (name, (*receiver, path))));
-                }
-                Row::Property {
-                    receiver,
-                    name,
-                    function,
-                } => properties.push((name, (receiver, function))),
-                Row::Function { path, function } => {
-                    globals.push(root(path));
-                    functions.push((path, function));
-                }
-                Row::Value { path, function } => {
-                    globals.push(root(path));
-                    values.push((path, function));
-                }
-                Row::Constructor { class, function } => {
-                    globals.push(class);
-                    classes.push(class);
-                    constructors.push((class, function));
-                }
-                Row::InstanceOf { class, function } => {
-                    globals.push(class);
-                    classes.push(class);
-                    instance_tests.push((class, function));
-                }
-            }
-        }
-        let functions = SortedMap::new(functions, "function");
-        let values = SortedMap::new(values, "value");
-        for (path, _) in POSITIONAL {
-            assert!(
-                functions.contains_key(path),
-                "positional built-in `{path}` has no function row"
-            );
-        }
-        let methods = members(methods, "method");
-        let mut member_names: Vec<&'static str> = methods.keys().copied().collect();
-        let mut prototype = false;
-        for path in functions.keys().chain(values.keys()) {
-            let mut segments = path.split('.');
-            let class = segments.next();
-            let mut segments = segments.peekable();
-            if let (Some(class), Some(&"prototype")) = (class, segments.peek()) {
-                classes.push(class);
-            }
-            // Each segment below the first is the last of the path itself
-            // or of an object the path runs through; `prototype` is named
-            // once below.
-            for segment in segments {
-                if segment == "prototype" {
-                    prototype = true;
-                } else {
-                    member_names.push(segment);
-                }
-            }
-        }
-        let classes = SortedSet::new(classes);
-        member_names.extend(classes.iter().filter_map(|class| last_segment(class)));
-        if prototype || !classes.is_empty() {
-            member_names.push("prototype");
-        }
-        member_names.extend(["constructor", "length", "message", "name", "size"]);
-        Self {
-            methods,
-            properties: members(properties, "property"),
-            functions,
-            positional: SortedMap::new(POSITIONAL.to_vec(), "positional"),
-            values,
-            constructors: SortedMap::new(constructors, "constructor"),
-            instance_tests: SortedMap::new(instance_tests, "instanceof"),
-            globals: SortedSet::new(globals),
-            classes,
-            member_names: SortedSet::new(member_names),
-            paths: OnceLock::new(),
-        }
-    }
-
     /// What `path` names as a value, when it is a built-in: a function
     /// row's path, then a class, then a class's prototype, then an object
     /// a function or value row's path runs through.
@@ -541,29 +256,6 @@ pub(crate) fn object_tag(path: &str) -> &'static str {
     }
 }
 
-/// Member rows by name, each name's rows in the order they came: one
-/// row per receiver kind, with its row's path or function.
-fn members(
-    mut rows: Vec<(&'static str, (Receiver, &'static str))>,
-    what: &str,
-) -> SortedMap<Vec<(Receiver, &'static str)>> {
-    rows.sort_by(|a, b| a.0.cmp(b.0));
-    let mut grouped: Vec<(&'static str, Vec<(Receiver, &'static str)>)> = Vec::new();
-    for (name, (receiver, function)) in rows {
-        match grouped.last_mut() {
-            Some((last, group)) if *last == name => {
-                assert!(
-                    group.iter().all(|(existing, _)| *existing != receiver),
-                    "two built-in rows answer the same question: {what} `{name}` of {receiver:?}"
-                );
-                group.push((receiver, function));
-            }
-            _ => grouped.push((name, vec![(receiver, function)])),
-        }
-    }
-    SortedMap::sorted(grouped)
-}
-
 /// The JavaScript `length` of the built-in function at `path`.
 fn length(path: &str) -> u8 {
     lengths::LENGTHS
@@ -572,18 +264,33 @@ fn length(path: &str) -> u8 {
         .unwrap_or_else(|_| panic!("`{path}` has no length in builtins/lengths.rs"))
 }
 
-/// The last segment of a dotted path, when it has more than one.
-fn last_segment(path: &'static str) -> Option<&'static str> {
-    path.rsplit_once('.').map(|(_, name)| name)
-}
-
-fn root(path: &'static str) -> &'static str {
-    path.split('.').next().unwrap_or(path)
-}
-
+/// The build derives these sorted indexes from the owning rows once. A
+/// cold lowerer borrows them directly; only package-only path enumeration
+/// needs a process-local cache.
 pub(crate) fn table() -> &'static Table {
-    static TABLE: OnceLock<Table> = OnceLock::new();
-    TABLE.get_or_init(Table::build)
+    static TABLE: Table = include!(concat!(env!("OUT_DIR"), "/builtin_table.rs"));
+    &TABLE
+}
+
+/// One member's receiver rows, in their source order.
+#[derive(Debug)]
+pub(crate) struct Rows(&'static [(Receiver, &'static str)]);
+
+impl std::ops::Deref for Rows {
+    type Target = [(Receiver, &'static str)];
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> IntoIterator for &'a Rows {
+    type Item = &'a (Receiver, &'static str);
+    type IntoIter = std::slice::Iter<'a, (Receiver, &'static str)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
 }
 
 /// Whether no text that begins with `prefix` is the internal brand field

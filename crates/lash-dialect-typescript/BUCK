@@ -20,7 +20,9 @@ lash_rust_build_script(
     name = "build_script",
     crate_features = [],
     declared_features = [],
-    data = ["build.rs"] + glob(["src/**/*.rs"]),
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "src/helpers/*.kernel",
+    ]),
     manifest_dir = "crates/lash-dialect-typescript",
     package_name = "lash-dialect-typescript",
     version = "0.0.0-dev",

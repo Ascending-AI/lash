@@ -1123,7 +1123,9 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
             "    name = \"build_script\",\n"
             f"    crate_features = {string_list(features)},\n"
             f"    declared_features = {string_list(declared_features)},\n"
-            f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]),\n"
+            f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]"
+            + (f" + {string_list(SOURCE_OWNERSHIP[package_dir]['compile_data'])}" if SOURCE_OWNERSHIP.get(package_dir, {}).get('compile_data') else "")
+            + "),\n"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
             f"    version = {quote(version)},\n"
