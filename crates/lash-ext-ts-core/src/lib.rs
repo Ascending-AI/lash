@@ -27,7 +27,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, RegistryError, Value,
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative,
+    RegistryError, Value,
 };
 
 /// Why [`implement`] could not add the natives.
@@ -48,7 +49,8 @@ mod plans;
 pub use plans::PLANS;
 
 /// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 8] = [
+pub const OPERATIONS: [&str; 9] = [
+    "ts.builtin_name",
     "ts.get",
     "ts.add",
     "ts.sub",
@@ -115,6 +117,7 @@ pub fn implement(
             })
         };
         let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
+            "ts.builtin_name" => Arc::new(BuiltinName),
             "ts.get" => Arc::new(Get),
             "ts.add" => add.clone(),
             "ts.sub" => subtract.clone(),
@@ -272,5 +275,33 @@ impl NativeFunction for Get {
             return Err(NativeError::Decline);
         }
         Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))
+    }
+}
+
+/// `ts.builtin_name`: whether a short text is a name some built-in row
+/// answers a computed read for, by halving the generated sorted table the
+/// body's search halves. A long text declines to the body.
+struct BuiltinName;
+
+fn builtin_name(args: &[Value]) -> Option<Value> {
+    let [Value::Text(name)] = args else {
+        return None;
+    };
+    // Code point order is byte order for UTF-8, as the table is sorted.
+    let found = plans::BUILTIN_NAMES.binary_search(&name.as_str()).is_ok();
+    Some(Value::Bool(found))
+}
+
+impl NativeFunction for BuiltinName {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        builtin_name(call.args.values()).ok_or(NativeError::Decline)
+    }
+
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: builtin_name,
+            charged_entry: None,
+            operation: "ts.builtin_name(name: Text) -> Bool",
+        })
     }
 }

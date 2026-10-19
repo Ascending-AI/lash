@@ -139,6 +139,9 @@ pub(crate) struct Operand {
     /// Proven representation and stable nested fields, never an annotation
     /// or part of a saved value. Boundness is checked before this is attached.
     pub(crate) plain: Option<PlainRecord>,
+    /// The literal text the value is proven by construction to begin
+    /// with, never by an annotation: `Some` only where it is a text.
+    pub(crate) text_prefix: Option<String>,
 }
 
 impl Operand {
@@ -147,6 +150,7 @@ impl Operand {
             expr: Expr::Literal(Literal::Absent),
             ty: Ty::Undefined,
             plain: None,
+            text_prefix: None,
             stable: true,
         }
     }
@@ -156,6 +160,7 @@ impl Operand {
             expr: Expr::Literal(Literal::Null),
             ty: Ty::Null,
             plain: None,
+            text_prefix: None,
             stable: true,
         }
     }
@@ -165,6 +170,7 @@ impl Operand {
             expr: Expr::Literal(Literal::Bool(value)),
             ty: Ty::Bool,
             plain: None,
+            text_prefix: None,
             stable: true,
         }
     }
@@ -174,6 +180,7 @@ impl Operand {
             expr: Expr::Literal(Literal::Float(Float::new(value))),
             ty: Ty::Float,
             plain: None,
+            text_prefix: None,
             stable: true,
         }
     }
@@ -183,6 +190,7 @@ impl Operand {
             expr: Expr::Literal(Literal::Text(value.into())),
             ty: Ty::Text,
             plain: None,
+            text_prefix: None,
             stable: true,
         }
     }
@@ -192,6 +200,7 @@ impl Operand {
             expr: Expr::Variable(name),
             ty,
             plain: None,
+            text_prefix: None,
             stable: false,
         }
     }
@@ -1295,6 +1304,7 @@ impl Lowerer<'_> {
         }
         let mut pinned = self.let_expr(operand.expr, operand.ty);
         pinned.plain = operand.plain;
+        pinned.text_prefix = operand.text_prefix;
         pinned
     }
 
@@ -1358,6 +1368,7 @@ impl Lowerer<'_> {
             ty,
             stable: false,
             plain: None,
+            text_prefix: None,
         }
     }
 

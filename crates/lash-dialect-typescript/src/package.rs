@@ -52,6 +52,7 @@ pub(crate) fn define_helpers_from(
         let source = dispatcher(table, name, rows);
         definitions.extend(define_functions(&source, library)?);
     }
+    definitions.extend(define_functions(&builtin_name(table), library)?);
     definitions.extend(define_functions(&computed_reader(table), library)?);
     Ok(definitions)
 }
@@ -140,19 +141,12 @@ const RECEIVER: &str = "  let receiver = kind(this)
   }
 ";
 
-/// Computed names use the same rows and readers as literal names. The key
-/// is coerced once, preserving its observable conversion. The name is
-/// found among the rows by halving them in name order with
-/// `text.compare`, so a read costs the logarithm of the rows, not their
-/// count.
-fn computed_reader(table: &builtins::Table) -> String {
-    let fallback = "ts.read";
-    let mut source = format!(
-        "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
-    );
-    source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+/// The names a computed read finds among the rows: each property row's,
+/// then each member reader's, once each, in `text.compare`'s order (code
+/// point order, as `str` orders them).
+fn row_names(table: &'static builtins::Table) -> Vec<(&'static str, String)> {
     // A property row takes precedence over the member reader, as for
-    // a literal name. Calling a member reads its value before applying it.
+    // a literal name.
     let mut rows: Vec<(&str, String)> = Vec::new();
     rows.extend(
         table
@@ -168,11 +162,53 @@ fn computed_reader(table: &builtins::Table) -> String {
     );
     let mut seen = std::collections::BTreeSet::new();
     rows.retain(|(name, _)| seen.insert(*name));
+    rows.sort_by(|left, right| left.0.cmp(right.0));
+    rows
+}
+
+/// Every name a computed read finds among the built-in rows, in code point
+/// order: the table `ts.builtin_name` searches, which its native searches
+/// too.
+pub fn builtin_names() -> Vec<&'static str> {
+    row_names(builtins::table())
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// `ts.builtin_name(name)`: whether a text is the name of a row a computed
+/// read finds, by halving the fixed table of row names. A plain record's
+/// read by any other text is its own field or `undefined` (`ts.read`).
+fn builtin_name(table: &'static builtins::Table) -> String {
+    let branches: Vec<(&str, String)> = row_names(table)
+        .into_iter()
+        .map(|(name, _)| (name, "let outcome = true".to_string()))
+        .collect();
+    let mut source = String::from(
+        "use same\nuse num.lt\nuse text.compare\n\
+         function ts.builtin_name(name: Any) -> Bool\nkernel 1\ncharge 4\nnative\nbody {\n",
+    );
+    search(&branches, 1, &mut source);
+    source.push_str("  return false\n}\n");
+    source
+}
+
+/// Computed names use the same rows and readers as literal names. The key
+/// is coerced once, preserving its observable conversion. The name is
+/// found among the rows by halving them in name order with
+/// `text.compare`, so a read costs the logarithm of the rows, not their
+/// count.
+fn computed_reader(table: &'static builtins::Table) -> String {
+    let fallback = "ts.read";
+    let mut source = format!(
+        "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse record.contains\nuse ts.builtin_name\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
+    );
+    source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+    // Calling a member reads its value before applying it.
+    let rows = row_names(table);
     for (_, function) in &rows {
         source.push_str(&format!("use {function}\n"));
     }
-    // `text.compare` orders texts by code point, as `str` orders them.
-    rows.sort_by(|left, right| left.0.cmp(right.0));
     let branches: Vec<(&str, String)> = rows
         .iter()
         .map(|(name, function)| {
@@ -188,15 +224,29 @@ fn computed_reader(table: &builtins::Table) -> String {
     // A plain object's own field is what every row and reader gives for
     // its name, so a text key naming one needs neither coercion nor rows.
     // A key that is no text raises `type_error` reading the field, and an
-    // absent field may be an inherited name: both take the rows.
+    // absent field may be an inherited name: both take the rows, unless
+    // the key is a text no row has, which `ts.read` answers with the
+    // absent field. A record with no marker field is plain without
+    // building the marker to compare.
     source.push_str(&format!(
         "  if same(kind(this), \"record\") {{
-    let own = absent
-    try {{
-      if bool.not(same(this.__ts_brand, ())) {{ set own = this[key] }}
-    }} catch generic {{}}
-    if same(own, absent) {{}} else {{
-    {own}
+    if record.contains(this, \"__ts_brand\") {{
+      if bool.not(same(this.__ts_brand, ())) {{
+        let own = absent
+        try {{ set own = this[key] }} catch generic {{}}
+        if same(own, absent) {{}} else {{
+        {own}
+        }}
+      }}
+    }} else {{
+      let own = absent
+      try {{ set own = this[key] }} catch generic {{}}
+      if bool.not(same(own, absent)) {{
+      {own}
+      }}
+      if same(kind(key), \"text\") {{
+        if ts.builtin_name(key) {{}} else {{ return absent }}
+      }}
     }}
   }}
   do invoke ts.require_object_coercible(this)\n"

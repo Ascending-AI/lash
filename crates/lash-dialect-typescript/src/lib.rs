@@ -29,7 +29,7 @@ pub use intrinsics::read;
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
-pub use package::define_helpers;
+pub use package::{builtin_names, define_helpers};
 pub use printer::print;
 
 /// The captions the dialect spells: every kind, as a JSDoc block before the

@@ -201,6 +201,7 @@ impl Lowerer<'_> {
         self.set_start_convention(frame.context_used || frame.arguments_used)?;
         Ok(Operand {
             plain: None,
+            text_prefix: None,
             expr: closure.expr,
             stable: closure.stable,
             ty: self.facts.function(function.return_ty.as_ref()),

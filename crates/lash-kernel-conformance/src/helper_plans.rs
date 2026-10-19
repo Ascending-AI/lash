@@ -1212,9 +1212,18 @@ pub(crate) fn dialect_region_programs() -> Vec<(runner::Case, Program)> {
         ),
         // FIG-6820: the region's membership test of a record at long
         // keys, present and missing, made in the loop from short texts.
+        // The prefix is a parameter, so no prefix proof (FIG-6819) drops
+        // the test.
         (
             "dict record at long keys",
-            "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key-past-limit\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
+            "function build(prefix, n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = prefix + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(\"key-past-limit\", 7);\nconst call = build;\ncall(\"key-past-limit\", 2);\n",
+        ),
+        // FIG-6819: computed keys with no proven prefix, whose misses on a
+        // plain record `ts.get_computed`'s heap path answers after its row
+        // test, a built-in name and a long text among them.
+        (
+            "computed keys with no prefix",
+            "function build(keys, n) {\n  const counts = {};\n  let found = 0;\n  for (let i = 0; i < n; i++) {\n    const key = keys[i % keys.length];\n    if (counts[key]) { found = found + 1; }\n    counts[key] = i + 1;\n  }\n  return [counts, found];\n}\nconst result = build([\"a\", \"toString\", \"b\", \"a-long-row-label-past-the-inline-text-limit\"], 9);\nconst call = build;\ncall([\"c\"], 2);\n",
         ),
         (
             "push and text",

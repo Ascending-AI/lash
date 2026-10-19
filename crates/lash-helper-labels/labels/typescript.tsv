@@ -77,6 +77,7 @@ ts.boolean.convert	TypeScript boolean convert
 ts.boolean.toString	TypeScript boolean toString
 ts.boolean.valueOf	TypeScript boolean valueOf
 ts.boundary	TypeScript boundary
+ts.builtin_name	TypeScript builtin name
 ts.callable	TypeScript callable
 ts.console.json	TypeScript console json
 ts.console.log	TypeScript console log

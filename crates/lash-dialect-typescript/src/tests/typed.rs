@@ -667,6 +667,159 @@ fn plain_record_text_keyed_function_local_writes_keep_admission() {
     );
 }
 
+/// TS-PLAIN-TEXT-PREFIX: a write keyed by a text proven to begin with a
+/// prefix that neither the internal brand nor a built-in name has keeps
+/// the record proven plain, and writes in place; a read by such a key is
+/// the field, or `undefined`, with no test and no helper.
+#[test]
+fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
+    let source = "function body() {\n\
+         const counts = {};\n\
+         for (let n = 0; n < 70; n++) {\n\
+           const key = 'key_' + String(n % 64);\n\
+           counts[key] = (counts[key] || 0) + n;\n\
+         }\n\
+         const later = `key_${1}`;\n\
+         const missing = 'key_' + 'none';\n\
+         return [counts.key_1, counts[later], counts[missing] === undefined];\n\
+       }\n\
+       await finish(body());";
+    let text = super::main_text_with_effects(source);
+    for refused in ["__ts_brand", "kind(", "ts.set", "ts.get_computed"] {
+        assert!(!text.contains(refused), "{refused}\n{text}");
+    }
+    let guarded = source.replace("const counts = {};", "const counts = opaque({});");
+    let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
+    assert!(super::main_text_with_effects(&guarded).contains("ts.get_computed"));
+    assert_eq!(super::machine::end(source), super::machine::end(&guarded));
+}
+
+/// TS-PLAIN-TEXT-PREFIX: only a prefix proven by construction keeps the
+/// proofs, and only one the internal brand does not begin with: a prefix
+/// of the brand, a text joined after an unproven value, two values whose
+/// common prefix is empty, a parameter, and a key copied from one each
+/// may write the brand.
+#[test]
+fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
+    let bindings = super::pages::Session::seeded([(
+        lash_kernel_doc::Name::new("marker"),
+        lash_kernel_doc::Datum::Tuple(Vec::new()),
+    )]);
+    for (params, key, argument) in [
+        ("", "const part = '_brand'; const key = '__ts' + part;", ""),
+        ("", "const part = 'brand'; const key = `__ts_${part}`;", ""),
+        ("", "const part = '__ts_brand'; const key = part + '';", ""),
+        ("", "let key = 'key_0'; key = '__ts_brand';", ""),
+        (
+            "",
+            "let key = 'key_0'; const change = () => { key = '__ts_brand'; }; change();",
+            "",
+        ),
+        (
+            "",
+            "const flag = false; const key = flag ? 'key_0' : '__ts' + '_brand';",
+            "",
+        ),
+        ("key", "", "'__ts_brand'"),
+        ("part", "const key = part as string;", "'__ts_brand'"),
+        ("part", "const key = String(part);", "'__ts_brand'"),
+    ] {
+        let source = format!(
+            "function body({params}) {{ const r = {{}}; r.__ts_type = 'brand:date'; {key} r[key] = marker; \
+             return r.__ts_brand === undefined; }} await finish(body({argument}));"
+        );
+        let text = super::main_of(lower_against(
+            &source,
+            &["marker"],
+            &super::machine::effects(),
+        ));
+        assert!(text.contains(".__ts_brand, ())"), "{key}\n{text}");
+        assert_eq!(
+            super::machine::end_with_bindings(&source, bindings.clone()),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+            "{key}"
+        );
+    }
+}
+
+/// TS-PLAIN-TEXT-PREFIX: a prefix that some built-in name begins with is
+/// no ordinary one: a read by such a key answers the member a plain record
+/// inherits, and a write by one leaves the record unproven.
+#[test]
+fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
+    let source = "function body() { const r = { a: 1 }; const tail = 'String'; \
+         const key = 'to' + tail; const other = 'to' + 'X'; r[other] = 1; \
+         return [typeof r[key], typeof r.toString, r[other]]; } await finish(body());";
+    let text = super::main_text_with_effects(source);
+    assert!(text.contains("ts.get_computed"), "{text}");
+    assert!(text.contains(".__ts_brand, ())"), "{text}");
+    let guarded = source.replace("const r = {", "const r = opaque({");
+    let guarded = guarded.replace("a: 1 };", "a: 1 });");
+    let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
+    assert_eq!(super::machine::end(source), super::machine::end(&guarded));
+    let super::machine::Ended::Finished(lash_kernel_doc::Datum::List(items)) =
+        super::machine::end(source)
+    else {
+        panic!("a list")
+    };
+    assert_eq!(items[0], lash_kernel_doc::Datum::Text("function".into()));
+}
+
+/// TS-COMPUTED-MISS: `ts.builtin_name` agrees with the rows a computed
+/// read searches, so a plain record's computed read by a text with no
+/// proven prefix answers each built-in name as the static read of that
+/// name does, and `undefined` for any other text, in a loop region and
+/// in the helper's plan, long texts included.
+#[test]
+fn computed_reads_of_plain_records_answer_misses_as_the_rows_do() {
+    // A static read of a name the dialect refuses to reach, as
+    // `r.prototype`, has no answer to compare with.
+    let names: Vec<&str> = crate::builtin_names()
+        .into_iter()
+        .filter(|name| {
+            super::lower_with_effects(&format!("const r = {{}}; await finish(typeof r.{name});"))
+                .is_ok()
+        })
+        .collect();
+    assert!(names.len() > 200, "{names:?}");
+    let others = [
+        "",
+        "key_1",
+        "toStrin",
+        "toStringX",
+        "__ts_brand",
+        "zzzz",
+        "a-long-row-label-past-the-inline-text-limit",
+    ];
+    let keys: Vec<String> = names
+        .iter()
+        .copied()
+        .chain(others)
+        .map(|name| format!("'{name}'"))
+        .collect();
+    let expected: Vec<String> = names
+        .iter()
+        .map(|name| format!("typeof r.{name}"))
+        .chain(others.iter().map(|_| "'undefined'".to_string()))
+        .collect();
+    let source = format!(
+        "function probe(r, keys) {{ const out = []; for (let i = 0; i < keys.length; i++) {{ out.push(typeof r[keys[i]]); }} return out; }}\n\
+         const r = {{ a: 1 }};\n\
+         const keys = [{}];\n\
+         const expected = [{}];\n\
+         const out = probe(r, keys);\n\
+         const bad = [];\n\
+         for (let i = 0; i < keys.length; i++) {{ if (out[i] !== expected[i]) {{ bad.push(keys[i]); }} }}\n\
+         await finish(bad.join(','));",
+        keys.join(", "),
+        expected.join(", ")
+    );
+    assert_eq!(
+        super::machine::end(&source),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Text(String::new()))
+    );
+}
+
 fn stable_path_matches_guarded(source: &str) {
     let guarded = source
         .replace("const r =", "var r =")

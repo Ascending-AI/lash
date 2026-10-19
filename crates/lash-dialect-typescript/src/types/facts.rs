@@ -155,7 +155,7 @@ impl Facts {
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
         for (binding, entry) in collector.bindings.iter().enumerate() {
             if entry.session_scope && session.contains(&Name::new(entry.name.as_str())) {
-                collector.plain.exclude(super::plain::Key::Binding(binding));
+                collector.plain.session(binding);
             }
         }
         let numbers = Numbers::proven(&collector.bindings, &collector.spellings, session);
@@ -254,6 +254,12 @@ impl Facts {
 
     pub(crate) fn primitive(&self, expr: &Expr) -> Option<Ty> {
         self.plain.primitive(expr, &|name| self.binding(name))
+    }
+
+    /// The literal text `expr`'s value is proven by construction to begin
+    /// with, never by an annotation: `Some` only where it is always a text.
+    pub(crate) fn text_prefix(&self, expr: &Expr) -> Option<String> {
+        self.plain.text_prefix(expr, &|name| self.binding(name))
     }
 
     /// The type of the binding a spelling of the program names, or `None`

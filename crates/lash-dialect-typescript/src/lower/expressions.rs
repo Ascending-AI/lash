@@ -77,6 +77,7 @@ impl Lowerer<'_> {
             None => self.lower_expr_inner(expr)?,
         };
         value.plain = self.facts.plain(expr);
+        value.text_prefix = self.facts.text_prefix(expr);
         Ok(value)
     }
 
@@ -323,6 +324,7 @@ impl Lowerer<'_> {
                     stable: value.stable,
                     ty: self.facts.believed(ty),
                     plain: value.plain,
+                    text_prefix: value.text_prefix,
                 })
             }
             ast::Expr::Delete { object, property } => {

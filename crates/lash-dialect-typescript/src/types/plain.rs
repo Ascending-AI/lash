@@ -8,13 +8,22 @@
 //! A binding read or written from a function nested inside the one that
 //! declares it is never proven: such a closure can run after its function
 //! returned and its record was handed to code this source cannot see.
+//!
+//! A text is proven by construction to begin with a literal prefix: a
+//! string literal, a template literal's first text, a `+` whose left
+//! operand is such a text (JavaScript's `+` with a text operand joins), or
+//! a binding every value given to it is one of those. A write keyed by
+//! such a text keeps the source's proofs when no text with its prefix can
+//! be the internal brand or a name some built-in answers
+//! (`builtins::ordinary_prefix`); it marks the names with that prefix
+//! written.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use lash_kernel_doc::Name;
 
 use super::Ty;
-use crate::adapter::{CallArg, Expr, MemberProperty, ObjectProperty, PropertyKey};
+use crate::adapter::{BinaryOp, CallArg, Expr, MemberProperty, ObjectProperty, PropertyKey};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PlainRecord(BTreeMap<String, PlainRecord>, usize, BTreeMap<String, Ty>);
@@ -68,11 +77,19 @@ struct Names {
     /// A number keyed a write or an escaped read. It names only what a
     /// number's text can be, never the internal brand.
     numeric: bool,
+    /// A text proven to begin with one of these keyed a write. None is a
+    /// prefix of the internal brand.
+    prefixes: BTreeSet<String>,
 }
 
 impl Names {
     fn contains(&self, name: &str) -> bool {
-        self.names.contains(name) || (self.numeric && numeric_name(name))
+        self.names.contains(name)
+            || (self.numeric && numeric_name(name))
+            || self
+                .prefixes
+                .iter()
+                .any(|prefix| name.starts_with(prefix.as_str()))
     }
 
     fn insert(&mut self, name: &str) {
@@ -94,6 +111,9 @@ pub(super) struct Collector<'a> {
     /// Each binding's spelling and every value it is given, `None` where
     /// the analysis does not follow it.
     definitions: HashMap<usize, (&'a str, Vec<Option<&'a Expr>>)>,
+    /// Bindings that may hold a value no definition gives: an earlier
+    /// cell's.
+    unfollowed: BTreeSet<usize>,
     /// Every name the source declares or assigns, in any scope.
     defined: BTreeSet<&'a str>,
     excluded: BTreeSet<Key>,
@@ -117,11 +137,28 @@ pub(super) struct Facts {
     written: Names,
     dynamic: bool,
     definitions: HashMap<String, Expr>,
+    /// What each binding's text is proven to begin with. These hold
+    /// whether or not the record proofs do: a text cannot change.
+    prefixes: HashMap<usize, String>,
 }
 
 impl Facts {
     pub(super) fn definition(&self, name: &str) -> Option<&Expr> {
         self.definitions.get(name)
+    }
+
+    /// The literal text that `expr`'s value is proven by construction to
+    /// begin with: `Some` only where the value is always a text.
+    pub(super) fn text_prefix(&self, expr: &Expr, resolve: Resolve<'_>) -> Option<String> {
+        text_prefix(expr, &self.prefixes, resolve)
+    }
+
+    /// Facts that prove no record, keeping the text proofs.
+    fn texts_only(prefixes: HashMap<usize, String>) -> Self {
+        Self {
+            prefixes,
+            ..Self::default()
+        }
     }
 
     pub(super) fn of(&self, expr: &Expr, resolve: Resolve<'_>) -> Option<PlainRecord> {
@@ -229,6 +266,48 @@ impl<'a> Collector<'a> {
         self.excluded.insert(key);
     }
 
+    /// `binding` may hold what an earlier cell left in it.
+    pub(super) fn session(&mut self, binding: usize) {
+        self.excluded.insert(Key::Binding(binding));
+        self.unfollowed.insert(binding);
+    }
+
+    /// The prefix every value of each binding is proven to begin with.
+    /// Starting from none proven, a binding is proven once each of its
+    /// values is under what the round before proved; each round's proofs
+    /// hold, and a prefix only grows, so the rounds settle.
+    fn text_prefixes(&self, resolve: Resolve<'_>) -> HashMap<usize, String> {
+        let mut known = HashMap::new();
+        for _ in 0..32 {
+            let mut next = HashMap::new();
+            for (binding, (_, values)) in &self.definitions {
+                if self.unfollowed.contains(binding) {
+                    continue;
+                }
+                let mut common: Option<String> = None;
+                for value in values {
+                    let Some(prefix) = value.and_then(|value| text_prefix(value, &known, resolve))
+                    else {
+                        common = None;
+                        break;
+                    };
+                    common = Some(match common {
+                        Some(common) => common_prefix(&common, &prefix),
+                        None => prefix,
+                    });
+                }
+                if let Some(common) = common {
+                    next.insert(*binding, common);
+                }
+            }
+            if next == known {
+                break;
+            }
+            known = next;
+        }
+        known
+    }
+
     pub(super) fn write(&mut self, property: &'a MemberProperty) {
         match (property_name(property), property) {
             // The internal brand can change representation, not just a
@@ -263,19 +342,25 @@ impl<'a> Collector<'a> {
         resolve: Resolve<'_>,
         numeric: &dyn Fn(&Expr) -> bool,
     ) -> Facts {
-        // A key that is always a number names only a number's text. Any
+        let prefixes = self.text_prefixes(resolve);
+        // A key that is always a number names only a number's text, and one
+        // proven to begin with an ordinary prefix only texts with it. Any
         // other might be the internal brand field: such a write can change
         // representation through any alias, so retain admission throughout
         // this source.
         for key in &self.keys {
             if numeric(key) {
                 self.mutated.numeric = true;
+            } else if let Some(prefix) = text_prefix(key, &prefixes, resolve)
+                && crate::builtins::ordinary_prefix(&prefix)
+            {
+                self.mutated.prefixes.insert(prefix);
             } else {
-                return Facts::default();
+                return Facts::texts_only(prefixes);
             }
         }
         if self.representation_written {
-            return Facts::default();
+            return Facts::texts_only(prefixes);
         }
         let written = self.mutated.clone();
         let terminal_call = |callee: &Expr| {
@@ -290,7 +375,7 @@ impl<'a> Collector<'a> {
             .iter()
             .any(|value| !matches!(value, Expr::Call { callee, .. } if terminal_call(callee)))
         {
-            return Facts::default();
+            return Facts::texts_only(prefixes);
         }
         for (callee, args) in &self.calls {
             if terminal_call(callee) {
@@ -378,6 +463,7 @@ impl<'a> Collector<'a> {
             enabled: true,
             names: HashMap::new(),
             primitives: HashMap::new(),
+            prefixes,
             mutated: self.mutated,
             written,
             dynamic: self.dynamic,
@@ -442,8 +528,50 @@ impl<'a> Collector<'a> {
             facts.names = next;
             facts.primitives = primitives;
         }
-        Facts::default()
+        Facts::texts_only(facts.prefixes)
     }
+}
+
+/// The literal text `expr`'s value begins with, given what each binding's
+/// text is `known` to begin with: `Some` only where the value is always a
+/// text. A `+` with a text operand joins its operands' texts, whatever the
+/// other converts to.
+fn text_prefix(
+    expr: &Expr,
+    known: &HashMap<usize, String>,
+    resolve: Resolve<'_>,
+) -> Option<String> {
+    match expr {
+        Expr::String(text) => Some(text.clone()),
+        Expr::Template { quasis, .. } => quasis.first().cloned(),
+        Expr::Binary {
+            left,
+            op: BinaryOp::Add,
+            right,
+            ..
+        } => text_prefix(left, known, resolve)
+            .or_else(|| text_prefix(right, known, resolve).map(|_| String::new())),
+        Expr::Ident(name, _) => known.get(&resolve(name)?).cloned(),
+        Expr::As { value, .. } => text_prefix(value, known, resolve),
+        Expr::Conditional {
+            consequent,
+            alternate,
+            ..
+        } => Some(common_prefix(
+            &text_prefix(consequent, known, resolve)?,
+            &text_prefix(alternate, known, resolve)?,
+        )),
+        _ => None,
+    }
+}
+
+fn common_prefix(left: &str, right: &str) -> String {
+    let end = left
+        .char_indices()
+        .zip(right.chars())
+        .find(|((_, a), b)| a != b)
+        .map_or_else(|| left.len().min(right.len()), |((index, _), _)| index);
+    left[..end].to_string()
 }
 
 fn property_name(property: &MemberProperty) -> Option<&str> {

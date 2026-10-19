@@ -71,7 +71,21 @@ fn ident(name: &str, taken: &mut BTreeSet<String>) -> String {
 /// A refusal of the helpers' registration, as text.
 pub fn generate(dialect: Dialect) -> Result<Generated, String> {
     let library = Library::of(dialect)?;
-    generate_library(&library, dialect)
+    let mut generated = generate_library(&library, dialect)?;
+    if dialect == Dialect::TypeScript {
+        // The fixed table `ts.builtin_name`'s native searches, as the
+        // helper's body does.
+        generated.rust.push_str(
+            "\n/// Every name a computed read finds among the built-in rows, in code\n\
+             /// point order: what `ts.builtin_name` searches.\n\
+             pub const BUILTIN_NAMES: &[&str] = &[\n",
+        );
+        for name in lash_dialect_typescript::builtin_names() {
+            let _ = writeln!(generated.rust, "    {name:?},");
+        }
+        generated.rust.push_str("];\n");
+    }
+    Ok(generated)
 }
 
 /// Compiles an admitted library's selected helpers and their closed callees.

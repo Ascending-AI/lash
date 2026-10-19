@@ -290,9 +290,10 @@ impl Lowerer<'_> {
     ///
     /// A plain record, a record without the internal tuple marker, answers a name no
     /// built-in has with its field by that name, `undefined` when it has
-    /// none (`ts.read`); a name some built-in has, or a computed text, only
-    /// when the record holds a field by it (`ts.member.<name>`,
-    /// `ts.property.<name>`, `ts.get_computed`). A
+    /// none (`ts.read`), and so a computed text proven to begin with a
+    /// prefix no built-in name or the marker has; a name some built-in
+    /// has, or any other computed text, only when the record holds a field
+    /// by it (`ts.member.<name>`, `ts.property.<name>`, `ts.get_computed`). A
     /// list answers `length` with its length, and a number that is one of
     /// its positions with its element there, a hole being `undefined`
     /// (`ts.get`). Each test is a kernel expression that cannot raise once
@@ -404,12 +405,22 @@ impl Lowerer<'_> {
 
     /// The tests that `key` is a text that names a field the plain record
     /// `object` holds, which every reader of a computed name gives before
-    /// any built-in's member by that name (`ts.get_computed`).
+    /// any built-in's member by that name (`ts.get_computed`). A key
+    /// proven a text needs no kind test, and one proven to begin with an
+    /// ordinary prefix no test: the record's field by it, or `undefined`,
+    /// is what every reader gives (`builtins::ordinary_prefix`).
     fn own_field_tests(&mut self, object: &Operand, key: &Operand) -> Lowering<Vec<Expr>> {
-        let kind = self.native("kind", vec![key.expr()])?;
-        let text = self.same(kind, Operand::text("text").expr())?;
-        let contains = self.native("record.contains", vec![object.expr(), key.expr()])?;
-        Ok(vec![text, contains])
+        let mut tests = Vec::new();
+        match key.text_prefix.as_deref() {
+            Some(prefix) if crate::builtins::ordinary_prefix(prefix) => return Ok(tests),
+            Some(_) => {}
+            None => {
+                let kind = self.native("kind", vec![key.expr()])?;
+                tests.push(self.same(kind, Operand::text("text").expr())?);
+            }
+        }
+        tests.push(self.native("record.contains", vec![object.expr(), key.expr()])?);
+        Ok(tests)
     }
 
     /// The tests that `object` is a kernel list: none when the source built
@@ -533,8 +544,10 @@ impl Lowerer<'_> {
     }
 
     /// A discarded assignment evaluates its reference before its value.
-    /// Keep a proven plain field write, with actions in the place; dynamic
-    /// writes use the dialect helper without document-level write branches.
+    /// Keep a proven plain field write, with actions in the place, by a
+    /// name the source spells or a key proven a text, which writes the
+    /// field it names (`ts.set`); dynamic writes use the dialect helper
+    /// without document-level write branches.
     pub(super) fn assign_member_statement(
         &mut self,
         object: &ast::Expr,
@@ -559,16 +572,25 @@ impl Lowerer<'_> {
             Key::Static(name) => Key::Static(name),
             Key::Computed(_) => Key::Computed(key_value),
         };
-        if let Key::Static(field) = &key
-            && self
+        let place = match &key {
+            Key::Static(field) => self
                 .record_tests(&object)?
                 .is_some_and(|tests| tests.is_empty())
-        {
-            self.emit(Stmt::Assign {
-                place: Place::Member(Member::Field {
+                .then(|| Member::Field {
                     target: object.expr(),
                     field: field.clone(),
                 }),
+            Key::Computed(key) if key.text_prefix.is_some() && object.plain.is_some() => {
+                Some(Member::Index {
+                    target: object.expr(),
+                    index: key.expr(),
+                })
+            }
+            Key::Computed(_) => None,
+        };
+        if let Some(place) = place {
+            self.emit(Stmt::Assign {
+                place: Place::Member(place),
                 value: lash_kernel_doc::Rhs::Expr(value.expr()),
                 order: AssignOrder::PlaceFirst,
             });
@@ -601,8 +623,10 @@ impl Lowerer<'_> {
             Key::Computed(key) if !key.ty.is_number() => match self.record_tests(object)? {
                 Some(mut tests) => {
                     // A text key writes the field it names (`ts.set`).
-                    let kind = self.native("kind", vec![key.expr()])?;
-                    tests.push(self.same(kind, Operand::text("text").expr())?);
+                    if key.text_prefix.is_none() {
+                        let kind = self.native("kind", vec![key.expr()])?;
+                        tests.push(self.same(kind, Operand::text("text").expr())?);
+                    }
                     let place = Place::Member(Member::Index {
                         target: object.expr(),
                         index: key.expr(),

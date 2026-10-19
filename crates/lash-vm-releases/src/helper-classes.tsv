@@ -197,6 +197,7 @@ ts.boolean.convert	total
 ts.boolean.toString	total
 ts.boolean.valueOf	total
 ts.boundary	total
+ts.builtin_name	total
 ts.callable	total
 ts.console.json	total
 ts.console.log	body

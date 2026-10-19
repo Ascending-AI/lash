@@ -276,6 +276,7 @@ impl Lowerer<'_> {
 fn reference(entry: Name) -> Operand {
     Operand {
         plain: None,
+        text_prefix: None,
         expr: Expr::Literal(Literal::Function(entry)),
         stable: true,
         ty: Ty::Unknown,

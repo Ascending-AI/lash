@@ -541,6 +541,28 @@ pub(crate) fn table() -> &'static Table {
     TABLE.get_or_init(Table::build)
 }
 
+/// Whether no text that begins with `prefix` is the internal brand field
+/// or a name a property or member row answers (`table.properties`,
+/// `table.member_names`, the rows `ts.get_computed` searches). A plain
+/// record's field by such a name is all that any reader of it gives, and
+/// writing one leaves the record plain.
+pub(crate) fn ordinary_prefix(prefix: &str) -> bool {
+    use std::ops::Bound;
+    let table = table();
+    let after = (Bound::Included(prefix), Bound::Unbounded);
+    !"__ts_brand".starts_with(prefix)
+        && !table
+            .properties
+            .range::<str, _>(after)
+            .next()
+            .is_some_and(|(name, _)| name.starts_with(prefix))
+        && !table
+            .member_names
+            .range::<str, _>(after)
+            .next()
+            .is_some_and(|name| name.starts_with(prefix))
+}
+
 /// Whether `name` is a global a built-in row answers for: a namespace
 /// (`Math`), a function (`parseInt`) or a class (`Map`).
 pub(crate) fn is_global(name: &str) -> bool {
