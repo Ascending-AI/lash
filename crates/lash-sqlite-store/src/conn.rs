@@ -53,12 +53,13 @@ use lash_core_store::compat::VersionRange;
 use lash_core_store::store::FleetFormat;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 mod batch;
+mod checkpoint;
 mod worker;
+use checkpoint::checkpoint_state;
 use worker::Connection as AsyncConnection;
 
 use crate::location::DatabaseTarget;
@@ -87,142 +88,6 @@ static WRITE_GATES: LazyLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static READ_GATES: LazyLock<Mutex<HashMap<String, Weak<RwLock<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// One checkpoint worker per file database, shared by all of its connections.
-/// The worker holds only a weak reference while asleep, so closing the last
-/// store connection also ends the worker.
-static CHECKPOINTS: LazyLock<Mutex<HashMap<String, Weak<CheckpointState>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-struct CheckpointState {
-    path: PathBuf,
-    write_gate: Arc<Mutex<()>>,
-    read_gate: Arc<RwLock<()>>,
-    threshold_pages: AtomicU64,
-    commits: AtomicU64,
-    timing: Mutex<(Duration, Duration)>,
-}
-
-fn checkpoint_state(
-    target: &DatabaseTarget,
-    write_gate: &Arc<Mutex<()>>,
-    read_gate: &Arc<RwLock<()>>,
-    threshold_pages: u32,
-    policy: crate::SqliteOperationalSettings,
-) -> Option<Arc<CheckpointState>> {
-    let path = target.file_path()?;
-    if threshold_pages == 0 {
-        return None;
-    }
-    let mut states = CHECKPOINTS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let key = target.canonical_name();
-    if let Some(state) = states.get(&key).and_then(Weak::upgrade) {
-        state
-            .threshold_pages
-            .fetch_min(u64::from(threshold_pages), Ordering::Relaxed);
-        let mut timing = state
-            .timing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        timing.0 = timing.0.min(policy.checkpoint_interval);
-        timing.1 = timing.1.min(policy.checkpoint_busy_timeout);
-        drop(timing);
-        return Some(state);
-    }
-    let state = Arc::new(CheckpointState {
-        path: path.to_owned(),
-        write_gate: Arc::clone(write_gate),
-        read_gate: Arc::clone(read_gate),
-        threshold_pages: AtomicU64::new(u64::from(threshold_pages)),
-        commits: AtomicU64::new(0),
-        timing: Mutex::new((policy.checkpoint_interval, policy.checkpoint_busy_timeout)),
-    });
-    let weak = Arc::downgrade(&state);
-    match std::thread::Builder::new()
-        .name("lash-sqlite-checkpoint".to_string())
-        .spawn(move || checkpoint_loop(weak))
-    {
-        Ok(_) => {
-            states.insert(key, Arc::downgrade(&state));
-            Some(state)
-        }
-        Err(error) => {
-            tracing::error!(%error, "could not start SQLite checkpoint worker");
-            None
-        }
-    }
-}
-
-fn checkpoint_loop(state: Weak<CheckpointState>) {
-    let mut seen_commits = 0;
-    let mut retry = false;
-    loop {
-        let Some(active) = state.upgrade() else {
-            return;
-        };
-        let interval = active
-            .timing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .0;
-        drop(active);
-        std::thread::sleep(interval);
-        let Some(state) = state.upgrade() else {
-            return;
-        };
-        let commits = state.commits.load(Ordering::Acquire);
-        if commits == seen_commits && !retry {
-            continue;
-        }
-        seen_commits = commits;
-        retry = checkpoint_if_needed(&state).unwrap_or_else(|error| {
-            tracing::warn!(%error, path = %state.path.display(), "SQLite checkpoint retry");
-            true
-        });
-    }
-}
-
-/// Return whether a blocked checkpoint should be retried even without a new
-/// commit. TRUNCATE is attempted only while the in-process write gate is idle.
-fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
-    crate::observed_sql::physical_scope("sqlite.background_checkpoint", || {
-        checkpoint_observed(state)
-    })
-}
-
-fn checkpoint_observed(state: &CheckpointState) -> rusqlite::Result<bool> {
-    // Stop new in-process readers and let their current statements finish.
-    // Writers also take this shared lock before the existing write gate, so
-    // obtaining it exclusively makes the write gate idle without a lock cycle.
-    let _read_gate = state
-        .read_gate
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Ok(_write_gate) = state.write_gate.try_lock() else {
-        return Ok(true);
-    };
-    let connection = open_connection(
-        &state.path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    connection.busy_timeout(
-        state
-            .timing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .1,
-    )?;
-    let pages: i64 =
-        connection.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(1))?;
-    if pages < state.threshold_pages.load(Ordering::Relaxed) as i64 {
-        return Ok(false);
-    }
-    let busy: i64 =
-        connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
-    Ok(busy != 0)
-}
 
 /// `target`'s shared write gate, created on first open.
 fn write_gate(target: &DatabaseTarget) -> Arc<Mutex<()>> {
@@ -306,11 +171,11 @@ pub struct SqliteConnectionPolicy {
     /// What a commit waits for, and so what a power loss can take back: see
     /// [`SqliteSynchronous`]. Stated by the host; it has no default.
     pub synchronous: SqliteSynchronous,
-    /// WAL pages written before SQLite attempts an automatic checkpoint. The
-    /// default is SQLite's 1,000-page setting; `0` disables automatic
-    /// checkpointing, including this store's background truncation worker.
-    /// Lower it to bound WAL growth, or raise it when checkpoint overhead
-    /// matters more than reader lag. `0` disables both mechanisms.
+    /// WAL pages a file store's commits leave before its background worker
+    /// checkpoints and truncates the WAL, off the committing thread. The
+    /// default is SQLite's 1,000-page autocheckpoint setting; `0` disables
+    /// automatic checkpointing. Lower it to bound WAL growth, or raise it
+    /// when checkpoint overhead matters more than reader lag.
     pub wal_autocheckpoint_pages: u32,
     /// SQLite cache-size pragma value, preserving SQLite's sign overload. The
     /// default is SQLite's `-2000` value (approximately 2,000 KiB); negative
@@ -655,6 +520,13 @@ impl SqliteConnection {
         );
         let pragmas = crate::connection_sql::open_pragmas(policy);
         let setup_gate = Arc::clone(&gate);
+        let checkpoint = checkpoint_state(
+            target,
+            &gate,
+            &reads,
+            policy.wal_autocheckpoint_pages,
+            policy.operational,
+        );
         inner
             .call(move |c| {
                 // Journal setup must queue with schema installation and other
@@ -681,6 +553,11 @@ impl SqliteConnection {
                 // its own bounded retry loop (see `set_wal_journal_mode`).
                 set_wal_journal_mode(c, policy.busy_timeout, policy.operational)?;
                 c.execute_batch(&pragmas)?;
+                // The file's checkpoint worker replaces SQLite's own
+                // autocheckpoint, so no commit checkpoints on this thread.
+                if let Some(checkpoint) = &checkpoint {
+                    checkpoint::report_commits(c, checkpoint);
+                }
                 install_perf_statement_witness(c);
                 Ok(())
             })
@@ -688,13 +565,6 @@ impl SqliteConnection {
         #[cfg(feature = "perf-witness")]
         lash_core_ids::perf_witness::startup::record(
             lash_core_ids::perf_witness::startup::Phase::StoreSetupFinished,
-        );
-        let checkpoint = checkpoint_state(
-            target,
-            &gate,
-            &reads,
-            policy.wal_autocheckpoint_pages,
-            policy.operational,
         );
         let fence = WriterFence::new();
         Ok(Self {
@@ -707,7 +577,6 @@ impl SqliteConnection {
                 operational: policy.operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),
-                checkpoint,
                 fence: Arc::clone(&fence),
                 node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
@@ -782,7 +651,6 @@ impl SqliteConnection {
                 operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),
-                checkpoint: None,
                 fence: Arc::clone(&fence),
                 node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
@@ -1148,6 +1016,49 @@ impl SqliteConnection {
         )?;
         result.await.unwrap_or_else(|_| closed())
     }
+}
+
+/// A store's read-only connections, taken in turn by its reads and the
+/// durable engine's (FIG-6907), so a read does not queue on the writer's
+/// thread and hold up the writes behind it. A read sees every write that
+/// answered before it started, as a read on the writer does: a commit
+/// answers only after its `COMMIT` returned. Other connections commit
+/// between two autocommit statements here, so a read of more than one
+/// statement takes one snapshot through [`SqliteConnection::read`].
+#[derive(Clone)]
+pub(crate) struct ReadPool(Arc<ReadPoolInner>);
+
+struct ReadPoolInner {
+    readers: Vec<SqliteConnection>,
+    next: AtomicU64,
+}
+
+impl ReadPool {
+    /// `readers`, at least one.
+    pub(crate) fn new(readers: Vec<SqliteConnection>) -> Self {
+        Self(Arc::new(ReadPoolInner {
+            readers,
+            next: AtomicU64::new(0),
+        }))
+    }
+
+    /// The reader the next read runs on.
+    pub(crate) fn next(&self) -> &SqliteConnection {
+        let index = self.0.next.fetch_add(1, Ordering::Relaxed) as usize;
+        &self.0.readers[index % self.0.readers.len()]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &SqliteConnection> {
+        self.0.readers.iter()
+    }
+}
+
+/// The page threshold `target`'s checkpoint worker runs at, while a writer
+/// connection keeps it.
+#[cfg(test)]
+pub(crate) fn checkpoint_threshold_for_testing(target: &DatabaseTarget) -> Option<u64> {
+    checkpoint::state_for_testing(target).map(|state| state.threshold_for_testing())
 }
 
 /// The answer of a write whose connection thread ended before answering.

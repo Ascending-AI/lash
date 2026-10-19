@@ -503,7 +503,14 @@ async fn store_options_apply_connection_policy_on_connection_thread() {
         .await
         .expect("read connection policy pragmas on connection thread");
 
-    assert_eq!(pragmas, (321, 2, 17, -4096, "wal".to_string()));
+    // The file's checkpoint worker takes SQLite's own autocheckpoint's place.
+    assert_eq!(pragmas, (321, 2, 0, -4096, "wal".to_string()));
+    assert_eq!(
+        crate::conn::checkpoint_threshold_for_testing(&crate::location::DatabaseTarget::File(
+            path.clone()
+        )),
+        Some(17)
+    );
 }
 
 fn count_checkpoint_data_statement(event: rusqlite::trace::TraceEvent<'_>) {

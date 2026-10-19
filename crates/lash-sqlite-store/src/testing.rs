@@ -515,7 +515,8 @@ impl crate::SqliteStoreSet {
 
 impl crate::SqliteStore {
     async fn reader_settings_for_testing(&self) -> rusqlite::Result<(i64, i64)> {
-        self.readers[0]
+        self.readers
+            .next()
             .call(|connection| {
                 Ok((
                     connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,

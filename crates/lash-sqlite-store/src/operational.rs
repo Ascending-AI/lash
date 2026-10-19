@@ -14,7 +14,9 @@ pub struct SqliteOperationalSettings {
     pub readonly_busy_timeout: Duration,
     /// Read-only page cache; negative KiB or positive pages, as SQLite defines it.
     pub readonly_cache_size: i32,
-    /// Background checkpoint pacing (must be positive).
+    /// Retry pacing for a WAL truncation a writer or reader blocked
+    /// (must be positive). Write volume, not this interval, starts each
+    /// checkpoint (FIG-6907).
     pub checkpoint_interval: Duration,
     /// Checkpoint connection's busy timeout; zero refuses contention immediately.
     pub checkpoint_busy_timeout: Duration,
@@ -63,7 +65,7 @@ impl Default for SqliteOperationalSettings {
 impl SqliteOperationalSettings {
     /// Standard production preset: 256 cached statements (FIG-3975 found
     /// the previous 16-entry cache evicted the store's statement mix).
-    /// Readonly: 1 s busy / -500 KiB cache. Checkpoint: 100 ms / 20 ms busy.
+    /// Readonly: 1 s busy / -500 KiB cache. Checkpoint: 100 ms retry / 20 ms busy.
     /// WAL retry: 1–50 ms. Locks: 8 attempts / 10 ms poll. Wakes: 25 ms poll,
     /// 10 s retention, 5 s lock wait, 25 ms–1 s reopen. Migration poll: 10 ms.
     /// Working chunks: checkpoint refs and occupied ids 16,384, inserts 512,

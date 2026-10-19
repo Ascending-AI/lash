@@ -45,13 +45,12 @@
 //! The synchronous level is the connection's, fixed at open and never
 //! changed per batch: SQLite refuses to change it inside a transaction.
 
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
 
 use lash_core_ids::operational_metrics::sql::Window;
 use rusqlite::{Connection, TransactionBehavior};
 
-use super::{CheckpointState, FencedTx, TxOutcome, WriterFence, timed_gate};
+use super::{FencedTx, TxOutcome, WriterFence, timed_gate};
 #[cfg(feature = "perf-witness")]
 use crate::observed_sql::WriteWitness as Writes;
 
@@ -77,7 +76,6 @@ pub(super) struct Writer {
     pub(super) operational: crate::SqliteOperationalSettings,
     pub(super) write_gate: Arc<Mutex<()>>,
     pub(super) read_gate: Arc<RwLock<()>>,
-    pub(super) checkpoint: Option<Arc<CheckpointState>>,
     pub(super) fence: Arc<WriterFence>,
     pub(super) node_wakes: Mutex<Option<crate::durable::NodeWakeWriter>>,
     #[cfg(feature = "testing")]
@@ -244,8 +242,6 @@ struct Ran {
 struct Settled {
     answered: Vec<(Member, Option<rusqlite::Error>)>,
     unrun: Vec<Member>,
-    /// Whether the transaction reached its end without failing.
-    ended: bool,
 }
 
 impl Settled {
@@ -257,7 +253,6 @@ impl Settled {
                 .map(|ran| (ran.member, Some(replicate(failure))))
                 .collect(),
             unrun: rest,
-            ended: false,
         }
     }
 
@@ -275,7 +270,6 @@ impl Settled {
                 })
                 .collect(),
             unrun: rest,
-            ended: false,
         }
     }
 }
@@ -331,11 +325,6 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     if observed {
         c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
     }
-    if settled.ended
-        && let Some(checkpoint) = &writer.checkpoint
-    {
-        checkpoint.commits.fetch_add(1, Ordering::Release);
-    }
     #[cfg(feature = "perf-witness")]
     drop(busy);
     for (member, failure) in settled.answered {
@@ -386,7 +375,6 @@ fn transact(
             return Settled {
                 answered: Vec::from_iter(first.map(|member| (member, Some(error)))),
                 unrun: members.collect(),
-                ended: false,
             };
         }
     };
@@ -522,7 +510,6 @@ fn transact(
         Ok(()) => Settled {
             answered: ran.into_iter().map(|ran| (ran.member, None)).collect(),
             unrun,
-            ended: true,
         },
         Err(error) => Settled::failed(ran, &error, unrun),
     }

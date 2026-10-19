@@ -903,7 +903,7 @@ impl RunStore for crate::SqliteStore {
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRun>, StoreError> {
         let session_id = session_id.clone();
-        self.conn
+        self.read_connection()
             .call(move |conn| Ok(unfinished_run_conn(conn, &session_id)))
             .await
             .map_err(sqlite_error)?
@@ -923,8 +923,9 @@ impl RunStore for crate::SqliteStore {
     ) -> Result<Option<RunTerminal>, StoreError> {
         let session_id = session_id.clone();
         let run = run.clone();
-        self.conn
-            .call(move |conn| Ok(run_terminal_conn(conn, &session_id, &run)))
+        // Its statements share one snapshot.
+        self.read_connection()
+            .read(move |tx| Ok(run_terminal_conn(tx, &session_id, &run)))
             .await
             .map_err(sqlite_error)?
     }
@@ -981,7 +982,7 @@ impl RunStore for crate::SqliteStore {
     ) -> Result<InputStatus, StoreError> {
         let session_id = session_id.clone();
         let input = input.clone();
-        self.conn
+        self.read_connection()
             .call(move |conn| Ok(input_status_conn(conn, &session_id, &input)))
             .await
             .map_err(sqlite_error)?
@@ -994,7 +995,7 @@ impl RunStore for crate::SqliteStore {
     ) -> Result<Option<TurnId>, StoreError> {
         let session_id = session_id.clone();
         let input = input.clone();
-        self.conn
+        self.read_connection()
             .call(move |conn| Ok(run_binding_conn(conn, &session_id, &input)))
             .await
             .map_err(sqlite_error)?

@@ -215,8 +215,7 @@ pub struct SqliteStore {
     /// The database this store is open on. Held so a store opened on a
     /// memory backend keeps its database alive.
     location: DatabaseLocation,
-    readers: Vec<SqliteConnection>,
-    next_reader: AtomicU64,
+    readers: conn::ReadPool,
     decoded_graph_node_bodies: Arc<AtomicU64>,
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     /// The windows this store decoded, which its later reads extend
@@ -418,8 +417,7 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
 
 impl SqliteStore {
     fn read_connection(&self) -> &SqliteConnection {
-        let index = self.next_reader.fetch_add(1, AtomicOrdering::Relaxed) as usize;
-        &self.readers[index % self.readers.len()]
+        self.readers.next()
     }
 
     /// Close the write connection and every read connection, so each read
@@ -427,7 +425,7 @@ impl SqliteStore {
     #[cfg(test)]
     pub(crate) async fn close_for_testing(&self) {
         self.conn.close_for_testing().await;
-        for reader in &self.readers {
+        for reader in self.readers.iter() {
             reader.close_for_testing().await;
         }
     }

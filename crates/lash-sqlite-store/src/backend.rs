@@ -280,6 +280,7 @@ impl SqliteStoreSet {
             SqliteLocation::File { path } => {
                 let store = crate::SqliteDurableStore::new(
                     process_env_store.conn.clone(),
+                    process_env_store.readers.clone(),
                     Arc::clone(&clock),
                     process_env_store.options.blob_profile,
                     options.observer.clone(),
@@ -352,6 +353,7 @@ impl SqliteStoreSet {
     pub fn durable_store(&self) -> crate::SqliteDurableStore {
         crate::SqliteDurableStore::new(
             self.inner.process_env_store.conn.clone(),
+            self.inner.process_env_store.readers.clone(),
             Arc::clone(&self.inner.clock),
             self.inner.process_env_store.options.blob_profile,
             self.inner.options.observer.clone(),

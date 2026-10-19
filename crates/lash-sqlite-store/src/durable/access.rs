@@ -34,7 +34,8 @@ impl SqliteDurableStore {
         T: Send + 'static,
         F: FnOnce(&Connection) -> rusqlite::Result<Result<T, DurableError>> + Send + 'static,
     {
-        self.conn
+        self.readers
+            .next()
             .read(move |tx| {
                 crate::observed_sql::with_origin(std::any::type_name::<F>(), || body(tx))
             })
@@ -49,7 +50,8 @@ impl SqliteDurableStore {
         T: Send + 'static,
         F: FnOnce(&Connection) -> rusqlite::Result<Result<T, DurableError>> + Send + 'static,
     {
-        self.conn
+        self.readers
+            .next()
             .call(move |conn| {
                 crate::observed_sql::with_origin(std::any::type_name::<F>(), || body(conn))
             })

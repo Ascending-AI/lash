@@ -222,8 +222,7 @@ impl SqliteStore {
         Ok(Self {
             conn,
             location: core.clone(),
-            readers,
-            next_reader: AtomicU64::new(0),
+            readers: crate::conn::ReadPool::new(readers),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),
@@ -252,8 +251,7 @@ impl SqliteStore {
         Ok(Self {
             conn,
             location: core.clone(),
-            readers,
-            next_reader: AtomicU64::new(0),
+            readers: crate::conn::ReadPool::new(readers),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),

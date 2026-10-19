@@ -429,6 +429,8 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
 pub struct SqliteDurableStore {
     graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     conn: SqliteConnection,
+    /// Where the engine's reads run, off the writer's thread.
+    readers: crate::conn::ReadPool,
     clock: Arc<dyn Clock>,
     blob_profile: crate::BuiltinBlobProfile,
     observer: lash_core_ids::operational_metrics::StoreObserver,
@@ -517,6 +519,7 @@ fn commit<T>(value: T) -> Flow<T> {
 impl SqliteDurableStore {
     pub(crate) fn new(
         conn: SqliteConnection,
+        readers: crate::conn::ReadPool,
         clock: Arc<dyn Clock>,
         blob_profile: crate::BuiltinBlobProfile,
         observer: lash_core_ids::operational_metrics::StoreObserver,
@@ -524,6 +527,7 @@ impl SqliteDurableStore {
     ) -> Self {
         Self {
             conn,
+            readers,
             clock,
             blob_profile,
             observer,
@@ -1424,7 +1428,8 @@ impl DurableStore for SqliteDurableStore {
         };
         // One statement: its own snapshot holds the actor, its mail and a
         // session's unfinished turn with the cancel it accepted.
-        self.conn
+        self.readers
+            .next()
             .call(move |connection| {
                 let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
                 let mut rows = statement.query(rusqlite::params![

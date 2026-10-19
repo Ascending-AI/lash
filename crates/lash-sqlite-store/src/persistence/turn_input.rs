@@ -189,7 +189,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
     {
         let session_id = session_id.clone();
         let input_id = input_id.clone();
-        self.conn
+        self.read_connection()
             .call(move |conn| {
                 // One point read by primary key; the list's lifecycle filter
                 // is applied to the one row here: a row is listed until it is
