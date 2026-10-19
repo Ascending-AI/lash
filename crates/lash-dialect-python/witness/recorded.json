@@ -526,7 +526,7 @@
   },
   {
    "name": "order",
-   "source": "log = []\ndef note(tag, value):\n    log.append(tag)\n    return value\nx = 1\ndef bump():\n    global x\n    x += 10\n    return x\nprint(x + bump(), bump() + x, x, [x, bump(), x], (x, bump()), {note(\"k\", \"key\"): note(\"v\", x)})\nprint(note(\"a\", 1) + note(\"b\", 2) * note(\"c\", 3), log)\nlog.clear()\nitems = [0, 0, 0]\nitems[note(\"index\", 1)] = note(\"value\", 5)\nprint(items, log)\nlog.clear()\ndef pick(a, b, c):\n    return (a, b, c)\nprint(pick(note(\"1\", x), bump(), note(\"3\", x)), log)\nlog.clear()\nprint(note(\"left\", 0) and note(\"skipped\", 1), note(\"left2\", 0) or note(\"right\", 2), note(\"t\", 1) if note(\"cond\", True) else note(\"e\", 2), log)\nlog.clear()\nd = {}\nd[note(\"key\", \"k\")] = [note(\"first\", 1), note(\"second\", 2)]\nd[\"k\"][note(\"i\", 0)] += note(\"add\", 10)\nprint(d, log)\nlog.clear()\nf = note\nf = [note, bump][note(\"choose\", 0)]\nprint(f(\"called\", \"result\"), log, f\"{note('f1', 1)}{bump()}{note('f2', x)}\", note(\"m\", \"a\").upper() + note(\"n\", \"b\"))\nvalue = [1, 2, 3]\nalias = value\nvalue = value + [note(\"rebind\", 4)]\nalias += [5]\nprint(value, alias, log[-1])\n",
+   "source": "log = []\ndef note(tag, value):\n    log.append(tag)\n    return value\nx = 1\ndef bump():\n    global x\n    x += 10\n    return x\nprint(x + bump(), bump() + x, x, [x, bump(), x], (x, bump()), {note(\"k\", \"key\"): note(\"v\", x)})\nprint(note(\"a\", 1) + note(\"b\", 2) * note(\"c\", 3), log)\nlog.clear()\nitems = [0, 0, 0]\nitems[note(\"index\", 1)] = note(\"value\", 5)\nprint(items, log)\nlog.clear()\ndef pick(a, b, c):\n    return (a, b, c)\nprint(pick(note(\"1\", x), bump(), note(\"3\", x)), log)\nlog.clear()\nprint(note(\"left\", 0) and note(\"skipped\", 1), note(\"left2\", 0) or note(\"right\", 2), note(\"t\", 1) if note(\"cond\", True) else note(\"e\", 2), log)\nlog.clear()\nd = {}\nd[note(\"key\", \"k\")] = [note(\"first\", 1), note(\"second\", 2)]\nd[\"k\"][note(\"i\", 0)] += note(\"add\", 10)\nprint(d, log)\nlog.clear()\nf = note\nf = [note, bump][note(\"choose\", 0)]\nprint(f(\"called\", \"result\"), log, f\"{note('f1', 1)}{bump()}{note('f2', x)}\", note(\"m\", \"a\").upper() + note(\"n\", \"b\"))\nvalue = [1, 2, 3]\nalias = value\nvalue = value + [note(\"rebind\", 4)]\nalias += [5]\nprint(value, alias, log[-1])\ndef same(v):\n    return v\nlog.clear()\nprint(sorted(note(\"values\", [2, 1, 3]), reverse=note(\"reverse\", True), key=note(\"key\", same)), log)\nlog.clear()\nordered = [3, 1, 2]\nordered.sort(reverse=note(\"reverse\", False), key=note(\"key\", same))\nprint(ordered, log)\n",
    "deliveries": [],
    "epochs": [
     {
@@ -540,7 +540,9 @@
       "0 2 1 ['left', 'left2', 'right', 'cond', 't']",
       "{'k': [11, 2]} ['first', 'second', 'key', 'i', 'add']",
       "result ['choose', 'called', 'f1', 'f2', 'm', 'n'] 16161 Ab",
-      "[1, 2, 3, 4] [1, 2, 3, 5] rebind"
+      "[1, 2, 3, 4] [1, 2, 3, 5] rebind",
+      "[3, 2, 1] ['values', 'reverse', 'key']",
+      "[1, 2, 3] ['reverse', 'key']"
      ]
     }
    ],

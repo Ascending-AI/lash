@@ -179,7 +179,37 @@ struct Prepared {
     args: Vec<Expr>,
 }
 
+/// What a call gives, each value evaluated once in source order: the
+/// callee or receiver written before the arguments, the positional
+/// arguments, then the keyword values. Where the call has keywords every
+/// value is pinned, so placing them by parameter never moves an
+/// evaluation.
+struct Given {
+    head: Operand,
+    positional: Vec<Operand>,
+    keywords: Vec<Operand>,
+}
+
 impl Lowerer<'_> {
+    /// Evaluates `head` and the arguments of `arguments` in source order,
+    /// before keywords place any of them by parameter.
+    fn given(&mut self, head: Option<&PyExpr>, arguments: &ast::Arguments) -> Lowering<Given> {
+        let mut exprs: Vec<&PyExpr> = head.into_iter().collect();
+        exprs.extend(arguments.args.iter());
+        exprs.extend(arguments.keywords.iter().map(|keyword| &keyword.value));
+        let mut operands = self.operands(&exprs)?;
+        if !arguments.keywords.is_empty() {
+            operands = operands.into_iter().map(|value| self.pin(value)).collect();
+        }
+        let keywords = operands.split_off(usize::from(head.is_some()) + arguments.args.len());
+        let positional = operands.split_off(usize::from(head.is_some()));
+        Ok(Given {
+            head: operands.pop().unwrap_or_else(Operand::none),
+            positional,
+            keywords,
+        })
+    }
+
     pub(super) fn is_asyncio(&self, expr: &PyExpr) -> bool {
         matches!(expr, PyExpr::Name(name) if name.id.as_str() == "asyncio")
             && self.variable("asyncio").is_none()
@@ -434,17 +464,12 @@ impl Lowerer<'_> {
                 ),
             ));
         }
-        let positional = call.arguments.args.len();
-        let mut exprs: Vec<&PyExpr> = vec![&call.func];
-        exprs.extend(call.arguments.args.iter());
-        exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = self.operands(&exprs)?;
-        if !call.arguments.keywords.is_empty() {
-            operands = operands.into_iter().map(|value| self.pin(value)).collect();
-        }
-        let keyword_values = operands.split_off(1 + positional);
-        let mut slots: Vec<Option<Operand>> = operands.drain(1..).map(Some).collect();
-        let callee = operands.pop().unwrap_or_else(Operand::none);
+        let Given {
+            head: callee,
+            positional,
+            keywords: keyword_values,
+        } = self.given(Some(&call.func), &call.arguments)?;
+        let mut slots: Vec<Option<Operand>> = positional.into_iter().map(Some).collect();
         if !call.arguments.keywords.is_empty() {
             let Some(signature) = &signature else {
                 return Err(diagnostics::with_repair(
@@ -650,14 +675,12 @@ impl Lowerer<'_> {
                 call.range(),
             ));
         }
-        let mut exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
-        exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = self.operands(&exprs)?;
-        if !call.arguments.keywords.is_empty() {
-            operands = operands.into_iter().map(|value| self.pin(value)).collect();
-        }
-        let keyword_values = operands.split_off(positional);
-        let mut slots: Vec<Option<Operand>> = operands.into_iter().map(Some).collect();
+        let Given {
+            positional: given,
+            keywords: keyword_values,
+            ..
+        } = self.given(None, &call.arguments)?;
+        let mut slots: Vec<Option<Operand>> = given.into_iter().map(Some).collect();
         slots.resize(signature.params.len(), None);
         for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
             let name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
@@ -1058,17 +1081,12 @@ impl Lowerer<'_> {
                 &repair,
             ));
         };
-        let positional = call.arguments.args.len();
-        let mut exprs: Vec<&PyExpr> = vec![&attribute.value];
-        exprs.extend(call.arguments.args.iter());
-        exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = self.operands(&exprs)?;
-        if !call.arguments.keywords.is_empty() {
-            operands = operands.into_iter().map(|value| self.pin(value)).collect();
-        }
-        let keyword_values = operands.split_off(1 + positional);
-        let mut slots: Vec<Option<Operand>> = operands.drain(1..).map(Some).collect();
-        let receiver = operands.pop().unwrap_or_else(Operand::none);
+        let Given {
+            head: receiver,
+            positional,
+            keywords: keyword_values,
+        } = self.given(Some(&attribute.value), &call.arguments)?;
+        let mut slots: Vec<Option<Operand>> = positional.into_iter().map(Some).collect();
         for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
             let keyword_name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
             let Some(index) = method
@@ -1146,11 +1164,12 @@ impl Lowerer<'_> {
                 call.range(),
             ));
         }
-        let mut exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
-        exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = self.operands(&exprs)?;
-        let keyword_values = operands.split_off(positional);
-        let mut slots: Vec<Option<Operand>> = operands.into_iter().map(Some).collect();
+        let Given {
+            positional: given,
+            keywords: keyword_values,
+            ..
+        } = self.given(None, &call.arguments)?;
+        let mut slots: Vec<Option<Operand>> = given.into_iter().map(Some).collect();
         slots.resize(max, None);
         for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
             let keyword_name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());

@@ -33,3 +33,11 @@ alias = value
 value = value + [note("rebind", 4)]
 alias += [5]
 print(value, alias, log[-1])
+def same(v):
+    return v
+log.clear()
+print(sorted(note("values", [2, 1, 3]), reverse=note("reverse", True), key=note("key", same)), log)
+log.clear()
+ordered = [3, 1, 2]
+ordered.sort(reverse=note("reverse", False), key=note("key", same))
+print(ordered, log)
