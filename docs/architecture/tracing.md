@@ -324,6 +324,16 @@ Install it with `content_hook`. Order is policy, hook, then truncation, for
 every sink and regardless of sampling. The hook must not block, perform I/O or
 re-enter the engine.
 
+A tool call's `ToolResults` field is `tool_results`. For a success it is the
+result value. For a failure (`TraceToolFailure`) or a cancellation
+(`TraceToolCancellation`) it is the call's `diagnostics`: one JSON object with
+`message`, plus `cause` and `raw` when the failure carries them. A hook may
+rewrite or omit it like any other field. The classification beside it is typed
+structure, not content: a failure's `class`, `code`, `source` and
+`suggested_delay_ms`, and a cancellation's `source`, `origin` and `forced`.
+No policy, hook or bound reaches it, and the exporter's `error.type` reads the
+terminal failure's `class` directly.
+
 To offload without exporting inline content:
 
 1. Capture the required categories at the core ceiling.

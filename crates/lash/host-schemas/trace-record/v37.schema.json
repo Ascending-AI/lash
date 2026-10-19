@@ -5149,6 +5149,7 @@
     "TraceToolCallOutcome": {
       "oneOf": [
         {
+          "description": "The call's result: `ToolResults` content, `null` when omitted.",
           "properties": {
             "payload": true,
             "status": {
@@ -5164,7 +5165,9 @@
         },
         {
           "properties": {
-            "payload": true,
+            "payload": {
+              "$ref": "#/$defs/TraceToolFailure"
+            },
             "status": {
               "const": "failure",
               "type": "string"
@@ -5178,7 +5181,9 @@
         },
         {
           "properties": {
-            "payload": true,
+            "payload": {
+              "$ref": "#/$defs/TraceToolCancellation"
+            },
             "status": {
               "const": "cancelled",
               "type": "string"
@@ -5225,6 +5230,65 @@
         "discarded"
       ],
       "type": "string"
+    },
+    "TraceToolCancellation": {
+      "description": "A cancelled call as a trace carries it: where the cancellation came from\nand whether lash forced it, which survive every content policy, hook and\nbound, and its governed [diagnostics](TraceToolCancellation::diagnostics).",
+      "properties": {
+        "diagnostics": {
+          "description": "`ToolResults` content: one JSON object holding the cancellation's\n`message`, and its `raw` evidence when it has it. Governed as\n[`TraceToolFailure::diagnostics`] is."
+        },
+        "forced": {
+          "type": "boolean"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CancelOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ToolFailureSource"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "TraceToolFailure": {
+      "description": "A failed call as a trace carries it: the failure's classification, which\nis structure and survives every content policy, hook and bound, and its\ngoverned [diagnostics](TraceToolFailure::diagnostics).",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/ToolFailureClass"
+        },
+        "code": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "description": "`ToolResults` content: one JSON object holding the failure's\n`message`, and its `cause` and `raw` evidence when it has them. A\ncontent hook sees it at the `tool_results` path, and may rewrite it\nto any JSON value. Absent when that content is not captured, or was\nomitted, offloaded or over its bound."
+        },
+        "source": {
+          "$ref": "#/$defs/ToolFailureSource"
+        },
+        "suggested_delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "source"
+      ],
+      "type": "object"
     },
     "TraceToolName": {
       "anyOf": [

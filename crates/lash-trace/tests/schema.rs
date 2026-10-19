@@ -982,6 +982,39 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
         !validator.is_valid(&predecessor),
         "predecessor schema version must be refused"
     );
+
+    // A tool failure's class is a closed classification, not open content.
+    let failed = fixture_record(
+        TraceContext::default(),
+        TraceEvent::ToolCallCompleted {
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
+            name: "search".to_string().into(),
+            args: json!({}).into(),
+            output: TraceToolCallOutput {
+                outcome: TraceToolCallOutcome::Failure(lash_trace::TraceToolFailure::new(
+                    &lash_protocol_types::ToolFailure::new("tool_failed", "failed"),
+                    lash_trace::ContentPolicy::captured(),
+                )),
+                control: None,
+            },
+            duration_ms: 1,
+            issuing_node_id: None,
+            attempts: None,
+            span_attributes: Default::default(),
+        },
+    );
+    let mut malformed = serde_json::to_value(&failed).expect("encode record");
+    assert_schema_accepts(&validator, &malformed, "a typed tool failure");
+    malformed["output"]["outcome"]["payload"]["class"] = json!("retryable");
+    assert!(
+        !validator.is_valid(&malformed),
+        "an unknown tool failure class must be refused"
+    );
+    assert!(
+        serde_json::from_value::<lash_trace::TraceRecord>(malformed).is_err(),
+        "an unknown tool failure class must not decode"
+    );
 }
 
 #[test]
@@ -1282,13 +1315,11 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             name: "search".to_string().into(),
             args: json!({ "query": CONTENT }).into(),
             output: TraceToolCallOutput {
-                outcome: TraceToolCallOutcome::Failure(json!({
-                    "class": "permission_denied",
-                    "code": "tool_failed",
-                    "message": CONTENT,
-                    "source": "tool",
-                    "raw": { "detail": CONTENT },
-                })),
+                outcome: TraceToolCallOutcome::Failure(lash_trace::TraceToolFailure::new(
+                    &lash_protocol_types::ToolFailure::new("tool_failed", CONTENT)
+                        .with_raw(json!({ "detail": CONTENT })),
+                    lash_trace::ContentPolicy::captured(),
+                )),
                 control: Some(json!({ "finish": CONTENT })),
             },
             duration_ms: 3,

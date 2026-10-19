@@ -150,7 +150,10 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         ),
         (
             "tool call failed",
-            tool_completed(TraceToolCallOutcome::Failure(Value::Null)),
+            tool_completed(TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+                &lash_protocol_types::ToolFailure::io("io_failed", "failed"),
+                crate::ContentPolicy::standard(),
+            ))),
         ),
         (
             "language node failed",
@@ -245,7 +248,12 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         ),
         (
             "cancelled tool call",
-            tool_completed(TraceToolCallOutcome::Cancelled(Value::Null)),
+            tool_completed(TraceToolCallOutcome::Cancelled(
+                crate::TraceToolCancellation::new(
+                    &lash_protocol_types::ToolCancellation::runtime("cancelled"),
+                    crate::ContentPolicy::standard(),
+                ),
+            )),
         ),
         (
             "started language node",

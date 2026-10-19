@@ -114,8 +114,11 @@ pub(crate) fn attributes(event: &TraceEvent) -> Vec<(&'static str, Value)> {
                 TraceToolCallOutcome::Success(value) => {
                     out.push(("gen_ai.tool.call.result", object(value)))
                 }
-                TraceToolCallOutcome::Failure(value) | TraceToolCallOutcome::Cancelled(value) => {
-                    out.push(("gen_ai.tool.call.result", json!({"error":value})))
+                TraceToolCallOutcome::Failure(failure) => {
+                    out.push(("gen_ai.tool.call.result", json!({"error":failure})))
+                }
+                TraceToolCallOutcome::Cancelled(cancellation) => {
+                    out.push(("gen_ai.tool.call.result", json!({"error":cancellation})))
                 }
                 _ => {}
             }

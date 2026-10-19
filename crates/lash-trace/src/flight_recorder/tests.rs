@@ -96,6 +96,20 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
     }
 }
 
+fn secret_failure() -> TraceToolCallOutcome {
+    TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+        &lash_protocol_types::ToolFailure::io("io_failed", "PAYLOAD_SECRET"),
+        crate::ContentPolicy::captured(),
+    ))
+}
+
+fn secret_cancellation() -> TraceToolCallOutcome {
+    TraceToolCallOutcome::Cancelled(crate::TraceToolCancellation::new(
+        &lash_protocol_types::ToolCancellation::runtime("PAYLOAD_SECRET"),
+        crate::ContentPolicy::captured(),
+    ))
+}
+
 fn failure() -> TraceEvent {
     TraceEvent::ExecCodeFailed {
         trailing_discarded: 0,
@@ -150,7 +164,13 @@ fn slow_record_snapshots_bounded_preceding_records_in_order() {
     sink.append(&record(
         "next",
         3000,
-        tool(TraceToolCallOutcome::Failure(json!(null)), 5001),
+        tool(
+            TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+                &lash_protocol_types::ToolFailure::io("io_failed", "failed"),
+                crate::ContentPolicy::standard(),
+            )),
+            5001,
+        ),
     ))
     .unwrap();
     let snapshots = snapshots.lock_recover();
@@ -167,7 +187,7 @@ fn failed_operation_triggers_a_snapshot() {
     );
     let failed_events = [
         failure(),
-        tool(TraceToolCallOutcome::Failure(json!("PAYLOAD_SECRET")), 0),
+        tool(secret_failure(), 0),
         TraceEvent::ProgramStep {
             step_index: 1,
             outcome: TraceProgramStepOutcome::Failure {
@@ -258,7 +278,7 @@ fn snapshots_never_contain_payload_even_with_full_content() {
             rendered_system_prompt: "PAYLOAD_SECRET".into(),
             tool_schemas: vec![],
         },
-        tool(TraceToolCallOutcome::Failure(json!("PAYLOAD_SECRET")), 100),
+        tool(secret_failure(), 100),
     ];
     for (index, event) in events.into_iter().enumerate() {
         let record = record(&index.to_string(), 1000, event);
@@ -285,11 +305,7 @@ fn inner_sink_receives_every_record_unchanged_and_keeps_its_errors() {
             tool(TraceToolCallOutcome::Success(json!("PAYLOAD_SECRET")), 10),
         ),
         record("failure", 1001, failure()),
-        record(
-            "cancelled",
-            1002,
-            tool(TraceToolCallOutcome::Cancelled(json!("PAYLOAD_SECRET")), 10),
-        ),
+        record("cancelled", 1002, tool(secret_cancellation(), 10)),
     ];
     sink.append(&records[0]).unwrap();
     inner.fail.store(true, Ordering::SeqCst);

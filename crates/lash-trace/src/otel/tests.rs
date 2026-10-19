@@ -792,7 +792,10 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 name: "unfamiliar-tool".into(),
                 args: serde_json::json!({"secret":"hidden"}).into(),
                 output: crate::TraceToolCallOutput {
-                    outcome: crate::TraceToolCallOutcome::Failure(serde_json::Value::Null),
+                    outcome: crate::TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+                        &lash_protocol_types::ToolFailure::io("io_failed", "failed"),
+                        crate::ContentPolicy::standard(),
+                    )),
                     control: None,
                 },
                 duration_ms: 55,
@@ -1278,22 +1281,14 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Tool,
             tool(
-                crate::TraceToolCallOutcome::Failure(serde_json::Value::Null),
-                attempts.clone(),
-            ),
-            Some("permission_denied".to_owned()),
-        ),
-        (
-            TraceSpanKind::Tool,
-            tool(
-                crate::TraceToolCallOutcome::Failure(
-                    lash_protocol_types::ToolFailure::runtime(
+                crate::TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+                    &lash_protocol_types::ToolFailure::runtime(
                         lash_protocol_types::ToolFailureClass::Internal,
                         "tool_retry_sleep_failed",
                         "private retry sleep failure",
-                    )
-                    .to_json_value(),
-                ),
+                    ),
+                    crate::ContentPolicy::captured(),
+                )),
                 attempts.clone(),
             ),
             Some("internal".to_owned()),
@@ -1301,10 +1296,10 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Tool,
             tool(
-                crate::TraceToolCallOutcome::Failure(
-                    lash_protocol_types::ToolFailure::io("host_io_failed", "private detail")
-                        .to_json_value(),
-                ),
+                crate::TraceToolCallOutcome::Failure(crate::TraceToolFailure::new(
+                    &lash_protocol_types::ToolFailure::io("host_io_failed", "private detail"),
+                    crate::ContentPolicy::captured(),
+                )),
                 Vec::new(),
             ),
             Some("io".to_owned()),
@@ -2397,7 +2392,11 @@ fn abandoned_tool_spans_omit_unavailable_arguments_but_keep_real_null() {
     let exporter = OtelTelemetry::new(&traces, &meters, OtelOptions::standard());
     for (index, outcome) in [
         crate::TraceToolCallOutcome::Discarded,
-        crate::TraceToolCallOutcome::Cancelled(serde_json::json!({"origin":"turn_stopped"})),
+        crate::TraceToolCallOutcome::Cancelled(crate::TraceToolCancellation::new(
+            &lash_protocol_types::ToolCancellation::runtime("the turn ended")
+                .with_origin(lash_protocol_types::CancelOrigin::TurnStopped),
+            crate::ContentPolicy::standard(),
+        )),
         crate::TraceToolCallOutcome::Success(serde_json::Value::Null),
     ]
     .into_iter()

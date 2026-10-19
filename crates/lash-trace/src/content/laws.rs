@@ -276,24 +276,38 @@ fn truncation_terminates_for_large_strings_numeric_arrays_messages_and_schemas()
     };
     assert!(text.starts_with(&format!("{}:", bounded.content.dropped_messages)));
 
-    // The error wrapper alone can push an otherwise fitting failure over the
-    // attribute bound. Dropping its content must retain the failure class.
-    let mut failure = json!({"class":"retryable", "values":vec![0; max / 2 - 1024]});
-    let padding = max - 5 - serde_json::to_vec(&failure).unwrap().len() - 13;
-    failure["padding"] = json!("x".repeat(padding));
-    assert_eq!(serde_json::to_vec(&failure).unwrap().len(), max - 5);
+    // The error wrapper alone can push otherwise fitting diagnostics over the
+    // attribute bound. Dropping them must retain the failure's classification.
+    let mut diagnostics = json!({"message":"failed", "values":vec![0; max / 2 - 1024]});
+    let padding = max - 5 - serde_json::to_vec(&diagnostics).unwrap().len() - 13;
+    diagnostics["padding"] = json!("x".repeat(padding));
+    assert_eq!(serde_json::to_vec(&diagnostics).unwrap().len(), max - 5);
+    let classified = crate::TraceToolFailure::new(
+        &lash_protocol_types::ToolFailure::io("host_io_failed", "failed"),
+        ContentPolicy::standard(),
+    );
     let mut failed = tool(Value::Null);
     if let TraceEvent::ToolCallCompleted { output, .. } = &mut failed {
-        output.outcome = TraceToolCallOutcome::Failure(failure);
+        output.outcome = TraceToolCallOutcome::Failure(crate::TraceToolFailure {
+            diagnostics: Some(diagnostics),
+            ..classified.clone()
+        });
     }
     let bounded = record(failed).governed(ContentPolicy::captured());
+    assert!(
+        bounded
+            .content
+            .oversize
+            .contains(&"gen_ai.tool.call.result".to_owned())
+    );
     let TraceEvent::ToolCallCompleted { output, .. } = bounded.event else {
         panic!()
     };
-    let TraceToolCallOutcome::Failure(value) = output.outcome else {
-        panic!("truncation changed the tool outcome")
-    };
-    assert_eq!(value["class"], "retryable");
+    assert_eq!(
+        output.outcome,
+        TraceToolCallOutcome::Failure(classified),
+        "the classification survives and the diagnostics are dropped"
+    );
     string.event.visit_content(&mut |field| {
         let n = match field.value() {
             ContentValue::Text(s) => serde_json::to_vec(s).unwrap().len(),

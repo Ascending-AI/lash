@@ -297,19 +297,10 @@ pub(crate) fn trace_tool_call_output(
             }),
         ),
         ToolCallOutcome::Failure(failure) => lash_trace::TraceToolCallOutcome::Failure(
-            if content.captures(lash_trace::ContentCategory::ToolResults) {
-                failure.to_json_value()
-            } else {
-                serde_json::json!({"class":failure.class, "code":failure.code,
-                    "source":failure.source, "suggested_delay_ms":failure.suggested_delay_ms})
-            },
+            lash_trace::TraceToolFailure::new(failure, content),
         ),
         ToolCallOutcome::Cancelled(cancellation) => lash_trace::TraceToolCallOutcome::Cancelled(
-            if content.captures(lash_trace::ContentCategory::ToolResults) {
-                cancellation.to_json_value()
-            } else {
-                serde_json::json!({"source":cancellation.source, "origin":cancellation.origin, "forced":cancellation.forced})
-            },
+            lash_trace::TraceToolCancellation::new(cancellation, content),
         ),
     };
     lash_trace::TraceToolCallOutput {

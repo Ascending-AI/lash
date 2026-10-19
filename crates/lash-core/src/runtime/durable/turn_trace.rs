@@ -326,37 +326,38 @@ pub(super) fn members_ended(
         let Some(scope) = member.trace() else {
             continue;
         };
+        let standing = tracing.unreplayed(Some(scope.clone()));
         let outcome = match end {
-            MemberEnd::Cancelled => TraceToolCallOutcome::Cancelled(
-                crate::ToolCancellation::runtime("the turn ended before the call settled")
-                    .with_origin(crate::CancelOrigin::TurnStopped)
-                    .to_json_value(),
-            ),
+            MemberEnd::Cancelled => {
+                TraceToolCallOutcome::Cancelled(lash_trace::TraceToolCancellation::new(
+                    &crate::ToolCancellation::runtime("the turn ended before the call settled")
+                        .with_origin(crate::CancelOrigin::TurnStopped),
+                    standing.content(),
+                ))
+            }
             MemberEnd::Discarded => TraceToolCallOutcome::Discarded,
         };
-        tracing
-            .unreplayed(Some(scope.clone()))
-            .close_scope(ended_at_ms, || {
-                (
-                    context(&row.session, &row.run, row.admission.input_ids().first())
-                        .for_call(member.call().clone()),
-                    TraceEvent::ToolCallCompleted {
-                        call_id: member.call().clone(),
-                        provider_call_id: None,
-                        name: name.clone(),
-                        args: lash_trace::TraceToolArgs::Unavailable,
-                        output: TraceToolCallOutput {
-                            outcome,
-                            control: None,
-                        },
-                        duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
-                        issuing_node_id: None,
-                        attempts: None,
-                        // No attempt answered this synthetic end, so none supplied annotations.
-                        span_attributes: Default::default(),
+        standing.close_scope(ended_at_ms, || {
+            (
+                context(&row.session, &row.run, row.admission.input_ids().first())
+                    .for_call(member.call().clone()),
+                TraceEvent::ToolCallCompleted {
+                    call_id: member.call().clone(),
+                    provider_call_id: None,
+                    name: name.clone(),
+                    args: lash_trace::TraceToolArgs::Unavailable,
+                    output: TraceToolCallOutput {
+                        outcome,
+                        control: None,
                     },
-                )
-            });
+                    duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
+                    issuing_node_id: None,
+                    attempts: None,
+                    // No attempt answered this synthetic end, so none supplied annotations.
+                    span_attributes: Default::default(),
+                },
+            )
+        });
     }
 }
 

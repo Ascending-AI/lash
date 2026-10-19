@@ -352,27 +352,12 @@ impl TraceEvent {
                     TraceToolCallOutcome::Success(value) => {
                         json(C::ToolResults, "tool_results", value, f)
                     }
-                    TraceToolCallOutcome::Failure(value)
-                    | TraceToolCallOutcome::Cancelled(value) => {
-                        let classification: Vec<_> = [
-                            "class",
-                            "code",
-                            "source",
-                            "suggested_delay_ms",
-                            "origin",
-                            "forced",
-                        ]
-                        .into_iter()
-                        .filter_map(|key| value.get(key).cloned().map(|v| (key.to_owned(), v)))
-                        .collect();
-                        json(C::ToolResults, "tool_results", value, f);
-                        if !classification.is_empty() && !value.is_object() {
-                            *value = Value::Object(Default::default());
-                        }
-                        if let Some(object) = value.as_object_mut() {
-                            object.extend(classification);
-                        }
-                    }
+                    // Only the diagnostics are content: the classification
+                    // beside them is structure no content operation reaches.
+                    TraceToolCallOutcome::Failure(TraceToolFailure { diagnostics, .. })
+                    | TraceToolCallOutcome::Cancelled(TraceToolCancellation {
+                        diagnostics, ..
+                    }) => json(C::ToolResults, "tool_results", diagnostics, f),
                     TraceToolCallOutcome::Discarded => {}
                 }
                 json(

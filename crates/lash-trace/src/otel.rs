@@ -30,8 +30,7 @@ use crate::telemetry::{
 use crate::{
     SpanRole, TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TraceExportPolicy,
     TraceMetrics, TraceOmissionLedger, TraceOmissionSite, TracePolicySnapshot, TracePosition,
-    TraceRecord, TraceRetryAttemptDetail, TraceSink, TraceSinkError, TraceSpanKind, TraceTimestamp,
-    TraceToolAttemptOutcome, TraceTurnOutcome,
+    TraceRecord, TraceSink, TraceSinkError, TraceSpanKind, TraceTimestamp, TraceTurnOutcome,
 };
 
 /// Exact API namespace supported by this adapter.
@@ -1026,33 +1025,10 @@ impl<'a> Projection<'a> {
                     crate::TraceToolCallStatus::Cancelled => "cancelled",
                     crate::TraceToolCallStatus::Discarded => "discarded",
                 }));
-                if self.failed(record) {
-                    // A controller failure after an attempt can replace the
-                    // terminal output; its class is authoritative over earlier attempts.
-                    let terminal_class = match &output.outcome {
-                        crate::TraceToolCallOutcome::Failure(value) => value
-                            .get("class")
-                            .and_then(|class| {
-                                serde_json::from_value::<lash_protocol_types::ToolFailureClass>(
-                                    class.clone(),
-                                )
-                                .ok()
-                            })
-                            .map(|class| crate::wire_tag(&class)),
-                        _ => None,
-                    };
-                    let class = terminal_class.or_else(|| {
-                        attempts
-                            .as_ref()
-                            .and_then(|attempts| attempts.last())
-                            .and_then(|attempt| match &attempt.detail {
-                                TraceRetryAttemptDetail::Tool {
-                                    outcome: TraceToolAttemptOutcome::Failed { class, .. },
-                                } => Some(crate::wire_tag(class)),
-                                _ => None,
-                            })
-                    });
-                    out.push(A::ErrorType.value(class.unwrap_or_else(|| "unknown".into())));
+                // The terminal failure's class is authoritative: a controller
+                // failure after an attempt replaces the attempt's.
+                if let crate::TraceToolCallOutcome::Failure(failure) = &output.outcome {
+                    out.push(A::ErrorType.value(crate::wire_tag(&failure.class)));
                 }
             }
             TraceEvent::TurnCompleted {

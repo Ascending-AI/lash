@@ -638,26 +638,104 @@ impl TraceToolCallOutput {
     pub fn is_success(&self) -> bool {
         self.status() == TraceToolCallStatus::Success
     }
-
-    pub fn value_for_projection(&self) -> Value {
-        match &self.outcome {
-            TraceToolCallOutcome::Success(value)
-            | TraceToolCallOutcome::Failure(value)
-            | TraceToolCallOutcome::Cancelled(value) => value.clone(),
-            TraceToolCallOutcome::Discarded => Value::Null,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum TraceToolCallOutcome {
+    /// The call's result: `ToolResults` content, `null` when omitted.
     Success(Value),
-    Failure(Value),
-    Cancelled(Value),
+    Failure(TraceToolFailure),
+    Cancelled(TraceToolCancellation),
     /// The call never settled: the session closed while it ran, and its
     /// turn's terminal owner closed its span. It has no output.
     Discarded,
+}
+
+/// A failed call as a trace carries it: the failure's classification, which
+/// is structure and survives every content policy, hook and bound, and its
+/// governed [diagnostics](TraceToolFailure::diagnostics).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceToolFailure {
+    pub class: lash_protocol_types::ToolFailureClass,
+    pub code: String,
+    pub source: lash_protocol_types::ToolFailureSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_delay_ms: Option<u64>,
+    /// `ToolResults` content: one JSON object holding the failure's
+    /// `message`, and its `cause` and `raw` evidence when it has them. A
+    /// content hook sees it at the `tool_results` path, and may rewrite it
+    /// to any JSON value. Absent when that content is not captured, or was
+    /// omitted, offloaded or over its bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Value>,
+}
+
+impl TraceToolFailure {
+    /// `failure`'s classification, with its diagnostics when `content`
+    /// captures tool results.
+    pub fn new(failure: &lash_protocol_types::ToolFailure, content: ContentPolicy) -> Self {
+        Self {
+            class: failure.class.clone(),
+            code: failure.code.clone(),
+            source: failure.source.clone(),
+            suggested_delay_ms: failure.suggested_delay_ms,
+            diagnostics: content.capture(ContentCategory::ToolResults, || {
+                let mut diagnostics = serde_json::Map::new();
+                diagnostics.insert("message".into(), failure.message.clone().into());
+                if let Some(cause) = &failure.cause {
+                    diagnostics.insert(
+                        "cause".into(),
+                        serde_json::to_value(cause).unwrap_or(Value::Null),
+                    );
+                }
+                if let Some(raw) = &failure.raw {
+                    diagnostics.insert("raw".into(), raw.to_json_value());
+                }
+                Some(Value::Object(diagnostics))
+            }),
+        }
+    }
+}
+
+/// A cancelled call as a trace carries it: where the cancellation came from
+/// and whether lash forced it, which survive every content policy, hook and
+/// bound, and its governed [diagnostics](TraceToolCancellation::diagnostics).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceToolCancellation {
+    pub source: lash_protocol_types::ToolFailureSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<lash_protocol_types::CancelOrigin>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forced: bool,
+    /// `ToolResults` content: one JSON object holding the cancellation's
+    /// `message`, and its `raw` evidence when it has it. Governed as
+    /// [`TraceToolFailure::diagnostics`] is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Value>,
+}
+
+impl TraceToolCancellation {
+    /// `cancellation`'s provenance, with its diagnostics when `content`
+    /// captures tool results.
+    pub fn new(
+        cancellation: &lash_protocol_types::ToolCancellation,
+        content: ContentPolicy,
+    ) -> Self {
+        Self {
+            source: cancellation.source.clone(),
+            origin: cancellation.origin,
+            forced: cancellation.forced,
+            diagnostics: content.capture(ContentCategory::ToolResults, || {
+                let mut diagnostics = serde_json::Map::new();
+                diagnostics.insert("message".into(), cancellation.message.clone().into());
+                if let Some(raw) = &cancellation.raw {
+                    diagnostics.insert("raw".into(), raw.to_json_value());
+                }
+                Some(Value::Object(diagnostics))
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
