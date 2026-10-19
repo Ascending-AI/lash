@@ -667,7 +667,7 @@ impl EmbedError {
     }
 }
 
-fn durable_error_is_retryable(error: &lash_core::durable_port::DurableError) -> bool {
+pub(crate) fn durable_error_is_retryable(error: &lash_core::durable_port::DurableError) -> bool {
     use lash_core::durable_port::{DurableError, StoreFailureKind};
     match error {
         DurableError::AckLost { .. } => true,

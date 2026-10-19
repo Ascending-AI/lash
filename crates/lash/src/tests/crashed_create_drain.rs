@@ -17,10 +17,6 @@
 //! then appends through the session's admin, a session command the
 //! session's actor applies and commits on the core's own node.
 //!
-//! Each law plays the host of its deployment: a core whose node stops on its
-//! own never serves again, so a wait on the node restarts the deployment as
-//! a new boot (see [`Deployment`]).
-//!
 //! A catalog row with no head at all recorded no config. It is never opened
 //! with defaults: the host's open and a send to it are both refused with the
 //! typed creation-unrecorded refusal, and nothing is committed.
@@ -117,67 +113,6 @@ fn core_over(
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::tests::host::runtime_lease_owner())
-}
-
-/// A law's deployment over its stores, played as ADR 0132 §3 asks of a host.
-/// A core's node that stops on its own never serves again: a process stalled
-/// past the lease's `self_stop_after` stops it `Unrenewed`. The host then
-/// restarts as a new boot of the same owner, which fences the old boot and
-/// serves its sessions, and the old core still admits work and follows it.
-struct Deployment {
-    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
-    nodes: usize,
-    /// The core the law built first: its handles admit work and follow it
-    /// whichever boot serves.
-    core: LashCore,
-    /// The boots a node's own stop restarted, the serving one last.
-    restarts: Vec<LashCore>,
-}
-
-impl Deployment {
-    fn over(
-        stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
-        nodes: usize,
-    ) -> Result<Self> {
-        Ok(Self {
-            stores: Arc::clone(stores),
-            nodes,
-            core: core_over(stores, nodes)?,
-            restarts: Vec::new(),
-        })
-    }
-
-    /// `wait`'s answer while a node of the deployment serves it: whenever the
-    /// serving boot's node stops on its own, a new boot takes over.
-    async fn served<T>(&mut self, wait: impl std::future::Future<Output = T>) -> Result<T> {
-        tokio::pin!(wait);
-        loop {
-            let serving = self.restarts.last().unwrap_or(&self.core);
-            let stopped = tokio::select! {
-                biased;
-                answer = &mut wait => return Ok(answer),
-                stopped = serving.node_stopped() => stopped,
-            };
-            let on_its_own = matches!(
-                stopped,
-                Some(Ok(crate::durable::runner::Stopped::Unrenewed
-                    | crate::durable::runner::Stopped::LeaseLost))
-            );
-            assert!(
-                on_its_own,
-                "the deployment's node stopped only on its own: {stopped:?}"
-            );
-            self.restarts.push(core_over(&self.stores, self.nodes)?);
-        }
-    }
-
-    /// Shut every boot down, the serving one first.
-    async fn shutdown(self) -> Result<()> {
-        for core in self.restarts.iter().rev().chain([&self.core]) {
-            core.shutdown().await?;
-        }
-        Ok(())
-    }
 }
 
 /// A session a crashed create left, and the config its creation resolved.
@@ -321,18 +256,14 @@ struct Drained {
 }
 
 /// Append [`NOTE`] to `session`, requiring `ancestor` when given: a session
-/// command an actor of `deployment` drains and settles.
+/// command an actor of `core`'s node drains and settles.
 async fn drain_an_append(
-    deployment: &mut Deployment,
+    core: &LashCore,
     store: &lash_core::store::SessionStore,
     session: &str,
     ancestor: Option<&str>,
 ) -> Result<Drained> {
-    let host = deployment
-        .core
-        .session(SessionId::fixture(session))
-        .open()
-        .await?;
+    let host = core.session(SessionId::fixture(session)).open().await?;
     let append = tokio::time::timeout(
         std::time::Duration::from_secs(90),
         host.admin()
@@ -342,9 +273,9 @@ async fn drain_an_append(
     .await
     .expect("the session's actor drains the queued command")?;
     let commands = host.admin().commands();
-    let outcome = deployment
-        .served(append.settle_with(&commands, crate::testing::admin_fixture_outcome))
-        .await??;
+    let outcome = append
+        .settle_with(&commands, crate::testing::admin_fixture_outcome)
+        .await?;
     assert!(
         store
             .list_open_queued_work()
@@ -403,15 +334,9 @@ async fn a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it(
 ) -> Result<()> {
     const ID: &str = "crashed-create-refused-append";
     let (stores, _held, _seams) = stores_of(storage).await;
-    let mut deployment = Deployment::over(&stores, NODE_BUDGET)?;
-    let crashed = crashed_create(&deployment.core, ID).await?;
-    let drained = drain_an_append(
-        &mut deployment,
-        &crashed.store,
-        ID,
-        Append::Refused.ancestor(),
-    )
-    .await?;
+    let core = core_over(&stores, NODE_BUDGET)?;
+    let crashed = crashed_create(&core, ID).await?;
+    let drained = drain_an_append(&core, &crashed.store, ID, Append::Refused.ancestor()).await?;
     let lash_core::AppendSessionNodesOutcome::StaleBranch { required_node_id } = &drained.outcome
     else {
         panic!(
@@ -439,15 +364,9 @@ async fn an_append_drained_after_a_crashed_create_is_committed_once(
 ) -> Result<()> {
     const ID: &str = "crashed-create-accepted-append";
     let (stores, _held, _seams) = stores_of(storage).await;
-    let mut deployment = Deployment::over(&stores, NODE_BUDGET)?;
-    let crashed = crashed_create(&deployment.core, ID).await?;
-    let drained = drain_an_append(
-        &mut deployment,
-        &crashed.store,
-        ID,
-        Append::Accepted.ancestor(),
-    )
-    .await?;
+    let core = core_over(&stores, NODE_BUDGET)?;
+    let crashed = crashed_create(&core, ID).await?;
+    let drained = drain_an_append(&core, &crashed.store, ID, Append::Accepted.ancestor()).await?;
     assert!(
         matches!(
             &drained.outcome,
@@ -477,27 +396,22 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
     let id = format!("crashed-create-reopen-{append:?}").to_lowercase();
     let (stores, _held, _seams) = stores_of(storage).await;
     {
-        let mut deployment = Deployment::over(&stores, NODE_BUDGET)?;
-        let crashed = crashed_create(&deployment.core, &id).await?;
-        drain_an_append(&mut deployment, &crashed.store, &id, append.ancestor()).await?;
-        deployment.shutdown().await?;
+        let core = core_over(&stores, NODE_BUDGET)?;
+        let crashed = crashed_create(&core, &id).await?;
+        drain_an_append(&core, &crashed.store, &id, append.ancestor()).await?;
+        core.shutdown().await?;
     }
-    let mut deployment = Deployment::over(&stores, 512)?;
-    let sent = deployment
-        .core
+    let core = core_over(&stores, 512)?;
+    let sent = core
         .session(SessionId::fixture(id.clone()))
         .durable()
         .await?
         .send(TurnInput::text("answer after the drain"));
-    let turn = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        deployment.served(sent.output()),
-    )
-    .await;
+    let turn = tokio::time::timeout(std::time::Duration::from_secs(60), sent.output()).await;
     let Ok(output) = turn else {
         panic!("the restarted deployment runs a turn of the session: none finished in 60 s");
     };
-    let output = output??;
+    let output = output?;
     assert!(
         matches!(output.outcome, TurnOutcome::Finished(_)),
         "the restarted deployment runs a turn of the session: {:?}",

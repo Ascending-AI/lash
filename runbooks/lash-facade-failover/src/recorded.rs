@@ -8,9 +8,9 @@
 //! watch.
 //!
 //! The one fault they inject is the partition: while the test holds the
-//! node's heartbeat ([`RecordedStore::block_heartbeat`]), every heartbeat
-//! waits, and everything else, the bodies and their owner commits among it,
-//! goes on.
+//! node's lease calls ([`RecordedStore::block_lease`]), every heartbeat and
+//! every registration of a new boot waits, and everything else, the bodies
+//! and their owner commits among it, goes on.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,7 +36,7 @@ use tokio::sync::Notify;
 
 use crate::events::{Event, report};
 
-/// The heartbeat gate the test controls.
+/// The lease gate the test controls.
 #[derive(Debug, Default)]
 struct Gate {
     blocked: AtomicBool,
@@ -73,13 +73,13 @@ impl RecordedStore {
         }
     }
 
-    /// Hold every heartbeat from now on, or let them through again.
-    pub fn block_heartbeat(&self, blocked: bool) {
+    /// Hold every lease call from now on, or let them through again.
+    pub fn block_lease(&self, blocked: bool) {
         self.gate.blocked.store(blocked, Ordering::SeqCst);
         if !blocked {
             self.gate.opened.notify_waiters();
         }
-        report(&self.node, Event::HeartbeatBlocked { blocked });
+        report(&self.node, Event::LeaseBlocked { blocked });
     }
 
     fn reaped(&self, reaped: &[Reaped], by: &str) {
@@ -120,6 +120,10 @@ impl DurableStore for RecordedStore {
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
+        if self.gate.blocked.load(Ordering::SeqCst) {
+            report(&self.node, Event::RegistrationHeld);
+        }
+        self.gate.pass().await;
         let lease = self.inner.register_node(spec).await;
         if let Ok(lease) = &lease {
             report(

@@ -13,6 +13,14 @@
 //! stops when the core shuts down or its last clone is dropped. Its name is
 //! the core's stable owner id: a new boot of the same owner fences the old.
 //!
+//! While the core lives, so does its node (FIG-6887). A node that stopped
+//! itself unrenewed (the process stalled past the lease's `self_stop_after`)
+//! serves again as a new boot, which fences the old one and resumes every
+//! actor it held, its listener holding the liveness lock again; so does a
+//! node whose start a transient store failure refused. It stays stopped
+//! only when a newer boot of its owner replaced it or the store refused it
+//! for good.
+//!
 //! The host drains it by release (ADR 0106 §1) with [`LashCore::drain`]: the
 //! node claims nothing more, hands each actor it owns to the next build at a
 //! committed phase, and stops. A drained core never starts a node again.
@@ -100,21 +108,49 @@ impl NodeSlot {
         let registration = self.registration.clone();
         *started = true;
         runtime.spawn(async move {
-            let outcome = serve(
-                &backend,
-                NodeServe {
-                    registration,
-                    node,
-                    drain,
-                    sessions,
-                    processes,
-                    serves,
-                },
-                stop.cancelled_owned(),
-            )
-            .await;
+            let clock = backend.clock();
+            let retry_after = backend.config().lease().settings().claim_poll;
+            let outcome = loop {
+                let outcome = serve(
+                    &backend,
+                    NodeServe {
+                        registration: registration.clone(),
+                        node: node.clone(),
+                        drain: drain.clone(),
+                        sessions: Arc::clone(&sessions),
+                        processes: processes.clone(),
+                        serves: serves.clone(),
+                    },
+                    stop.clone().cancelled_owned(),
+                )
+                .await;
+                if stop.is_cancelled() || drain.started() {
+                    break outcome;
+                }
+                match &outcome {
+                    // The process stalled past `self_stop_after` (a starved
+                    // host): the node stopped itself and dropped its actors.
+                    // Its next boot fences this one and resumes them.
+                    Ok(Stopped::Unrenewed) => {
+                        tracing::warn!(
+                            "the core's node went unrenewed; it serves again as a new boot"
+                        );
+                    }
+                    Err(error) if crate::error::durable_error_is_retryable(error) => {
+                        tracing::warn!(%error, "the core's node did not start; it starts again");
+                        tokio::select! {
+                            () = stop.cancelled() => break outcome,
+                            () = clock.sleep(retry_after) => {}
+                        }
+                    }
+                    _ => break outcome,
+                }
+            };
             match &outcome {
-                Ok(stopped) => tracing::debug!(?stopped, "the core's node stopped"),
+                Ok(Stopped::Requested | Stopped::Drained) => {
+                    tracing::debug!(?outcome, "the core's node stopped");
+                }
+                Ok(stopped) => tracing::warn!(?stopped, "the core's node stopped on its own"),
                 Err(error) => tracing::error!(%error, "the core's node stopped"),
             }
             served.send_replace(Some(outcome));

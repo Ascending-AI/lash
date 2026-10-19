@@ -40,15 +40,15 @@ time and the target is `dev-deferred`: two cases wait out a 15 s node lease.
 | Node process | [`src/bin/node.rs`](src/bin/node.rs), [`src/node.rs`](src/node.rs) | real: `DurableBackendBuilder` over `PostgresStoreSet` and one `LashCore` built on it, whose node is the production runner, session activation, process worker, fences, notifier and liveness lock, with the default `DurableSettings`. The host shuts the core down on `stop`, and learns how the node stopped from `LashCore::node_stopped` |
 | Turn | [`src/turn.rs`](src/turn.rs) | real: the facade's session and send, the production turn driver, model pins, and a TypeScript cell on the code mode worker path with its durable snapshots; the model is scripted (`lash::testing::TestProvider`) |
 | `ext_write` | [`src/turn.rs`](src/turn.rs) | a `Once` host tool (`StaticToolProvider`) called from the cell through the production tool dispatch; its body is the runbook's |
-| Reports | [`src/recorded.rs`](src/recorded.rs), [`src/events.rs`](src/events.rs) | decorators over the facade's `StoreSet`, durable store and node wakes that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |
-| Server, nodes, faults | [`tests/support/`](tests/support/) | the test owns the server and the node processes (SIGKILL, stop on stdin, heartbeat hold); its operator core admits the turn and serves no node |
+| Reports | [`src/recorded.rs`](src/recorded.rs), [`src/events.rs`](src/events.rs) | decorators over the facade's `StoreSet`, durable store and node wakes that forward every call and print what the store answered; the partition's lease hold is the one fault they inject |
+| Server, nodes, faults | [`tests/support/`](tests/support/) | the test owns the server and the node processes (SIGKILL, stop on stdin, lease hold); its operator core admits the turn and serves no node |
 | Witness ledger | [`witness.sql`](witness.sql) | the substrate runbook's ledger, unchanged |
 
 A node reads its configuration from its environment (`LASH_FAILOVER_NODE`,
 `LASH_FAILOVER_DATABASE_URL`, `LASH_FAILOVER_WITNESS_URL`,
 `LASH_FAILOVER_NOTIFIER` = `after-commit` or `poll-only`,
 `LASH_FAILOVER_HOLD`, and `LASH_FAILOVER_ADMIT_TURN` for runs by hand), its
-commands from stdin (`stop`, `block-heartbeat`, `unblock-heartbeat`; end of
+commands from stdin (`stop`, `block-lease`, `unblock-lease`; end of
 input stops it) and writes one JSON report per line to stdout. Its node is
 named by the core's owner id, the node name.
 
@@ -62,7 +62,7 @@ are the substrate runbook's.
 | `a_turn_killed_mid_model_call_finishes_on_another_node` | kill -9 of the node holding the turn's first model call | detected 111 ms after the kill by the liveness lock, claimed 2 ms after the reap, re-sent 203 ms after the kill; one `turn.commit` on the survivor |
 | `a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound` | the same kill with `poll-only` | detected 15 805 ms after the kill by the lease (`ttl` + `reap_every`), claimed 170 ms after the reap |
 | `a_once_step_killed_mid_body_settles_interrupted_on_another_node` | kill -9 inside `ext_write`'s body, after its witness entry | detected 151 ms after the kill; the operation settled `Interrupted` under the survivor's epoch 3; one `entered` row, on the victim |
-| `a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses` | partition: the node's heartbeats are held while its `ext_write` body runs | the zombie's node stopped `unrenewed` 9 992 ms after its last lease extension (`self_stop_after` 10 s), and its host learned it from `node_stopped`; the survivor reaped it 9 766 ms after the hold and finished the turn with the operation `Interrupted` |
+| `a_node_whose_lease_is_held_stops_itself_before_its_lease_lapses` | partition: the node's lease calls (heartbeat and registration) are held while its `ext_write` body runs | the zombie's node stopped itself 10 002 ms after its last lease extension (`self_stop_after` 10 s) and its core registered a new boot, which the partition held (FIG-6887); the survivor reaped it 8 905 ms after the hold and finished the turn with the operation `Interrupted` |
 | `a_cleanly_stopped_node_hands_its_turn_over_at_once` | `stop` (the host shuts its core down) while the node holds the first model call | released 11 ms after the request, claimed 91 ms after the release |
 | `a_postgres_restart_strands_no_work_and_reaps_no_node` | fast shutdown of the server for about 3 s while a model call is in flight | outage 3 141 ms; no node reaped or stopped; the turn finished on the node that held it, 2 838 ms after the server was back, `ext_write` once |
 
@@ -75,6 +75,11 @@ are the substrate runbook's.
    `LashCore::node_stopped` answers how the node stopped (law:
    `node_drain::a_host_learns_why_its_cores_node_stopped`); this runbook's
    node reports it.
+2. **A core whose node went unrenewed sat alive and idle** (fixed in
+   FIG-6887). With no other node, every session it held stayed owned by its
+   stopped boot. Its node now serves again as a new boot (law:
+   `node_drain::a_node_stalled_past_its_self_stop_serves_its_sessions_again`);
+   `node_stopped` answers only a stop for good.
 The source mid-wait case asserted engine-emitted events, retired on main.
 Its surviving wait, state and start-key guarantees are covered by
 `crates/lash-postgres-workers/tests/failover.rs::a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state`.

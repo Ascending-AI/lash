@@ -401,3 +401,146 @@ async fn a_host_learns_why_its_cores_node_stopped() {
     );
     old.shutdown().await.expect("shutdown");
 }
+
+/// A clock a law stalls: each reading is shifted by the time the law
+/// skipped, and each sleep whose deadline a skip passed wakes at once, as a
+/// starved process's timers all fire late together.
+#[derive(Debug)]
+struct StallClock {
+    skipped: tokio::sync::watch::Sender<std::time::Duration>,
+}
+
+impl StallClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            skipped: tokio::sync::watch::Sender::new(std::time::Duration::ZERO),
+        })
+    }
+
+    /// Stall the process for `by`: no timer fires during it.
+    fn stall(&self, by: std::time::Duration) {
+        self.skipped.send_modify(|skipped| *skipped += by);
+    }
+
+    fn skipped(&self) -> std::time::Duration {
+        *self.skipped.borrow()
+    }
+}
+
+#[async_trait]
+impl lash_core::Clock for StallClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now() + self.skipped()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now() + chrono::TimeDelta::from_std(self.skipped()).expect("a short skip")
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        self.sleep_until(self.now() + duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        let mut skipped = self.skipped.subscribe();
+        loop {
+            let Some(real) = deadline.checked_sub(*skipped.borrow_and_update()) else {
+                return;
+            };
+            tokio::select! {
+                () = tokio::time::sleep_until(real.into()) => return,
+                _ = skipped.changed() => {}
+            }
+        }
+    }
+}
+
+/// FIG-6887: a process stalled past its node's `self_stop_after` (a starved
+/// host: no heartbeat lands in time) loses nothing. Its node stops itself,
+/// dropping the turn it ran mid-call, then serves again as a new boot of the
+/// same owner, holding its liveness lock again: the dropped turn resumes from
+/// its committed phase and answers, and an input sent across the stall is
+/// admitted and answered. The core never reports its node stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_node_stalled_past_its_self_stop_serves_its_sessions_again() {
+    let directory = tempfile::tempdir().expect("SQLite test directory");
+    let clock = StallClock::new();
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open_with_clock(
+            directory.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        )
+        .await
+        .expect("open SQLite store set"),
+    );
+    let self_stop_after = lash_conformance::backend_over(Arc::clone(&stores) as _)
+        .config()
+        .lease()
+        .settings()
+        .self_stop_after;
+    let script = Arc::new(Script::default());
+    let core = build_core(Arc::clone(&stores) as _, "stalled-owner", &script);
+    for id in ["mid-turn", "idle"] {
+        core.session(session_id(id))
+            .create(lash::SessionCreation::root(mock_session_spec()))
+            .await
+            .expect("created");
+        let first = within("a turn before the stall", answered(&core, id, "hello")).await;
+        assert_eq!(first.assistant_message(), Some("echo: hello"));
+    }
+
+    // The tool turn's first model call is in flight when the process stalls
+    // past the node's self-stop deadline.
+    let entered = script.entered.notified();
+    let held = core
+        .session(session_id("mid-turn"))
+        .open()
+        .await
+        .expect("opened")
+        .send(lash::TurnInput::text(TOOL_TURN));
+    let held = tokio::spawn(held.output());
+    within("the tool turn's first model call", entered).await;
+    clock.stall(self_stop_after + std::time::Duration::from_secs(1));
+    let across = tokio::spawn({
+        let core = core.clone();
+        async move { answered(&core, "idle", "across the stall").await }
+    });
+
+    // The new boot runs the dropped model call again, and the turn finishes.
+    // Every held call answers, the dropped boot's too (a provider task that
+    // ignores its cancel): the tool still runs once, so only the new boot's
+    // turn acts.
+    within("the resumed model call", script.entered.notified()).await;
+    script.gate.notify_waiters();
+    let output = within("the resumed turn", held)
+        .await
+        .expect("the handle task")
+        .expect("the resumed turn answers");
+    assert_eq!(output.assistant_message(), Some("done: kept"));
+    assert_eq!(script.tool_turn_first_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(script.tool_runs.load(Ordering::SeqCst), 1);
+    assert_eq!(script.tool_turn_second_calls.load(Ordering::SeqCst), 1);
+    let next = within("the input sent across the stall", across)
+        .await
+        .expect("the send task");
+    assert_eq!(next.assistant_message(), Some("echo: across the stall"));
+
+    // One boot of the owner holds its liveness lock, and the node serves on.
+    let node_wakes = lash_execution_contracts::backend::StoreSet::node_wakes(stores.as_ref())
+        .expect("a SQLite file has node wakes");
+    let held_boots: Vec<_> = node_wakes
+        .liveness()
+        .await
+        .expect("probe the liveness locks")
+        .into_iter()
+        .filter(|boot| boot.held)
+        .map(|boot| boot.boot.node.as_str().to_owned())
+        .collect();
+    assert_eq!(held_boots, ["stalled-owner"]);
+    assert!(
+        futures_util::FutureExt::now_or_never(core.node_stopped()).is_none(),
+        "the core's node still serves"
+    );
+    core.shutdown().await.expect("shutdown");
+}

@@ -209,12 +209,20 @@ reasons (`lash::durable::runner::Stopped`):
   anyone could reap it.
 - `Drained`: it drained by release ([below](#drain-by-release)).
 
-`LashCore::node_stopped` waits until the core's node stops and answers which
-of these it was (`None` for a core built with `serve_sessions(false)`). A
-node that stopped `LeaseLost` or `Unrenewed` stopped on its own: the core
-still admits work, which other nodes serve, but this process serves none
-until it restarts as a new boot. A host that wants every process serving
-watches it and exits on such a stop, so its supervisor restarts it. The
+A core's node that stops `Unrenewed` while the host neither shut the core
+down nor drained it (a stalled process: a starved host, a long pause) serves
+again at once as a new boot of the same owner. The new boot's registration
+fences the old one and releases its actors, so the node resumes every
+session it held, and its listener holds the liveness lock again (FIG-6887).
+A start that a transient store failure refused is retried the same way.
+
+`LashCore::node_stopped` waits until the core's node stops for good and
+answers which reason it was (`None` for a core built with
+`serve_sessions(false)`). A node that stopped `LeaseLost`, or whose store
+refused it for good, stopped on its own: the core still admits work, which
+other nodes serve, but this process serves none until it restarts as a new
+boot. A host that wants every process serving watches it and exits on such a
+stop, so its supervisor restarts it. The
 [facade-host failover runbook](../../runbooks/lash-facade-failover/README.md)
 does this.
 

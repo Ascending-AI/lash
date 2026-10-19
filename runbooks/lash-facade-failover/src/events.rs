@@ -109,11 +109,13 @@ pub enum Event {
         /// `entered` or `returned`.
         phase: String,
     },
-    /// The test blocked or unblocked this node's heartbeat.
-    HeartbeatBlocked {
-        /// Whether it is blocked now.
+    /// The test blocked or unblocked this node's lease calls.
+    LeaseBlocked {
+        /// Whether they are blocked now.
         blocked: bool,
     },
+    /// A registration of a new boot met the blocked lease calls and waits.
+    RegistrationHeld,
 }
 
 /// A line a node reads on stdin. End of input stops the node.
@@ -121,11 +123,12 @@ pub enum Event {
 pub enum Command {
     /// Stop serving cleanly: release every actor and exit.
     Stop,
-    /// Hold every heartbeat from now on until [`Command::UnblockHeartbeat`]:
-    /// the partition. Bodies and owner commits keep running.
-    BlockHeartbeat,
-    /// Let heartbeats through again.
-    UnblockHeartbeat,
+    /// Hold every lease call, heartbeat and registration, from now on until
+    /// [`Command::UnblockLease`]: the partition. Bodies and owner commits
+    /// keep running.
+    BlockLease,
+    /// Let lease calls through again.
+    UnblockLease,
 }
 
 impl Command {
@@ -134,8 +137,8 @@ impl Command {
     pub fn line(self) -> &'static str {
         match self {
             Self::Stop => "stop",
-            Self::BlockHeartbeat => "block-heartbeat",
-            Self::UnblockHeartbeat => "unblock-heartbeat",
+            Self::BlockLease => "block-lease",
+            Self::UnblockLease => "unblock-lease",
         }
     }
 
@@ -144,8 +147,8 @@ impl Command {
     pub fn parse(line: &str) -> Option<Self> {
         match line.trim() {
             "stop" => Some(Self::Stop),
-            "block-heartbeat" => Some(Self::BlockHeartbeat),
-            "unblock-heartbeat" => Some(Self::UnblockHeartbeat),
+            "block-lease" => Some(Self::BlockLease),
+            "unblock-lease" => Some(Self::UnblockLease),
             _ => None,
         }
     }

@@ -5,8 +5,10 @@
 //! through [`lash::durable::DurableBackendBuilder`] and one
 //! [`lash::LashCore`], whose node serves the store's sessions and processes
 //! until the host shuts the core down (told to on stdin, or stdin ends) or
-//! the node stops on its own (its lease lost or unrenewed), which the host
-//! learns from [`lash::LashCore::node_stopped`]. It reports on stdout
+//! the node stops on its own (a newer boot replaced it, or the store refused
+//! it for good), which the host learns from
+//! [`lash::LashCore::node_stopped`]. A node that went unrenewed serves again
+//! as a new boot of the same core. It reports on stdout
 //! ([`crate::events`]).
 
 use std::sync::Arc;
@@ -115,7 +117,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     if config.admit_turn {
         admit_turn(&backend, &core).await?;
     }
-    // The commands are read on a task of their own: a heartbeat hold or
+    // The commands are read on a task of their own: a lease hold or
     // release must reach the store whatever the node awaits.
     tokio::spawn(commands(store, core.clone()));
     let stopped = core.node_stopped().await;
@@ -156,8 +158,8 @@ async fn commands(store: Arc<RecordedStore>, core: lash::LashCore) {
     while let Ok(Some(line)) = lines.next_line().await {
         match Command::parse(&line) {
             Some(Command::Stop) => break,
-            Some(Command::BlockHeartbeat) => store.block_heartbeat(true),
-            Some(Command::UnblockHeartbeat) => store.block_heartbeat(false),
+            Some(Command::BlockLease) => store.block_lease(true),
+            Some(Command::UnblockLease) => store.block_lease(false),
             None => eprintln!("unknown command `{line}`"),
         }
     }

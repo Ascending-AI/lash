@@ -16,8 +16,8 @@
 //!   `entered` row per `Once` call.
 //!
 //! A killed node cannot commit at all, and a partitioned node stops itself,
-//! dropping its activations, before its lease lapses, and its host learns
-//! it from `LashCore::node_stopped`. Each case prints a `case=` line with
+//! dropping its activations, before its lease lapses, then tries to serve
+//! again as a new boot of its core (FIG-6887). Each case prints a `case=` line with
 //! what it measured; the failover cases check the failover bound of L8
 //! (FIG-5178).
 
@@ -370,13 +370,15 @@ async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node() {
     );
 }
 
-/// Partition: one node's heartbeat is held while its `Once` body keeps
+/// Partition: one node's lease calls are held while its `Once` body keeps
 /// running. The node stops itself, dropping the body, within
 /// `self_stop_after` and one poll of its last renewal, before its lease
-/// lapses; the other node reaps it and finishes the turn with the operation
-/// `Interrupted`, and the body is never entered again (FIG-5178).
+/// lapses, and its core tries to serve again as a new boot, whose
+/// registration the partition holds (FIG-6887); the other node reaps it and
+/// finishes the turn with the operation `Interrupted`, and the body is never
+/// entered again (FIG-5178).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
+async fn a_node_whose_lease_is_held_stops_itself_before_its_lease_lapses() {
     let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::StepUntilRelease).await;
     cluster.admit_turn().await;
     let entered = cluster
@@ -386,7 +388,7 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
         .await;
     let zombie = entered.node.clone();
     let survivor = other(&zombie);
-    cluster.send(&zombie, Command::BlockHeartbeat).await;
+    cluster.send(&zombie, Command::BlockLease).await;
     cluster.nemesis("partition", Some(&zombie)).await;
     let partitioned = Instant::now();
     // Its lease was last extended by its registration or its last renewal.
@@ -405,23 +407,16 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
         .map(|entry| entry.at)
         .expect("the zombie registered");
     let lease = lease();
-    // The runner reports its stop only once every activation it ran is
-    // dropped, the held body among them.
+    // The runner stops only once every activation it ran is dropped, the
+    // held body among them; only then does the core register a new boot.
     let stopped = cluster
         .wait_after(
             Some(partitioned),
             lease.self_stop_after + STEP,
-            "the zombie stops itself",
-            |entry| entry.node == zombie && matches!(entry.event, Event::Stopped { .. }),
+            "the zombie stops itself and registers a new boot",
+            |entry| entry.node == zombie && entry.event == Event::RegistrationHeld,
         )
         .await;
-    assert_eq!(
-        stopped.event,
-        Event::Stopped {
-            why: "unrenewed".to_owned()
-        },
-        "the zombie stopped"
-    );
     let served = stopped.at.saturating_duration_since(last_renewed);
     assert!(
         served <= lease.self_stop_after + lease.claim_poll,
@@ -430,7 +425,6 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses() {
         ms(lease.self_stop_after),
         ms(lease.claim_poll),
     );
-    cluster.exited(&zombie, STEP).await;
     let reap = cluster
         .wait_after(
             Some(partitioned),

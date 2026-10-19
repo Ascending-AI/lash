@@ -3,7 +3,7 @@
 //!
 //! The test, not lash, starts the node processes
 //! (`lash-facade-failover-node`), kills them with SIGKILL, stops them on
-//! stdin and holds their heartbeats. Each node's report lines are collected
+//! stdin and holds their lease calls. Each node's report lines are collected
 //! in arrival order with the instant they arrived; its stderr is forwarded
 //! to the test's.
 
