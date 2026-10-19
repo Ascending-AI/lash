@@ -69,9 +69,12 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
         .bindings
         .get_mut(admission::MCP_BINDING_KEY)
         .unwrap()["tool_digest"] = json!("cold-registry-revision");
-    pool.entries.read_recover()["mock"]
-        .imported_tools
+    pool.catalog
         .write_recover()
+        .servers
+        .get_mut("mock")
+        .unwrap()
+        .tools
         .values_mut()
         .next()
         .unwrap()
@@ -247,9 +250,12 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
     }
     let mut replacement = original.clone();
     replacement.bindings.get_mut(key).unwrap()["tool_digest"] = json!("new-server-revision");
-    pool.entries.read_recover()["mock"]
-        .imported_tools
+    pool.catalog
         .write_recover()
+        .servers
+        .get_mut("mock")
+        .unwrap()
+        .tools
         .values_mut()
         .next()
         .unwrap()

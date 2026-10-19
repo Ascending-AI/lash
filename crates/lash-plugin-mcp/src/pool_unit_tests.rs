@@ -5,7 +5,7 @@
 
 use super::*;
 use lash_core::ToolProvider;
-use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
+use lash_protocol_types::sync::RwLockExt;
 
 #[tokio::test]
 async fn mcp_view_preserves_order_and_filters_nonassistant_blocks() {
@@ -304,8 +304,8 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
         )
         .expect("one-tool forced catalog")
     };
-    let old = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
+    let old = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         server_name.to_string(),
         McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
@@ -315,8 +315,8 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     old.replace_imported_tools(forced_catalog(server_name, "abcdefghijklmnop"))
         .expect("old entry publishes while current");
 
-    let replacement = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
+    let replacement = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         server_name.to_string(),
         McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
@@ -329,7 +329,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
         .replace_imported_tools(forced_catalog(server_name, "abcdefghijklmnop"))
         .expect("replacement entry publishes");
 
-    pool.retire_publication(&removed);
+    pool.catalog.write_recover().retire(&removed);
     let advertised = pool.advertised_tools();
     assert_eq!(advertised.len(), 1);
     assert_eq!(
@@ -345,8 +345,8 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
         "{stale_error}"
     );
 
-    let contender = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
+    let contender = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         "abcdefghijklmno-two".to_string(),
         McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
@@ -363,7 +363,10 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
         "{collision}"
     );
     assert_eq!(pool.advertised_tools().len(), 1);
-    assert_eq!(pool.publication_state.lock_recover().tool_names.len(), 1);
+    assert!(
+        pool.advertised_tools_for_server(&contender.server_name)
+            .is_empty()
+    );
 
     removed.shutdown().await;
     pool.shutdown_all().await;
@@ -372,14 +375,14 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
 #[tokio::test]
 async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations() {
     let pool = Arc::new(McpConnectionPool::empty());
-    let first = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
+    let first = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         "abcdefghijklmno-one".to_string(),
         McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
-    let second = McpEntry::new_with_publication_state(
-        Arc::clone(&pool.publication_state),
+    let second = McpEntry::new_in_catalog(
+        Arc::clone(&pool.catalog),
         "abcdefghijklmno-two".to_string(),
         McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
@@ -443,8 +446,14 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
 
     assert_eq!(snapshot.len(), 1);
     assert_eq!(pool.advertised_tools().len(), 1);
-    assert!(first.imported_tools.read_recover().is_empty());
-    assert_eq!(second.imported_tools.read_recover().len(), 1);
+    assert!(
+        pool.advertised_tools_for_server(&first.server_name)
+            .is_empty()
+    );
+    assert_eq!(
+        pool.advertised_tools_for_server(&second.server_name).len(),
+        1
+    );
 
     pool.shutdown_all().await;
 }
