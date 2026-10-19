@@ -308,9 +308,15 @@ opcode fast path outside regions too.
 `lash-kernel-conformance`,
 `tests::regions::regions_on_and_off_agree_programs_0` through `_15`:
 
-The sixteen laws, one per Buck shard of the target, partition the region
-programs, the call-island programs, corpus cases and smith seeds by program,
-so Buck can schedule them independently within the existing test budget. Each keeps its program's
+Sixteen program shards partition the region programs, call-island programs,
+corpus cases and smith seeds by program. Program shards 2 and 6 each divide
+their sweep positions among four independent laws; the others each have one
+law. The test names in each group define its exhaustive partition count.
+Bounds, slices, session-memory checks and smith schedules are assigned by
+position modulo that count; a slice retains its cross-resumes and bounded
+runs. Every part runs the natural and formation witnesses, and the first
+smith schedule supplies the same charge bounds in every part. Buck schedules
+these laws independently within the existing test budget. Each keeps its program's
 admitted document and both prepared layouts across the sweep; executions,
 page stores and host scripts start fresh. Three region exit witnesses (nested
 arms with a declaration, list iteration with continue, tuple iteration with a

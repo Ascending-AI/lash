@@ -524,6 +524,7 @@ fn bounds(program: &[Weight], limit: u64) -> Vec<u64> {
 /// How many runs a case made under each plan.
 #[derive(Default)]
 struct Counts {
+    sweep: Sweep,
     cases: usize,
     runs: usize,
     bounds: usize,
@@ -538,10 +539,34 @@ struct Counts {
     work: RegionWork,
 }
 
+/// Disjoint, exhaustive sweep positions. Programs, natural runs and plan
+/// formation witnesses stay in every part; only independent fresh-machine
+/// comparisons are dealt out. A slice and its cross-resumes and bounds stay
+/// together, so splitting cannot change what either side resumes.
+#[derive(Clone, Copy)]
+struct Sweep {
+    part: usize,
+    parts: usize,
+}
+
+impl Default for Sweep {
+    fn default() -> Self {
+        Self { part: 0, parts: 1 }
+    }
+}
+
+impl Sweep {
+    fn owns(self, position: usize) -> bool {
+        position % self.parts == self.part
+    }
+}
+
 impl Counts {
     fn report(&self, shard: usize, family: &str, began: std::time::Instant) {
         println!(
-            "regions shard={shard} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} plan_passes={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            "regions shard={shard} sweep={}/{} through={family}: cases={} ran_regions={} region_iterations={} island_calls={} plan_passes={} pairs={} bounds={} slices={} cross_resumes={} slice_bounds={} smith_schedules={} smith_bounds={} seconds={:.3}",
+            self.sweep.part,
+            self.sweep.parts,
             self.cases,
             self.ran,
             self.work.iterations,
@@ -682,7 +707,10 @@ fn check_in(
     } else {
         Vec::new()
     };
-    for bound in swept {
+    for (position, bound) in swept.into_iter().enumerate() {
+        if !counts.sweep.owns(position) {
+            continue;
+        }
         counts.bounds += 1;
         let a = probe::<ON>(&on, &case, policy, Some(bound), None);
         let b = probe::<OFF>(&off, &case, policy, Some(bound), None);
@@ -696,7 +724,10 @@ fn check_in(
             failures,
         );
     }
-    for slice in SLICES {
+    for (position, slice) in SLICES.into_iter().enumerate() {
+        if !counts.sweep.owns(position) {
+            continue;
+        }
         counts.slices += 1;
         let mut sliced = case.clone();
         sliced.environment.slice = slice;
@@ -789,7 +820,12 @@ fn check_smith(
     schedules.extend(SLICES.iter().map(|slice| vec![*slice]));
     let plans = crate::smith::Plans::<ON, OFF>::new(smith);
     let mut whole = None;
-    for slices in &schedules {
+    for (position, slices) in schedules.iter().enumerate() {
+        // Every part derives the bounds from the original first schedule,
+        // rather than from whichever schedule happens to belong to it.
+        if position != 0 && !counts.sweep.owns(position) {
+            continue;
+        }
         counts.smith_schedules += 1;
         counts.runs += 1;
         match plans.agree(smith, slices) {
@@ -800,14 +836,20 @@ fn check_smith(
         }
     }
     let whole = whole.unwrap_or(0);
-    for charge in [
+    for (position, charge) in [
         0,
         whole / 3,
         whole / 2,
         whole.saturating_sub(1),
         whole,
         whole + 1,
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if !counts.sweep.owns(position) {
+            continue;
+        }
         counts.smith_bounds += 1;
         let mut bounded = smith.clone();
         bounded.schedule.bounds.charge_limit = charge;
@@ -978,12 +1020,15 @@ fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<S
 /// smith programs runs so with charge Off too, under every slice: its
 /// plans form as under Exact, run where they run charged, and its slices
 /// count its pace.
-fn regions_on_and_off_agree(shard: usize) {
+fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
     let began = std::time::Instant::now();
     let registry = Arc::new(super::corpus_registry());
     let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
     let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
-    let mut counts = Counts::default();
+    let mut counts = Counts {
+        sweep,
+        ..Counts::default()
+    };
     let mut failures = Vec::new();
     let mut regions = 0;
     let mut deal = Deal { shard, next: 0 };
@@ -1184,7 +1229,10 @@ fn sessions_hold(
             library: off.clone(),
             ..program.clone()
         };
-        for slice in [7, 50, u64::MAX] {
+        for (position, slice) in [7, 50, u64::MAX].into_iter().enumerate() {
+            if !counts.sweep.owns(position) {
+                continue;
+            }
             counts.runs += 1;
             let a = finished::<ON>(&program, &case, slice);
             let b = finished::<OFF>(&reference, &case, slice);
@@ -1791,31 +1839,47 @@ fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
 }
 
 macro_rules! program_shards {
-    ($($name:ident: $shard:expr),+ $(,)?) => {
-        $(
-            #[test]
-            fn $name() {
-                regions_on_and_off_agree($shard);
-            }
-        )+
+    (@parts $shard:literal, $parts:expr, $part:expr;) => {};
+    (@parts $shard:literal, $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {
+        #[test]
+        fn $name() {
+            regions_on_and_off_agree($shard, Sweep { part: $part, parts: $parts });
+        }
+        program_shards!(@parts $shard, $parts, $part + 1; $($rest),*);
+    };
+    ($($shard:literal => [$($name:ident),+]),+ $(,)?) => {
+        $(program_shards!(@parts $shard, [$(stringify!($name)),+].len(), 0; $($name),+);)+
     };
 }
 
+// Each group's membership defines both its exhaustive partition count and
+// its tests. The two slow laws split their expensive projection sweeps;
+// all other program shards retain their complete sweep in one law.
 program_shards! {
-    regions_on_and_off_agree_programs_0: 0,
-    regions_on_and_off_agree_programs_1: 1,
-    regions_on_and_off_agree_programs_2: 2,
-    regions_on_and_off_agree_programs_3: 3,
-    regions_on_and_off_agree_programs_4: 4,
-    regions_on_and_off_agree_programs_5: 5,
-    regions_on_and_off_agree_programs_6: 6,
-    regions_on_and_off_agree_programs_7: 7,
-    regions_on_and_off_agree_programs_8: 8,
-    regions_on_and_off_agree_programs_9: 9,
-    regions_on_and_off_agree_programs_10: 10,
-    regions_on_and_off_agree_programs_11: 11,
-    regions_on_and_off_agree_programs_12: 12,
-    regions_on_and_off_agree_programs_13: 13,
-    regions_on_and_off_agree_programs_14: 14,
-    regions_on_and_off_agree_programs_15: 15,
+    0 => [regions_on_and_off_agree_programs_0],
+    1 => [regions_on_and_off_agree_programs_1],
+    2 => [
+        regions_on_and_off_agree_programs_2,
+        regions_on_and_off_agree_programs_2_sweep_1,
+        regions_on_and_off_agree_programs_2_sweep_2,
+        regions_on_and_off_agree_programs_2_sweep_3
+    ],
+    3 => [regions_on_and_off_agree_programs_3],
+    4 => [regions_on_and_off_agree_programs_4],
+    5 => [regions_on_and_off_agree_programs_5],
+    6 => [
+        regions_on_and_off_agree_programs_6,
+        regions_on_and_off_agree_programs_6_sweep_1,
+        regions_on_and_off_agree_programs_6_sweep_2,
+        regions_on_and_off_agree_programs_6_sweep_3
+    ],
+    7 => [regions_on_and_off_agree_programs_7],
+    8 => [regions_on_and_off_agree_programs_8],
+    9 => [regions_on_and_off_agree_programs_9],
+    10 => [regions_on_and_off_agree_programs_10],
+    11 => [regions_on_and_off_agree_programs_11],
+    12 => [regions_on_and_off_agree_programs_12],
+    13 => [regions_on_and_off_agree_programs_13],
+    14 => [regions_on_and_off_agree_programs_14],
+    15 => [regions_on_and_off_agree_programs_15],
 }
