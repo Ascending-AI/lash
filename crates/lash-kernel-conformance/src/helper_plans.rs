@@ -27,6 +27,39 @@ fn generated_plan_indexes_are_in_function_identity_order() {
                 .all(|pair| pair[0].function < pair[1].function)
         );
     }
+    // The worker installation path must retain every generated plan, including
+    // helpers beside the two sort identities that FIG-6904 moved in the index.
+    for (dialect, source, plans) in [
+        ("typescript", "null;", lash_ext_ts_core::PLANS),
+        ("python", "None", lash_ext_py_core::PLANS),
+    ] {
+        let runner = runner::Runner::new(dialect).unwrap();
+        let case = runner::Case {
+            id: "plan-index".into(),
+            dialect: dialect.into(),
+            source: source.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+            panic!("the plan-index fixture lowers")
+        };
+        for plan in plans {
+            let installed = program
+                .library
+                .registry()
+                .get(&plan.function)
+                .unwrap_or_else(|| panic!("{dialect}: {} is not registered", plan.name))
+                .plan()
+                .unwrap_or_else(|| panic!("{dialect}: {} has no plan", plan.name));
+            assert_eq!(
+                installed.function, plan.function,
+                "{dialect}: {}",
+                plan.name
+            );
+        }
+    }
 }
 
 #[allow(
