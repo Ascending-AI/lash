@@ -324,6 +324,14 @@ pub(super) fn functions<T>(
         )
     })?;
     functions.push((definition, Arc::new(IndexOfRange) as _));
+    // Each merge pass compares a pair at most once per element it places,
+    // and a comparison reads no further than the shallower of its keys.
+    let definition = define("list.sort_by_keys", &|| {
+        String::from(
+            "function list.sort_by_keys(items: List(Any), keys: List(Any), descending: Bool) -> List(Any)\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(items), product(2, sum(size(keys), deep(keys)), sum(1, ceil_log2(size(keys)))), size(result))\nnative\n",
+        )
+    })?;
+    functions.push((definition, Arc::new(SortByKeys) as _));
     let prepared = |function: fn(&[Value]) -> Result<Value, NativeError>,
                     entry: fn(&[Value]) -> Option<Value>,
                     operation: &'static str|
@@ -936,6 +944,73 @@ fn lookup(args: &Args<'_>, xs: &Value, key: &Value) -> Result<Option<Value>, Nat
 
 /// Searches an absolute half-open range using kernel equality, optionally
 /// equating floating NaNs. Reverse selects the last match in the range.
+/// `list.sort_by_keys(items, keys, descending)`: `items` in the order of
+/// their `keys` by `lt`, stably, or by its reverse when `descending`. Keys
+/// are data a caller computed once per item, so no function crosses into
+/// the native (K-LIB-003). It merges as `list.sort` does under the
+/// comparator `fn(a, b) { if lt(key(b), key(a)) { return 1 } return 0 }`
+/// (`lt(key(a), key(b))` when descending): the same keys compared in the
+/// same order, so keys with no shared ordering raise exactly where that
+/// sort raises (FIG-6886).
+struct SortByKeys;
+impl NativeFunction for SortByKeys {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let args = call.args;
+        let values = args.values();
+        let (listed @ Value::List(_), ranks @ Value::List(_), Value::Bool(descending)) =
+            (nth(values, 0)?, nth(values, 1)?, nth(values, 2)?)
+        else {
+            return Err(raise(
+                "type_error",
+                "sort_by_keys takes two lists and a bool",
+            ));
+        };
+        let listed = items(&args, listed)?;
+        let ranks = items(&args, ranks)?;
+        if listed.len() != ranks.len() {
+            return Err(raise("type_error", "every item needs exactly one key"));
+        }
+        let n = listed.len();
+        let mut sorted: Vec<usize> = (0..n).collect();
+        let mut out = vec![0; n];
+        let mut width = 1;
+        while width < n {
+            let mut start = 0;
+            while start < n {
+                let mid = (start + width).min(n);
+                let end = (mid + width).min(n);
+                let (mut left, mut right, mut dest) = (start, mid, start);
+                while left < mid && right < end {
+                    let (before, after) = (sorted[left], sorted[right]);
+                    let (first, second) = if *descending {
+                        (before, after)
+                    } else {
+                        (after, before)
+                    };
+                    let order =
+                        crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)?;
+                    if order == Some(std::cmp::Ordering::Less) {
+                        out[dest] = after;
+                        right += 1;
+                    } else {
+                        out[dest] = before;
+                        left += 1;
+                    }
+                    dest += 1;
+                }
+                out[dest..dest + (mid - left)].copy_from_slice(&sorted[left..mid]);
+                dest += mid - left;
+                out[dest..dest + (end - right)].copy_from_slice(&sorted[right..end]);
+                start = end;
+            }
+            std::mem::swap(&mut sorted, &mut out);
+            width *= 2;
+        }
+        Ok(call.new.allocate(NewObject::List(
+            sorted.into_iter().map(|at| listed[at]).collect(),
+        )))
+    }
+}
 struct IndexOfRange;
 impl NativeFunction for IndexOfRange {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

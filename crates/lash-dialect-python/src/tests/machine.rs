@@ -339,6 +339,66 @@ fn builtin_range_loop_uses_constant_space() {
     assert_eq!(console.lines, ["0", "0"]);
 }
 
+/// FIG-6886: a key sort applies its key once per item, in order, and sorts
+/// the keys natively: `sorted` and `list.sort`, reversed or not, order
+/// stably by key and charge the same for any order of the same items.
+#[test]
+fn a_key_sort_computes_each_key_once_and_charges_alike_in_any_order() {
+    const N: usize = 64;
+    let orders: [Vec<usize>; 3] = [
+        (0..N).collect(),
+        (0..N).rev().collect(),
+        (0..N).map(|i| i * 37 % N).collect(),
+    ];
+    let mut charges = Vec::new();
+    for items in &orders {
+        let listed = items
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!(
+            "calls = []\ndef rank(x):\n    calls.append(x)\n    return x % 7\n\
+             xs = [{listed}]\nys = sorted(xs, key=rank)\nxs.sort(key=rank, reverse=True)\n\
+             print(calls == [{listed}, {listed}])\nprint(ys)\nprint(xs)\n"
+        );
+        let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
+        let program = Program {
+            release: pages::RELEASE,
+            document: Arc::clone(lowered.document.shared()),
+            library: installed().prepared.clone(),
+        };
+        let observed = execution_observation(program, BOUNDS, false);
+        assert!(
+            matches!(observed.end, End::Finished(_)),
+            "{:?}",
+            observed.end
+        );
+        let mut ascending = items.clone();
+        ascending.sort_by_key(|x| x % 7);
+        let mut descending = items.clone();
+        descending.sort_by_key(|x| std::cmp::Reverse(x % 7));
+        let shown = |xs: &[usize]| {
+            format!(
+                "[{}]",
+                xs.iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        assert_eq!(
+            observed.lines,
+            ["True".to_owned(), shown(&ascending), shown(&descending)]
+        );
+        charges.push(observed.charged);
+    }
+    assert!(
+        charges.iter().all(|charge| *charge == charges[0]),
+        "a key sort's charge depends on the order of its items: {charges:?}"
+    );
+}
+
 /// FIG-6406: replacing every visited key preserves size but must exhaust
 /// the dict iterator's entry budget instead of extending the loop forever.
 #[test]

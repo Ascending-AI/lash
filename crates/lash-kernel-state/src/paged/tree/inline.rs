@@ -90,6 +90,62 @@ impl<T: Cell> Tree<T> {
         Ok(node)
     }
 
+    /// A fresh nested tree holding `rows`, as writing each into an empty
+    /// tree in turn would: a later row replaces an earlier one with the same
+    /// key. One that [`Self::seal_nested`] would seal inline is built in that
+    /// form now, from the same prepared rows: a fresh object's small rows
+    /// never become a working page that dirty pressure stages as a page of
+    /// its own (FIG-6886). Any other is built as working leaves.
+    pub fn nested_from_rows(
+        rows: Vec<(Vec<u8>, T)>,
+        sequence: bool,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        let mut rows = keyed_rows(rows);
+        if rows.is_empty() || rows.len() > KEYED_LEAF_ROWS as usize {
+            return Self::from_keyed(rows, sequence, access);
+        }
+        let mut work = SealWork::new(SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        });
+        let mut children = Vec::new();
+        for (_, cell) in &mut rows {
+            if !cell.prepare(access, &mut work)? {
+                return Err(HeapFault::Malformed(
+                    "unbounded preparation ran out of budget".into(),
+                ));
+            }
+            cell.children(&mut children);
+        }
+        let tokens = encode_body(&rows);
+        if tokens.len() > INLINE_TREE_BYTES {
+            return Self::from_keyed(rows, sequence, access);
+        }
+        children.sort_by_key(|p| p.id);
+        children.dedup_by_key(|p| p.id);
+        let mut root = Branch {
+            family: None,
+            encoded_bytes: None,
+            is_leaf: None,
+            tasks_known: true,
+            members_known: true,
+            first: Key(Vec::new()),
+            summary: Summary::default(),
+            link: Link::Inline {
+                tokens: tokens.into(),
+                children,
+            },
+        };
+        refresh(&mut root, &Node::Leaf(rows))?;
+        root.encoded_bytes = Some(root.link_tokens_len());
+        root.is_leaf = Some(true);
+        Ok(Self {
+            root: Some(root),
+            sequence,
+        })
+    }
+
     /// A nested tree is inline exactly when all its rows encode as one leaf
     /// within [`INLINE_TREE_BYTES`], and otherwise canonical pages. External
     /// root descriptors use `seal`, which always publishes pages.

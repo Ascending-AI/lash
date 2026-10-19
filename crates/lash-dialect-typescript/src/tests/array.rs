@@ -319,6 +319,41 @@ fn sort_uses_utf16_stability_and_undefined_before_holes() {
     "#);
 }
 
+/// FIG-6886: a comparator sort applies its comparator exactly where a
+/// bottom-up merge of runs 1, 2, 4… compares, to the same (left, right)
+/// pairs in the same order: at most n⌈log2 n⌉ applications, stably.
+#[test]
+fn comparator_sort_applies_the_comparator_once_per_merge_comparison() {
+    law(r#"
+        const n = 100; const xs = []; let seed = 6886;
+        for (let i = 0; i < n; i++) { seed = (seed * 1103 + 12345) % 65536; xs.push({ id: i, key: seed % 17 }); }
+        const expected = []; let runs = xs.slice(); let width = 1;
+        while (width < n) {
+            const out = [];
+            for (let start = 0; start < n; start += 2 * width) {
+                const mid = Math.min(start + width, n); const end = Math.min(mid + width, n);
+                let left = start; let right = mid;
+                while (left < mid && right < end) {
+                    expected.push(runs[left].id + ':' + runs[right].id);
+                    if (runs[left].key - runs[right].key > 0) { out.push(runs[right]); right++; }
+                    else { out.push(runs[left]); left++; }
+                }
+                while (left < mid) { out.push(runs[left]); left++; }
+                while (right < end) { out.push(runs[right]); right++; }
+            }
+            runs = out; width = width * 2;
+        }
+        const calls = [];
+        xs.sort((p, q) => { calls.push(p.id + ':' + q.id); return p.key - q.key; });
+        let stable = true;
+        for (let i = 1; i < n; i++) {
+            if (xs[i - 1].key > xs[i].key || (xs[i - 1].key === xs[i].key && xs[i - 1].id > xs[i].id)) { stable = false; }
+        }
+        await finish(stable && calls.length <= n * 7 && calls.join(',') === expected.join(',')
+            && runs.map(r => r.id).join(',') === xs.map(r => r.id).join(','));
+    "#);
+}
+
 /// Splice, reverse and overlapping copyWithin preserve property presence,
 /// while change-by-copy methods materialize holes and keep the source intact.
 #[test]

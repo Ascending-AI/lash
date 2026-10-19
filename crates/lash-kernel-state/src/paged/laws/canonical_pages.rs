@@ -108,11 +108,12 @@ fn trees_built_by_different_histories_seal_to_one_root() {
     }
 }
 
-/// Seam H invariant for a fresh object's tree (`Tree::from_rows`): built
-/// from all its rows at once, in or out of key order and with a repeated
-/// key, it holds and seals to what writing each row in turn does, the last
-/// write of a key winning, and later edits of it seal as edits of the
-/// written tree do.
+/// Seam H invariant for a fresh object's tree (`Tree::nested_from_rows`):
+/// built from all its rows at once, in or out of key order and with a
+/// repeated key, it holds and seals to what writing each row in turn does,
+/// the last write of a key winning, and later edits of it seal as edits of
+/// the written tree do. One that fits inline is built already in the form a
+/// nested seal gives the written tree (FIG-6886).
 #[test]
 fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
     const N: u64 = 6_000;
@@ -134,7 +135,7 @@ fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
         for (key, value) in rows.clone() {
             written.write(key, value, access).unwrap();
         }
-        let mut built = tree::Tree::from_rows(rows, sequence, access).unwrap();
+        let mut built = tree::Tree::nested_from_rows(rows, sequence, access).unwrap();
         assert_eq!(built.len(), N, "{sequence}");
         assert!(is_int(built.get(&key(4_000), access).unwrap(), 4_000), "{sequence}");
         assert!(written.seal(access, &mut full_work()).unwrap());
@@ -148,9 +149,26 @@ fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
         }
         assert_eq!(built.page(), written.page(), "{sequence}");
 
-        let empty = tree::Tree::<PageValue>::from_rows(Vec::new(), sequence, access).unwrap();
+        let empty =
+            tree::Tree::<PageValue>::nested_from_rows(Vec::new(), sequence, access).unwrap();
         assert!(empty.is_empty());
         assert_eq!(empty.page(), None);
+
+        for n in [1, 3, 64] {
+            let rows: Vec<_> = (0..n).rev().map(|i| (key(i), int(i as i64))).collect();
+            let mut written = tree::Tree::<PageValue>::new(sequence);
+            for (key, value) in rows.clone() {
+                written.write(key, value, access).unwrap();
+            }
+            let mut built = tree::Tree::nested_from_rows(rows, sequence, access).unwrap();
+            assert!(written.seal_nested(access, &mut full_work()).unwrap());
+            assert!(built.seal_nested(access, &mut full_work()).unwrap());
+            assert_eq!(
+                lash_kernel_doc::graph_tokens::encode_body(&built),
+                lash_kernel_doc::graph_tokens::encode_body(&written),
+                "{sequence} {n}"
+            );
+        }
     }
 }
 

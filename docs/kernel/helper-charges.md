@@ -68,7 +68,7 @@ or constant schedules.
 | `ts.array.unshift` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.toSpliced` | `8` | `sum(8, size(this), deep(args), size(result))` | 3 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.with` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.array.sort` | `8` | `sum(8, size(this), deep(args), size(result))` | 4 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
+| `ts.array.sort` | `8` | `sum(8, size(this), deep(args), size(result))` | 6 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. A comparator sort runs `list.sort`'s merge in the body itself, one metered loop over each pass placing one element per test, and the comparator is its only callback (FIG-6886). |
 | `ts.array.toSorted` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flatten` | `8` | `sum(8, size(source), size(depth), size(output), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flat` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
@@ -328,6 +328,10 @@ Kernel collection schedules retain their completion formulas. `list.clear`,
 `map.clear`, `set.clear` and `record.clear` declare two units per shrinking
 traversal test. `list.sort` declares two units per merge/copy test because a
 comparator may shrink the original while the merge walks a captured copy.
+`list.sort_by_keys` takes keys a caller computed once per item, so it runs
+no callback: each merge pass makes at most one comparison per item it
+places, and a comparison reads no further than the shallower key, so
+`2 × (size(keys) + deep(keys))` per pass bounds its comparisons (FIG-6886).
 `tasks.wait_all` and `tasks.cancel_all` declare two units per task-set test;
 their trip counts come from live tasks rather than call arguments.
 

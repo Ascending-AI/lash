@@ -13040,20 +13040,19 @@ fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sorted",
-    function: p::function("567414aae860816c3ea975cb4a7b12aaaebca7ddb91fa467942e1d5a7e95e66e"),
+    function: p::function("da8d793cb7b3b47b74be72503d23273e1d6e35d1fef62ba1b8d5a8fa2e8c0855"),
     callees: &[
         p::function("8ffcaa1d78c1a1b9e8601233a6422fc5a2c1b8991ff6622a20f5caa38ccf025e"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("19a7c0612a690d923a706cca39c8490672da28b6d5b3ca899df448b8167b3807"),
-        p::function("32c16fbcbf2dd9851c00127da7d04df64d997167498587e816732a5bde1d07bc"),
+        p::function("c87f57eaa12c6041e190bf797281d312f557e3ee6a017f44c5660302c5567c77"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
         p::PlanLiteral::Null,
         p::PlanLiteral::Bool(false),
-        p::PlanLiteral::Int("1"),
     ],
     fields: &[],
     records: &[],
@@ -13063,19 +13062,14 @@ const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "key", path: &[] },
         p::PlanLocal { name: "reverse", path: &[] },
         p::PlanLocal { name: "items", path: &[0] },
-        p::PlanLocal { name: "pairs", path: &[1] },
-        p::PlanLocal { name: "keyed", path: &[2] },
+        p::PlanLocal { name: "keyed", path: &[1] },
+        p::PlanLocal { name: "ranks", path: &[3] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[4, 1] },
-        p::PlanLocal { name: "rank", path: &[4, 1, 0] },
+        p::PlanLocal { name: "item", path: &[4, 1, 1, 1] },
+        p::PlanLocal { name: "rank", path: &[4, 1, 1, 1, 0] },
         p::PlanLocal { name: "descending", path: &[5] },
-        p::PlanLocal { name: "order", path: &[7] },
-        p::PlanLocal { name: "out", path: &[9] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "pair", path: &[10, 1] },
     ],
     closures: &[
-        &[7, 0],
     ],
     sites: &[
         p::PlanSite {
@@ -13083,20 +13077,12 @@ const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 7, 8],
+            bound: &[0, 1, 2, 3, 4, 5, 7],
             loops: &[p::PlanLoop::For { walked: 6 }],
-        },
-        p::PlanSite {
-            path: &[8, 0],
-            call: p::SiteCall::Invoke(5),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 9, 10],
-            loops: &[],
         },
     ],
     run: py_sorted,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_sorted_heap, depth: 2, writes: false, callees: &[p::function("8ffcaa1d78c1a1b9e8601233a6422fc5a2c1b8991ff6622a20f5caa38ccf025e"), p::function("19a7c0612a690d923a706cca39c8490672da28b6d5b3ca899df448b8167b3807"), p::function("c87f57eaa12c6041e190bf797281d312f557e3ee6a017f44c5660302c5567c77"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }) }),
 };
 
 /// `py.sorted`.
@@ -13113,74 +13099,72 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.list(0, 0)?;
-        ctx.bind(4, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.literal(0, 1)?;
         ctx.call(1, 0, 2)?;
         ctx.call(2, 0, 1)?;
-        ctx.bind(5, 0)?;
+        ctx.bind(4, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(5, 0)?;
+        ctx.local(4, 0)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.literal(1, 1)?;
             ctx.call(1, 0, 2)?;
             ctx.call(2, 0, 1)?;
-            ctx.assign(5, 0)?;
+            ctx.assign(4, 0)?;
         }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.bind(5, 0)?;
     }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
         if r == 0 {
-            ctx.local(3, 0)?;
+            ctx.local(4, 0)?;
         }
-        let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
-        'l0: loop {
-            if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
+        let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
+        if t0 {
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
-                ctx.bind(8, 0)?;
+                ctx.list(0, 0)?;
+                ctx.assign(5, 0)?;
             }
             if r == 0 || matches!(r, 1) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
-                    ctx.local(5, 0)?;
+                    ctx.local(3, 0)?;
                 }
-                let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
-                if t0 {
+                let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
+                'l0: loop {
+                    if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
                     if r == 0 || matches!(r, 1) {
                         if r == 0 { ctx.begin()?; }
                         if r == 0 { ctx.local(1, 0)?; }
                         if r == 0 { ctx.local(7, 1)?; }
                         if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
-                        if r == 0 { ctx.assign(8, 0)?; }
+                        if r == 0 { ctx.bind(8, 0)?; }
                     }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(8, 0)?;
+                        ctx.pin(0)?;
+                        ctx.local(5, 1)?;
+                        ctx.local(5, 2)?;
+                        ctx.call(3, 2, 1)?;
+                        ctx.set_index(1, 0)?;
+                    }
+                    if r == 0 { ctx.unbind(8); }
+                    if r == 0 { ctx.unbind(7); }
+                    if r == 0 { ctx.begin()?; }
                 }
+                ctx.close(c0);
             }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.local(7, 1)?;
-                ctx.tuple(0, 2)?;
-                ctx.pin(0)?;
-                ctx.local(4, 1)?;
-                ctx.local(4, 2)?;
-                ctx.call(3, 2, 1)?;
-                ctx.set_index(1, 0)?;
-            }
-            if r == 0 { ctx.unbind(8); }
-            if r == 0 { ctx.unbind(7); }
-            if r == 0 { ctx.begin()?; }
         }
-        ctx.close(c0);
     }
     if r == 0 {
         ctx.begin()?;
@@ -13202,50 +13186,10 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.closure(0, 0)?;
-        ctx.bind(10, 0)?;
-    }
-    if r == 0 || matches!(r, 2) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(4, 0)?;
-        }
-        if r == 0 {
-            ctx.local(10, 1)?;
-        }
-        if r == 2 { r = 0; } else if r == 0 { ctx.invoke(1, 5, 0, 2)?; }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.list(0, 0)?;
-        ctx.bind(11, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(4, 0)?;
-        let c0 = ctx.open(0, 12)?;
-        'l0: loop {
-            if !ctx.next(c0, 0)? {
-                break 'l0;
-            }
-            ctx.bind(13, 0)?;
-            ctx.begin()?;
-            ctx.local(13, 0)?;
-            ctx.literal(3, 1)?;
-            ctx.index(0)?;
-            ctx.pin(0)?;
-            ctx.local(11, 1)?;
-            ctx.local(11, 2)?;
-            ctx.call(3, 2, 1)?;
-            ctx.set_index(1, 0)?;
-            ctx.unbind(13);
-            ctx.begin()?;
-        }
-        ctx.close(c0);
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(11, 0)?;
+        ctx.local(3, 0)?;
+        ctx.local(5, 1)?;
+        ctx.local(9, 2)?;
+        ctx.call(5, 0, 3)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -13253,6 +13197,33 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn py_sorted_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent, Value::Null] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(1, &[args[2]])?; let _ = v1;
+                let v2 = heap.call(2, &[v0, v0, v1])?; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent, Value::Absent] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(2, &[v0, v0, Value::Bool(false)])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }
 
 const COLLECTION_RANGE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -16307,11 +16278,11 @@ fn py_method_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.sort",
-    function: p::function("7f348fc8b070b9485a03e841b52bfceefa75bcb30d23bed2e22fca1d4b56755d"),
+    function: p::function("2d7b21523be02853bf335673dc6e62dff8cdc3793af2dd93130a4b737404de38"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("567414aae860816c3ea975cb4a7b12aaaebca7ddb91fa467942e1d5a7e95e66e"),
+        p::function("da8d793cb7b3b47b74be72503d23273e1d6e35d1fef62ba1b8d5a8fa2e8c0855"),
         p::function("60cfea808c1d6121cea1f0605e928b4418db7d358e8d47f0ea09427c4580c0ea"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("cc460bdde925d3a4a0a89b496f25b152d4d5b2b9c0c65e0cf7ea9a533080ab26"),

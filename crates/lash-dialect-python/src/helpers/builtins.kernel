@@ -41,7 +41,7 @@ use text.trim_u17_0_0
 use text.to_code_points
 use text.from_code_points
 use list.len
-use list.sort
+use list.sort_by_keys
 use tuple.len
 use collection.range
 use py.str
@@ -335,46 +335,31 @@ body {
   return total
 }
 
-# `sorted(values, key=key, reverse=reverse)`: stable, by `<`.
+# `sorted(values, key=key, reverse=reverse)`: stable, by `<`. Each key is
+# computed once, in order, and the keys are data the native sorts by: the
+# merge compares them as a comparator closure over them would (FIG-6886).
 function py.sorted(values: Any, key?: Any, reverse?: Any) -> List(Any)
 kernel 1
 charge sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))
 body {
   let items = invoke py.to_list(values)
-  let pairs = []
   let keyed = bool.not(same(key, absent))
   if keyed {
     set keyed = bool.not(same(key, null))
   }
-  for item in items {
-    let rank = item
-    if keyed {
-      set rank = apply key(item)
+  let ranks = items
+  if keyed {
+    set ranks = []
+    for item in items {
+      let rank = apply key(item)
+      set ranks[list.len(ranks)] = rank
     }
-    set pairs[list.len(pairs)] = (rank, item)
   }
   let descending = false
   if bool.not(same(reverse, absent)) {
     set descending = invoke py.truth(reverse)
   }
-  let order = fn(first, second) {
-    if descending {
-      if lt(first[0], second[0]) {
-        return 1
-      }
-      return 0
-    }
-    if lt(second[0], first[0]) {
-      return 1
-    }
-    return 0
-  }
-  do invoke list.sort(pairs, order)
-  let out = []
-  for pair in pairs {
-    set out[list.len(out)] = pair[1]
-  }
-  return out
+  return list.sort_by_keys(items, ranks, descending)
 }
 
 # `range(...)` as the list of its integers.

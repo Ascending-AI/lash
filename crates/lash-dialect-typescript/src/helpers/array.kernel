@@ -23,6 +23,7 @@ use text.join
 use text.join_or_index
 use text.utf16_compare
 use list.len
+use list.get
 use list.copy
 use list.slice
 use list.sort
@@ -1479,7 +1480,7 @@ charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let callback = invoke ts.array.argument(args, 0)
-  if same(callback, absent) {} else { set callback = invoke ts.array.callback(callback) }
+  if same(callback, absent) {} else { set callback = invoke ts.array.reusable_callback(callback) }
   let values = []
   let undefined_count = 0
   let index = 0.0
@@ -1492,19 +1493,63 @@ body {
     }
     set index = num.add(index, 1)
   }
-  let compare = fn(a, b) {
-    if same(callback, absent) {
+  if same(callback, absent) {
+    let compare = fn(a, b) {
       let left = invoke ts.to_string(a)
       let right = invoke ts.to_string(b)
       return text.utf16_compare(left, right)
     }
-    let passed = [a, b]
-    let output = apply callback(absent, passed)
-    let number = invoke ts.to_number(output)
-    if num.is_nan(number) { return 0.0 }
-    return number
+    do invoke list.sort(values, compare)
+  } else {
+    # list.sort's merge, with the callback applied where list.sort applies
+    # its comparator: the same pairs in the same order, with no closure
+    # between them (FIG-6886). Each pass places one element per step of a
+    # loop over the pass's input, reading by `list.get`, so the loop runs as
+    # a region with the callback inline. A NaN answer orders as 0.
+    let sorted = values
+    let out = []
+    let n = list.len(sorted)
+    let passed = [absent, absent]
+    let width = 1
+    while num.lt(width, n) metered 2 {
+      let mid = 0
+      let end = 0
+      let left = 0
+      let right = 0
+      let dest = 0
+      for placed in sorted metered 2 {
+        if same(dest, end) {
+          set mid = num.min(num.add(dest, width), n)
+          set end = num.min(num.add(mid, width), n)
+          set left = dest
+          set right = mid
+        }
+        let from_right = false
+        if num.lt(left, mid) {
+          if num.lt(right, end) {
+            set passed[0] = list.get(sorted, left)
+            set passed[1] = list.get(sorted, right)
+            let output = apply callback(absent, passed)
+            let order = invoke ts.to_number(output)
+            if num.lt(0, order) { set from_right = true }
+          }
+        } else { set from_right = true }
+        if from_right {
+          set out[dest] = list.get(sorted, right)
+          set right = num.add(right, 1)
+        } else {
+          set out[dest] = list.get(sorted, left)
+          set left = num.add(left, 1)
+        }
+        set dest = num.add(dest, 1)
+      }
+      let previous = sorted
+      set sorted = out
+      set out = previous
+      set width = num.add(width, width)
+    }
+    set values = sorted
   }
-  do invoke list.sort(values, compare)
   set index = 0.0
   for value in values metered 2 {
     do invoke ts.array.set(this, index, value)

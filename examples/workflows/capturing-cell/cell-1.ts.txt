@@ -41,6 +41,7 @@ use list.clear = @list.clear
 use list.contains = @list.contains
 use list.copy = @list.copy
 use list.copy_deep = @list.copy_deep
+use list.get = @list.get
 use list.get_or = @list.get_or
 use list.index_of_range = @list.index_of_range
 use list.len = @list.len

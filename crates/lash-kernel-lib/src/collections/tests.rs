@@ -618,6 +618,103 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
     );
 }
 
+/// FIG-6886: `list.sort_by_keys` orders items as `list.sort` orders their
+/// (key, item) pairs under the comparator the keys stand for, descending
+/// too: stably, and raising where that sort raises for keys with no shared
+/// ordering. Its charge bounds the comparisons that sort makes.
+#[test]
+fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
+    let charged = |source: &str| {
+        let mut machine = crate::testsupport::start(
+            program(source),
+            Bounds {
+                charge_limit: 1_000_000_000,
+                ..BOUNDS
+            },
+            lash_kernel_vm::kernel_internals::Layout::default(),
+        )
+        .unwrap();
+        let Step::Ended(End::Finished(done)) =
+            machine.run(&mut World::default(), u64::MAX).unwrap()
+        else {
+            panic!("{source}")
+        };
+        (done.result, machine.meters().charged.expect("exact charge"))
+    };
+    for n in [0usize, 1, 2, 30, 257] {
+        for shape in ["reversed", "seeded", "sorted", "equal"] {
+            let mut seed = 6886u32;
+            let ranks: Vec<usize> = (0..n)
+                .map(|i| match shape {
+                    "reversed" => n - i,
+                    "seeded" => {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        seed as usize % 31
+                    }
+                    "sorted" => i,
+                    _ => 0,
+                })
+                .collect();
+            for tuples in [false, true] {
+                let keys: Vec<String> = ranks
+                    .iter()
+                    .map(|rank| match tuples {
+                        true => format!("({}, {rank})", rank % 3),
+                        false => rank.to_string(),
+                    })
+                    .collect();
+                let items = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+                let pairs = keys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, key)| format!("({key}, {i})"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let keys = keys.join(", ");
+                for descending in [false, true] {
+                    let (sorted, native) = charged(&format!(
+                        "main {{ let items = [{items}] let keys = [{keys}] \
+                         return list.sort_by_keys(items, keys, {descending}) }}"
+                    ));
+                    let (_, unsorted) = charged(&format!(
+                        "main {{ let items = [{items}] let keys = [{keys}] return items }}"
+                    ));
+                    let (expected, _) = charged(&format!(
+                        "main {{ let pairs = [{pairs}] let calls = 0 \
+                         let order = fn(first, second) {{ set calls = num.add(calls, 1) \
+                         if {descending} {{ if lt(first[0], second[0]) {{ return 1 }} return 0 }} \
+                         if lt(second[0], first[0]) {{ return 1 }} return 0 }} \
+                         do invoke list.sort(pairs, order) let out = [] \
+                         for pair in pairs {{ set out[list.len(out)] = pair[1] }} \
+                         return (out, calls) }}"
+                    ));
+                    let Datum::Tuple(expected) = expected else {
+                        panic!("the comparator sort's result")
+                    };
+                    assert_eq!(sorted, expected[0], "{shape} n={n} {tuples} {descending}");
+                    let Datum::Int(calls) = &expected[1] else {
+                        panic!("comparison count")
+                    };
+                    let calls: u64 = calls.to_string().parse().unwrap();
+                    assert!(
+                        native - unsorted >= calls,
+                        "{shape} n={n}: billed {} for {calls} comparisons",
+                        native - unsorted
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(
+        error(
+            "let items = [1, 2, 3] let keys = [2, \"a\", 1] return list.sort_by_keys(items, keys, false)"
+        ),
+        error(
+            "let pairs = [(2, 1), (\"a\", 2), (1, 3)] let order = fn(first, second) { if lt(second[0], first[0]) { return 1 } return 0 } do invoke list.sort(pairs, order) return pairs"
+        )
+    );
+}
+
 #[test]
 fn k_col_012_sum_zip_enumerate_and_range_have_kernel_bodies() {
     assert_eq!(

@@ -11,5 +11,5 @@ action fn demo/1/0/0 Some(Effect(QualifiedName("corpus.echo")))
 caption callable 0 block=fn demo "Echo a value unless it is negative"
 caption node 0 site=fn demo/0 "Check for a negative value"
 caption node 0 site=fn demo/0/1/0 "Stop and report that it is negative"
-caption node 1 site=fn demo/1 "Echo the value"
+caption node 2 site=fn demo/1 "Echo the value"
 caption node 3 site=fn demo/2 "Report that it is done"

@@ -27,11 +27,11 @@ action fn file_emails/3/1/0/1/1/2/0/0 library id=d6542f0529b376d960281e13e1d85c8
 action fn file_emails/3/1/0/1/2/0 Some(Effect(QualifiedName("display.add_item")))
 action fn file_emails/3/1/0/1/2/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
 caption callable 0 block=fn file_emails "File emails into lists"
-caption node 0 site=fn file_emails/0 "Get the three newest emails"
+caption node 1 site=fn file_emails/0 "Get the three newest emails"
 caption node 2 site=fn file_emails/1 "Name the lists to file into"
 caption node 2 site=fn file_emails/2 "Start counting at zero"
 caption node 3 site=fn file_emails/3 "Go through each list"
 caption node 4 site=fn file_emails/3/1/0 "Go through each email"
-caption node 11 site=fn file_emails/3/1/0/1/2 "Add the email's subject to the list"
+caption node 12 site=fn file_emails/3/1/0/1/2 "Add the email's subject to the list"
 caption node 13 site=fn file_emails/3/1/0/1/3 "Count the email as filed"
 caption node 14 site=fn file_emails/4 "Report how many emails were filed"

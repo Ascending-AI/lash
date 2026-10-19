@@ -402,7 +402,7 @@ impl PagedHeap {
                     .enumerate()
                     .map(|(at, value)| Ok((ordinal_key(at as u64), self.canonical(value)?)))
                     .collect::<Result<Vec<_>, HeapWriteError>>()?;
-                let rows = Tree::from_rows(rows, true, self.pages())?;
+                let rows = Tree::nested_from_rows(rows, true, self.pages())?;
                 Body::List { rows, next }
             }
             StoredObject::Table {
@@ -421,8 +421,8 @@ impl PagedHeap {
                     lookup.push((normal_bytes(normal), Ordinal(seq)));
                     rows.push((ordinal_key(seq), Entry { key, value }));
                 }
-                let lookup: Tree<Ordinal> = Tree::from_rows(lookup, false, self.pages())?;
-                let rows = Tree::from_rows(rows, true, self.pages())?;
+                let lookup: Tree<Ordinal> = Tree::nested_from_rows(lookup, false, self.pages())?;
+                let rows = Tree::nested_from_rows(rows, true, self.pages())?;
                 Body::Table {
                     kind,
                     lookup,

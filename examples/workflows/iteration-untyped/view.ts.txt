@@ -10,5 +10,5 @@ action fn demo/1/1/0/2/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f
 caption callable 0 block=fn demo "Echo every item"
 caption node 0 site=fn demo/0 "Start an empty list of replies"
 caption node 1 site=fn demo/1 "Go through each item"
-caption node 2 site=fn demo/1/1/0 "Echo the item and keep the reply"
+caption node 3 site=fn demo/1/1/0 "Echo the item and keep the reply"
 caption node 4 site=fn demo/2 "Give back the replies"

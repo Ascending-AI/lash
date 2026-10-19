@@ -9,5 +9,5 @@ action fn demo/0/1/0/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe
 action fn demo/0/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
 caption callable 0 block=fn demo "Answer yes or no"
 caption node 0 site=fn demo/0 "Check whether the answer is yes"
-caption node 1 site=fn demo/0/1/0 "Send back a yes"
+caption node 2 site=fn demo/0/1/0 "Send back a yes"
 caption node 3 site=fn demo/1 "Otherwise answer no"

@@ -705,6 +705,55 @@ fn unequal_prefixes_do_not_read_missing_later_members() {
     );
 }
 
+/// FIG-6886: a fresh object whose rows fit inline holds them inline from
+/// the start, never in a working page of their own. A run's fresh records
+/// stored past the dirty bound stage directory leaves only: no record's
+/// rows are sealed as a page, and every record reads back after a reopen.
+#[test]
+fn fresh_small_records_stage_no_page_of_their_own_rows() {
+    use super::super::stored::StoredObject;
+    const N: u64 = 40_000;
+    let (mut heap, pages) = fresh();
+    let id = PageValue::Text(heap.text("id").expect("text"));
+    let key = PageValue::Text(heap.text("key").expect("text"));
+    let entity = |ordinal| EntityId {
+        family: FamilyId::PRIMARY,
+        ordinal,
+    };
+    let key_of = |ordinal: u64| ((ordinal * 7_919) % N) as i64;
+    for ordinal in 0..N {
+        heap.store_object(
+            entity(ordinal),
+            StoredObject::Table {
+                kind: ObjectKind::Record,
+                entries: vec![
+                    (0, id.clone(), int(ordinal as i64)),
+                    (1, key.clone(), int(key_of(ordinal))),
+                ],
+                next: 2,
+            },
+        )
+        .expect("a fresh record");
+    }
+    assert!(
+        pages.borrow().kinds.contains_key(&PageKind::KEYED_LEAF),
+        "the directory stages under dirty pressure"
+    );
+    assert_eq!(
+        pages.borrow().kinds.get(&PageKind::SEQUENCE_LEAF),
+        None,
+        "a record's rows were sealed as a page of their own"
+    );
+    let heap = reopen(&mut heap, &pages);
+    for ordinal in [0, N / 2, N - 1] {
+        assert!(is_int(
+            heap.record_get(entity(ordinal), FieldName::Static("key"))
+                .expect("a stored record"),
+            key_of(ordinal)
+        ));
+    }
+}
+
 /// D-CAP/D-SEALTIME: private pages spill at 32 MiB without publishing a
 /// checkpoint, retaining old working versions and exact new contents.
 #[test]

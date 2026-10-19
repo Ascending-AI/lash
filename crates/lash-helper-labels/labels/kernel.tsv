@@ -139,6 +139,7 @@ list.remove	list remove
 list.set	list set
 list.slice	list slice
 list.sort	list sort
+list.sort_by_keys	list sort by keys
 list.values	list values
 lt	lt
 map.check	map check
