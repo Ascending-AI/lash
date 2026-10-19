@@ -260,8 +260,8 @@ pub fn compact_note_rows(shape: &SchemaShape, path: &str) -> Vec<CompactNoteRow>
                 }
             }
             ShapeKind::Union(items) => {
-                for (item, label) in items.iter().zip(shape.union_arm_labels()) {
-                    walk(item, &format!("{path}|{label}"), rows);
+                for (item, arm) in items.iter().zip(shape.union_arm_paths(path)) {
+                    walk(item, &arm, rows);
                 }
             }
             ShapeKind::Intersection(items) => {

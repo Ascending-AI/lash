@@ -342,8 +342,8 @@ fn collect_notes(shape: &SchemaShape, path: &str, required: bool, rows: &mut Vec
             }
         }
         ShapeKind::Union(items) => {
-            for (item, label) in items.iter().zip(shape.union_arm_labels()) {
-                collect_notes(item, &format!("{path}|{label}"), required, rows);
+            for (item, arm) in items.iter().zip(shape.union_arm_paths(path)) {
+                collect_notes(item, &arm, required, rows);
             }
         }
         ShapeKind::Intersection(items) => {

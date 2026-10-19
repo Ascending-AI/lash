@@ -357,16 +357,23 @@ impl SchemaShape {
         }
     }
 
-    /// Readable, distinct labels for a union's alternatives. Titles win,
-    /// followed by a literal discriminant and then a type description.
-    pub fn union_arm_labels(&self) -> Vec<String> {
+    /// Note paths for a union's alternatives below `path`. An optional value
+    /// (one arm besides `null`) is noted on `path` itself; every other arm is
+    /// `path|label`, with a readable, distinct label. Titles win, followed by
+    /// a literal discriminant and then a type description.
+    pub fn union_arm_paths(&self, path: &str) -> Vec<String> {
         let ShapeKind::Union(members) = &self.kind else {
             return Vec::new();
         };
+        let is_null = |member: &Self| matches!(member.kind, ShapeKind::Null);
+        let optional = members.len() == 2 && members.iter().filter(|m| is_null(m)).count() == 1;
         let mut used = Vec::<String>::new();
         members
             .iter()
             .map(|member| {
+                if optional && !is_null(member) {
+                    return path.to_string();
+                }
                 let base = member.arm_label();
                 let mut label = base.clone();
                 let mut alternative = 2;
@@ -374,8 +381,9 @@ impl SchemaShape {
                     label = format!("{base} (alternative {alternative})");
                     alternative += 1;
                 }
-                used.push(label.clone());
-                label
+                let arm = format!("{path}|{label}");
+                used.push(label);
+                arm
             })
             .collect()
     }

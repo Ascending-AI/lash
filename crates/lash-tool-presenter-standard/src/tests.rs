@@ -610,3 +610,37 @@ fn compact_discovery_refuses_legacy_authored_examples() {
         "{refused}"
     );
 }
+
+/// FIG-6807: an optional value's notes sit on its field path; only a real
+/// union names its arms.
+#[test]
+fn a_nullable_field_is_noted_on_its_own_path_and_a_real_union_names_its_arms() {
+    let tool = ToolDefinition::raw(
+        "select",
+        "select",
+        "Select records.",
+        serde_json::json!({"type":"object", "properties":{
+            "endCursor":{"anyOf":[{"type":"string","title":"End Cursor","description":"Cursor of the last item."},{"type":"null"}]},
+            "assignee":{"anyOf":[{"type":"object","title":"Assignee","description":"Who owns the issue.",
+                "properties":{"name":{"type":"string","description":"Display name."}},"required":["name"]},{"type":"null"}]},
+            "target":{"anyOf":[{"type":"string","title":"Url","description":"A link."},{"type":"integer","title":"Id","description":"An identifier."}]}
+        }, "required":["endCursor","assignee","target"], "additionalProperties":false}),
+        serde_json::json!({"type":"string"}),
+    )
+    .expect("valid tool")
+    .with_execution(std::time::Duration::from_secs(30));
+    let docs = compact(&tool).render_markdown();
+    for row in [
+        "- `input.endCursor` — Cursor of the last item.",
+        "- `input.assignee` — Who owns the issue.",
+        "- `input.assignee.name` — Display name.",
+        "- `input.target|Url` — A link.",
+        "- `input.target|Id` — An identifier.",
+    ] {
+        assert!(docs.contains(row), "{row}\n{docs}");
+    }
+    assert!(
+        !docs.contains("|End Cursor") && !docs.contains("|Assignee"),
+        "{docs}"
+    );
+}

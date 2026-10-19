@@ -440,10 +440,9 @@ fn scope_union_notes(
     fn collect(shape: &SchemaShape, path: &str, scopes: &mut Vec<String>) {
         match &shape.kind {
             lash_tool_shape::ShapeKind::Union(members) => {
-                for (member, label) in members.iter().zip(shape.union_arm_labels()) {
-                    let path = format!("{path}|{label}");
-                    scopes.push(types::note_text(&path));
-                    collect(member, &path, scopes);
+                for (member, arm) in members.iter().zip(shape.union_arm_paths(path)) {
+                    scopes.push(types::note_text(&arm));
+                    collect(member, &arm, scopes);
                 }
             }
             lash_tool_shape::ShapeKind::Object(object) => {
@@ -850,6 +849,31 @@ mod tests {
             text.contains("- `input|Calendar.v1`:")
                 && text.contains("  - `date` — Day")
                 && text.contains("input|kind=\"mail\".date"),
+            "{text}"
+        );
+    }
+
+    /// FIG-6807: an optional value's notes sit on its field path; only a
+    /// real union names its arms.
+    #[test]
+    fn a_nullable_field_is_noted_on_its_own_path_and_a_real_union_names_its_arms() {
+        let text = shape_text(&json!({"type": "object", "properties": {
+            "endCursor": {"anyOf": [{"type": "string", "title": "End Cursor", "description": "Cursor of the last item."}, {"type": "null"}]},
+            "assignee": {"anyOf": [{"type": "object", "title": "Assignee", "description": "Who owns the issue.",
+                "properties": {"name": {"type": "string", "description": "Display name."}}, "required": ["name"]}, {"type": "null"}]},
+            "target": {"anyOf": [{"type": "string", "title": "Url", "description": "A link."}, {"type": "integer", "title": "Id", "description": "An identifier."}]}
+        }, "required": ["endCursor", "assignee", "target"], "additionalProperties": false}));
+        for row in [
+            "- `input.endCursor` — Cursor of the last item.",
+            "- `input.assignee` — Who owns the issue.",
+            "- `input.assignee.name` — Display name.",
+            "- `input.target|Url` — A link.",
+            "- `input.target|Id` — An identifier.",
+        ] {
+            assert!(text.contains(row), "{row}\n{text}");
+        }
+        assert!(
+            !text.contains("|End Cursor") && !text.contains("|Assignee"),
             "{text}"
         );
     }
