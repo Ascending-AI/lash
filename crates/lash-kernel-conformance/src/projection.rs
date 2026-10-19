@@ -1,37 +1,14 @@
 //! Save/open exchange shared by the corpus and smith laws.
 use lash_kernel_state::paged::CheckpointRoot;
-use lash_kernel_state::{AdmittedRequest, AdmittedWait};
 use lash_kernel_vm::kernel_internals::conformance::{Checkpoint, checkpoint};
-use lash_kernel_vm::{Bounds, Machine, PreparedLibrary, Program, Request};
+use lash_kernel_vm::{Bounds, Machine, PreparedLibrary, Program};
 
 use crate::{HarnessError, pages};
-
-pub(crate) fn admissions(requests: &[Request]) -> Vec<AdmittedWait> {
-    requests
-        .iter()
-        .map(|request| match request {
-            Request::Effect(e) => AdmittedWait {
-                identity: e.identity.clone(),
-                request: AdmittedRequest::Effect {
-                    effect: e.effect.clone(),
-                    args: e.args.clone(),
-                },
-            },
-            Request::Sleep(s) => AdmittedWait {
-                identity: s.identity.clone(),
-                request: AdmittedRequest::Sleep {
-                    duration: s.duration.into(),
-                },
-            },
-        })
-        .collect()
-}
 
 #[derive(Clone)]
 pub(crate) struct Image {
     pub(crate) root: CheckpointRoot,
     pub(crate) source: pages::Source,
-    pub(crate) admissions: Vec<AdmittedWait>,
 }
 
 #[derive(Default)]
@@ -57,7 +34,6 @@ impl Projector<'_> {
         program: &Program,
         bounds: Bounds,
         source: &pages::Source,
-        admissions: Vec<AdmittedWait>,
     ) -> Result<Checkpoint, HarnessError> {
         let sealed = machine
             .seal(pages::BUDGET)
@@ -72,7 +48,6 @@ impl Projector<'_> {
         let image = Image {
             root: lash_kernel_vm::kernel_internals::sealed_root(&sealed).clone(),
             source: source.clone(),
-            admissions,
         };
         let imported = match self.imports {
             Some(images) => images.get(self.images.len()).unwrap_or(&image),
@@ -88,14 +63,8 @@ impl Projector<'_> {
             )
         });
         program.library = library.clone();
-        let witness = pages::open::<M>(
-            program.clone(),
-            bounds,
-            &image.root,
-            source,
-            image.admissions.clone(),
-        )
-        .map_err(fault)?;
+        let witness =
+            pages::open::<M>(program.clone(), bounds, &image.root, source).map_err(fault)?;
         self.memory.push((warm_memory, witness.meters().memory));
         // Even the warm baseline opens a cold witness for the independent
         // accounting verdict; only importing runs replace their live machine.
@@ -106,14 +75,8 @@ impl Projector<'_> {
                     self.layout,
                 );
             }
-            *machine = pages::open::<M>(
-                program,
-                bounds,
-                &imported.root,
-                &imported.source,
-                imported.admissions.clone(),
-            )
-            .map_err(fault)?;
+            *machine = pages::open::<M>(program, bounds, &imported.root, &imported.source)
+                .map_err(fault)?;
             let reopened = machine
                 .seal(pages::BUDGET)
                 .map_err(fault)?
@@ -251,14 +214,12 @@ impl<const L: u64> Machine for Plan<L> {
         program: Program,
         bounds: Bounds,
         root: &lash_kernel_state::paged::Checkpoint,
-        admissions: Vec<AdmittedWait>,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
     ) -> Result<Self, lash_kernel_vm::OpenError> {
         lash_kernel_vm::kernel_internals::open_with_layout(
             program,
             bounds,
             lash_kernel_state::kernel_internals::checkpoint_root(root),
-            admissions,
             source,
             lash_kernel_vm::kernel_internals::Layout(L),
         )

@@ -486,7 +486,6 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
             ..ROOMY
         },
         &checkpoint,
-        Vec::new(),
         Box::new(run.source.clone()),
     )
     .unwrap();

@@ -172,30 +172,12 @@ fn observe_in<M: Machine>(
         fail: smith.schedule.fail_effects,
     };
     let mut observations = Vec::new();
-    let mut outstanding = Vec::<Request>::new();
     // At least one statement is executed per positive slice. This exceeds
     // the generator's worst-case bounded loops, calls and work charge.
     for index in 0..25_000 {
         let step = machine
             .run(&mut host, slices[index % slices.len()])
             .map_err(fault)?;
-        if let Step::Parked(park) = &step {
-            outstanding.retain(|request| {
-                !park
-                    .withdrawn
-                    .contains(&crate::machine::request_wait(request))
-            });
-            outstanding.extend(
-                park.requests
-                    .iter()
-                    .filter(|request| {
-                        !park
-                            .withdrawn
-                            .contains(&crate::machine::request_wait(request))
-                    })
-                    .cloned(),
-            );
-        }
         let meters = machine.meters();
         let ended = matches!(step, Step::Ended(_));
         if let Step::Ended(end) = &step {
@@ -204,13 +186,7 @@ fn observe_in<M: Machine>(
         let parked = if ended {
             None
         } else {
-            Some(projection.at(
-                &mut machine,
-                &program,
-                smith.schedule.bounds,
-                source,
-                crate::projection::admissions(&outstanding),
-            )?)
+            Some(projection.at(&mut machine, &program, smith.schedule.bounds, source)?)
         };
         let mut observation = Observation {
             meters,
@@ -250,15 +226,9 @@ fn observe_in<M: Machine>(
                 observation
                     .deliveries
                     .push(machine.deliver(wait, outcome).map_err(fault)?);
-                outstanding.retain(|request| crate::machine::request_wait(request) != wait);
             }
-            let parked = Some(projection.at(
-                &mut machine,
-                &program,
-                smith.schedule.bounds,
-                source,
-                crate::projection::admissions(&outstanding),
-            )?);
+            let parked =
+                Some(projection.at(&mut machine, &program, smith.schedule.bounds, source)?);
             observation.after_deliveries = parked;
         }
         observations.push(observation);

@@ -107,7 +107,6 @@ fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
         program,
         ROOMY,
         &root,
-        Vec::new(),
         Box::new(counting.clone()),
         Box::new(
             lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate).unwrap(),

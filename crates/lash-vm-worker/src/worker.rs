@@ -11,7 +11,6 @@ use crate::host::{PagePort, Wire, WireHost, WireLimiter, WirePageSource, grant_o
 use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
-use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
 #[cfg(test)]
@@ -619,21 +618,15 @@ impl<'embedding> Server<'embedding> {
                     }));
                 }
                 program.release = root.header().release;
-                let admissions = checkpoint
-                    .admissions
-                    .iter()
-                    .map(|admission| AdmittedWait::decode(&admission.0))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| undecodable(RunInput::Checkpoint, &error))?;
-                KernelMachine::open(program, bounds, &root, admissions, Box::new(source)).map_err(
-                    |error| match error {
+                KernelMachine::open(program, bounds, &root, Box::new(source)).map_err(|error| {
+                    match error {
                         OpenError::Heap(fault) => heap_fault(fault),
                         error @ OpenError::Accounting { .. } => machine_breach(error),
                         error => PoolError::refused(RunRefusal::Restore {
                             refusal: restore_refusal(error),
                         }),
-                    },
-                )?
+                    }
+                })?
             }
         };
         machine.set_options(lash_kernel_vm::MachineOptions {

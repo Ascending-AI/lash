@@ -22,14 +22,12 @@ impl Machine for KernelMachine {
         program: Program,
         bounds: Bounds,
         root: &lash_kernel_state::paged::Checkpoint,
-        admissions: Vec<lash_kernel_state::AdmittedWait>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError> {
         Self::open_with_layout(
             program,
             bounds,
             lash_kernel_state::kernel_internals::checkpoint_root(root),
-            admissions,
             source,
             Layout::default(),
         )
@@ -227,7 +225,6 @@ impl KernelMachine {
         program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
-        admissions: Vec<lash_kernel_state::AdmittedWait>,
         mut source: Box<dyn PageSource>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
@@ -235,7 +232,7 @@ impl KernelMachine {
             None => None,
             Some(_) => Some(session::restored_census(&mut *source, Some(root.heap))?),
         };
-        Self::open_with_optional_census(program, bounds, root, admissions, source, census, layout)
+        Self::open_with_optional_census(program, bounds, root, source, census, layout)
     }
 
     /// Opens `root` with `census` for its accounting: the laws that hold a
@@ -245,27 +242,17 @@ impl KernelMachine {
         program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
-        _admissions: Vec<lash_kernel_state::AdmittedWait>,
         source: Box<dyn PageSource>,
         census: Box<dyn AllocationCensus>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        Self::open_with_optional_census(
-            program,
-            bounds,
-            root,
-            _admissions,
-            source,
-            Some(census),
-            layout,
-        )
+        Self::open_with_optional_census(program, bounds, root, source, Some(census), layout)
     }
 
     fn open_with_optional_census(
         program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
-        _admissions: Vec<lash_kernel_state::AdmittedWait>,
         source: Box<dyn PageSource>,
         census: Option<Box<dyn AllocationCensus>>,
         layout: Layout,

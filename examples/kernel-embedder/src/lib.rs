@@ -103,7 +103,6 @@ pub fn embed<M: Machine>(
                     program.clone(),
                     bounds,
                     &sealed.checkpoint(),
-                    Vec::new(),
                     Box::new(source.clone()),
                 )
                 .map_err(|e| e.to_string())?;

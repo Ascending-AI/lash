@@ -223,14 +223,12 @@ pub(crate) fn open_in(
     bounds: lash_kernel_vm::Bounds,
     root: &CheckpointRoot,
     source: &Source,
-    admissions: Vec<lash_kernel_state::AdmittedWait>,
     layout: lash_kernel_vm::kernel_internals::Layout,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::OpenError> {
     lash_kernel_vm::kernel_internals::open_with_layout(
         program,
         bounds,
         root,
-        admissions,
         Box::new(source.clone()),
         layout,
     )
@@ -240,13 +238,11 @@ pub(crate) fn open<M: lash_kernel_vm::Machine>(
     bounds: lash_kernel_vm::Bounds,
     root: &CheckpointRoot,
     source: &Source,
-    admissions: Vec<lash_kernel_state::AdmittedWait>,
 ) -> Result<M, lash_kernel_vm::OpenError> {
     M::open(
         program,
         bounds,
         &lash_kernel_state::kernel_internals::checkpoint(root.clone()),
-        admissions,
         Box::new(source.clone()),
     )
 }

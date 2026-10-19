@@ -44,11 +44,10 @@ pub fn open_with_layout(
     program: Program,
     bounds: crate::Bounds,
     root: &CheckpointRoot,
-    admissions: Vec<lash_kernel_state::AdmittedWait>,
     source: Box<dyn PageSource>,
     layout: Layout,
 ) -> Result<KernelMachine, OpenError> {
-    KernelMachine::open_with_layout(program, bounds, root, admissions, source, layout)
+    KernelMachine::open_with_layout(program, bounds, root, source, layout)
 }
 
 /// The executable's own checks of its statement and step structure.

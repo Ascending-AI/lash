@@ -71,7 +71,6 @@ fn probe(
                 at.bounds,
                 lash_kernel_vm::kernel_internals::sealed_root(&sealed),
                 at.source,
-                at.admissions,
                 layout,
             )
             .map_err(|e| HarnessError(e.to_string()))?;

@@ -105,7 +105,6 @@ fn reopen(machine: &mut KernelMachine, source: &Counting, operation: &str) {
         program(operation),
         BOUNDS,
         &sealed.checkpoint(),
-        Vec::new(),
         Box::new(source.clone()),
     )
     .unwrap();

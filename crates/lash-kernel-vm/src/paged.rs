@@ -12,7 +12,6 @@
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{Datum, DocumentId, Invalid, Name};
-use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{
     Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
 };
@@ -210,15 +209,13 @@ pub trait Machine: Sized {
     ) -> Result<Self, StartError>;
 
     /// Opens a sealed root against its document's prepared executable,
-    /// reading the root page and nothing it does not need. `admissions`
-    /// holds the request of every wait the root holds handed out. The run
-    /// accounts its memory from the root's saved accounting, held to
-    /// `bounds.memory`.
+    /// reading the root page and nothing it does not need. The root's waits
+    /// carry every request it handed out. The run accounts its memory from
+    /// the root's saved accounting, held to `bounds.memory`.
     fn open(
         program: Program,
         bounds: Bounds,
         root: &Checkpoint,
-        admissions: Vec<AdmittedWait>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError>;
 

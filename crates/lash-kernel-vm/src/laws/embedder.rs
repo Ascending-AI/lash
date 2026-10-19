@@ -585,7 +585,6 @@ impl Embedder {
             program,
             self.bounds,
             &root,
-            Vec::new(),
             Box::new(self.source.clone()),
             Box::new(census),
             layout,
@@ -633,7 +632,6 @@ impl Embedder {
             program,
             self.bounds,
             root,
-            Vec::new(),
             Box::new(self.source.clone()),
             Box::new(
                 lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate)

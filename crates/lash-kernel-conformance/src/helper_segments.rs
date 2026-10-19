@@ -191,15 +191,7 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
         &mut world,
         &mut requests,
         |machine, world, requests, owed| {
-            projector
-                .at(
-                    machine,
-                    program,
-                    BOUNDS,
-                    &source,
-                    crate::projection::admissions(owed),
-                )
-                .unwrap();
+            projector.at(machine, program, BOUNDS, &source).unwrap();
             marks.push((world.prints.len(), requests.len(), owed.to_vec()));
         },
     );
@@ -224,14 +216,9 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
     for (index, (image, (printed, requested, owed))) in
         cut.images.iter().zip(&cut.marks).enumerate()
     {
-        let mut machine = crate::pages::open::<Plan<L>>(
-            program.clone(),
-            BOUNDS,
-            &image.root,
-            &image.source,
-            image.admissions.clone(),
-        )
-        .unwrap();
+        let mut machine =
+            crate::pages::open::<Plan<L>>(program.clone(), BOUNDS, &image.root, &image.source)
+                .unwrap();
         let resealed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
         assert!(
             checkpoint(

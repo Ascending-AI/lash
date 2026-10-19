@@ -404,7 +404,7 @@ where
             release: parked.header.release,
             ..self.program.clone()
         };
-        let (bounds, admissions) = (self.bounds, parked.admissions.clone());
+        let bounds = self.bounds;
         InProcessMachine::spawn(
             self.hold.clone(),
             pages,
@@ -419,12 +419,12 @@ where
                         .map_err(fault)?,
                 )
                 .map_err(fault)?;
-                KernelMachine::open(program, bounds, &header, admissions, Box::new(source)).map_err(
-                    |error| match error {
+                KernelMachine::open(program, bounds, &header, Box::new(source)).map_err(|error| {
+                    match error {
                         error @ lash_kernel_vm::OpenError::Accounting { .. } => fault(error),
                         error => error.into(),
-                    },
-                )
+                    }
+                })
             },
         )
         .await

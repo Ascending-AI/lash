@@ -68,7 +68,6 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
                     at.bounds,
                     lash_kernel_vm::kernel_internals::sealed_root(&sealed),
                     at.source,
-                    at.admissions,
                 )
                 .map_err(|e| HarnessError(e.to_string()))
             },
@@ -86,7 +85,6 @@ pub(crate) struct Park<'a, M> {
     pub(crate) program: &'a mut Program,
     pub(crate) bounds: lash_kernel_vm::Bounds,
     pub(crate) source: &'a crate::pages::Source,
-    pub(crate) admissions: Vec<lash_kernel_state::AdmittedWait>,
     #[cfg(test)]
     pub(crate) requests: &'a [Request],
 }
@@ -226,7 +224,6 @@ pub(crate) fn run_program_in<M: Machine>(
     };
     let mut batches = env.deliveries.iter();
     let mut waits = Vec::new();
-    let mut outstanding = Vec::<Request>::new();
     let mut trace = Vec::new();
     let mut parks = 0;
     if env.slice == 0 && projection.is_none() {
@@ -258,13 +255,7 @@ pub(crate) fn run_program_in<M: Machine>(
         match step {
             Step::Slice => {
                 if let Some(p) = &mut projection {
-                    p.at(
-                        &mut machine,
-                        &program,
-                        bounds,
-                        &source,
-                        crate::projection::admissions(&outstanding),
-                    )?;
+                    p.at(&mut machine, &program, bounds, &source)?;
                 }
             }
             Step::Ended(end) => {
@@ -316,23 +307,14 @@ pub(crate) fn run_program_in<M: Machine>(
                         }
                     }
                 }
-                outstanding.retain(|request| !park.withdrawn.contains(&request_wait(request)));
-                outstanding.extend(
-                    park.requests
-                        .iter()
-                        .filter(|request| !park.withdrawn.contains(&request_wait(request)))
-                        .cloned(),
-                );
-                let admissions = crate::projection::admissions(&outstanding);
                 if let Some(p) = &mut projection {
-                    p.at(&mut machine, &program, bounds, &source, admissions.clone())?;
+                    p.at(&mut machine, &program, bounds, &source)?;
                 }
                 machine = at_park(Park {
                     machine,
                     program: &mut program,
                     bounds,
                     source: &source,
-                    admissions,
                     #[cfg(test)]
                     requests: &park.requests,
                 })?;
@@ -346,7 +328,6 @@ pub(crate) fn run_program_in<M: Machine>(
                     let delivered = machine
                         .deliver(*wait, delivery.outcome.clone().into())
                         .map_err(|e| HarnessError(e.to_string()))?;
-                    outstanding.retain(|request| request_wait(request) != *wait);
                     if (delivered == Delivered::Dropped) != delivery.dropped {
                         return Err(HarnessError(format!(
                             "unexpected delivery result {delivered:?}"
@@ -354,13 +335,7 @@ pub(crate) fn run_program_in<M: Machine>(
                     }
                 }
                 if let Some(p) = &mut projection {
-                    p.at(
-                        &mut machine,
-                        &program,
-                        bounds,
-                        &source,
-                        crate::projection::admissions(&outstanding),
-                    )?;
+                    p.at(&mut machine, &program, bounds, &source)?;
                 }
             }
         }
@@ -462,12 +437,5 @@ impl Host for ScriptHost<'_> {
         } else {
             false
         }
-    }
-}
-
-pub(crate) fn request_wait(request: &Request) -> lash_kernel_vm::WaitId {
-    match request {
-        Request::Effect(e) => e.wait,
-        Request::Sleep(s) => s.wait,
     }
 }

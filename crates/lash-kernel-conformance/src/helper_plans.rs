@@ -162,13 +162,7 @@ fn run_with_options<const L: u64>(
             Step::Slice => panic!("an unbounded helper run yielded"),
             Step::Parked(park) => {
                 projector
-                    .at(
-                        &mut machine,
-                        program,
-                        bounds,
-                        &source,
-                        crate::projection::admissions(&park.requests),
-                    )
+                    .at(&mut machine, program, bounds, &source)
                     .unwrap();
                 machine.record_charges(tape.clone());
                 for request in park.requests {

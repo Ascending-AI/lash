@@ -106,7 +106,6 @@ pub(crate) fn reopen(
         program.clone(),
         bounds,
         &sealed.checkpoint(),
-        Vec::new(),
         Box::new(source.clone()),
     )
     .unwrap();

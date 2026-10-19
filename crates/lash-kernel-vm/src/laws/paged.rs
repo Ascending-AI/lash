@@ -146,7 +146,6 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
         program,
         Setup::default().bounds,
         &prior,
-        Vec::new(),
         Box::new(embedder.source.clone()),
         Box::new(Census::restore(old_heap.certificate()).unwrap()),
         crate::compile::Layout::default(),

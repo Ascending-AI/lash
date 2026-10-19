@@ -716,7 +716,6 @@ pub(super) fn execution_observation(
                 program.clone(),
                 bounds,
                 &sealed.checkpoint(),
-                Vec::new(),
                 Box::new(session.source.clone()),
             )
             .unwrap();

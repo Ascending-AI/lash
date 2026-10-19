@@ -33,7 +33,6 @@ pub(super) fn check(rule: &str, case: &Case) {
                     at.bounds,
                     &unsupported,
                     at.source,
-                    at.admissions.clone(),
                 ),
                 Err(lash_kernel_vm::OpenError::KernelVersion { .. })
             ));
@@ -53,7 +52,6 @@ pub(super) fn check(rule: &str, case: &Case) {
                 at.bounds,
                 &decoded,
                 at.source,
-                at.admissions.clone(),
             )
             .unwrap())
         })
