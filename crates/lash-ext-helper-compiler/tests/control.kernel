@@ -2,6 +2,8 @@
 use eq
 use num.add
 use num.div
+use num.lt
+use num.mul
 use list.len
 use error.new
 use law.declining
@@ -73,4 +75,14 @@ charge 5
 body {
   let answer = invoke law.declining(log)
   return (answer, log)
+}
+
+# FIG-6814: a scalar path past the call budget leaves its whole arm to the
+# body, the inputs its other paths answer included.
+function law.budget(x: Float) -> Float
+kernel 1
+charge 3
+body {
+  if num.lt(x, 0.0) { return -1.0 }
+  return num.add(num.mul(x, 2.0), 1.0)
 }

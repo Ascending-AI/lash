@@ -26,6 +26,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &LAW_FACTORY,
     &LAW_DECLINING,
     &LAW_DECLINE_CALLER,
+    &LAW_BUDGET,
 ];
 
 const LAW_HANDLERS: p::HelperPlan = p::HelperPlan {
@@ -584,4 +585,73 @@ fn law_decline_caller(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.local(0, 1)?;
     ctx.tuple(0, 2)?;
     Ok(ctx.take(0))
+}
+
+const LAW_BUDGET: p::HelperPlan = p::HelperPlan {
+    name: "law.budget",
+    function: p::function("5a414e8f0f22935bd00a8122700aaf4d5020a374248eda06746392fe11e9f428"),
+    callees: &[
+        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
+        p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"),
+        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Float(0xbff0000000000000),
+        p::PlanLiteral::Float(0x4000000000000000),
+        p::PlanLiteral::Float(0x3ff0000000000000),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "x", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: law_budget,
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }) }),
+};
+
+/// `law.budget`.
+fn law_budget(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(1, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.literal(2, 1)?;
+    ctx.call(1, 0, 2)?;
+    ctx.literal(3, 1)?;
+    ctx.call(2, 0, 2)?;
+    Ok(ctx.take(0))
+}
+fn law_budget_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
+            })() { return Some(value); }
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v1 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4611686018427387904)))])?; let _ = v1;
+                let v2 = match (natives[2].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))]) { Some(value) => value, None => heap.call(0, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])? }; let _ = v2;
+                Some(v2)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
 }

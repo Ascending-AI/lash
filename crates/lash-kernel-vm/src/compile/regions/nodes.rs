@@ -639,6 +639,11 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option
 pub(crate) struct Fresh(u16);
 
 impl Fresh {
+    /// The operands whose positions `mask` sets.
+    pub(crate) fn of(mask: u16) -> Self {
+        Self(mask)
+    }
+
     /// Whether the operand at `at` is a construction of no members.
     #[inline(always)]
     pub(crate) fn empty(self, at: usize) -> bool {

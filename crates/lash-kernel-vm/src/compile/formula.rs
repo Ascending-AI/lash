@@ -492,21 +492,18 @@ impl Fast {
     }
 
     /// What the formula charges a call with `args` that returned `result`
-    /// when it is a sum of measurements and every value it measures
-    /// carries its measurements: one the arena holds nothing of
-    /// ([`immediate_measure`]), or an argument `fresh` names, a
-    /// construction of no members ([`empty_measure`]). Neither holds
-    /// another value, so the shallow formula computes for them what the
-    /// formula does. `None` for another formula, or where a measured
-    /// value is one the arena measures.
+    /// when it is a sum of measurements, optionally with one minimum pair
+    /// (`same`'s), and every value it measures carries its measurements:
+    /// one the arena holds nothing of ([`immediate_measure`]), or an
+    /// argument `fresh` names, a construction of no members
+    /// ([`empty_measure`]). Neither holds another value, so the shallow
+    /// formula computes for them what the formula does, combined as
+    /// [`Plan::evaluate`] combines it. `None` for another formula, or where
+    /// a measured value is one the arena measures.
     #[inline(always)]
     pub(crate) fn immediate(&self, args: &[Value], fresh: Fresh, result: &Value) -> Option<u64> {
-        let Some(Linear::Sum(constant)) = self.shallow.linear else {
-            return None;
-        };
-        let mut sum = constant;
-        for (source, measure) in &self.shallow.measurements {
-            let units = match *source {
+        let measured = |(source, measure): &(Source, doc::Measure)| -> Option<u64> {
+            Some(match *source {
                 Source::Arg(index) if fresh.empty(index) => empty_measure(*measure),
                 Source::Arg(index) => match args.get(index) {
                     Some(value) => immediate_measure(value, *measure)?,
@@ -514,10 +511,27 @@ impl Fast {
                 },
                 Source::Result => immediate_measure(result, *measure)?,
                 Source::Nothing => 0,
-            };
-            sum = sum.saturating_add(units);
+            })
+        };
+        let measurements = &self.shallow.measurements;
+        match self.shallow.linear {
+            Some(Linear::Sum(constant)) => measurements.iter().try_fold(constant, |sum, item| {
+                Some(sum.saturating_add(measured(item)?))
+            }),
+            Some(Linear::Minimum { constant, at }) => {
+                let mut sum = constant;
+                for item in &measurements[..at] {
+                    sum = sum.saturating_add(measured(item)?);
+                }
+                let least = measured(&measurements[at])?.min(measured(&measurements[at + 1])?);
+                sum = sum.saturating_add(least);
+                for item in &measurements[at + 2..] {
+                    sum = sum.saturating_add(measured(item)?);
+                }
+                Some(sum)
+            }
+            None => None,
         }
-        Some(sum)
     }
 
     /// How to charge a call with `args` that returned `result`: what

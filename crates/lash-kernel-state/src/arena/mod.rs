@@ -248,6 +248,11 @@ pub struct Arena {
     evict_at: u64,
     /// Objects decoded since the last statement boundary.
     streaked: Vec<ArenaHandle>,
+    /// The empty tuple, while one is live: every empty tuple the run makes
+    /// or decodes is this one object, so evaluating `()` allocates nothing
+    /// once one exists. An immutable has no identity a run observes, and
+    /// it is freed as any object is, when nothing holds it.
+    empty_tuple: Option<ArenaHandle>,
 }
 
 /// What a collection's roots are visited with: each value they hold.
@@ -461,7 +466,22 @@ impl Arena {
         if let Some(page) = page {
             let _ = facts.page.set(page);
         }
+        if matches!(&body, Body::Tuple(sequence) if sequence.len == 0 && !has_cold(&body)) {
+            return self.empty_tuple(facts);
+        }
         self.insert(body, facts)
+    }
+
+    /// The live empty tuple, made with `facts` when none is.
+    fn empty_tuple(&mut self, facts: Facts) -> ArenaHandle {
+        if let Some(handle) = self.empty_tuple
+            && self.objects.get(handle).is_some()
+        {
+            return handle;
+        }
+        let handle = self.insert(Body::Tuple(Sequence::whole(Vec::new())), facts);
+        self.empty_tuple = Some(handle);
+        handle
     }
 
     /// The facts of a mutable object the run creates: dirty, and without
@@ -674,13 +694,16 @@ impl Arena {
         if summary.depth as usize > depth_limit {
             return Err(Raise::TooDeep);
         }
-        Ok(Value::Tuple(self.insert(
-            Body::Tuple(Sequence::whole(members)),
-            Facts {
-                summary,
-                ..Facts::default()
-            },
-        )))
+        let facts = Facts {
+            summary,
+            ..Facts::default()
+        };
+        if members.is_empty() {
+            return Ok(Value::Tuple(self.empty_tuple(facts)));
+        }
+        Ok(Value::Tuple(
+            self.insert(Body::Tuple(Sequence::whole(members)), facts),
+        ))
     }
 
     /// An error value of `kind`, `message` and `data`.
@@ -737,7 +760,11 @@ impl Arena {
     /// members' own objects already there. Its storage moves into the body.
     pub fn create(&mut self, object: NewObject) -> Result<Value, NativeError> {
         let naming = object.naming();
+        let empty = matches!(&object, NewObject::Tuple(members) if members.is_empty());
         let (body, facts) = self.new_body(object)?;
+        if empty {
+            return Ok(naming(self.empty_tuple(facts)));
+        }
         Ok(naming(self.insert(body, facts)))
     }
 
@@ -1214,6 +1241,9 @@ impl Arena {
     /// Frees `handle`: gives what its body held to `members`, uncounted by
     /// the caller.
     fn free(&mut self, handle: ArenaHandle, members: &mut Vec<ArenaHandle>) {
+        if self.empty_tuple == Some(handle) {
+            self.empty_tuple = None;
+        }
         let index = handle.index() as usize;
         let facts = std::mem::take(&mut self.facts[index]);
         if let Some(entity) = facts.entity {
@@ -1447,5 +1477,49 @@ mod tests {
         let counted = arena.held();
         arena.recount_resident();
         assert_eq!(counted, arena.held());
+    }
+
+    /// FIG-6814: while an empty tuple is live, every empty tuple the run
+    /// makes or decodes is that one object, so evaluating `()` allocates
+    /// nothing and the meter counts it once. Once nothing holds it, it is
+    /// freed as any object is, and the next is made afresh.
+    #[test]
+    fn an_empty_tuple_is_one_object_while_one_is_live() {
+        let mut arena = Arena::new();
+        let Ok(Value::Tuple(first)) = arena.tuple(Vec::new(), 8) else {
+            panic!("an empty tuple")
+        };
+        let held = arena.held();
+        let decoded = arena.immutable(
+            Body::Tuple(Sequence::whole(Vec::new())),
+            Summary {
+                depth: 1,
+                ..Summary::default()
+            },
+            None,
+        );
+        assert_eq!(decoded, first);
+        for made in [
+            arena.tuple(Vec::new(), 8).unwrap(),
+            arena.create(NewObject::Tuple(Vec::new())).unwrap(),
+        ] {
+            assert!(matches!(made, Value::Tuple(handle) if handle == first));
+        }
+        assert_eq!(arena.held(), held);
+        assert!(
+            arena.tuple(Vec::new(), 0).is_err(),
+            "depth is checked first"
+        );
+        assert!(matches!(
+            arena.tuple(vec![Value::Null], 8),
+            Ok(Value::Tuple(handle)) if handle != first
+        ));
+        arena.release(&mut |_| {});
+        assert!(arena.body(first).is_err());
+        let Ok(Value::Tuple(next)) = arena.tuple(Vec::new(), 8) else {
+            panic!("an empty tuple")
+        };
+        assert_ne!(next, first);
+        assert!(arena.body(next).is_ok());
     }
 }

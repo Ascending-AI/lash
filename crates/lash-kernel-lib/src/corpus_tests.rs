@@ -460,3 +460,103 @@ fn prepared_scalar_completion_matches_operator_corpus() {
     assert!(specialized > 0);
     assert!(masks.contains(&0) && masks.iter().any(|mask| mask & 8 != 0));
 }
+
+/// K-CHG-003: what a region charges a call from its values alone, where
+/// each carries its measurements (an immediate, or a construction of no
+/// members), is the declared formula's amount, for every numeric and
+/// collection function of at most three parameters over every combination
+/// of such operands, `same`'s sum with a minimum included. `same` of two
+/// immediates, or of one and an empty construction, takes it every time.
+#[test]
+fn immediate_charges_are_the_declared_formula() {
+    let mut registry = FunctionRegistry::new();
+    lash_kernel_vm::register_machine_functions(&mut registry).unwrap();
+    register_numbers(&mut registry).unwrap();
+    crate::register_collections(&mut registry).unwrap();
+    crate::register_text_json(&mut registry).unwrap();
+    let mut heap = testsupport::heap();
+    let long = "fourteen bytes";
+    let mut operands: Vec<(Value, bool)> = [
+        Datum::Null,
+        Datum::Absent,
+        Datum::Bool(true),
+        Datum::Int(0.into()),
+        Datum::Int(7.into()),
+        Datum::Int((-3).into()),
+        Datum::Float(lash_kernel_doc::Float::new(2.5)),
+        Datum::Text(String::new()),
+        Datum::Text("record".into()),
+        Datum::Text(long.into()),
+    ]
+    .into_iter()
+    .map(|datum| (decode(datum, &mut heap), false))
+    .collect();
+    for empty in [
+        Datum::Tuple(Vec::new()),
+        Datum::List(Vec::new()),
+        Datum::Record(Vec::new()),
+    ] {
+        operands.push((decode(empty, &mut heap), true));
+    }
+    let results: Vec<Value> = [
+        Datum::Bool(false),
+        Datum::Int(0.into()),
+        Datum::Int(9.into()),
+        Datum::Text("text".into()),
+    ]
+    .into_iter()
+    .map(|datum| decode(datum, &mut heap))
+    .collect();
+    let mut answered = 0u64;
+    for (_, registered) in registry.iter() {
+        let definition = registered.definition();
+        let params = &definition.signature.params;
+        if params.len() > 3 {
+            continue;
+        }
+        let same = definition.name.as_str() == "same";
+        let combinations = operands.len().pow(params.len() as u32);
+        for combination in 0..combinations {
+            let mut rest = combination;
+            let mut args = Vec::new();
+            let mut fresh = 0u16;
+            for at in 0..params.len() {
+                let (value, empty) = operands[rest % operands.len()];
+                rest /= operands.len();
+                args.push(value);
+                if empty {
+                    fresh |= 1 << at;
+                }
+            }
+            for result in &results {
+                let fast = lash_kernel_vm::kernel_internals::immediate_charge(
+                    definition, &args, fresh, result,
+                );
+                if same {
+                    assert!(fast.is_some(), "same{args:?} takes the immediate charge");
+                }
+                let Some(fast) = fast else {
+                    continue;
+                };
+                let general = definition.charge.evaluate(&mut |operand, measure| {
+                    let value = match operand {
+                        Operand::Result => Some(result),
+                        Operand::Param(name) => params
+                            .iter()
+                            .position(|param| param.name == *name)
+                            .and_then(|index| args.get(index)),
+                    };
+                    value.map_or(0, |value| match measure {
+                        Measure::Size => size(value, &heap),
+                        Measure::DeepSize => deep_size(value, &heap),
+                        Measure::Magnitude => magnitude(value, &heap),
+                        Measure::NestedSize => nested_size(value, &heap),
+                    })
+                });
+                assert_eq!(fast, general, "{}{args:?} -> {result:?}", definition.name);
+                answered += 1;
+            }
+        }
+    }
+    assert!(answered > 0);
+}

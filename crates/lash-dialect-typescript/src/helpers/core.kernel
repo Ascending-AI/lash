@@ -1135,9 +1135,9 @@ native
 body {
   # A float's position needs no closure.
   if same(kind(key), "float") {
-    if num.le(0, key) {
+    if num.le(0.0, key) {
       if num.lt(key, length) {
-        if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
+        if eq(num.floor(key), key) { return num.add(key, 0.0) }
       }
     }
     return -1.0
@@ -1348,7 +1348,7 @@ body {
     }
     set position = invoke ts.list_index(name, 4294967295.0)
     }
-    if num.lt(position, 0) {
+    if num.lt(position, 0.0) {
       throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
     }
     if num.lt(list.len(target), position) {

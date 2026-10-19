@@ -580,6 +580,33 @@ fn generated_closures_share_cells_and_keep_ordinary_charge_and_depth() {
     }
 }
 
+/// FIG-6814: a scalar path past the call budget leaves its whole arm to the
+/// body, which answers the inputs its other paths answer as well: the
+/// template keeps no arm that would only re-test them and decline.
+#[test]
+fn a_scalar_arm_past_its_call_budget_is_left_to_the_body() {
+    let plan = control::PLANS
+        .iter()
+        .find(|plan| plan.name == "law.budget")
+        .unwrap();
+    assert!(
+        plan.template
+            .as_ref()
+            .is_none_or(|template| template.entry.is_none()),
+        "law.budget keeps no scalar arm"
+    );
+    for (x, answer) in [("-1.0", -1.0), ("2.0", 5.0)] {
+        let observed = compare_control(
+            &format!("main {{ let value = invoke law.budget({x}) return value }}"),
+            1_000_000,
+        );
+        assert_eq!(
+            observed.end,
+            crate::ExpectedEnd::Finished(Datum::Float(lash_kernel_doc::Float::new(answer)))
+        );
+    }
+}
+
 struct Declining;
 impl lash_kernel_doc::NativeFunction for Declining {
     fn call(

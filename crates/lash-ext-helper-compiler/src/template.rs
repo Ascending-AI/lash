@@ -1083,11 +1083,18 @@ impl Evaluator<'_> {
             } else {
                 SCALAR_CALLS
             };
-            let mut results: Vec<_> = self
-                .block(&body.block, &mut state, 1)
+            let paths = self.block(&body.block, &mut state, 1);
+            let reduced = paths.len();
+            let mut results: Vec<_> = paths
                 .into_iter()
                 .filter(|(_, value)| value.as_ref().is_none_or(|value| value.calls <= most))
                 .collect();
+            // A scalar arm that lost a path to the call budget declines
+            // wherever that path answers, after re-testing what the general
+            // call then tests again: it has no arm at all.
+            if !self.heap && results.len() != reduced {
+                continue;
+            }
             if results.is_empty() || results.len() > ALTERNATIVES {
                 continue;
             }

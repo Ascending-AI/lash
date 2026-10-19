@@ -128,6 +128,26 @@ pub fn prepared_scalar_charge(
     crate::compile::Fast::new(&definition.charge, params, &plan, true).scalar_units(mask)
 }
 
+/// What a region charges a call of `definition` on `args` that returned
+/// `result` from the values alone (`Fast::immediate`), the arguments at the
+/// positions `fresh` sets being constructions of no members, for the owning
+/// library's independent charge oracle; `None` where the region measures the
+/// formula in the arena instead.
+pub fn immediate_charge(
+    definition: &lash_kernel_doc::FunctionDefinition,
+    args: &[lash_kernel_doc::Value],
+    fresh: u16,
+    result: &lash_kernel_doc::Value,
+) -> Option<u64> {
+    let params = &definition.signature.params;
+    let plan = crate::compile::Plan::new(&definition.charge, params);
+    crate::compile::Fast::new(&definition.charge, params, &plan, false).immediate(
+        args,
+        crate::compile::Fresh::of(fresh),
+        result,
+    )
+}
+
 /// How many loop regions lowering forms for `program`'s document under its
 /// library's layout (`docs/design/kernel-regions.md` §1): what the regions
 /// law checks its region-shaped programs form, and a layout without
