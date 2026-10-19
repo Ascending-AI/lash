@@ -385,6 +385,10 @@ impl LiveReplayStore for LiveReplayProbe {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor {
+        self.inner.tail_cursor(session_id)
+    }
+
     fn earliest_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         self.inner.earliest_cursor(session_id, revision)
     }

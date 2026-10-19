@@ -163,10 +163,17 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .await?;
     assert_eq!(observer.read_view().turn_index(), 1);
 
-    host.send(TurnInput::text("second"))
+    let tail = fixture.core.live_replay_store.tail_cursor(&session_id);
+    let second = host
+        .send(TurnInput::text("second"))
         .id(crate::TurnId::parse("observed-second").expect("nonblank host identity"))
-        .output()
         .await?;
+    assert_eq!(
+        second.cursor(),
+        &tail,
+        "FIG-6934: send follows from the publication tail, not the host's stale resident revision"
+    );
+    second.outcome().await?;
     let head = lash_core::store::load_session_window_state(
         &store,
         lash_core::store::WindowSelector::Current,

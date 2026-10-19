@@ -486,6 +486,10 @@ impl lash_core::LiveReplayStore for SlowSessionReplay {
     ) -> lash_core::SessionCursor {
         self.0.sessions.current_cursor(session, revision)
     }
+
+    fn tail_cursor(&self, session_id: &SessionId) -> lash_core::SessionCursor {
+        self.0.sessions.tail_cursor(session_id)
+    }
     fn earliest_cursor(
         &self,
         session: &SessionId,

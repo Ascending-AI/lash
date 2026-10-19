@@ -113,6 +113,24 @@ impl Mirror {
         self.incarnation.cursor(session_id, revision, position)
     }
 
+    pub(super) fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor {
+        let (revision, position) = self.sessions.get(session_id).map_or(
+            (SessionRevision::new(0), self.incarnation.watermark),
+            |session| {
+                (
+                    SessionRevision::new(
+                        session
+                            .runs
+                            .last_key_value()
+                            .map_or(0, |(_, (_, revision))| *revision),
+                    ),
+                    session.tail,
+                )
+            },
+        );
+        self.incarnation.cursor(session_id, revision, position)
+    }
+
     /// The cursor before everything `session_id`'s generation still
     /// retains, as far as this replica has learned: a read that gapped
     /// taught it the generation and the window (`observed`).
@@ -326,6 +344,15 @@ mod tests {
         assert_eq!(position(&mirror, "s", 2), 5);
         mirror.ring(&published("s", 0, 9, 9, 2));
         assert_eq!(position(&mirror, "s", 2), 5, "positions 6..8 are unknown");
+        assert_eq!(
+            mirror
+                .tail_cursor(&SessionId::from("s"))
+                .parse()
+                .expect("tail cursor")
+                .live_position,
+            9,
+            "a send starts at the known tail without reconciling a snapshot"
+        );
         mirror.ring(&published("s", 0, 6, 8, 1));
         assert_eq!(position(&mirror, "s", 2), 9);
         mirror.ring(&Doorbell::Trimmed {

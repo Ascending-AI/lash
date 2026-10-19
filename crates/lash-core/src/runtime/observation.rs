@@ -836,6 +836,10 @@ mod tests {
             self.inner.current_cursor(session_id, revision)
         }
 
+        fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor {
+            self.inner.tail_cursor(session_id)
+        }
+
         async fn invalidate_all(&self) -> Result<(), LiveReplayStoreError> {
             self.inner.invalidate_all().await
         }

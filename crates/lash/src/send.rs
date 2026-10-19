@@ -137,16 +137,13 @@ impl SendTarget {
     /// sees everything the acceptance's shift publishes.
     fn current_cursor(&self) -> lash_core::SessionCursor {
         match self {
-            Self::Live(session) => {
-                let observation = session.runtime.observe();
-                session.runtime.live_replay_store.current_cursor(
-                    &SessionId::from(observation.session_id()),
-                    observation.session_revision(),
-                )
-            }
+            Self::Live(session) => session
+                .runtime
+                .live_replay_store
+                .tail_cursor(&session.session_id()),
             Self::Durable(durable) => durable
                 .live_replay_store()
-                .current_cursor(durable.session_id(), lash_core::SessionRevision::new(0)),
+                .tail_cursor(durable.session_id()),
         }
     }
 }

@@ -411,6 +411,10 @@ impl LiveReplayStore for PostgresLiveReplayStore {
             .current_cursor(session_id, revision)
     }
 
+    fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor {
+        self.shared.mirror.lock_recover().tail_cursor(session_id)
+    }
+
     fn earliest_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
         self.shared
             .mirror

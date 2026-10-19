@@ -161,6 +161,10 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
         self.inner.current_cursor(session, revision)
     }
 
+    fn tail_cursor(&self, session_id: &lash_core::SessionId) -> lash_core::SessionCursor {
+        self.inner.tail_cursor(session_id)
+    }
+
     async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_all().await
     }

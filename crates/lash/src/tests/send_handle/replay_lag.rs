@@ -202,6 +202,10 @@ impl lash_core::LiveReplayStore for FaultyReplay {
         self.inner.current_cursor(session, revision)
     }
 
+    fn tail_cursor(&self, session_id: &lash_core::SessionId) -> lash_core::SessionCursor {
+        self.inner.tail_cursor(session_id)
+    }
+
     fn earliest_cursor(
         &self,
         session: &lash_core::SessionId,

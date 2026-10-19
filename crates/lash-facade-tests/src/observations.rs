@@ -114,6 +114,10 @@ impl lash_core::LiveReplayStore for PublishedCommits {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn tail_cursor(&self, session_id: &SessionId) -> lash_core::SessionCursor {
+        self.inner.tail_cursor(session_id)
+    }
+
     fn earliest_cursor(
         &self,
         session_id: &SessionId,
@@ -387,6 +391,10 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn tail_cursor(&self, session_id: &SessionId) -> lash_core::SessionCursor {
+        self.inner.tail_cursor(session_id)
+    }
+
     fn earliest_cursor(
         &self,
         session_id: &SessionId,
@@ -539,6 +547,10 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
+    }
+
+    fn tail_cursor(&self, session_id: &SessionId) -> lash_core::SessionCursor {
+        self.inner.tail_cursor(session_id)
     }
 
     fn earliest_cursor(

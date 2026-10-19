@@ -785,3 +785,90 @@ fn boxed_language_payload_is_included_in_retention_charge() {
     );
     assert!(bytes::event_bytes(&event, expected - 1).is_err());
 }
+
+/// FIG-6934: attaching at turn N reads only the suffix, including when
+/// retention has wrapped the deque. Subscription and the follower's final
+/// drain share the same counted budget; live delivery must not repeat replay.
+#[tokio::test]
+async fn a_follower_at_turn_n_reads_only_new_events() {
+    use futures_util::{FutureExt as _, StreamExt as _};
+
+    for (history, capacity) in [(10, 1024), (600, 1024), (600, 32)] {
+        let store = InMemoryLiveReplayStore::with_bounds(capacity, Duration::from_secs(120));
+        let session = SessionId::fixture(format!("follower-{history}-{capacity}"));
+        for turn in 1..=history {
+            store
+                .publish_test_event(&session, SessionRevision(turn), None, activity("old"))
+                .await
+                .expect("publish history");
+        }
+        let from = store.tail_cursor(&session);
+        let mut expected = Vec::new();
+        for text in ["one", "two", "three"] {
+            expected.push(
+                store
+                    .publish_test_event(
+                        &session,
+                        SessionRevision(history + 1),
+                        None,
+                        activity(text),
+                    )
+                    .await
+                    .expect("publish suffix"),
+            );
+        }
+        let LiveReplaySubscribeOutcome::Subscribed(mut follower) = store
+            .subscribe_after_cursor(&from)
+            .await
+            .expect("subscribe after N")
+        else {
+            panic!("the cursor is retained");
+        };
+        expected.push(
+            store
+                .publish_test_event(
+                    &session,
+                    SessionRevision(history + 1),
+                    None,
+                    activity("live"),
+                )
+                .await
+                .expect("publish live tail"),
+        );
+        for event in &expected {
+            let next = follower
+                .next()
+                .now_or_never()
+                .expect("replay and live tail are ready")
+                .expect("subscription is open")
+                .expect("no gap");
+            assert_eq!(next.cursor, event.cursor);
+        }
+        assert!(follower.next().now_or_never().is_none(), "nothing repeats");
+        let LiveReplayOutcome::Replayed(replayed) =
+            store.replay_after_cursor(&from).await.expect("drain")
+        else {
+            panic!("the cursor is retained");
+        };
+        assert_eq!(
+            replayed
+                .iter()
+                .map(|event| &event.cursor)
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|event| &event.cursor)
+                .collect::<Vec<_>>()
+        );
+        let tail = &expected.last().expect("nonempty suffix").cursor;
+        assert!(matches!(store.replay_after_cursor(tail).await,
+            Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()));
+        let reads = store.sessions.lock_recover().buffers[&session]
+            .replay_reads
+            .get();
+        assert_eq!(
+            reads, 7,
+            "history={history}, capacity={capacity}: subscription reads three new records, drain reads four, tail reads none"
+        );
+    }
+}

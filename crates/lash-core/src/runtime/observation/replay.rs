@@ -678,6 +678,16 @@ pub trait LiveReplayStore: Send + Sync {
     /// replays more.
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor;
 
+    /// The latest locally known publication position, independent of a
+    /// runtime snapshot's revision. A send captures this before acceptance;
+    /// attaching to an existing input or run starts observation here too.
+    /// No retained event at or before this position is replayed.
+    ///
+    /// Like `current_cursor`, this is synchronous and uses local knowledge.
+    /// A distributed store may replay publications its replica has yet to
+    /// learn, but must not walk or replay history it already knows.
+    fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor;
+
     /// The cursor every event the store still retains for the session comes
     /// after. An observer whose cursor gapped resumes from it, so its gap
     /// is only what the store no longer holds: what was published between
@@ -841,6 +851,8 @@ struct LiveReplaySessionBuffer {
     retained_bytes: usize,
     channel_bytes: usize,
     events: VecDeque<StoredObservationEvent>,
+    #[cfg(test)]
+    replay_reads: std::cell::Cell<usize>,
     /// The last position assigned: every position up to it is published.
     tail_position: u64,
     /// Delivered `TurnActivity` identities with the live position each holds
@@ -862,10 +874,26 @@ impl LiveReplaySessionBuffer {
             retained_bytes: 0,
             channel_bytes: 0,
             events: VecDeque::new(),
+            #[cfg(test)]
+            replay_reads: std::cell::Cell::new(0),
             tail_position: first_position,
             delivered_activities: DeliveredActivities::default(),
             sender: None,
         }
+    }
+
+    /// Visit the retained records after a validated cursor.
+    fn events_after(&self, position: u64) -> impl Iterator<Item = &StoredObservationEvent> {
+        // Accepted publications take contiguous positions; retention only
+        // removes a prefix. A validated cursor therefore names an exact
+        // suffix length, even after the deque wraps. No earlier record is read.
+        let count = usize::try_from(self.tail_position - position).unwrap_or(usize::MAX);
+        self.events
+            .range(self.events.len().saturating_sub(count)..)
+            .inspect(|_| {
+                #[cfg(test)]
+                self.replay_reads.set(self.replay_reads.get() + 1);
+            })
     }
 
     /// Whether a live subscription holds this entry's channel.
@@ -1039,6 +1067,60 @@ impl InMemoryLiveReplayStore {
     }
 }
 
+impl InMemoryLiveReplayStore {
+    fn cursor_at(
+        &self,
+        session_id: &SessionId,
+        snapshot: Option<SessionRevision>,
+    ) -> SessionCursor {
+        let revision = snapshot.unwrap_or(SessionRevision::new(0));
+        let now = self.clock.now();
+        let mut sessions = self.sessions.lock_recover();
+        sessions.touch(session_id, now);
+        sessions.expire(
+            &self.config,
+            now,
+            self.work_limits.replay_expiry_batch.get(),
+        );
+        if sessions
+            .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
+            .is_err()
+        {
+            return SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0);
+        }
+        sessions
+            .update(session_id, |buffer| {
+                Self::trim_locked(&self.config, buffer, now);
+                let (revision, live_position) = match snapshot {
+                    Some(revision) => {
+                        let position = buffer
+                            .events
+                            .iter()
+                            .find(|stored| stored.revision > revision)
+                            .map_or(buffer.tail_position, |stored| stored.position - 1);
+                        (revision, position)
+                    }
+                    None => (
+                        buffer
+                            .events
+                            .back()
+                            .map_or(revision, |stored| stored.revision),
+                        buffer.tail_position,
+                    ),
+                };
+                SessionCursor::new(
+                    &buffer.replay_incarnation_id,
+                    session_id,
+                    revision,
+                    live_position,
+                )
+            })
+            .unwrap_or_else(|| {
+                SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0)
+            })
+    }
+}
+
 #[async_trait::async_trait]
 impl LiveReplayStore for InMemoryLiveReplayStore {
     fn tool_live_window(&self) -> Option<Arc<dyn crate::ToolLiveReplay>> {
@@ -1190,9 +1272,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let events = buffer
             .map(|buffer| {
                 buffer
-                    .events
-                    .iter()
-                    .filter(|event| event.position > parsed.live_position)
+                    .events_after(parsed.live_position)
                     .map(|event| clone_event(&event.event))
                     .collect()
             })
@@ -1242,9 +1322,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         Ok(sessions
             .update(&session_id, |buffer| {
                 let replay = buffer
-                    .events
-                    .iter()
-                    .filter(|event| event.position > parsed.live_position)
+                    .events_after(parsed.live_position)
                     .map(|event| clone_event(&event.event))
                     .collect();
                 let receiver = buffer.subscribe(self.config.max_events_per_session, channel_bytes);
@@ -1259,40 +1337,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     }
 
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
-        let now = self.clock.now();
-        let mut sessions = self.sessions.lock_recover();
-        sessions.touch(session_id, now);
-        sessions.expire(
-            &self.config,
-            now,
-            self.work_limits.replay_expiry_batch.get(),
-        );
-        if sessions
-            .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
-            .is_err()
-        {
-            return SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0);
-        }
-        sessions
-            .update(session_id, |buffer| {
-                Self::trim_locked(&self.config, buffer, now);
-                let live_position = buffer
-                    .events
-                    .iter()
-                    .find(|stored| stored.revision > revision)
-                    .map_or(buffer.tail_position, |stored| {
-                        stored.position.saturating_sub(1)
-                    });
-                SessionCursor::new(
-                    &buffer.replay_incarnation_id,
-                    session_id,
-                    revision,
-                    live_position,
-                )
-            })
-            .unwrap_or_else(|| {
-                SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0)
-            })
+        self.cursor_at(session_id, Some(revision))
+    }
+
+    fn tail_cursor(&self, session_id: &SessionId) -> SessionCursor {
+        self.cursor_at(session_id, None)
     }
 
     fn earliest_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
