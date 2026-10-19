@@ -341,7 +341,7 @@ async fn sample(run: &super::Run<'_>, scenario: &str, h: usize) -> Result<Vec<Ro
 }
 
 fn worker_service(worker: &Path) -> lash::vm::WorkerService {
-    let mut config = lash::vm::WorkerService::subprocess(worker).config().clone();
+    let mut config = lash_perf::cell_bounds::subprocess(worker).config().clone();
     config.entry.args.push("--count-heap-work".to_owned());
     config.deadlines.compute = LIMIT;
     config.deadlines.serialization = LIMIT;
@@ -413,8 +413,8 @@ async fn sample_with_stores(
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash::rlm::InstructionBound::instructions(100_000_000))
-                .memory_limit(lash::rlm::MemoryBound::mebibytes(512))
+                .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
+                .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )

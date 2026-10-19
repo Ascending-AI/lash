@@ -270,7 +270,8 @@ pub async fn run(run: &Run<'_>, populations: &[String]) -> Result<()> {
         run.samples > 0 && run.nodes == 1,
         "read matrix needs samples and one node"
     );
-    let mut config = lash::vm::WorkerService::default().config().clone();
+    let mut config =
+        lash_perf::cell_bounds::admitting(lash::vm::WorkerService::default().config().clone());
     config.entry = lash::vm::WorkerEntry::reexec()?;
     let workers = lash::vm::WorkerService::new(config);
     let mut selected = 0;
@@ -389,7 +390,7 @@ async fn measure_with_stores(
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
-            .instruction_limit(lash::rlm::InstructionBound::instructions(100_000_000))
+            .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
             .memory_limit(lash::rlm::MemoryBound::mebibytes(128))
             .build(),
         if python {
@@ -610,7 +611,7 @@ mod tests {
             false,
             32,
             super::Variant::Read,
-            lash::vm::WorkerService::subprocess(&benchmark),
+            lash_perf::cell_bounds::subprocess(&benchmark),
             (
                 std::sync::Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
                 None,
@@ -681,7 +682,7 @@ mod tests {
         let benchmark = std::path::PathBuf::from(
             std::env::var_os("LASH_READ_BENCH_WORKER").expect("benchmark worker runfile"),
         );
-        let workers = lash::vm::WorkerService::subprocess(&benchmark);
+        let workers = lash_perf::cell_bounds::subprocess(&benchmark);
         let started = std::time::Instant::now();
         for python in [false, true] {
             for traced in [false, true] {

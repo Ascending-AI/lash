@@ -203,6 +203,7 @@ use ts.boolean.convert = @ts.boolean.convert
 use ts.boolean.toString = @ts.boolean.toString
 use ts.boolean.valueOf = @ts.boolean.valueOf
 use ts.boundary = @ts.boundary
+use ts.builtin_name = @ts.builtin_name
 use ts.callable = @ts.callable
 use ts.console.json = @ts.console.json
 use ts.console.log = @ts.console.log

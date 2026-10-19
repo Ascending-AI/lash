@@ -132,8 +132,8 @@ pub(crate) fn build_core(
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
                     .channel(lash::rlm::RlmChannel::Cell)
-                    .instruction_limit(lash::rlm::InstructionBound::instructions(100_000_000))
-                    .memory_limit(lash::rlm::MemoryBound::mebibytes(512))
+                    .instruction_limit(crate::cell_bounds::INSTRUCTION_LIMIT)
+                    .memory_limit(crate::cell_bounds::MEMORY_LIMIT)
                     .build(),
                 if protocol == Protocol::Python {
                     lash::rlm::CellDialect::python()

@@ -7,6 +7,7 @@
 //! measurement support.
 
 pub mod boundary;
+pub mod cell_bounds;
 pub mod latency;
 pub mod offered_load;
 pub mod perf_support;

@@ -201,7 +201,7 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
     )
     .await?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
-    let mut config = lash::vm::WorkerService::subprocess(&args.vm_worker)
+    let mut config = lash_perf::cell_bounds::subprocess(&args.vm_worker)
         .config()
         .clone();
     if let Some(dir) = &args.worker_profile_dir {
@@ -215,8 +215,8 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash::rlm::InstructionBound::instructions(100_000_000))
-                .memory_limit(lash::rlm::MemoryBound::mebibytes(512))
+                .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
+                .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )

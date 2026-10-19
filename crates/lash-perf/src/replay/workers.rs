@@ -32,7 +32,8 @@ pub(crate) fn service(
     _profile_dir: &std::path::Path,
 ) -> anyhow::Result<lash::vm::WorkerService> {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::vm::WorkerService::default().config().clone();
+    let mut config =
+        crate::cell_bounds::admitting(lash::vm::WorkerService::default().config().clone());
     if python {
         config.entry = lash::vm::WorkerEntry::reexec()
             .map_err(|error| anyhow::anyhow!("locate this binary for Python workers: {error}"))?;

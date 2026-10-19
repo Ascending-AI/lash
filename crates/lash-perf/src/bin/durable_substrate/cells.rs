@@ -51,8 +51,8 @@ pub fn core(
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash::rlm::InstructionBound::instructions(100_000_000))
-                .memory_limit(lash::rlm::MemoryBound::mebibytes(512))
+                .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
+                .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )
@@ -104,7 +104,7 @@ pub async fn create_session(core: &lash::LashCore, session: &SessionId) -> Resul
 /// The bench names its worker: a build output has no worker beside it.
 fn untimed_workers(worker: &Path) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::vm::WorkerService::subprocess(worker).config().clone();
+    let mut config = lash_perf::cell_bounds::subprocess(worker).config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
