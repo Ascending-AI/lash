@@ -7,6 +7,7 @@
 //! their absent slot at the scope root.
 
 mod calls;
+mod captions;
 mod entries;
 mod expressions;
 mod format;
@@ -197,6 +198,11 @@ pub(crate) struct Lowerer<'a> {
     /// The first module name an entry's body named, with where, which the
     /// entry is refused for.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
+    /// The captions the module spells, by where what each captions starts;
+    /// none for a cell.
+    captions: BTreeMap<usize, lash_kernel_doc::Caption>,
+    /// The captions of the module's entries.
+    entry_captions: BTreeMap<Name, lash_kernel_doc::Caption>,
 }
 
 /// No module or restored session binding may mask the dialect's built-ins,
@@ -234,6 +240,7 @@ pub(crate) fn lower_with_calls(
     mode: Mode<'_>,
     max_nesting: usize,
     calls: Option<&mut BTreeSet<String>>,
+    spelled: crate::captions::Spelled,
 ) -> Lowering<Lowered> {
     let (cell, workflow) = match mode {
         Mode::Cell(cell) => (cell, None),
@@ -244,8 +251,18 @@ pub(crate) fn lower_with_calls(
     } else {
         HashSet::new()
     };
-    let mut taken: HashSet<String> = source
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+    // Fresh names avoid every word of the code, but not of `#:` comments:
+    // a caption changes no name (`K-CAP-001`).
+    let mut code = Vec::with_capacity(spelled.comments.len() + 1);
+    let mut from = 0;
+    for comment in &spelled.comments {
+        code.push(&source[from..comment.start]);
+        from = comment.end;
+    }
+    code.push(&source[from..]);
+    let mut taken: HashSet<String> = code
+        .into_iter()
+        .flat_map(|code| code.split(|c: char| !(c.is_alphanumeric() || c == '_')))
         .filter(|word| !word.is_empty())
         .map(str::to_string)
         .collect();
@@ -331,6 +348,8 @@ pub(crate) fn lower_with_calls(
         creates_tasks: false,
         inline_closures: Vec::new(),
         captured: std::cell::RefCell::new(None),
+        captions: spelled.captions,
+        entry_captions: BTreeMap::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -389,7 +408,6 @@ pub(crate) fn lower_with_calls(
         )
     })?;
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    // No caption is spelled yet: the notes carry none.
     let lash_kernel_dialect::SiteLayers {
         mut source_map,
         written,
@@ -400,7 +418,7 @@ pub(crate) fn lower_with_calls(
         lash_kernel_doc::SourceLanguage::Python,
         &main.notes,
         &lowerer.declared_notes,
-        &BTreeMap::new(),
+        &lowerer.entry_captions,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     let mut mapped: BTreeSet<_> = source_map

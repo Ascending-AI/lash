@@ -148,6 +148,8 @@ a source with its stripped twin and the exact `(site, caption)` table it
 imports with. A dialect that spells captions declares the kinds in its
 `CaptionSupport` and adds authored cases; the laws stay as they are.
 Rekeying (`K-CAP-004`) runs over kernel documents with one edit of each
-operation, and over each dialect's authored cases with a step inserted ahead
-of the entry's body. The text domain (`K-CAP-005`) takes no dialect and runs
-once.
+operation, and over each dialect's authored cases twice. A step inserted
+ahead of the entry's body keeps every caption at its step's new site. A
+canvas edit of a tool's argument, or of an action-free condition, keeps
+every imported caption and touches exactly those at or above what it
+wrote. The text domain (`K-CAP-005`) takes no dialect and runs once.

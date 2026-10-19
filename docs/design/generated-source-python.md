@@ -1,7 +1,7 @@
 # Python exported source, format v1
 
 The Python codec implements the [shared exact-source contract](generated-source-format.md).
-`print(Document, PrintOptions)` only renders plain Python an agent could have
+`print(Document, captions, PrintOptions)` only renders plain Python an agent could have
 written: functions, then `def main():`, with no header, directive, stub block,
 name or helper table, and no `result=` cast in the ordinary case.
 `read(source, base, limits)` reconstructs the document directly against the
@@ -33,6 +33,19 @@ async def deep_research():
 def main():
     return None
 ```
+
+## Captions
+
+Captions print as `#:` lines directly above what they caption, at its
+indentation: a statement's first line; the `else:`, `except BaseException as
+…:` or `finally:` line of an arm, or its `with k.block():` line in a generic
+suite; and a declared function's `def`. A captioned else arm never folds
+into `elif`, and an empty one prints `else:` with `pass`. Caption Sites are
+tracked whether or not a map is collected, and none is dropped. The reader
+numbers statements in the order it begins them, which is the order a walk of
+the document meets them, and resolves each caption to its Site once the
+document is whole; any other comment, and a `#:` run above anything else, is
+ignored. The front end and the reader share the syntax module.
 
 ## Paired readable inventory
 

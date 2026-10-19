@@ -536,10 +536,11 @@ identity. Wording for a step without a caption is yours.
 **Telling a model.** Each dialect declares the caption kinds it spells and a
 short guide in its own syntax (`lash::typescript::CAPTIONS`,
 `lash::python::CAPTIONS`, a `CaptionSupport`). Put the `guide` in a model's
-prompt rather than hard-coding a syntax. TypeScript spells every kind as a
-JSDoc block, `/** Send the weekly report */`, right before the statement,
-function or `else`/`catch`/`finally` keyword it names. Python spells none
-yet: its `kinds` are empty and its printer drops every caption.
+prompt rather than hard-coding a syntax. Both dialects spell every kind.
+TypeScript uses a JSDoc block, `/** Send the weekly report */`, right
+before the statement, function or `else`/`catch`/`finally` keyword it
+names. Python uses `#:` lines directly above what they caption, at its
+indentation: `#: Send the weekly report`.
 
 ## TypeScript is a lens
 

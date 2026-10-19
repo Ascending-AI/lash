@@ -22,6 +22,7 @@ fn error(code: Code, message: impl Into<String>) -> Diagnostic {
     }
 }
 mod actions;
+mod captioned;
 mod inline;
 
 type Result<T> = std::result::Result<T, Diagnostic>;
@@ -42,15 +43,16 @@ fn depth_error() -> Diagnostic {
 /// admission. The source carries only code; the manifest, entries, private
 /// bindings, helper identities and name renames come from `base`.
 ///
-/// The captions are those the source spells: none yet, as the printer
-/// spells none.
+/// The captions are those the source spells as `#:` lines above a
+/// statement, a clause or a `def` ([`crate::captions`]); any other comment
+/// is ignored.
 pub fn read(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
 ) -> Result<(k::Document, k::Captions)> {
-    let document = read_document(source, base, limits)?;
-    let captions = k::Captions::empty(document.identity());
+    let (document, entries) = read_document(source, base, limits)?;
+    let captions = k::Captions::new(&document, entries).map_err(|e| invalid(e.to_string()))?;
     Ok((document, captions))
 }
 
@@ -58,7 +60,7 @@ fn read_document(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
-) -> Result<k::Document> {
+) -> Result<(k::Document, Vec<k::CaptionEntry>)> {
     if source.len() > limits.max_bytes {
         return Err(error(
             Code::GeneratedSourceBytes,
@@ -72,7 +74,7 @@ fn read_document(
             .name("kernel-python-decode".into())
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let mut document = Reader::new(source, base, limits)?.document(base)?;
+                let (mut document, captions) = Reader::new(source, base, limits)?.document(base)?;
                 // Source spells no start adapter: the base keeps them.
                 k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|e| match e {
@@ -80,7 +82,8 @@ fn read_document(
                     PrintError::Depth { .. } => depth_error(),
                     _ => invalid(e.to_string()),
                 })?;
-                Ok(document)
+                let captions = captions.resolve(&document);
+                Ok((document, captions))
             })
             .map_err(|e| invalid(e.to_string()))?;
         handle
@@ -249,6 +252,9 @@ struct Reader<'a> {
     scope: BindingScope,
     main: bool,
     operators: crate::generated_operators::Operators,
+    /// The caption above each line that has one, by the line's index.
+    captions: BTreeMap<usize, k::Caption>,
+    found: captioned::Found,
 }
 impl<'a> Reader<'a> {
     fn new(source: &'a str, base: &k::Document, limits: GeneratedSourceLimits) -> Result<Self> {
@@ -258,7 +264,9 @@ impl<'a> Reader<'a> {
         let plan = lash_kernel_dialect::NamePlan::new(base, crate::printer::legal_identifier);
         let limit = limits.max_depth.min(64);
         let mut lines = vec![];
-        for line in source.lines() {
+        let mut spelled = crate::captions::spelled(source, captioned::comments(source));
+        let mut captions = BTreeMap::new();
+        for (start, line) in captioned::lines(source) {
             if line.trim().is_empty() || line.trim_start().starts_with('#') {
                 continue;
             }
@@ -270,6 +278,9 @@ impl<'a> Reader<'a> {
             // indentation step is a real Node child, not an auxiliary tree.
             if indent / 4 > limit + 2 {
                 return Err(depth_error());
+            }
+            if let Some(caption) = spelled.captions.remove(&(start + indent)) {
+                captions.insert(lines.len(), caption);
             }
             lines.push(Line {
                 indent: indent / 4,
@@ -296,7 +307,25 @@ impl<'a> Reader<'a> {
             scope: Default::default(),
             main: false,
             operators: crate::generated_operators::Operators::new(&base.manifest.functions),
+            captions,
+            found: Default::default(),
         })
+    }
+    /// The caption above the line read next.
+    fn caption(&self) -> Option<k::Caption> {
+        self.captions.get(&self.next).cloned()
+    }
+    /// Begins the statement on the line read next, which the caption above
+    /// it names, and answers its ordinal.
+    fn begin_statement(&mut self) -> usize {
+        let caption = self.caption();
+        self.found.statement(caption)
+    }
+    /// Notes the caption above the line read next for block `child` of the
+    /// statement `owner`: the clause that line begins.
+    fn arm(&mut self, owner: usize, child: u32) {
+        let caption = self.caption();
+        self.found.arm(owner, child, caption);
     }
     fn line(&mut self, indent: usize) -> Result<(Cursor<'a>, bool)> {
         let line = *self
@@ -540,7 +569,7 @@ impl<'a> Reader<'a> {
             c.expect(",")?;
         }
     }
-    fn document(mut self, base: &k::Document) -> Result<k::Document> {
+    fn document(mut self, base: &k::Document) -> Result<(k::Document, captioned::Found)> {
         let mut document = k::Document {
             manifest: base.manifest.clone(),
             entries: base.entries.clone(),
@@ -550,6 +579,7 @@ impl<'a> Reader<'a> {
         };
         let mut main = false;
         while self.more(0) {
+            let caption = self.caption();
             let (mut c, suite) = self.line(0)?;
             if !suite && (c.take("async def ") || c.take("def ")) && !main {
                 let alias = c.word()?;
@@ -558,6 +588,8 @@ impl<'a> Reader<'a> {
                 } else {
                     Some(self.named(alias)?)
                 };
+                let unit = name.clone().map_or(k::Unit::Main, k::Unit::Function);
+                self.found.root(unit, caption);
                 let params = self.parameters(&mut c)?;
                 c.expect(":")?;
                 c.finish()?;
@@ -595,7 +627,7 @@ impl<'a> Reader<'a> {
         if !main || self.next != self.lines.len() {
             return Err(format_error("missing main or trailing program text"));
         }
-        Ok(document)
+        Ok((document, self.found))
     }
     fn block(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
         self.depth(depth)?;
@@ -618,9 +650,10 @@ impl<'a> Reader<'a> {
     }
     fn statement(&mut self, indent: usize, depth: usize) -> Result<k::Stmt> {
         self.depth(depth)?;
+        let ordinal = self.begin_statement();
         let (mut c, suite) = self.line(indent)?;
         if !suite {
-            let stmt = self.readable_statement(c, indent, depth)?;
+            let stmt = self.readable_statement(c, indent, depth, ordinal)?;
             self.scope
                 .types
                 .statement(&stmt, self.operators.functions());
@@ -665,9 +698,12 @@ impl<'a> Reader<'a> {
             }
             "if_" => {
                 c.end(true)?;
+                let condition = self.expr(i, d)?;
+                let then_block = self.block(i, d)?;
+                self.arm(ordinal, 2);
                 k::Stmt::If {
-                    condition: self.expr(i, d)?,
-                    then_block: self.block(i, d)?,
+                    condition,
+                    then_block,
                     else_block: self.block(i, d)?,
                 }
             }
@@ -700,7 +736,7 @@ impl<'a> Reader<'a> {
                     iterable: self.expr(i, d)?,
                     via,
                     body: self.block(i, d)?,
-                    else_block: self.generic_else(i, d)?,
+                    else_block: self.generic_else(i, d, ordinal)?,
                 }
             }
             "while_" => {
@@ -709,7 +745,7 @@ impl<'a> Reader<'a> {
                     metered: 0,
                     condition: self.expr(i, d)?,
                     body: self.block(i, d)?,
-                    else_block: self.generic_else(i, d)?,
+                    else_block: self.generic_else(i, d, ordinal)?,
                 }
             }
             "return_via" => {
@@ -748,10 +784,14 @@ impl<'a> Reader<'a> {
                 };
                 c.end(true)?;
                 let body = self.block(i, d)?;
+                if binding.is_some() {
+                    self.arm(ordinal, 1);
+                }
                 let catch = binding
                     .map(|binding| self.block(i, d).map(|body| k::Catch { binding, body }))
                     .transpose()?;
                 let finally = if finally {
+                    self.arm(ordinal, 1 + u32::from(catch.is_some()));
                     Some(self.block(i, d)?)
                 } else {
                     None
@@ -790,10 +830,11 @@ impl<'a> Reader<'a> {
         Ok(body)
     }
     /// A loop's `else` suite, or the empty block when it has none.
-    fn readable_else(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
+    fn readable_else(&mut self, indent: usize, depth: usize, owner: usize) -> Result<k::Block> {
         if !self.starts(indent, "else:") {
             return Ok(Vec::new());
         }
+        self.arm(owner, 2);
         let (mut c, _) = self.line(indent)?;
         c.expect("else:")?;
         c.finish()?;
@@ -804,17 +845,24 @@ impl<'a> Reader<'a> {
         Ok(block)
     }
     /// A generic loop's `else` block, when one follows its body.
-    fn generic_else(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
+    fn generic_else(&mut self, indent: usize, depth: usize, owner: usize) -> Result<k::Block> {
         if !self.more(indent) {
             return Ok(Vec::new());
         }
+        self.arm(owner, 2);
         let block = self.block(indent, depth)?;
         if block.is_empty() {
             return Err(invalid("an empty loop else is omitted"));
         }
         Ok(block)
     }
-    fn readable_if(&mut self, mut c: Cursor<'_>, indent: usize, depth: usize) -> Result<k::Stmt> {
+    fn readable_if(
+        &mut self,
+        mut c: Cursor<'_>,
+        indent: usize,
+        depth: usize,
+        ordinal: usize,
+    ) -> Result<k::Stmt> {
         self.depth(depth)?;
         let condition = self.inline(&mut c, depth + 1)?;
         c.expect(":")?;
@@ -823,10 +871,12 @@ impl<'a> Reader<'a> {
         let else_block = if self.starts(indent, "elif ") {
             // Exact inverse: elif is one If statement inside the else Block.
             self.depth(depth + 1)?;
+            let nested = self.begin_statement();
             let (mut c, _) = self.line(indent)?;
             c.expect("elif ")?;
-            vec![self.readable_if(c, indent, depth + 2)?]
+            vec![self.readable_if(c, indent, depth + 2, nested)?]
         } else {
+            self.arm(ordinal, 2);
             let (mut c, suite) = self.line(indent)?;
             if suite {
                 return Err(invalid("expected else clause"));
@@ -855,6 +905,7 @@ impl<'a> Reader<'a> {
         mut c: Cursor<'_>,
         indent: usize,
         depth: usize,
+        ordinal: usize,
     ) -> Result<k::Stmt> {
         let field_operation = if c.take("setattr(") {
             Some(true)
@@ -932,7 +983,7 @@ impl<'a> Reader<'a> {
                 value: k::Expr::Act(Box::new(act)),
             }
         } else if c.take("if ") {
-            self.readable_if(c, indent, depth)?
+            self.readable_if(c, indent, depth, ordinal)?
         } else if c.take("for ") {
             let binding = self.name(&mut c)?;
             self.scope.introduce(&binding);
@@ -971,7 +1022,7 @@ impl<'a> Reader<'a> {
                 iterable,
                 via,
                 body: self.readable_block(indent + 1, depth + 1)?,
-                else_block: self.readable_else(indent, depth + 1)?,
+                else_block: self.readable_else(indent, depth + 1, ordinal)?,
             }
         } else if c.take("while ") {
             let condition = self.inline(&mut c, depth + 1)?;
@@ -981,12 +1032,13 @@ impl<'a> Reader<'a> {
                 metered: 0,
                 condition,
                 body: self.readable_block(indent + 1, depth + 1)?,
-                else_block: self.readable_else(indent, depth + 1)?,
+                else_block: self.readable_else(indent, depth + 1, ordinal)?,
             }
         } else if c.take("try:") {
             c.finish()?;
             let body = self.readable_block(indent + 1, depth + 1)?;
             let catch = if self.starts(indent, "except ") {
+                self.arm(ordinal, 1);
                 let (mut c, suite) = self.line(indent)?;
                 if suite {
                     return Err(invalid("expected except clause"));
@@ -1004,6 +1056,7 @@ impl<'a> Reader<'a> {
                 None
             };
             let finally = if self.starts(indent, "finally:") {
+                self.arm(ordinal, 1 + u32::from(catch.is_some()));
                 let (mut c, _) = self.line(indent)?;
                 c.expect("finally:")?;
                 c.finish()?;

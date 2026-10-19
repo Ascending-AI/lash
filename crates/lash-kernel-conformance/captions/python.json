@@ -1,9 +1,369 @@
 {
-  "authored": [],
+  "authored": [
+    {
+      "name": "every kind",
+      "source": "#: Greet the team — ✓\n#: Sends one hello per member.\n#:\n#: Then reports back: 名前を確認.\nasync def demo(flag: bool, items: list[str]):\n    \"\"\"A docstring is never a caption.\"\"\"\n    #: Say hello\n    result = await corpus.echo(\"start\")\n    #: Choose a path\n    if flag:\n        #: Say yes\n        result = await corpus.echo(\"yes\")\n    #: Otherwise say no\n    else:\n        #: Pick no\n        result = \"no\"\n    if result == \"a\":\n        result = \"b\"\n    #: Or check c\n    elif result == \"c\":\n        result = \"d\"\n    #: Fall back\n    else:\n        pass\n    #: Echo twice\n    both = await corpus.echo(await corpus.echo(\"inner\"))\n    #: Try the risky step\n    try:\n        result = await corpus.echo(\"try\")\n    #: Recover\n    except ValueError:\n        result = \"caught\"\n    #: A later except is a comment\n    except Exception:\n        result = \"other\"\n    #: Always clean up\n    finally:\n        await corpus.echo(\"finally\")\n    #: Echo each item\n    for item in items:\n        await corpus.echo(item)\n    #: After every item\n    else:\n        result = \"done\"\n    while flag:\n        flag = False\n    #: Loop ended\n    else:\n        result = \"stopped\"\n    return [result, both]\n",
+      "stripped": "async def demo(flag: bool, items: list[str]):\n    \"\"\"A docstring is never a caption.\"\"\"\n    result = await corpus.echo(\"start\")\n    if flag:\n        result = await corpus.echo(\"yes\")\n    else:\n        result = \"no\"\n    if result == \"a\":\n        result = \"b\"\n    elif result == \"c\":\n        result = \"d\"\n    else:\n        pass\n    both = await corpus.echo(await corpus.echo(\"inner\"))\n    try:\n        result = await corpus.echo(\"try\")\n    except ValueError:\n        result = \"caught\"\n    except Exception:\n        result = \"other\"\n    finally:\n        await corpus.echo(\"finally\")\n    for item in items:\n        await corpus.echo(item)\n    else:\n        result = \"done\"\n    while flag:\n        flag = False\n    else:\n        result = \"stopped\"\n    return [result, both]\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            }
+          },
+          "caption": {
+            "title": "Greet the team — ✓",
+            "description": "Sends one hello per member.\n\nThen reports back: 名前を確認."
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              0
+            ]
+          },
+          "caption": {
+            "title": "Say hello"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1
+            ]
+          },
+          "caption": {
+            "title": "Choose a path"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              1,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Say yes"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Otherwise say no"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              1,
+              2,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Pick no"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              2,
+              2,
+              0
+            ]
+          },
+          "caption": {
+            "title": "Or check c"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              2,
+              2,
+              0,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Fall back"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              3
+            ]
+          },
+          "caption": {
+            "title": "Echo twice"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4
+            ]
+          },
+          "caption": {
+            "title": "Try the risky step"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4,
+              1
+            ]
+          },
+          "caption": {
+            "title": "Recover"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              4,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Always clean up"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              5
+            ]
+          },
+          "caption": {
+            "title": "Echo each item"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              5,
+              2
+            ]
+          },
+          "caption": {
+            "title": "After every item"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "demo"
+            },
+            "path": [
+              6,
+              2
+            ]
+          },
+          "caption": {
+            "title": "Loop ended"
+          }
+        }
+      ]
+    },
+    {
+      "name": "hoisted",
+      "source": "#: Hoisted work\nasync def hoist(items: list[str]):\n    #: Gather both\n    pair = [await corpus.echo(\"a\"), [await corpus.echo(item) for item in items]]\n    #: Define the helper\n    def helper():\n        return later\n    #: Set it later\n    later = await corpus.echo(\"x\")\n    #: Count them\n    total = len(pair)\n    #: Retry once\n    try:\n        total = total + 1\n    #: Report\n    finally:\n        await corpus.echo(helper())\n    return total\n",
+      "stripped": "async def hoist(items: list[str]):\n    pair = [await corpus.echo(\"a\"), [await corpus.echo(item) for item in items]]\n    def helper():\n        return later\n    later = await corpus.echo(\"x\")\n    total = len(pair)\n    try:\n        total = total + 1\n    finally:\n        await corpus.echo(helper())\n    return total\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            }
+          },
+          "caption": {
+            "title": "Hoisted work"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              1
+            ]
+          },
+          "caption": {
+            "title": "Gather both"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              5
+            ]
+          },
+          "caption": {
+            "title": "Define the helper"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              6
+            ]
+          },
+          "caption": {
+            "title": "Set it later"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              7
+            ]
+          },
+          "caption": {
+            "title": "Count them"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              8
+            ]
+          },
+          "caption": {
+            "title": "Retry once"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "hoist"
+            },
+            "path": [
+              8,
+              1
+            ]
+          },
+          "caption": {
+            "title": "Report"
+          }
+        }
+      ]
+    },
+    {
+      "name": "trivia",
+      "source": "async def quiet(flag: bool):\n    #: On a docstring\n    \"\"\"Docstrings stay discarded.\"\"\"\n    #: Detached by a blank line\n\n    first = await corpus.echo(\"one\")\n    #: Done */ await wipe(); /*\n    second = await corpus.echo(\"two\")\n    #: Tagged\n    #: @param flag\n    third = await corpus.echo(\"three\")\n      #: Wrong indentation\n    fourth = await corpus.echo(\"four\")  #: After code\n    #: Far\n    # an ordinary comment\n    #: Near\n    fifth = await corpus.echo(\"five\")\n    #: Nothing to caption\n    pass\n    #: Two blank lines\n    #:\n    #:\n    #: break the rule\n    seventh = await corpus.echo(\"seven\")\n    #: Fetch the eighth\n    try:\n        eighth = await corpus.echo(\"eight\")\n    except Exception:\n        eighth = \"none\"\n    #: No kernel arm\n    else:\n        eighth = \"fine\"\n    return [first, second, third, fourth, fifth, seventh, eighth]\n",
+      "stripped": "async def quiet(flag: bool):\n    \"\"\"Docstrings stay discarded.\"\"\"\n\n    first = await corpus.echo(\"one\")\n    second = await corpus.echo(\"two\")\n    third = await corpus.echo(\"three\")\n    fourth = await corpus.echo(\"four\")\n    # an ordinary comment\n    fifth = await corpus.echo(\"five\")\n    pass\n    seventh = await corpus.echo(\"seven\")\n    try:\n        eighth = await corpus.echo(\"eight\")\n    except Exception:\n        eighth = \"none\"\n    else:\n        eighth = \"fine\"\n    return [first, second, third, fourth, fifth, seventh, eighth]\n",
+      "captions": [
+        {
+          "site": {
+            "unit": {
+              "function": "quiet"
+            },
+            "path": [
+              5
+            ]
+          },
+          "caption": {
+            "title": "Near"
+          }
+        },
+        {
+          "site": {
+            "unit": {
+              "function": "quiet"
+            },
+            "path": [
+              8
+            ]
+          },
+          "caption": {
+            "title": "Fetch the eighth"
+          }
+        }
+      ]
+    }
+  ],
   "readback": [
     {
       "name": "every captionable kind",
       "source": "async def demo(flag: bool, items: list[str]):\n    result = await corpus.echo(\"start\")\n    if flag:\n        result = await corpus.echo(\"yes\")\n    else:\n        result = \"no\"\n    if result == \"a\":\n        result = \"b\"\n    elif result == \"c\":\n        result = \"d\"\n    both = await corpus.echo(await corpus.echo(\"inner\"))\n    try:\n        result = await corpus.echo(\"try\")\n    except Exception:\n        result = \"caught\"\n    finally:\n        await corpus.echo(\"finally\")\n    for item in items:\n        await corpus.echo(item)\n    else:\n        result = \"done\"\n    while flag:\n        flag = False\n    else:\n        result = \"stopped\"\n    return [result, both]\n"
+    },
+    {
+      "name": "every kind",
+      "source": "#: Greet the team — ✓\n#: Sends one hello per member.\n#:\n#: Then reports back: 名前を確認.\nasync def demo(flag: bool, items: list[str]):\n    \"\"\"A docstring is never a caption.\"\"\"\n    #: Say hello\n    result = await corpus.echo(\"start\")\n    #: Choose a path\n    if flag:\n        #: Say yes\n        result = await corpus.echo(\"yes\")\n    #: Otherwise say no\n    else:\n        #: Pick no\n        result = \"no\"\n    if result == \"a\":\n        result = \"b\"\n    #: Or check c\n    elif result == \"c\":\n        result = \"d\"\n    #: Fall back\n    else:\n        pass\n    #: Echo twice\n    both = await corpus.echo(await corpus.echo(\"inner\"))\n    #: Try the risky step\n    try:\n        result = await corpus.echo(\"try\")\n    #: Recover\n    except ValueError:\n        result = \"caught\"\n    #: A later except is a comment\n    except Exception:\n        result = \"other\"\n    #: Always clean up\n    finally:\n        await corpus.echo(\"finally\")\n    #: Echo each item\n    for item in items:\n        await corpus.echo(item)\n    #: After every item\n    else:\n        result = \"done\"\n    while flag:\n        flag = False\n    #: Loop ended\n    else:\n        result = \"stopped\"\n    return [result, both]\n"
+    },
+    {
+      "name": "hoisted",
+      "source": "#: Hoisted work\nasync def hoist(items: list[str]):\n    #: Gather both\n    pair = [await corpus.echo(\"a\"), [await corpus.echo(item) for item in items]]\n    #: Define the helper\n    def helper():\n        return later\n    #: Set it later\n    later = await corpus.echo(\"x\")\n    #: Count them\n    total = len(pair)\n    #: Retry once\n    try:\n        total = total + 1\n    #: Report\n    finally:\n        await corpus.echo(helper())\n    return total\n"
+    },
+    {
+      "name": "trivia",
+      "source": "async def quiet(flag: bool):\n    #: On a docstring\n    \"\"\"Docstrings stay discarded.\"\"\"\n    #: Detached by a blank line\n\n    first = await corpus.echo(\"one\")\n    #: Done */ await wipe(); /*\n    second = await corpus.echo(\"two\")\n    #: Tagged\n    #: @param flag\n    third = await corpus.echo(\"three\")\n      #: Wrong indentation\n    fourth = await corpus.echo(\"four\")  #: After code\n    #: Far\n    # an ordinary comment\n    #: Near\n    fifth = await corpus.echo(\"five\")\n    #: Nothing to caption\n    pass\n    #: Two blank lines\n    #:\n    #:\n    #: break the rule\n    seventh = await corpus.echo(\"seven\")\n    #: Fetch the eighth\n    try:\n        eighth = await corpus.echo(\"eight\")\n    except Exception:\n        eighth = \"none\"\n    #: No kernel arm\n    else:\n        eighth = \"fine\"\n    return [first, second, third, fourth, fifth, seventh, eighth]\n"
+    },
+    {
+      "name": "generic suites",
+      "source": "async def generic(flag: bool, items: list[str]):\n    if (await corpus.echo(\"a\") if flag else \"b\"):\n        result = \"yes\"\n    else:\n        result = \"no\"\n    while (await corpus.echo(\"go\") if flag else False):\n        flag = False\n    else:\n        result = \"stopped\"\n    for item in (items if flag else []):\n        result = item\n    else:\n        result = \"walked\"\n    check = lambda value: value if flag else None\n    return [result, check(result)]\n"
     }
   ]
 }

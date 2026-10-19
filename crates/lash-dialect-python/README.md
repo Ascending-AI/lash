@@ -208,10 +208,34 @@ law for each entry.
 
 ## Exact generated source
 
-`print(document, PrintOptions::default())` emits plain Python with no header
+`print(document, captions, PrintOptions::default())` emits plain Python with no header
 or tables; `read(source, &document, GeneratedSourceLimits::default())`
 reconstructs identical canonical document bytes against that base Document,
-without authored lowering or library lookup.
+and the captions the source spells, without authored lowering or library lookup.
 Maps are optional and default off. Printing performs no compilation or admission.
 The [generic format and paired inventory](../../docs/design/generated-source-python.md)
 document indentation, explicit empty blocks, exact literals, aliases and limits.
+
+## Captions
+
+A workflow module spells a step's caption (`K-CAP-001`..`K-CAP-006`) as `#:`
+lines directly above it, at its indentation, with no blank line between: the
+first line is the title, the rest the description, and a bare `#:` a blank
+line in it. Above a statement it captions the statement, above a top-level
+`async def` the entry (the workflow's title), and above `else:` (of an `if`,
+`for` or `while`), the first `except` or `finally:` that arm; above `elif` it
+captions the nested `if`. `CAPTIONS` declares every kind and its `guide` says
+this for a model's prompt.
+
+The front end decides the owner as it lowers each construct: a control's own
+statement, a `def`'s binding, else the statement holding the construct's
+first action (a pinned operand's temporary when the first action is pinned),
+else the construct's last statement. A predeclared slot and the other
+scaffolding never take one. Anything else is a comment, never a refusal: a
+`#:` run that is detached, at another indentation, after code, above a
+docstring, `pass`, a later `except` or a `try`'s `else:`, or whose text the
+caption rule refuses. A docstring is never a caption. Words in `#:` comments
+do not count against fresh names, so stripping them keeps the document's
+identity. The front end (from the parser's comment tokens) and the
+generated-source reader share one `captions` module; a cell has no
+captions.

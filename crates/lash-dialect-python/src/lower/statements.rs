@@ -8,6 +8,7 @@ use lash_kernel_doc::{
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
+use super::captions::Arm;
 use super::{Active, Buf, Lowerer, Lowering, Note, Operand, Scope, ScopeKind};
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Catches;
@@ -52,9 +53,12 @@ impl Lowerer<'_> {
     fn statement(&mut self, statement: &PyStmt) -> Lowering<()> {
         self.span_of(statement);
         let span = self.span;
+        let first = self.buf.stmts.len();
         self.nested(statement.range(), |this| {
             this.statement_inner(statement, span)
-        })
+        })?;
+        self.own_caption(statement, first);
+        Ok(())
     }
 
     fn statement_inner(
@@ -190,6 +194,8 @@ impl Lowerer<'_> {
                 let else_block = self.block(|this| this.clauses(&branch.elif_else_clauses))?;
                 self.span = span;
                 self.emit_if(condition, then_block, else_block);
+                let otherwise = self.else_caption(&branch.elif_else_clauses);
+                self.caption_arm(Arm::Last, otherwise);
                 Ok(())
             }
             PyStmt::While(while_loop) => self.while_loop(while_loop, span),
@@ -294,9 +300,23 @@ impl Lowerer<'_> {
                 let else_block = self.block(|this| this.clauses(rest))?;
                 self.span = span;
                 self.emit_if(condition, then_block, else_block);
+                // An `elif`'s caption names its own check, the nested `if`.
+                if let Some(caption) = self.caption_at(clause.start())
+                    && let Some(note) = self.buf.notes.last_mut()
+                {
+                    note.caption = Some(caption);
+                }
+                let otherwise = self.else_caption(rest);
+                self.caption_arm(Arm::Last, otherwise);
                 Ok(())
             }
         }
+    }
+
+    /// The caption of the `else:` that `clauses` start with, when they do.
+    fn else_caption(&self, clauses: &[ast::ElifElseClause]) -> Option<lash_kernel_doc::Caption> {
+        let clause = clauses.first().filter(|clause| clause.test.is_none())?;
+        self.caption_at(clause.start())
     }
 
     fn while_loop(
@@ -311,6 +331,7 @@ impl Lowerer<'_> {
             },
             |this| this.statements(&while_loop.body),
             &while_loop.orelse,
+            self.loop_else_caption(&while_loop.body, &while_loop.orelse),
             span,
         )
     }
@@ -325,6 +346,7 @@ impl Lowerer<'_> {
         test: impl FnOnce(&mut Self) -> Lowering<Expr>,
         body: impl FnOnce(&mut Self) -> Lowering<()>,
         orelse: &[PyStmt],
+        else_caption: Option<lash_kernel_doc::Caption>,
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let mut simple = None;
@@ -366,7 +388,9 @@ impl Lowerer<'_> {
             }
             (None, None) => Expr::Literal(Literal::Bool(true)),
         };
+        let otherwise = (!orelse.is_empty()).then_some(else_caption).flatten();
         self.emit_while(condition, block, orelse);
+        self.caption_arm(Arm::Last, otherwise);
         Ok(())
     }
 
@@ -451,7 +475,11 @@ impl Lowerer<'_> {
         })?;
         let orelse = self.block(|this| this.statements(&for_loop.orelse))?;
         self.span = span;
+        let otherwise = (!orelse.is_empty())
+            .then(|| self.loop_else_caption(&for_loop.body, &for_loop.orelse))
+            .flatten();
         self.emit_for(binding, walked.expr, Some(via), body, orelse);
+        self.caption_arm(Arm::Last, otherwise);
         Ok(())
     }
 
@@ -626,6 +654,7 @@ impl Lowerer<'_> {
             let finally = self.suite(&attempt.finalbody)?;
             self.span = span;
             self.emit_try(body, None, Some(finally));
+            self.caption_arm(Arm::Last, self.finally_caption(attempt));
             return Ok(());
         }
         let caught = self.temp();
@@ -642,6 +671,7 @@ impl Lowerer<'_> {
         let finally = self.suite(&attempt.finalbody)?;
         self.span = span;
         self.emit_try(body, None, Some(finally));
+        self.caption_arm(Arm::Last, self.finally_caption(attempt));
         Ok(())
     }
 
@@ -706,6 +736,7 @@ impl Lowerer<'_> {
         })?;
         self.span = span;
         self.emit_try(body, Some((raised, record)), Some(finally));
+        self.caption_arm(Arm::Last, self.finally_caption(attempt));
         Ok(())
     }
 
@@ -740,7 +771,10 @@ impl Lowerer<'_> {
         })?;
         let handlers = self.block(|this| this.handlers(&attempt.handlers, caught))?;
         self.span = span;
+        let finally_caption = finally.as_ref().and_then(|_| self.finally_caption(attempt));
         self.emit_try(body, Some((caught.clone(), handlers)), finally);
+        self.caption_arm(Arm::Catch, self.except_caption(attempt));
+        self.caption_arm(Arm::Last, finally_caption);
         if let Some(flag) = passed {
             let orelse = self.suite(&attempt.orelse)?;
             self.span = span;

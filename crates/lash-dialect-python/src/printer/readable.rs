@@ -417,6 +417,8 @@ impl Renderer<'_> {
         self.readable_block(then_block);
         // An elif is exactly one nested If in the else Block. Keep both map
         // frames; this changes layout, never the stored statement boundaries.
+        // A captioned else Block has its own clause, where its caption goes.
+        let otherwise = self.next_caption();
         if let [
             k::Stmt::If {
                 condition,
@@ -425,14 +427,19 @@ impl Renderer<'_> {
             },
         ] = else_block.as_slice()
             && self.inline.contains(condition)
+            && otherwise.is_none()
         {
             self.out.begin_node(None); // else Block
+            self.caption_next();
             self.out.begin_node(None); // nested If
             self.padding();
             self.readable_if(condition, then_block, else_block, "elif");
             self.out.end_node();
             self.out.end_node();
         } else {
+            if let Some(caption) = otherwise {
+                self.spell(&caption);
+            }
             self.padding();
             self.out.write("else:\n");
             self.readable_block(else_block);
@@ -441,6 +448,7 @@ impl Renderer<'_> {
     /// A loop's `else` suite, which an empty `else` has none of.
     fn loop_else(&mut self, else_block: &k::Block) {
         if !else_block.is_empty() {
+            self.caption_next();
             self.padding();
             self.out.write("else:\n");
             self.readable_block(else_block);
@@ -600,6 +608,7 @@ impl Renderer<'_> {
                 self.out.write("try:\n");
                 self.readable_block(&scope.body);
                 if let Some(catch) = &scope.catch {
+                    self.caption_next();
                     self.padding();
                     self.out.write("except BaseException as ");
                     self.name(&catch.binding);
@@ -608,6 +617,7 @@ impl Renderer<'_> {
                     self.readable_block(&catch.body);
                 }
                 if let Some(finally) = &scope.finally {
+                    self.caption_next();
                     self.padding();
                     self.out.write("finally:\n");
                     self.readable_block(finally);

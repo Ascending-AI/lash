@@ -6,8 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Environment, Mode, NamedLibrary, Package, SourceFormat};
 use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal, Captions, CaptionsRefusal,
-    EffectName, Expr, Literal, Name, Param, Signature, Site, Type, Unit, parse_document,
+    ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal, Captions,
+    CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node, Param, Signature, Site, Stmt,
+    Type, Unit, parse_document,
 };
 use lash_kernel_edit::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use lash_kernel_edit::{Draft, Position, Transaction};
@@ -23,6 +24,7 @@ pub(super) fn verify(rule: &str) {
         "K-CAP-004" => {
             rekey();
             each_dialect(rekey_imported);
+            each_dialect(rekey_canvas_edits);
         }
         "K-CAP-005" => {
             text_domain();
@@ -642,4 +644,138 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         assert_eq!(rekeyed.touched, touched, "{}", case.name);
     }
     Ok(())
+}
+
+/// `K-CAP-004`, of the captions a dialect's source spells: a canvas edit of
+/// a tool's argument, and one of a condition, keep every imported caption
+/// at its site and touch exactly those at or above what they write.
+fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessError> {
+    let fail =
+        |case: &str, message: String| crate::HarnessError(format!("K-CAP-004 {case}: {message}"));
+    let mut edits = 0;
+    for case in &dialect.corpus.authored {
+        let lowered = dialect
+            .package
+            .front_end
+            .lower(&case.source, &dialect.environment, Mode::Module)
+            .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
+        let document = lowered.document.document();
+        let environment = lash_kernel_check::Environment {
+            effects: dialect.environment.effects.clone(),
+            functions: dialect.environment.library,
+            bindings: BTreeSet::new(),
+        };
+        let base = document.identity();
+        let mut operations = Vec::new();
+        // An argument that runs an action or holds a closure is no canvas
+        // edit's to set.
+        if let Some(action) = first_site(document, |node| match node {
+            Node::Expr(Expr::Act(act)) => {
+                matches!(act.kind, ActKind::Perform { .. })
+                    && act.args.first().is_some_and(|argument| {
+                        !acts(Node::Expr(argument)) && !closes(Node::Expr(argument))
+                    })
+            }
+            Node::Action(Action::Perform { args, .. }) => !args.is_empty(),
+            _ => false,
+        }) {
+            operations.push((
+                action.clone(),
+                Operation::SetValue {
+                    base,
+                    target: ValueTarget::ToolArgument {
+                        action,
+                        index: 0,
+                        path: Vec::new(),
+                    },
+                    value: DataValue::Literal(Literal::Text("edited".into())),
+                },
+            ));
+        }
+        // A condition that runs an action is no canvas edit's to change.
+        if let Some(statement) = first_site(
+            document,
+            |node| matches!(node, Node::Stmt(Stmt::If { condition, .. }) if !acts(Node::Expr(condition))),
+        ) {
+            operations.push((
+                statement.clone(),
+                Operation::ChangeCondition {
+                    base,
+                    statement,
+                    condition: Expr::Literal(Literal::Bool(false)),
+                },
+            ));
+        }
+        for (written, operation) in operations {
+            let mut draft = Draft::open(document.clone())
+                .map_err(|refusal| fail(&case.name, format!("{refusal:?}")))?;
+            let applied = draft
+                .apply(
+                    &Transaction {
+                        base,
+                        edits: vec![operation],
+                    },
+                    &environment,
+                )
+                .map_err(|refusal| fail(&case.name, format!("{refusal:?}")))?;
+            let rekeyed = lowered
+                .captions
+                .rekey(&applied.correspondence, draft.document())
+                .ok_or_else(|| fail(&case.name, "the edit starts elsewhere".into()))?;
+            if rekeyed.captions.entries() != lowered.captions.entries() {
+                return Err(fail(
+                    &case.name,
+                    format!("rekeyed {:?}", rekeyed.captions.entries()),
+                ));
+            }
+            let above: Vec<Site> = lowered
+                .captions
+                .entries()
+                .iter()
+                .map(|entry| entry.site.clone())
+                .filter(|site| site.unit == written.unit && written.path.starts_with(&site.path))
+                .collect();
+            if rekeyed.touched != above {
+                return Err(fail(
+                    &case.name,
+                    format!("touched {:?}, expected {above:?}", rekeyed.touched),
+                ));
+            }
+            edits += 1;
+        }
+    }
+    if edits == 0 && !dialect.package.captions.kinds.is_empty() {
+        return Err(fail("corpus", "no authored case takes an edit".into()));
+    }
+    Ok(())
+}
+
+/// The Site of the first node of `document` that `wanted` picks, in a walk
+/// of its declared functions and then of `main`.
+fn first_site(document: &Document, wanted: impl Fn(Node<'_>) -> bool) -> Option<Site> {
+    fn walk(node: Node<'_>, site: Site, wanted: &dyn Fn(Node<'_>) -> bool) -> Option<Site> {
+        if wanted(node) {
+            return Some(site);
+        }
+        (0u32..)
+            .zip(node.children())
+            .find_map(|(index, child)| walk(child, site.child(index), wanted))
+    }
+    let roots = document
+        .functions
+        .iter()
+        .map(|(name, function)| (Unit::Function(name.clone()), &function.body))
+        .chain(std::iter::once((Unit::Main, &document.main)));
+    roots
+        .into_iter()
+        .find_map(|(unit, body)| walk(Node::Block(body), Site::new(unit, Vec::new()), &wanted))
+}
+
+fn acts(node: Node<'_>) -> bool {
+    matches!(node, Node::Action(_) | Node::Expr(Expr::Act(_)))
+        || node.children().into_iter().any(acts)
+}
+
+fn closes(node: Node<'_>) -> bool {
+    matches!(node, Node::Expr(Expr::Closure(_))) || node.children().into_iter().any(closes)
 }

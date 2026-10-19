@@ -136,6 +136,7 @@ impl Lowerer<'_> {
             );
             this.statements(&for_loop.body)
         };
-        self.python_while(test, body, &for_loop.orelse, span)
+        let else_caption = self.loop_else_caption(&for_loop.body, &for_loop.orelse);
+        self.python_while(test, body, &for_loop.orelse, else_caption, span)
     }
 }

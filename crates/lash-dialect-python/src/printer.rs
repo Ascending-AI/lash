@@ -13,8 +13,9 @@ pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 /// Render plain Python without compiling or resolving dependencies. The
 /// manifest, entries, private bindings, helper identities and name renames
 /// are not written: [`crate::read`] takes them from the base document.
-/// Captions are not yet spelled in this dialect: every one is reported in
-/// [`PrintedSource::dropped`].
+/// Each caption is spelled as `#:` lines directly above what it captions,
+/// an `else`, `except` or `finally` clause for an arm and the `def` for a
+/// function; none is dropped.
 pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
@@ -34,8 +35,12 @@ pub fn print(
         scope: Default::default(),
         main: false,
         operators: crate::generated_operators::Operators::new(&document.manifest.functions),
+        captions: captions.is_some_and(|captions| !captions.is_empty()),
     };
     for (name, function) in &document.functions {
+        if r.captions {
+            r.caption_of(&k::Site::new(k::Unit::Function(name.clone()), Vec::new()));
+        }
         r.out.write(if awaits(&function.body) {
             "async def "
         } else {
@@ -81,8 +86,38 @@ struct Renderer<'a> {
     scope: BindingScope,
     main: bool,
     operators: crate::generated_operators::Operators,
+    /// Whether any caption waits to be spelled.
+    captions: bool,
 }
 impl Renderer<'_> {
+    /// The caption of the node the writer opens next, taken to be spelled.
+    fn next_caption(&mut self) -> Option<k::Caption> {
+        let site = self.captions.then(|| self.out.next_site(None)).flatten()?;
+        self.out.take_caption(&site)
+    }
+    /// Spells the caption of the node the writer opens next, if it has one.
+    fn caption_next(&mut self) {
+        if let Some(caption) = self.next_caption() {
+            self.spell(&caption);
+        }
+    }
+    fn caption_of(&mut self, site: &k::Site) {
+        if let Some(caption) = self.out.take_caption(site) {
+            self.spell(&caption);
+        }
+    }
+    /// `caption`'s `#:` lines, at the current indentation.
+    fn spell(&mut self, caption: &k::Caption) {
+        for line in crate::captions::lines(caption) {
+            self.padding();
+            self.out.write("#:");
+            if !line.is_empty() {
+                self.out.write(" ");
+                self.out.write(line);
+            }
+            self.out.write("\n");
+        }
+    }
     fn parameters(&mut self, names: &[k::Name]) {
         self.out.write("(");
         for (i, name) in names.iter().enumerate() {
@@ -138,6 +173,9 @@ impl Renderer<'_> {
         self.out.write("pass\n");
     }
     fn node(&mut self, node: k::Node<'_>, root: Option<&k::Unit>) {
+        if matches!(node, k::Node::Stmt(_) | k::Node::Block(_)) {
+            self.caption_next();
+        }
         self.out.begin_node(root);
         self.padding();
         match node {

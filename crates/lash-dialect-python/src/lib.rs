@@ -11,6 +11,7 @@
 //! The dialect needs nothing of the kernel that the kernel did not already
 //! have: no form, no value kind and no library function was added for it.
 
+mod captions;
 mod diagnostics;
 mod exceptions;
 mod generated;
@@ -31,12 +32,18 @@ pub use lash_kernel_dialect::{
 pub use package::define_helpers;
 pub use printer::print;
 
-/// The captions the dialect spells: none yet. Its front end and reader
-/// extract none and its printer drops every one.
-pub const CAPTIONS: CaptionSupport = CaptionSupport::NONE;
+/// The captions the dialect spells: every kind, as `#:` comment lines
+/// directly above what they caption. A workflow module's front end, the
+/// reader of generated source and the printer share the syntax; a cell
+/// has none.
+pub const CAPTIONS: CaptionSupport = CaptionSupport {
+    kinds: &lash_kernel_doc::CaptionKind::ALL,
+    guide: captions::GUIDE,
+};
 
 use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Mode, Package};
 use lash_kernel_doc::Span;
+use ruff_text_size::Ranged;
 
 /// The name annotations record a document's dialect under.
 pub const DIALECT: &str = "python";
@@ -137,6 +144,18 @@ fn lower_with_calls(
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
     })?;
+    // Captions are a workflow module's; a cell's `#:` lines are comments.
+    let spelled = match mode {
+        Mode::Module => captions::spelled(
+            source,
+            parsed
+                .tokens()
+                .iter()
+                .filter(|token| token.kind() == ruff_python_ast::token::TokenKind::Comment)
+                .map(|token| token.start().to_usize()..token.end().to_usize()),
+        ),
+        Mode::Cell(_) => captions::Spelled::default(),
+    };
     lower::lower_with_calls(
         parsed.syntax(),
         source,
@@ -144,6 +163,7 @@ fn lower_with_calls(
         mode,
         limits.max_nesting,
         calls,
+        spelled,
     )
 }
 
