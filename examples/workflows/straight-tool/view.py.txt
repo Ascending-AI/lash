@@ -3,3 +3,5 @@ statement fn demo/0 ordinal=3 depth=0 block=fn demo Return { value: Act(ActExpr 
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action fn demo/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
+caption callable 0 block=fn demo "Say hello"
+caption node 0 site=fn demo/0 "Send a greeting and give back the reply"

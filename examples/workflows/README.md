@@ -78,3 +78,59 @@ a cell's Main keeps its root wrap.
 `kernel_hoist` is zero: calls remain nested in while tests and assignment
 places (FIG-6657). The SHAPE contract remains statements ≤ author statements
 + operand pins, with one body per author loop, including comprehensions.
+
+## Captions
+
+Every workflow module case captions its entry function, its steps and its
+controls in plain language, as a host would show them to someone who does
+not read code. A caption is a title line and an optional description. Each
+dialect spells it its own way; lash keeps the value apart from the document
+(`Captions`), so captions never change a document's identity or behaviour.
+
+TypeScript uses a JSDoc block right before what it names, with no blank
+line between:
+
+```ts
+/** Try a step, and always finish up */
+export async function demo() {
+  /** Try the echo */
+  try {
+    /** Echo a test message and keep the reply */
+    result = await corpus.echo("try");
+  }
+  /** If the echo fails */
+  catch (error) {
+    result = "caught";
+  }
+}
+```
+
+Python uses `#:` lines directly above it, at its indentation; further `#:`
+lines are the description:
+
+```python
+#: Try a step, and always finish up
+async def demo():
+    #: Try the echo
+    try:
+        #: Echo a test message and keep the reply
+        result = await corpus.echo("try")
+    #: If the echo fails
+    except Exception:
+        result = "caught"
+```
+
+A caption before a function names the workflow; before a statement, that
+step; before `else`, `catch`/the first `except` or `finally`, that branch.
+Cells carry none: a cell's front end reads no captions.
+
+The generated outputs show where captions go. `view.<lang>.txt` ends with
+lash's join of the captions with the view (`WorkflowView::captions`): one
+`caption callable` line for the workflow title, a `caption node` line per
+captioned step and a `caption arm` line per captioned branch.
+`printed.<lang>` spells them back, and regeneration checks that reading it
+returns the same captions. `edits/1.<lang>.txt` lists the captions the edit
+marks for review (`Captions::rekey`'s `touched`) and reprints the edited
+document with them. Regeneration also refuses a source whose written captions
+do not all import: a misplaced caption is ordinary comment text to its
+dialect, never an error.

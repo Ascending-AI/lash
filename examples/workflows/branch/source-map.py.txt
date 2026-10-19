@@ -1,8 +1,8 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [0..96] "async def demo(flag: bool):\n    if flag:\n        return await corpus.echo(\"yes\")\n    return \"no\""
-fn demo/0 [32..80] "if flag:\n        return await corpus.echo(\"yes\")"
-fn demo/0/1/0 [49..80] "return await corpus.echo(\"yes\")"
-fn demo/0/1/0/0 [49..80] "return await corpus.echo(\"yes\")"
-fn demo/0/1/0/0/0 [49..80] "return await corpus.echo(\"yes\")"
-fn demo/1 [85..96] "return \"no\""
+main/0 [20..209] "async def demo(flag: bool):\n    #: Check whether the answer is yes\n    if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")\n    #: Otherwise answer no\n    return \"no\""
+fn demo/0 [91..166] "if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")"
+fn demo/0/1/0 [135..166] "return await corpus.echo(\"yes\")"
+fn demo/0/1/0/0 [135..166] "return await corpus.echo(\"yes\")"
+fn demo/0/1/0/0/0 [135..166] "return await corpus.echo(\"yes\")"
+fn demo/1 [198..209] "return \"no\""

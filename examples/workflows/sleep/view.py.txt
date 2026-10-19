@@ -3,3 +3,6 @@ statement fn demo/0 ordinal=3 depth=0 block=fn demo Do { value: Act(ActExpr { ki
 statement fn demo/1 ordinal=4 depth=0 block=fn demo Return { value: Literal(Text("awake")) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0 None
+caption callable 0 block=fn demo "Wait a moment, then report"
+caption node 0 site=fn demo/0 "Pause briefly"
+caption node 1 site=fn demo/1 "Say it is awake"

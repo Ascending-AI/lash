@@ -5,3 +5,8 @@ statement fn demo/1/1/0 ordinal=6 depth=1 block=fn demo/1/1 Assign { place: Vari
 statement fn demo/2 ordinal=7 depth=0 block=fn demo ReturnVia { value: Variable(Name("total")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/1/1 ordinal=5 depth=1 For
+caption callable 0 block=fn demo "Add up the numbers"
+caption node 0 site=fn demo/0 "Start the total at zero"
+caption node 0 site=fn demo/1 "Go through each number"
+caption node 0 site=fn demo/1/1/0 "Add it to the total"
+caption node 0 site=fn demo/2 "Give back the total"

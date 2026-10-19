@@ -14,3 +14,6 @@ action fn demo/1/0 library id=1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c230
 action fn demo/1/0/0 library id=322dedfb2f8bf4399ef97bfb76eb49024cc25cd39df31b1df4c32b3ab450dbc9 name=ts.promise.all label="TypeScript promise all"
 action fn demo/1/0/0/1/0/0/1/1/1 None
 action fn demo/1/0/0/1/0/1/1/1/1 None
+caption callable 0 block=fn demo "Echo two values at once"
+caption node 0 site=fn demo/0 "Describe how to echo one value"
+caption node 1 site=fn demo/1 "Echo \"a\" and \"b\" side by side and wait for both"

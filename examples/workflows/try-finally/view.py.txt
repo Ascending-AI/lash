@@ -18,3 +18,12 @@ action fn demo/1/0/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/1/0/0 library id=ce14341b9991890a40cfa78553f20bfc311d3beb76b520102917c864680684be name=py.exc.is_exception label="Python exc is exception"
 action fn demo/1/2/0/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action fn demo/1/2/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
+caption callable 0 block=fn demo "Try a step, and always finish up"
+caption node 0 site=fn demo/0 "Start with a placeholder result"
+caption node 1 site=fn demo/1 "Try the echo"
+caption node 2 site=fn demo/1/0/0 "Echo a test message and keep the reply"
+caption node 6 site=fn demo/1/1/0/1/0 "Note that it failed"
+caption node 8 site=fn demo/1/2/0 "Send a closing echo"
+caption node 10 site=fn demo/2 "Give back the result"
+caption arm 1.1 block=fn demo/1/1 "If the echo fails"
+caption arm 1.2 block=fn demo/1/2 "Whatever happened"

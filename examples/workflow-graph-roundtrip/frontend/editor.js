@@ -22,6 +22,15 @@ import {
 } from "./projection.mjs";
 import { approvalControl } from "./approvals.mjs";
 import {
+  armCaption,
+  captionFrom,
+  captionSite,
+  conditionText,
+  nodeCaptions,
+  withCaption,
+  workflowTitle,
+} from "./captions.mjs";
+import {
   highlightLine,
   kernelLinking,
   readableLinking,
@@ -723,7 +732,8 @@ function canvasScopes() {
   return [
     ...view.callables.map((callable) => view.scopes.find((scope) => key(scope.block) === key(callable.block))),
     ...view.nodes.filter((node) => node.kind === "control").flatMap((node) => [
-      ...node.arms.map((arm) => ({ block: arm.block, kind: arm.role, statement: node.statement })),
+      ...node.arms.map((arm, position) => ({ block: arm.block, kind: arm.role, statement: node.statement,
+        caption: armCaption(workflow, view.nodes.indexOf(node), position) })),
       ...(node.header?.actions.length ? [{ block: node.header.expression, kind: node.header.role, statement: node.statement }] : []),
     ]),
   ];
@@ -731,14 +741,36 @@ function canvasScopes() {
 
 function renderScopes() {
   $("scope").replaceChildren(...canvasScopes().map((scope, index) => {
-    const option = el("option", null, scope.kind === "entry" ? "Workflow entry"
+    const option = el("option", null, scope.kind === "entry" ? (workflowTitle(workflow)?.title ?? "Workflow entry")
+      : scope.caption ? scope.caption.title
       : ["condition", "iterable"].includes(scope.kind) ? `${scope.kind} actions ${index}` : `${SCOPE_LABELS[scope.kind]} ${index}`);
     option.value = String(index); option.selected = key(scope.block) === key(activeScope);
     return option;
   }));
 }
 
+// A node's wording: lash's caption for it when it has one, over this host's
+// deterministic wording, which then names what the step does underneath.
 function model(s) {
+  const details = describe(s);
+  const carrier = viewOf(workflow).nodes.findIndex((node) => key(node.site) === key(s.site));
+  const captions = nodeCaptions(workflow, carrier);
+  if (!captions.length) return { ...details, captions };
+  return {
+    ...details,
+    captions,
+    title: captions[0].caption.title,
+    subtitle: captions.length > 1 ? captions.slice(1).map((item) => item.caption.title).join(" · ") : details.title,
+    description: captions[0].caption.description,
+    review: captions.some((item) => item.review),
+  };
+}
+// The printed line a node's readable range starts on.
+function printedLine(carrier) {
+  const first = carrier?.readable?.[0]?.first;
+  return first && workflow.source?.split("\n")[first - 1];
+}
+function describe(s) {
   if (s.node_kind === "code") {
     const carrier = viewOf(workflow).nodes.find((node) => node.kind === "code" && key(node.site) === key(s.site));
     const range = carrier.canonical;
@@ -764,13 +796,16 @@ function model(s) {
       subtitle: preview || info.name,
     };
   }
-  if (s.statement.if)
+  if (s.statement.if) {
+    const carrier = viewOf(workflow).nodes.find((node) => key(node.site) === key(s.site));
+    const condition = conditionText(printedLine(carrier));
     return {
       s,
       info: { name: "Condition", app: "Flow", icon: "branch" },
-      title: "If · Choose a path",
+      title: condition ? `If ${condition}` : "If · Choose a path",
       subtitle: "True or false",
     };
+  }
   const kind =
     actionOf(workflow, s)?.kind ??
     (typeof s.statement === "string" ? s.statement : Object.keys(s.statement)[0]);
@@ -923,6 +958,12 @@ function drawNode(node, x, y) {
     el("small", null, node.subtitle),
   );
   header.append(heading);
+  if (node.description) header.title = node.description;
+  if (node.review) {
+    const badge = el("span", "caption-review", "Review");
+    badge.title = "An edit changed this step since its caption was written. Open it to check the caption.";
+    header.append(badge);
+  }
   if (shown.runs > 0)
     header.append(el("span", "run-count", `×${shown.runs}`));
   if (STATE_GLYPHS[state])
@@ -1006,9 +1047,11 @@ function drawNode(node, x, y) {
     }
   }
   if (node.kind === "control") {
-    for (const arm of node.carrier.arms) {
+    const index = viewOf(workflow).nodes.indexOf(node.carrier);
+    for (const [position, arm] of node.carrier.arms.entries()) {
       const entries = runCounts.scopes.get(key(arm.block));
-      const button = el("button", "control-arm", `${arm.role}${entries === undefined ? "" : ` · ${entries} entries`}`);
+      const name = armCaption(workflow, index, position)?.title ?? arm.role;
+      const button = el("button", "control-arm", `${name}${entries === undefined ? "" : ` · ${entries} entries`}`);
       button.onclick = () => { activeScope = arm.block; renderScopes(); renderCanvas(); fit(); };
       card.append(button);
     }
@@ -1214,10 +1257,9 @@ function renderCanvas() {
   setZoom(zoom);
   $("node-count").textContent =
     `${viewOf(workflow).nodes.length} coarse nodes · ${viewOf(workflow).statements.length} statements · ${viewOf(workflow).callables.length} callables`;
-  document.querySelector("h1").textContent = workflow.entry.replaceAll(
-    "_",
-    " ",
-  );
+  const title = workflowTitle(workflow);
+  document.querySelector("h1").textContent = title?.title ?? workflow.entry.replaceAll("_", " ");
+  document.querySelector("h1").title = title?.description ?? "";
   applySelection();
 }
 function panel(title) {
@@ -1740,6 +1782,56 @@ function renderInvocationOutput() {
       : dataTree(finalOutput),
   );
 }
+// A caption is changed by saving the whole new caption list; lash checks
+// every site and the text. Saving one marks it reviewed.
+async function saveCaption(site, caption) {
+  if (caption && !caption.title) throw Error("Write a title for the caption.");
+  const next = await call("/workflow/captions", {
+    version: workflow.version,
+    entries: withCaption(workflow.captions, site, caption),
+    reviewed: [site],
+  });
+  show(next);
+  report(caption ? "Caption saved" : "Caption removed");
+}
+let captionForms = 0;
+function captionForm(container, heading, { site, caption, review }) {
+  const form = el("section", "caption-form");
+  form.append(el("h3", null, heading));
+  if (review)
+    form.append(el("p", "help caption-review-note",
+      "An edit changed this step since its caption was written. Check that it still describes the step, then save it."));
+  const id = `caption-${captionForms++}`;
+  const title = el("input");
+  title.id = `${id}-title`;
+  title.value = caption?.title ?? "";
+  const description = el("textarea");
+  description.id = `${id}-description`;
+  description.value = caption?.description ?? "";
+  const titleLabel = el("label", null, "Title");
+  titleLabel.htmlFor = title.id;
+  const descriptionLabel = el("label", null, "Description (optional)");
+  descriptionLabel.htmlFor = description.id;
+  const save = el("button", "save-node", "Save caption");
+  save.onclick = () => action(() => saveCaption(site, captionFrom(title.value, description.value)));
+  form.append(titleLabel, title, descriptionLabel, description, save);
+  if (caption) {
+    const remove = el("button", "quiet save-node", "Remove caption");
+    remove.onclick = () => action(() => saveCaption(site, undefined));
+    form.append(remove);
+  }
+  container.append(form);
+}
+// A node's captions, or a form to add one where the node can carry it.
+function nodeCaptionForms(container, node) {
+  if (!node.carrier) return;
+  if (node.captions?.length)
+    for (const item of node.captions) captionForm(container, "Caption", item);
+  else {
+    const site = captionSite(node.carrier);
+    if (site) captionForm(container, "Add a caption", { site });
+  }
+}
 // The inspector of an open node. Opening goes through `openItem`.
 function openNode(node) {
   const container = panel(
@@ -1750,6 +1842,15 @@ function openNode(node) {
         : "NODE SETTINGS",
   );
   identity(container, node.info);
+  nodeCaptionForms(container, node);
+  if (node.kind === "input") {
+    const site = { unit: { function: workflow.entry }, path: [] };
+    captionForm(container, "Workflow title", {
+      site,
+      caption: workflowTitle(workflow),
+      review: workflow.captionsToReview.some((item) => key(item) === key(site)),
+    });
+  }
   if (node.kind === "code") {
     const range = node.carrier.canonical;
     const source = viewOf(workflow).canonical_source.split("\n").slice(range.first - 1, range.last).join("\n");
@@ -2196,8 +2297,25 @@ function setupCodePane() {
     setSplit((current || 0.58) + step);
   };
 }
+// The source editor follows the host guide's authority rule: once a version
+// has a change its imported module lacks (a canvas edit or a caption), it
+// opens on lash's print of the document with its captions, so reading the
+// source back keeps them.
+function sourceNote(printed) {
+  const changed = workflow.authored && workflow.authored.version !== workflow.version;
+  const dropped = workflow.captionsDropped?.length
+    ? ` ${workflow.captionsDropped.length} caption(s) cannot be written in this language and would be lost.`
+    : "";
+  if (printed)
+    return `Lash's print of this version, with its captions.${changed ? " It has changes its imported module does not have." : ""}${dropped}`;
+  return changed
+    ? "The module as imported, before this version's canvas and caption changes: importing it replaces them."
+    : "The module as imported. Captions are part of the source.";
+}
 function refreshSourceEditor() {
   const printed = $("source-kind").value === "printed";
+  $("source-note").textContent = sourceNote(printed);
+  $("caption-guide").textContent = workflow.captionGuide ?? "";
   $("source").value = printed ? (workflow.source ?? "") : (workflow.authored?.text ?? "");
   $("source-dialect").disabled = printed;
   if (printed) $("source-dialect").value = workflow.sourceDialect;

@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{Document, Name, Site, SourceMap};
-use lash::workflow::view::{PathStep, WorkflowCoverage};
+use lash::workflow::document::{CaptionEntry, Captions, Document, Name, Site, SourceMap};
+use lash::workflow::view::{CaptionView, PathStep, WorkflowCoverage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -45,6 +45,8 @@ pub struct WorkflowView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub source_dialect: Dialect,
+    /// How to write a caption in `sourceDialect`, as that dialect words it.
+    pub caption_guide: &'static str,
     /// Host display data joined by the callee name carried by the view.
     pub function_labels: BTreeMap<String, String>,
     /// Lash's map from the document's sites to byte ranges of `source`.
@@ -56,6 +58,22 @@ pub struct WorkflowView {
     /// opened as a kernel document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authored: Option<AuthoredSource>,
+    /// The version's captions, lash's `kernel-captions` shape: the host's
+    /// sidecar, keyed to `identity`.
+    pub captions: Captions,
+    /// `captions` joined with `view` by view location, as
+    /// `WorkflowView::captions` answers it (`kernel-caption-view`); absent
+    /// with `view`, or with `captionsUnavailable` saying why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption_view: Option<CaptionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captions_unavailable: Option<String>,
+    /// Captioned sites an edit has written at or beneath since the caption
+    /// was saved: their captions may no longer describe the step.
+    pub captions_to_review: Vec<Site>,
+    /// Captions `source` could not spell; a printed read would lose them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub captions_dropped: Vec<Site>,
 }
 
 /// Authored source, the dialect it is written in, and the version
@@ -119,6 +137,19 @@ pub struct OpenWorkflowRequest {
 pub struct EditWorkflowRequest {
     pub version: u64,
     pub edits: Vec<Operation>,
+}
+
+/// New captions for the saved version: every entry it is to have. The host
+/// builds the `Captions` value from them; a site absent here loses its
+/// caption. `reviewed` names the captions the author has checked, which
+/// leave `captionsToReview`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptionWorkflowRequest {
+    pub version: u64,
+    pub entries: Vec<CaptionEntry>,
+    #[serde(default)]
+    pub reviewed: Vec<Site>,
 }
 
 /// The version an edit transaction saved, and where each node of the

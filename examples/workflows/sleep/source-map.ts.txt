@@ -1,6 +1,6 @@
 language: TypeScript
 exceptions: none
-main/0 [7..68] "async function demo() {\n  await sleep(5);\n  return \"awake\";\n}"
-fn demo/0 [33..48] "await sleep(5);"
-fn demo/0/0/0 [33..48] "await sleep(5);"
-fn demo/1 [51..66] "return \"awake\";"
+main/0 [41..150] "async function demo() {\n  /** Pause briefly */\n  await sleep(5);\n  /** Say it is awake */\n  return \"awake\";\n}"
+fn demo/0 [90..105] "await sleep(5);"
+fn demo/0/0/0 [90..105] "await sleep(5);"
+fn demo/1 [133..148] "return \"awake\";"

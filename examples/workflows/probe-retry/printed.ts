@@ -1,8 +1,14 @@
+/** Search the web, counting failures */
 export async function resilient_search() {
+  /** Choose the result limits to try */
   let limits = [2.0, 50.0, 1.0];
+  /** Start counting failures at zero */
   let failures = 0.0;
+  /** Try each limit */
   for (const limit of limits) {
+    /** Search and show the top result */
     try {
+      /** Search the web for workflow engines */
       let found = (await await tools.web.search((await helper_ts_boundary({query: "workflow engines", limit: limit}))));
       let t2 = undefined;
       if (helper_same(helper_kind(found), "record")) {
@@ -37,12 +43,18 @@ export async function resilient_search() {
       } else {
         t4 = await helper_ts_read(t3, "title");
       }
+      /** Show the top result's title */
       await await tools.display.show_message((await helper_ts_boundary({text: t4})));
-    } catch (error) {
+    }
+    /** If the search fails */
+    catch (error) {
+      /** Count the failure */
       failures = failures + 1.0;
+      /** Say that a search failed */
       await await tools.display.set_status((await helper_ts_boundary({key: "search", value: "A search failed"})));
     }
   }
+  /** Report how many searches failed */
   return k.returnVia({failures: failures}, helper_ts_promise_adopt);
 }
 async function main() {

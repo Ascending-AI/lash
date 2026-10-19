@@ -4,3 +4,6 @@ statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Act(ActEx
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/1/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
+caption callable 0 block=fn demo "Grüße aus 日本 🦀"
+caption node 0 site=fn demo/0 "Pick the greeting: 日本 🦀"
+caption node 1 site=fn demo/1 "Echo the greeting with the name"

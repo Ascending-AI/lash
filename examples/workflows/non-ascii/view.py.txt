@@ -5,3 +5,6 @@ scope fn demo ordinal=2 depth=0 Entry
 action fn demo/1/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action fn demo/1/0/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/0/0/0 library id=ad2d969650d98bd8572c9c6b16d7f43e0ca883c5e6e30c26475d6f8706645448 name=py.add label="Python add"
+caption callable 0 block=fn demo "Grüße aus 日本 🦀"
+caption node 0 site=fn demo/0 "Pick the greeting: 日本 🦀"
+caption node 1 site=fn demo/1 "Echo the greeting with the name"

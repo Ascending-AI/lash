@@ -1,5 +1,7 @@
+#: Give back the number it is given
 def arrow(value):
     return value
+#: Answer from the top level
 def kernel_name_1():
     return "top"
 def main():

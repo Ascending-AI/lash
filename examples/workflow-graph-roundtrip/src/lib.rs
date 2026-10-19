@@ -26,7 +26,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash::workflow::document::{FunctionRegistry, Name, print_document};
+use lash::workflow::document::{Captions, FunctionRegistry, Name, Site, print_document};
 use lash::workflow::edit::{Draft, Location, Transaction};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use tokio::sync::mpsc;
@@ -35,9 +35,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 pub use catalog::{CatalogGroup, LoweringSize, SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    AuthoredSource, CallData, Dialect, DisplayDelta, DisplayState, EditWorkflowRequest,
-    EditWorkflowResponse, EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse,
-    OpenWorkflowRequest, RunEvent, RunPath, RunStatus, WorkflowView,
+    AuthoredSource, CallData, CaptionWorkflowRequest, Dialect, DisplayDelta, DisplayState,
+    EditWorkflowRequest, EditWorkflowResponse, EnvironmentView, ErrorBody, ErrorDetail,
+    ErrorResponse, OpenWorkflowRequest, RunEvent, RunPath, RunStatus, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 
@@ -72,24 +72,39 @@ struct SavedWorkflow {
     published: Result<runtime::Published, Arc<runtime::RunError>>,
     /// The source the workflow was imported from, if it was.
     authored: Option<AuthoredSource>,
+    /// The host's caption sidecar for the draft's document. It is the
+    /// authority for captions: importing or reading source replaces it
+    /// wholesale, and an edit rekeys it.
+    captions: Captions,
+    /// Captioned sites an edit wrote at or beneath since their caption was
+    /// last saved: the author should check they still describe the step.
+    review: Vec<Site>,
     dialect: Dialect,
     function_labels: std::collections::BTreeMap<String, String>,
 }
 
-/// How a saved version came to be, which says what authored source it has.
+/// How a saved version came to be, which says what authored source and
+/// captions it has.
 pub(crate) enum Origin {
-    /// Opened as a kernel document: it has no authored source.
+    /// Opened as a kernel document: it has no authored source or captions.
     Document,
-    /// Imported from this source.
+    /// Imported from this source, with the captions it spells.
     Imported {
         dialect: Dialect,
         text: String,
         map: Option<lash::workflow::document::SourceMap>,
+        captions: Captions,
     },
-    /// An edit of the saved version: it keeps that version's source.
-    Edited,
+    /// An edit of the saved version, of its document or of its captions: it
+    /// keeps that version's source, which no longer spells the version.
+    Edited {
+        captions: Captions,
+        review: Vec<Site>,
+    },
+    /// Read back from printed source, with the captions it spells.
     Read {
         dialect: Dialect,
+        captions: Captions,
     },
 }
 
@@ -142,11 +157,12 @@ impl SavedWorkflow {
                     source_map: true,
                     ..Default::default()
                 };
+                let captions = Some(&self.captions);
                 let (printed, source_unavailable, cause) = match match source_dialect {
                     Dialect::TypeScript => {
-                        lash::typescript::print(derived.document(), None, options)
+                        lash::typescript::print(derived.document(), captions, options)
                     }
-                    Dialect::Python => lash::python::print(derived.document(), None, options),
+                    Dialect::Python => lash::python::print(derived.document(), captions, options),
                 } {
                     Ok(printed) => (Some(printed), None, None),
                     Err(error) => {
@@ -194,6 +210,13 @@ impl SavedWorkflow {
                 Some(refusal.to_string()),
             ),
         };
+        let (caption_view, captions_unavailable) = match &view {
+            Some(view) => match view.captions(&self.captions) {
+                Ok(joined) => (Some(joined), None),
+                Err(refusal) => (None, Some(refusal.to_string())),
+            },
+            None => (None, None),
+        };
         WorkflowView {
             version: self.version,
             entry: self.entry.clone(),
@@ -214,13 +237,52 @@ impl SavedWorkflow {
             source_map: printed
                 .as_ref()
                 .and_then(|printed| printed.source_map.clone()),
+            captions_dropped: printed
+                .as_ref()
+                .map(|printed| printed.dropped.clone())
+                .unwrap_or_default(),
             source: printed.map(|printed| printed.source),
             source_unavailable,
             authored,
             source_dialect,
+            caption_guide: match source_dialect {
+                Dialect::TypeScript => lash::typescript::CAPTIONS.guide,
+                Dialect::Python => lash::python::CAPTIONS.guide,
+            },
             function_labels: self.function_labels.clone(),
+            captions: self.captions.clone(),
+            caption_view,
+            captions_unavailable,
+            captions_to_review: self.review.clone(),
             document,
         }
+    }
+
+    /// The captions moved through an applied edit of this version's draft
+    /// to `result`, and the sites to review after it: those the edit wrote
+    /// at or beneath, and those still awaiting review.
+    fn rekeyed(
+        &self,
+        correspondence: &lash::workflow::document::Correspondence,
+        result: &lash::workflow::document::Document,
+    ) -> Result<(Captions, Vec<Site>), ErrorResponse> {
+        let rekeyed = self.captions.rekey(correspondence, result).ok_or_else(|| {
+            ErrorResponse::invalid(
+                "captions",
+                "the edit does not start at the captions' document",
+            )
+        })?;
+        let mut review: Vec<Site> = self
+            .review
+            .iter()
+            .filter_map(|site| correspondence.successor(site))
+            .filter(|site| rekeyed.captions.get(site).is_some())
+            .cloned()
+            .chain(rekeyed.touched)
+            .collect();
+        review.sort();
+        review.dedup();
+        Ok((rekeyed.captions, review))
     }
 }
 
@@ -304,40 +366,49 @@ impl AppState {
             let version = store.as_ref().map_or(1, |saved| saved.version + 1);
             let dialect = match &origin {
                 Origin::Document => Dialect::TypeScript,
-                Origin::Imported { dialect, .. } | Origin::Read { dialect } => *dialect,
-                Origin::Edited => store
+                Origin::Imported { dialect, .. } | Origin::Read { dialect, .. } => *dialect,
+                Origin::Edited { .. } => store
                     .as_ref()
                     .map_or(Dialect::TypeScript, |saved| saved.dialect),
             };
-            let authored =
-                match origin {
-                    Origin::Document | Origin::Read { .. } => None,
-                    Origin::Imported { dialect, text, .. } => Some(AuthoredSource {
-                        dialect,
-                        text,
-                        version,
-                        source_map_id: published
-                            .as_ref()
-                            .ok()
-                            .and_then(|published| published.source_map),
-                        source_map: None,
-                        map_unavailable: None,
+            let (captions, review) = match &origin {
+                Origin::Document => (Captions::empty(draft.identity()), Vec::new()),
+                Origin::Imported { captions, .. } | Origin::Read { captions, .. } => {
+                    (captions.clone(), Vec::new())
+                }
+                Origin::Edited { captions, review } => (captions.clone(), review.clone()),
+            };
+            let authored = match origin {
+                Origin::Document | Origin::Read { .. } => None,
+                Origin::Imported { dialect, text, .. } => Some(AuthoredSource {
+                    dialect,
+                    text,
+                    version,
+                    source_map_id: published
+                        .as_ref()
+                        .ok()
+                        .and_then(|published| published.source_map),
+                    source_map: None,
+                    map_unavailable: None,
+                }),
+                Origin::Edited { .. } => store
+                    .as_ref()
+                    .and_then(|saved| saved.authored.clone())
+                    .map(|mut authored| {
+                        authored.source_map_id = None;
+                        authored.source_map = None;
+                        authored.map_unavailable = None;
+                        authored
                     }),
-                    Origin::Edited => store.as_ref().and_then(|saved| saved.authored.clone()).map(
-                        |mut authored| {
-                            authored.source_map_id = None;
-                            authored.source_map = None;
-                            authored.map_unavailable = None;
-                            authored
-                        },
-                    ),
-                };
+            };
             let saved = SavedWorkflow {
                 version,
                 draft,
                 entry,
                 published,
                 authored,
+                captions,
+                review,
                 dialect,
                 function_labels: self.function_labels.clone(),
             };
@@ -367,6 +438,7 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow/edits", post(edit_workflow))
         .route("/workflow/source", post(authoring_http::import_source))
         .route("/workflow/plan", post(authoring_http::preview))
+        .route("/workflow/captions", post(authoring_http::caption))
         .route("/run", post(run_workflow))
         .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))
@@ -496,7 +568,10 @@ async fn edit_workflow(
                 serde_json::json!({ "diagnostics": diagnostics }),
             )
         })?;
-    let (saved, _) = state.install(draft, current.entry, Origin::Edited).await;
+    let (captions, review) = current.rekeyed(&applied.correspondence, draft.document())?;
+    let (saved, _) = state
+        .install(draft, current.entry, Origin::Edited { captions, review })
+        .await;
     Ok(Json(EditWorkflowResponse {
         workflow: saved.view(&state.core, environment.functions()).await,
         // The published document is the draft's, so the transaction's

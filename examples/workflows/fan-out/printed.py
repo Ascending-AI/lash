@@ -1,4 +1,6 @@
+#: Echo two values at once
 async def demo():
+    #: Describe how to echo one value
     async def work(value):
         with k.return_():
             with k.bind("t1"):
@@ -7,6 +9,7 @@ async def demo():
                     (await helper_py_arg_missing("work"))
                     None
                 (await helper_py_reply((await tools.corpus.echo(value))))
+    #: Echo "a" and "b" side by side and wait for both
     with k.return_():
         with k.bind("t2"):
             work

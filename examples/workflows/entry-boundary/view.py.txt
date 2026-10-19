@@ -1,6 +1,8 @@
 unit Function(Name("arrow"))
 statement fn arrow/0 ordinal=11 depth=0 block=fn arrow Return { value: Variable(Name("value")) }
 scope fn arrow ordinal=10 depth=0 Entry
+caption callable 0 block=fn arrow "Give back the number it is given"
 unit Function(Name("declared"))
 statement fn declared/0 ordinal=13 depth=0 block=fn declared Return { value: Literal(Text("top")) }
 scope fn declared ordinal=12 depth=0 Entry
+caption callable 0 block=fn declared "Answer from the top level"

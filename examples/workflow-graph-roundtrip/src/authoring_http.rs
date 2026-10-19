@@ -6,11 +6,13 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{Correspondence, Document, Name};
+use lash::workflow::document::{Captions, Correspondence, Document, Name, SourceMap};
 use lash::workflow::edit::{Draft, EditDiagnosticKind, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::{AppState, Dialect, ErrorResponse, Origin, WorkflowView, runtime};
+use crate::{
+    AppState, CaptionWorkflowRequest, Dialect, ErrorResponse, Origin, WorkflowView, runtime,
+};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,7 +32,7 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let (document, map) = if let Some(format) = request.format {
+    let (document, map, captions) = if let Some(format) = request.format {
         let read = state
             .core
             .host_artifacts()
@@ -44,11 +46,12 @@ pub(crate) async fn import_source(
             .await
             .map_err(|error| ErrorResponse::invalid("source_read", error))?;
         match read {
-            WorkflowImport::Read { document, .. } => (
+            WorkflowImport::Read { document, captions } => (
                 document
                     .to_document()
                     .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
                 None,
+                captions,
             ),
             other => {
                 return Err(ErrorResponse::invalid(
@@ -81,12 +84,14 @@ pub(crate) async fn import_source(
                     } else {
                         Dialect::TypeScript
                     },
+                    captions,
                 }
             } else {
                 Origin::Imported {
                     dialect: request.dialect,
                     text: request.source,
                     map,
+                    captions,
                 }
             },
         )
@@ -96,12 +101,12 @@ pub(crate) async fn import_source(
 
 /// Lowers authored source in `dialect` through lash's workflow import and
 /// admits it against the run environment, as written: the host rewrites
-/// nothing.
+/// nothing. The captions are the ones the source spells.
 pub(crate) async fn import(
     core: &lash::LashCore,
     dialect: Dialect,
     source: &str,
-) -> Result<(Document, Option<lash::workflow::document::SourceMap>), ErrorResponse> {
+) -> Result<(Document, Option<SourceMap>, Captions), ErrorResponse> {
     let environment =
         runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
     let imported = core
@@ -113,12 +118,14 @@ pub(crate) async fn import(
         WorkflowImport::Imported {
             document,
             source_map,
+            captions,
             ..
         } => Ok((
             document
                 .to_document()
                 .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
             Some(source_map),
+            captions,
         )),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -182,6 +189,9 @@ pub(crate) async fn preview(
             }).collect::<Vec<_>>()}),
             )
         })?;
+    // The preview shows the captions the edit would keep, and marks.
+    (current.captions, current.review) =
+        current.rekeyed(&applied.correspondence, current.draft.document())?;
     // A preview is an unpublished edit and must not read the old definition or map.
     current.published = Err(std::sync::Arc::new(runtime::RunError::Invalid(
         "preview".into(),
@@ -199,6 +209,38 @@ pub(crate) async fn preview(
         preview: view,
         correspondence: applied.correspondence,
     }))
+}
+
+/// Saves the request's captions as the next version of the same document.
+/// The host builds the new `Captions` value; lash checks every site and
+/// text. Nothing about the document, its draft or its publication changes.
+pub(crate) async fn caption(
+    State(state): State<AppState>,
+    request: Result<Json<CaptionWorkflowRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<WorkflowView>, ErrorResponse> {
+    // A caption's text is checked as it is decoded (`CaptionRefusal`).
+    let Json(request) =
+        request.map_err(|error| ErrorResponse::invalid("caption_refused", error.body_text()))?;
+    let environment = state.environment().await?;
+    let _publishing = state.publishing.lock().await;
+    let current = state.current();
+    check_version(request.version, current.version)?;
+    let captions = Captions::new(current.draft.document(), request.entries)
+        .map_err(|refusal| ErrorResponse::invalid("caption_refused", refusal))?;
+    let review = current
+        .review
+        .iter()
+        .filter(|site| !request.reviewed.contains(site) && captions.get(site).is_some())
+        .cloned()
+        .collect();
+    let (saved, _) = state
+        .install(
+            current.draft.clone(),
+            current.entry.clone(),
+            Origin::Edited { captions, review },
+        )
+        .await;
+    Ok(Json(saved.view(&state.core, environment.functions()).await))
 }
 
 fn check_version(sent: u64, current: u64) -> Result<(), ErrorResponse> {

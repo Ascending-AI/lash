@@ -1,10 +1,10 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/1 [0..45] "async def arrow(value: int):\n    return value"
-main/2 [47..85] "async def declared():\n    return \"top\""
-main/3 [87..141] "if True:\n    async def local():\n        return \"block\""
-main/3/1/0 [100..141] "async def local():\n        return \"block\""
-main/3/1/0/0/0/0 [127..141] "return \"block\""
-fn arrow/0 [33..45] "return value"
-fn declared/0 [73..85] "return \"top\""
+main/1 [36..81] "async def arrow(value: int):\n    return value"
+main/2 [112..150] "async def declared():\n    return \"top\""
+main/3 [152..206] "if True:\n    async def local():\n        return \"block\""
+main/3/1/0 [165..206] "async def local():\n        return \"block\""
+main/3/1/0/0/0/0 [192..206] "return \"block\""
+fn arrow/0 [69..81] "return value"
+fn declared/0 [138..150] "return \"top\""
 exception main/0: absent-binding initialization

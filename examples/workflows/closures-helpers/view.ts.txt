@@ -25,3 +25,6 @@ action fn demo/2/2/0/0 library id=8f0ac10cd41f7f321f99efd18a09659b5555c40aed7076
 action fn demo/4/1/0/0 library id=9fa1586eaa70b644a487044462d40564b6f1e842a8934cf9a32fdc9dbf8d9607 name=ts.array.map label="TypeScript array map"
 action fn demo/4/2/0/0 library id=e601dd9bae09806d33147c914a41bdf6e5804e4efee43559f0da9e9fe5a25d16 name=ts.member.map label="TypeScript member map"
 action fn demo/4/2/1/0/1/1/1 None
+caption callable 0 block=fn demo "Measure each word"
+caption node 0 site=fn demo/0 "Describe how to measure one word"
+caption node 10 site=fn demo/5 "Measure every word in the list"

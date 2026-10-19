@@ -154,8 +154,14 @@ Correspondence:
   ]
 }
 
+Captions to review:
+fn demo "Say hello"
+fn demo/0 "Send a greeting and give back the reply"
+
 Reprinted source:
+#: Say hello
 async def demo():
+    #: Send a greeting and give back the reply
     return (await helper_py_reply((await tools.corpus.echo("edited λ"))))
 def main():
     demo = declared.demo

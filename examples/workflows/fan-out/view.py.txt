@@ -16,3 +16,6 @@ action fn demo/1/0/1/1/1/1/1/1/0/0/0/0/0/0 None
 action fn demo/1/0/1/1/1/1/1/1/0/1 library id=f38fc4ff1301b8bba9c3622fe2e6672fad1adb700b7775a10af1d8af6bb9773f name=py.task.run label="Python task run"
 action fn demo/1/0/1/1/1/1/1/1/0/1/0/0/0/0 None
 action fn demo/1/0/1/1/1/1/1/1/1 library id=1cee69c6e0e89c90833f4a7ca40d948b2aab308c62dd8d1c6602e12fbfc9f6c9 name=py.gather label="Python gather"
+caption callable 0 block=fn demo "Echo two values at once"
+caption node 0 site=fn demo/0 "Describe how to echo one value"
+caption node 1 site=fn demo/1 "Echo \"a\" and \"b\" side by side and wait for both"

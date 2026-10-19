@@ -9,7 +9,8 @@ use anyhow::{Context, Result, ensure};
 use lash_kernel_check::{Environment as Checker, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, PrintOptions};
 use lash_kernel_doc::{
-    self as k, Document, Expr, Name, Node, Site, SourceLanguage, Unit, WorkflowDocumentEntry,
+    self as k, Captions, Document, Expr, Name, Node, Site, SourceLanguage, Unit,
+    WorkflowDocumentEntry,
 };
 use lash_kernel_edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
@@ -77,21 +78,31 @@ fn lower(
 
 fn printed(
     document: &Document,
+    captions: &Captions,
     lang: SourceLanguage,
 ) -> Result<lash_kernel_dialect::PrintedSource> {
     let options = PrintOptions {
         source_map: true,
         ..Default::default()
     };
-    Ok(match lang {
-        SourceLanguage::TypeScript => lash_dialect_typescript::print(document, None, options)?,
-        SourceLanguage::Python => lash_dialect_python::print(document, None, options)?,
-    })
+    let output = match lang {
+        SourceLanguage::TypeScript => {
+            lash_dialect_typescript::print(document, Some(captions), options)?
+        }
+        SourceLanguage::Python => lash_dialect_python::print(document, Some(captions), options)?,
+    };
+    // Both dialects spell every captionable kind (K-CAP-006).
+    ensure!(
+        output.dropped.is_empty(),
+        "the printer dropped captions at {:?}",
+        output.dropped
+    );
+    Ok(output)
 }
 
-fn roundtrip(document: &Document, lang: SourceLanguage) -> Result<String> {
-    let output = printed(document, lang)?;
-    let decoded = match lang {
+fn roundtrip(document: &Document, captions: &Captions, lang: SourceLanguage) -> Result<String> {
+    let output = printed(document, captions, lang)?;
+    let (decoded, read) = match lang {
         SourceLanguage::TypeScript => {
             lash_dialect_typescript::read(&output.source, document, Default::default())?
         }
@@ -100,8 +111,12 @@ fn roundtrip(document: &Document, lang: SourceLanguage) -> Result<String> {
         }
     };
     ensure!(
-        decoded.0.canonical_bytes() == document.canonical_bytes(),
+        decoded.canonical_bytes() == document.canonical_bytes(),
         "authored import -> print -> read changed canonical bytes"
+    );
+    ensure!(
+        read == *captions,
+        "print -> read changed the captions (K-CAP-002)"
     );
     output
         .source_map
@@ -110,6 +125,26 @@ fn roundtrip(document: &Document, lang: SourceLanguage) -> Result<String> {
     // SM-ORDER's editor handoff accepts precisely the printed document.
     Draft::open(document.clone())?;
     Ok(output.source)
+}
+
+/// How many captions `source` spells: each TypeScript JSDoc block, and
+/// each run of Python `#:` lines.
+fn written_captions(source: &str, lang: SourceLanguage) -> usize {
+    match lang {
+        SourceLanguage::TypeScript => source.matches("/**").count(),
+        SourceLanguage::Python => {
+            let mut previous = false;
+            source
+                .lines()
+                .filter(|line| {
+                    let caption = line.trim_start().starts_with("#:");
+                    let starts = caption && !previous;
+                    previous = caption;
+                    starts
+                })
+                .count()
+        }
+    }
 }
 
 pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
@@ -264,6 +299,15 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
                 "reproducible import: {} {extension}",
                 case.name
             );
+            // A misplaced caption is trivia, never a refusal: pin that every
+            // caption a corpus source writes reaches the sidecar.
+            ensure!(
+                lowered.captions.entries().len() == written_captions(&source, lang),
+                "{} {extension}: {} of {} written captions imported",
+                case.name,
+                lowered.captions.entries().len(),
+                written_captions(&source, lang)
+            );
             let document = &*lowered.document;
             let entries: Vec<_> = document
                 .entries
@@ -313,15 +357,16 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
                     code_sites(document).len()
                 )?;
                 views.push_str(&readable::view(&checked, &view)?);
+                views.push_str(&readable::captions(&view, &lowered.captions)?);
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);
             outputs.insert(format!("{prefix}view.{extension}.txt"), views);
             outputs.insert(
                 format!("{prefix}printed.{extension}"),
-                roundtrip(document, lang)?,
+                roundtrip(document, &lowered.captions, lang)?,
             );
             if case.edit {
-                let (json, text) = edit(document, lang, &checker)?;
+                let (json, text) = edit(document, &lowered.captions, lang, &checker)?;
                 outputs.insert(format!("{prefix}edits/1.{extension}.json"), json);
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
@@ -336,6 +381,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
 
 fn edit(
     document: &Document,
+    captions: &Captions,
     lang: SourceLanguage,
     checker: &Checker<'_>,
 ) -> Result<(String, String)> {
@@ -401,10 +447,23 @@ fn edit(
         "\nCorrespondence:\n{}",
         serde_json::to_string_pretty(&applied.correspondence)?
     )?;
+    // The host's sidecar follows the edit: survivors move with their steps,
+    // and the ones whose step the edit wrote are marked for review.
+    let rekeyed = captions
+        .rekey(&applied.correspondence, draft.document())
+        .context("captions rekey through the edit's correspondence")?;
+    writeln!(text, "\nCaptions to review:")?;
+    for site in &rekeyed.touched {
+        let caption = rekeyed
+            .captions
+            .get(site)
+            .context("a touched site keeps its caption")?;
+        writeln!(text, "{site} {:?}", caption.title())?;
+    }
     write!(
         text,
         "\nReprinted source:\n{}",
-        roundtrip(draft.document(), lang)?
+        roundtrip(draft.document(), &rekeyed.captions, lang)?
     )?;
     Ok((json, text))
 }

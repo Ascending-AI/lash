@@ -307,6 +307,143 @@ async fn authored_source_is_read_from_its_published_map() {
     }
 }
 
+/// EXAMPLE-CAPTIONS: captions authored in source are the version's sidecar
+/// and drawn through lash's join; a canvas edit rekeys them and marks the
+/// touched ones for review; a rename is a new Captions value on a new version
+/// of the same document; the printed source spells them and reads them back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn captions_follow_import_edit_rename_and_printed_read() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let post = |path: &str, body: Value| {
+        client
+            .post(format!("{base}/workflow/{path}"))
+            .json(&body)
+            .send()
+    };
+    for (dialect, format, spelled) in [
+        ("typescript", "type_script_v1", "/** Email the team */"),
+        ("python", "python_v1", "#: Email the team"),
+    ] {
+        let opened = answer(
+            post("select", json!({"id": "straight-tool", "dialect": dialect}))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let titles = |workflow: &Value| -> Vec<Value> {
+            workflow["captions"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["caption"]["title"].clone())
+                .collect()
+        };
+        assert_eq!(
+            titles(&opened),
+            ["Say hello", "Send a greeting and give back the reply"]
+        );
+        assert_eq!(opened["captions"]["document"], opened["identity"]);
+        assert_eq!(
+            opened["captionView"]["callables"][0]["caption"]["title"],
+            "Say hello"
+        );
+        let step = opened["captionView"]["nodes"][0].clone();
+        assert_eq!(
+            step["caption"]["title"],
+            "Send a greeting and give back the reply"
+        );
+        assert_eq!(opened["captionsToReview"], json!([]));
+        // A canvas edit of the step's argument keeps its caption and marks it.
+        let action = opened["view"]["dataflow"]["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["callee"]["effect"] == "corpus.echo")
+            .unwrap()
+            .clone();
+        let edited = answer(
+            post(
+                "edits",
+                json!({"version": opened["version"], "edits": [{"set_value": {
+                    "base": opened["identity"],
+                    "target": {"tool_argument": {"action": action["site"], "index": 0}},
+                    "value": {"literal": {"text": "edited λ"}}}}]}),
+            )
+            .await
+            .unwrap(),
+        )
+        .await["workflow"]
+            .clone();
+        assert_ne!(edited["identity"], opened["identity"]);
+        assert_eq!(edited["captions"]["document"], edited["identity"]);
+        assert_eq!(titles(&edited), titles(&opened));
+        let review = edited["captionsToReview"].as_array().unwrap().clone();
+        assert!(review.contains(&step["site"]), "{review:?}");
+        // A caption text lash refuses changes nothing.
+        let mut entries = edited["captions"]["entries"].as_array().unwrap().clone();
+        let renamed_entry = entries
+            .iter_mut()
+            .find(|entry| entry["site"] == step["site"])
+            .unwrap();
+        renamed_entry["caption"] = json!({"title": "Done */ await wipe(); /*"});
+        let refused = post(
+            "captions",
+            json!({"version": edited["version"], "entries": entries.clone()}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+        let unchanged = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+        assert_eq!(unchanged["version"], edited["version"]);
+        // The rename is a new version of the same document.
+        let renamed_entry = entries
+            .iter_mut()
+            .find(|entry| entry["site"] == step["site"])
+            .unwrap();
+        renamed_entry["caption"] = json!({"title": "Email the team"});
+        let renamed = answer(
+            post(
+                "captions",
+                json!({"version": edited["version"], "entries": entries, "reviewed": [step["site"]]}),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(renamed["identity"], edited["identity"]);
+        assert_eq!(
+            renamed["version"].as_u64().unwrap(),
+            edited["version"].as_u64().unwrap() + 1
+        );
+        assert_eq!(titles(&renamed), ["Say hello", "Email the team"]);
+        assert!(
+            !renamed["captionsToReview"]
+                .as_array()
+                .unwrap()
+                .contains(&step["site"])
+        );
+        // The authored module predates both changes, so the printed source
+        // is what the editor shows; it spells the new caption.
+        assert_ne!(renamed["authored"]["version"], renamed["version"]);
+        let printed = renamed["source"].as_str().unwrap();
+        assert!(printed.contains(spelled), "{printed}");
+        let read = answer(
+            post(
+                "source",
+                json!({"version": renamed["version"], "entry": "demo", "dialect": dialect,
+                    "format": format, "source": printed}),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(read["identity"], renamed["identity"]);
+        assert_eq!(read["captions"], renamed["captions"]);
+        assert_eq!(read["captionsToReview"], json!([]));
+    }
+}
+
 /// EXAMPLE-CORPUS / STORED-VIEW / HELP-LABEL: the picker follows the shared
 /// catalog, twins keep their own results, and drawing consumes stored declarations.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -416,6 +553,16 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         )
                         .await;
                         assert_eq!(opened["authored"]["text"], *source);
+                        // EXAMPLE-CAPTIONS: every corpus workflow has a title.
+                        assert!(
+                            opened["captionView"]["callables"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|callable| callable["block"]["unit"]["function"] == *entry),
+                            "{} {dialect} {entry}: no workflow title",
+                            case["id"]
+                        );
                         assert_eq!(opened["sourceDialect"], dialect);
                         let definition = lash::process::ProcessDefinitionId::parse(
                             opened["definition"].as_str().unwrap(),

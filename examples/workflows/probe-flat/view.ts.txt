@@ -11,3 +11,9 @@ action fn demo/2/0 Some(Effect(QualifiedName("gmail.list_recent")))
 action fn demo/2/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
 action fn demo/3/0 Some(Effect(QualifiedName("display.set_status")))
 action fn demo/3/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
+caption callable 0 block=fn demo "Review the inbox"
+caption node 0 site=fn demo/0 "Choose the opening message"
+caption node 1 site=fn demo/1 "Show that the review started"
+caption node 3 site=fn demo/2 "Get the three newest emails"
+caption node 5 site=fn demo/3 "Mark the inbox as reviewed"
+caption node 7 site=fn demo/4 "Give back the emails"

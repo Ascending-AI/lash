@@ -163,7 +163,12 @@
           <label for="source-kind">Source form</label><select id="source-kind"><option value="authored">Workflow module</option><option value="printed">Printed document</option></select>
           <label for="source-dialect">Language</label><select id="source-dialect"><option value="typescript">TypeScript</option><option value="python">Python</option></select>
         </div>
+        <p id="source-note" class="help"></p>
         <textarea id="source" aria-label="TypeScript source" spellcheck="false" wrap="off"></textarea>
+        <details class="caption-guide">
+          <summary>Writing captions</summary>
+          <pre id="caption-guide" class="code-fragment"></pre>
+        </details>
         <div id="source-actions" class="button-row entry-row">
           <label for="entry">Entry function</label><input id="entry" value="demo" />
           <button id="import" data-write>Import TypeScript</button>

@@ -19,6 +19,7 @@ own serialized shapes and pass through unchanged (snake_case).
 | `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
 | `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
 | `POST` | `/workflow/source` | `{ version, source, entry, dialect? }`: import and admit source (`typescript` by default, or `python`) before replacing the current document |
+| `POST` | `/workflow/captions` | `{ version, entries, reviewed? }`: save a new caption list for the saved document as the next version; its `WorkflowView` |
 | `POST` | `/workflow/plan` | `{ version, operations }`: preview Lash authoring operations without publishing; `{ version, transaction, preview, correspondence }` |
 | `POST` | `/run` | `{ version?, inputs? }`: start a run with named input values; its `text/event-stream` |
 | `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
@@ -71,6 +72,11 @@ here.
 | `functionLabels` | Shipped helper titles keyed by name, joined against view callees. Unknown names fall back to themselves. |
 | `sourceMap` | Lash's `SourceMap` for `source` (snake_case, lash's shape): UTF-8 byte ranges of `source` for each site of the document. |
 | `authored` | `{ dialect, text, version, sourceMapId?, sourceMap?, mapUnavailable? }`: the imported source, read back through the publication's held map id. Authoring edits retain historical text but drop the map and id. A printed read or opening a kernel document drops authored source. |
+| `captions` | The version's captions, lash's `kernel-captions` shape (snake_case): `{ document, entries: [{ site, caption: { title, description? } }] }`, keyed to `identity`. Import and printed reads replace them with the source's; an edit rekeys them; a kernel document opens with none. |
+| `captionView` | `captions` joined with `view` by lash's `WorkflowView::captions`, the `kernel-caption-view` shape: `{ document, nodes: [{ node, site, caption }], arms: [{ node, arm, block, caption }], callables: [{ callable, block, caption }] }`, indexing `view.nodes`, a node's `arms` and `view.callables`. Absent with `view`, or with `captionsUnavailable`. |
+| `captionsToReview` | Captioned sites an edit has written at or beneath since their caption was saved (`Rekeyed.touched`, carried through later edits). |
+| `captionsDropped` | Captions `source` could not spell; absent when it spells all of them. |
+| `captionGuide` | How to write a caption in `sourceDialect`, in that dialect's words. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 
@@ -114,6 +120,15 @@ Refusals leave the saved version unchanged and answer HTTP 422 `edit_refused`
 with `details.diagnostics: [{ edit, site, location, message, cause }]`. `cause` is Lash's
 serialized `EditDiagnosticKind`, retaining nested checker fields. Unsupported
 or malformed operations answer `unsupported_canvas_edit` and its typed cause.
+
+`POST /workflow/captions` accepts `{ version, entries: CaptionEntry[], reviewed?: Site[] }`:
+every caption the saved document is to have. The host builds a lash `Captions`
+value from them, saves it as the next version of the same document and
+republishes it; the sites in `reviewed` leave `captionsToReview`. A caption
+text lash refuses (`CaptionRefusal`) or a site it may not caption
+(`CaptionsRefusal`) answers HTTP 422 `caption_refused` and changes nothing.
+An edit transaction's response and a plan's preview carry the rekeyed
+captions.
 
 `POST /workflow/plan` accepts `{ version, operations: Operation[] }` and previews
 the same closed batch against a cloned draft, returning

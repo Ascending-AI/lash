@@ -1,9 +1,9 @@
 language: TypeScript
 exceptions: none
-main/0 [7..136] "async function demo(items) {\n  const out = [];\n  for (const item of items) { out.push(await corpus.echo(item)); }\n  return out;\n}"
-fn demo/0 [38..53] "const out = [];"
-fn demo/1 [56..120] "for (const item of items) { out.push(await corpus.echo(item)); }"
-fn demo/1/1/0 [84..118] "out.push(await corpus.echo(item));"
-fn demo/1/1/0/2 [84..118] "out.push(await corpus.echo(item));"
-fn demo/1/1/0/2/0 [84..118] "out.push(await corpus.echo(item));"
-fn demo/2 [123..134] "return out;"
+main/0 [30..310] "async function demo(items) {\n  /** Start an empty list of replies */\n  const out = [];\n  /** Go through each item */\n  for (const item of items) {\n    /** Echo the item and keep the reply */\n    out.push(await corpus.echo(item));\n  }\n  /** Give back the replies */\n  return out;\n}"
+fn demo/0 [101..116] "const out = [];"
+fn demo/1 [149..263] "for (const item of items) {\n    /** Echo the item and keep the reply */\n    out.push(await corpus.echo(item));\n  }"
+fn demo/1/1/0 [225..259] "out.push(await corpus.echo(item));"
+fn demo/1/1/0/2 [225..259] "out.push(await corpus.echo(item));"
+fn demo/1/1/0/2/0 [225..259] "out.push(await corpus.echo(item));"
+fn demo/2 [297..308] "return out;"

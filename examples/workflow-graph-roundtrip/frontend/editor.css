@@ -971,6 +971,37 @@ dialog::backdrop {
 .run-count + .data-status {
   margin-left: 6px;
 }
+/* A caption an edit may have made stale: the author should check it. */
+.caption-review {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: #8a5a12;
+  background: #fbf0dc;
+  border-radius: 9px;
+  padding: 1px 7px;
+}
+.caption-review + .run-count {
+  margin-left: 6px;
+}
+.caption-form {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.caption-form h3 {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.caption-form textarea {
+  min-height: 60px;
+}
+.caption-form .save-node {
+  margin-top: 12px;
+}
+.caption-review-note {
+  color: #8a5a12;
+}
 .result-chip {
   position: absolute;
   left: 10px;
@@ -1365,4 +1396,11 @@ dialog::backdrop {
 .data-node .control-arm:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+.caption-guide {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.caption-guide pre {
+  white-space: pre-wrap;
 }

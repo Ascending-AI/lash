@@ -26,3 +26,13 @@ action fn digest/1/1/2/1/0/2/0/0 library id=6761e24d2f7380f55eee758414c07f86a1b8
 action fn digest/1/1/2/2/0/0 library id=6761e24d2f7380f55eee758414c07f86a1b817509531fceeec778805b271ec8e name=ts.read label="TypeScript read"
 action fn digest/1/1/3/1/0/0/0 None
 action fn digest/1/1/3/2/0/0/0 None
+caption callable 0 block=fn digest "Pace a digest of topics"
+caption node 0 site=fn digest/0 "Start counting at zero"
+caption node 1 site=fn digest/1 "Go through each topic"
+caption node 2 site=fn digest/1/1/0 "Wait seven seconds"
+caption node 9 site=fn digest/1/1/3 "Check whether the topic is urgent"
+caption node 10 site=fn digest/1/1/3/1/0 "Wait one more second"
+caption node 11 site=fn digest/1/1/3/2/0 "Wait two more seconds"
+caption node 12 site=fn digest/1/1/4 "Count the topic as seen"
+caption node 13 site=fn digest/2 "Report how many topics were seen"
+caption arm 9.1 block=fn digest/1/1/3/2 "Not urgent"

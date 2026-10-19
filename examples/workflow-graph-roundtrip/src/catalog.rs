@@ -2,7 +2,7 @@
 //! includes, so the example and its tests ship exactly the committed corpus.
 use crate::{Dialect, runtime::RunError};
 use lash::LashCore;
-use lash::workflow::document::{Document, FunctionRegistry, Name, SourceMap};
+use lash::workflow::document::{Captions, Document, FunctionRegistry, Name, SourceMap};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry, WorkflowEnvironment};
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,7 @@ pub(crate) struct ImportedTwin {
     dialect: Dialect,
     source: &'static str,
     map: Option<SourceMap>,
+    captions: Captions,
 }
 impl ImportedTwin {
     pub(crate) fn origin(&self) -> crate::Origin {
@@ -72,6 +73,7 @@ impl ImportedTwin {
             dialect: self.dialect,
             text: self.source.into(),
             map: self.map.clone(),
+            captions: self.captions.clone(),
         }
     }
 }
@@ -134,7 +136,7 @@ impl Catalog {
                     }
                     twins.push(None);
                 } else {
-                    let (document, map) = imported.map_err(|error| {
+                    let (document, map, captions) = imported.map_err(|error| {
                         RunError::Invalid(format!("{} ({dialect:?}): {:?}", case.name, error.body))
                     })?;
                     let entries: Vec<_> =
@@ -151,6 +153,7 @@ impl Catalog {
                         dialect,
                         source,
                         map,
+                        captions,
                     }));
                 }
             }

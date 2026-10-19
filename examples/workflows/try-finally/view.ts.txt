@@ -11,3 +11,12 @@ scope fn demo/1/1 ordinal=7 depth=1 Catch
 scope fn demo/1/2 ordinal=9 depth=1 Finally
 action fn demo/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/2/0/0 Some(Effect(QualifiedName("corpus.echo")))
+caption callable 0 block=fn demo "Try a step, and always finish up"
+caption node 0 site=fn demo/0 "Start with a placeholder result"
+caption node 1 site=fn demo/1 "Try the echo"
+caption node 2 site=fn demo/1/0/0 "Echo a test message and keep the reply"
+caption node 3 site=fn demo/1/1/0 "Note that it failed"
+caption node 4 site=fn demo/1/2/0 "Send a closing echo"
+caption node 5 site=fn demo/2 "Give back the result"
+caption arm 1.1 block=fn demo/1/1 "If the echo fails"
+caption arm 1.2 block=fn demo/1/2 "Whatever happened"

@@ -147,6 +147,59 @@ Printed source reads against the current document with its printer format;
 reading it unchanged preserves canonical identity. The language of a printed
 lens follows the imported revision, including after canvas edits.
 
+## Captions
+
+A caption is a step's plain-language title and optional description. The
+corpus writes one on every workflow, step and branch, and each dialect has
+its own spelling. In TypeScript it is a JSDoc block right before the
+function, statement or `else`/`catch`/`finally` keyword it names:
+
+```ts
+/** Send the weekly report */
+export async function report(team: string) {
+  /** Email the team */
+  await mail.send({ to: team });
+}
+```
+
+In Python it is `#:` lines directly above, at the same indentation; lines
+after the first are the description:
+
+```python
+#: Send the weekly report
+async def report(team: str):
+    #: Email the team
+    #: Only the leads receive it.
+    await mail.send(to=team)
+```
+
+The host keeps a version's `Captions` beside its document and source map
+(`SavedWorkflow::captions`); lash stores none. Importing a module or reading
+printed source replaces them with the ones that source spells.
+
+- **On the canvas.** A step's caption is its tile's title, with the host's
+  own wording (the tool's name, `If value < 0` for a condition) underneath;
+  a step without one shows that wording as its title. The tiles come from
+  lash's join, `WorkflowView::captions`: an action or control tile shows its
+  statement's caption, a code tile every caption among its statements. A
+  branch's caption names its button and its entry in the scope menu, and the
+  entry function's caption is the workflow's title in the header.
+- **Through canvas edits.** An edit moves the captions with their steps
+  (`Captions::rekey`). The ones whose step the edit changed, or anything
+  inside it, get a **Review** badge: "Email the team" may no longer fit once
+  its recipient changed.
+- **Renaming.** Open a step to rename, add or remove its caption; open
+  **Workflow Input** for the workflow's title. Saving sends the whole new
+  caption list to `POST /workflow/captions`, which builds a new `Captions`
+  value, saves it as the next version of the same document and clears that
+  caption's review mark. Lash refuses text no dialect can spell (`*/`, a line
+  starting with `@`, a title over 200 bytes) and nothing changes.
+- **In Edit source.** Once a version has a canvas edit or a caption change
+  its imported module lacks, the editor opens on lash's print of the document
+  with its captions (`print(document, Some(&captions), options)`), so reading
+  it back keeps them. **Writing captions** shows the dialect's own guide
+  (`CaptionSupport::guide`).
+
 ## Public authoring API
 
 `lash::workflow::authoring::Operation` is the closed canvas vocabulary:
@@ -184,7 +237,8 @@ omits them, and deserialization sets that field to `None`.
 
 ## Verification
 
-The focused HTTP laws cover retained source maps, both dialects' imports,
+The focused HTTP laws cover captions through import, edit, rename and a
+printed read, retained source maps, both dialects' imports,
 printed read identity, exact edit preview/replay, display output, catalog entry
 and refusal contracts, and views derived from stored declarations. The shared
 corpus law pins readable per-dialect outputs and counts. It compares entry names
@@ -192,8 +246,9 @@ and refusal codes across dialects; it does not require their values to agree.
 
 ```sh
 . ./env.sh
-kiln test //examples/workflow-graph-roundtrip:roundtrip__test --test_arg=--exact --test_arg=authored_source_is_read_from_its_published_map --test_arg=corpus_catalog_imports_both_dialects_and_draws_the_stored_read
+kiln test //examples/workflow-graph-roundtrip:roundtrip__test --test_arg=--exact --test_arg=authored_source_is_read_from_its_published_map --test_arg=corpus_catalog_imports_both_dialects_and_draws_the_stored_read --test_arg=captions_follow_import_edit_rename_and_printed_read
 kiln gate lash "$(basename "$PWD")" -- node --test --test-name-pattern=EXAMPLE-SOURCE examples/workflow-graph-roundtrip/frontend/codepane.test.mjs
+kiln gate lash "$(basename "$PWD")" -- node --test examples/workflow-graph-roundtrip/frontend/captions.test.mjs
 ```
 
 The [browser runbook](../../runbooks/workflow-editor-authoring/runbook.md)

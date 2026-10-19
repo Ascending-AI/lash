@@ -1,5 +1,5 @@
 language: TypeScript
 exceptions: none
-main/0 [7..69] "async function demo() {\n  return await corpus.echo(\"hello\");\n}"
-fn demo/0 [33..67] "return await corpus.echo(\"hello\");"
-fn demo/0/0 [33..67] "return await corpus.echo(\"hello\");"
+main/0 [24..135] "async function demo() {\n  /** Send a greeting and give back the reply */\n  return await corpus.echo(\"hello\");\n}"
+fn demo/0 [99..133] "return await corpus.echo(\"hello\");"
+fn demo/0/0 [99..133] "return await corpus.echo(\"hello\");"

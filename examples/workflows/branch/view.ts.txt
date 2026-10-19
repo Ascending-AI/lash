@@ -6,3 +6,7 @@ scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then
 scope fn demo/0/2 ordinal=6 depth=1 Else
 action fn demo/0/1/0/0 Some(Effect(QualifiedName("corpus.echo")))
+caption callable 0 block=fn demo "Answer yes or no"
+caption node 0 site=fn demo/0 "Check whether the answer is yes"
+caption node 1 site=fn demo/0/1/0 "Send back a yes"
+caption node 2 site=fn demo/1 "Otherwise answer no"

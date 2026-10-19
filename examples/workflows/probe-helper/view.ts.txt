@@ -37,3 +37,10 @@ action fn summarize_inbox/1/0 Some(Effect(QualifiedName("gmail.list_recent")))
 action fn summarize_inbox/1/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
 action fn summarize_inbox/3/1/0/2 library id=1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a name=ts.await label="TypeScript await"
 action fn summarize_inbox/3/1/0/2/0/1/1/1 None
+caption callable 0 block=fn summarize_inbox "Summarize the inbox"
+caption node 0 site=fn summarize_inbox/0 "Describe how to summarize and show one email"
+caption node 1 site=fn summarize_inbox/1 "Get the three newest emails"
+caption node 3 site=fn summarize_inbox/2 "Start an empty list of summaries"
+caption node 4 site=fn summarize_inbox/3 "Go through each email"
+caption node 5 site=fn summarize_inbox/3/1/0 "Summarize it, show it and keep the summary"
+caption node 7 site=fn summarize_inbox/4 "Give back the summaries"

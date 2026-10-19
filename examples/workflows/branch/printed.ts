@@ -1,7 +1,11 @@
+/** Answer yes or no */
 export async function demo(flag) {
+  /** Check whether the answer is yes */
   if (flag) {
+    /** Send back a yes */
     return k.returnVia((await await tools.corpus.echo("yes")), helper_ts_promise_adopt);
   }
+  /** Otherwise answer no */
   return k.returnVia("no", helper_ts_promise_adopt);
 }
 async function main() {

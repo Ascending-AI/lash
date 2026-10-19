@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
-main/0 [7..121] "async function demo(name: string) {\n  const größe = \"日本 🦀\";\n  return await corpus.echo(größe + name);\n}"
-fn demo/0 [45..75] "const größe = \"日本 🦀\";"
-fn demo/1 [78..119] "return await corpus.echo(größe + name);"
-fn demo/1/0 [78..119] "return await corpus.echo(größe + name);"
-fn demo/1/0/0 [78..119] "return await corpus.echo(größe + name);"
+main/0 [38..233] "async function demo(name: string) {\n  /** Pick the greeting: 日本 🦀 */\n  const größe = \"日本 🦀\";\n  /** Echo the greeting with the name */\n  return await corpus.echo(größe + name);\n}"
+fn demo/0 [116..146] "const größe = \"日本 🦀\";"
+fn demo/1 [190..231] "return await corpus.echo(größe + name);"
+fn demo/1/0 [190..231] "return await corpus.echo(größe + name);"
+fn demo/1/0/0 [190..231] "return await corpus.echo(größe + name);"

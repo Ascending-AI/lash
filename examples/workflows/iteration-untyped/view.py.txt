@@ -8,3 +8,8 @@ scope fn demo/1/1 ordinal=5 depth=1 For
 action fn demo/1/1/0/0 library id=d8fa186a8c5784053d9e47d83b231e2bae49e435d560e60788186a51b79fda9c name=py.method.append label="Python method append"
 action fn demo/1/1/0/0/1 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action fn demo/1/1/0/0/1/0 Some(Effect(QualifiedName("corpus.echo")))
+caption callable 0 block=fn demo "Echo every item"
+caption node 0 site=fn demo/0 "Start an empty list of replies"
+caption node 1 site=fn demo/1 "Go through each item"
+caption node 2 site=fn demo/1/1/0 "Echo the item and keep the reply"
+caption node 5 site=fn demo/2 "Give back the replies"

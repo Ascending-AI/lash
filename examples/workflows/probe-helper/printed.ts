@@ -1,4 +1,6 @@
+/** Summarize the inbox */
 export async function summarize_inbox() {
+  /** Describe how to summarize and show one email */
   let announce = ["ts.function", "", "announce", 1.0, async function(this3, args3) {
     return (await helper_ts_promise_start(async function(this2, args2) {
       let t1 = (helper_list_len(args2) < 1.0 ? (await helper_ts_pad(args2, 1.0)) : args2);
@@ -18,11 +20,16 @@ export async function summarize_inbox() {
       return k.returnVia(summary, helper_ts_promise_adopt);
     }, this3, helper_list_copy(args3)));
   }, {}] as const;
+  /** Get the three newest emails */
   let emails = (await await tools.gmail.list_recent((await helper_ts_boundary({count: 3.0}))));
+  /** Start an empty list of summaries */
   let summaries = [];
+  /** Go through each email */
   for (const email of emails) {
+    /** Summarize it, show it and keep the summary */
     summaries[helper_list_len(summaries)] = (await ((await (async (t8) => ((await (async (t9) => ((await (async (t10) => ((await (t10)(undefined, t9))))(t8[4.0]))))([email]))))(announce))));
   }
+  /** Give back the summaries */
   return k.returnVia(summaries, helper_ts_promise_adopt);
 }
 async function main() {

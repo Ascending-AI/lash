@@ -1,8 +1,8 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [0..99] "async def demo(name: str):\n    größe = \"日本 🦀\"\n    return await corpus.echo(größe + name)"
-fn demo/0 [31..54] "größe = \"日本 🦀\""
-fn demo/1 [59..99] "return await corpus.echo(größe + name)"
-fn demo/1/0 [59..99] "return await corpus.echo(größe + name)"
-fn demo/1/0/0 [59..99] "return await corpus.echo(größe + name)"
-fn demo/1/0/0/0 [59..99] "return await corpus.echo(größe + name)"
+main/0 [27..203] "async def demo(name: str):\n    #: Pick the greeting: 日本 🦀\n    größe = \"日本 🦀\"\n    #: Echo the greeting with the name\n    return await corpus.echo(größe + name)"
+fn demo/0 [96..119] "größe = \"日本 🦀\""
+fn demo/1 [163..203] "return await corpus.echo(größe + name)"
+fn demo/1/0 [163..203] "return await corpus.echo(größe + name)"
+fn demo/1/0/0 [163..203] "return await corpus.echo(größe + name)"
+fn demo/1/0/0/0 [163..203] "return await corpus.echo(größe + name)"

@@ -1,9 +1,9 @@
 language: TypeScript
 exceptions: none
-main/0 [7..130] "async function demo(value: number) {\n  if (value < 0) { return \"negative\"; }\n  await corpus.echo(value);\n  return \"done\";\n}"
-fn demo/0 [46..83] "if (value < 0) { return \"negative\"; }"
-fn demo/0/1/0 [63..81] "return \"negative\";"
-fn demo/1 [86..111] "await corpus.echo(value);"
-fn demo/1/0 [86..111] "await corpus.echo(value);"
-fn demo/1/0/0 [86..111] "await corpus.echo(value);"
-fn demo/2 [114..128] "return \"done\";"
+main/0 [49..317] "async function demo(value: number) {\n  /** Check for a negative value */\n  if (value < 0) {\n    /** Stop and report that it is negative */\n    return \"negative\";\n  }\n  /** Echo the value */\n  await corpus.echo(value);\n  /** Report that it is done */\n  return \"done\";\n}"
+fn demo/0 [124..214] "if (value < 0) {\n    /** Stop and report that it is negative */\n    return \"negative\";\n  }"
+fn demo/0/1/0 [192..210] "return \"negative\";"
+fn demo/1 [241..266] "await corpus.echo(value);"
+fn demo/1/0 [241..266] "await corpus.echo(value);"
+fn demo/1/0/0 [241..266] "await corpus.echo(value);"
+fn demo/2 [301..315] "return \"done\";"

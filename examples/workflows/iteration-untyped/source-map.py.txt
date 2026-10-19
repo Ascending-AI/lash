@@ -1,10 +1,10 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [0..117] "async def demo(items):\n    out = []\n    for item in items:\n        out.append(await corpus.echo(item))\n    return out"
-fn demo/0 [27..35] "out = []"
-fn demo/1 [40..102] "for item in items:\n        out.append(await corpus.echo(item))"
-fn demo/1/1/0 [67..102] "out.append(await corpus.echo(item))"
-fn demo/1/1/0/0 [67..102] "out.append(await corpus.echo(item))"
-fn demo/1/1/0/0/1 [67..102] "out.append(await corpus.echo(item))"
-fn demo/1/1/0/0/1/0 [67..102] "out.append(await corpus.echo(item))"
-fn demo/2 [107..117] "return out"
+main/0 [19..275] "async def demo(items):\n    #: Start an empty list of replies\n    out = []\n    #: Go through each item\n    for item in items:\n        #: Echo the item and keep the reply\n        out.append(await corpus.echo(item))\n    #: Give back the replies\n    return out"
+fn demo/0 [84..92] "out = []"
+fn demo/1 [125..231] "for item in items:\n        #: Echo the item and keep the reply\n        out.append(await corpus.echo(item))"
+fn demo/1/1/0 [196..231] "out.append(await corpus.echo(item))"
+fn demo/1/1/0/0 [196..231] "out.append(await corpus.echo(item))"
+fn demo/1/1/0/0/1 [196..231] "out.append(await corpus.echo(item))"
+fn demo/1/1/0/0/1/0 [196..231] "out.append(await corpus.echo(item))"
+fn demo/2 [265..275] "return out"

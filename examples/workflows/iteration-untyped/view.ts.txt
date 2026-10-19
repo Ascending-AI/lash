@@ -7,3 +7,8 @@ scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/1/1 ordinal=5 depth=1 For
 action fn demo/1/1/0/2 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/1/0/2/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
+caption callable 0 block=fn demo "Echo every item"
+caption node 0 site=fn demo/0 "Start an empty list of replies"
+caption node 1 site=fn demo/1 "Go through each item"
+caption node 2 site=fn demo/1/1/0 "Echo the item and keep the reply"
+caption node 4 site=fn demo/2 "Give back the replies"

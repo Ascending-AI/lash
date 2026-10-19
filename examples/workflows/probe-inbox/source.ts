@@ -1,9 +1,16 @@
+/** Send a paced inbox digest */
 export async function digest(items) {
+  /** Start counting at zero */
   let sent = 0;
+  /** Go through each item */
   for (const item of items) {
+    /** Wait six seconds */
     await sleep(6000);
+    /** Show the item's title */
     await display.show_message({ text: item.title });
+    /** Count the item as sent */
     sent = sent + 1;
   }
+  /** Report how many items were sent */
   return { sent };
 }

@@ -1,6 +1,8 @@
+/** Give back the number it is given */
 export async function arrow(value) {
   return k.returnVia(value, helper_ts_promise_adopt);
 }
+/** Answer from the top level */
 export async function kernel_name_1() {
   return k.returnVia("top", helper_ts_promise_adopt);
 }

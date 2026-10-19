@@ -1,4 +1,6 @@
+/** Measure each word */
 export async function demo(items) {
+  /** Describe how to measure one word */
   let size = ["ts.function", "", "size", 1.0, async function(this2, args2) {
     return (await (async (t1) => ((await (async (item) => ((await helper_ts_property_length(item))))(t1[0.0]))))((helper_list_len(args2) < 1.0 ? (await helper_ts_pad(args2, 1.0)) : args2)));
   }, {}] as const;
@@ -17,6 +19,7 @@ export async function demo(items) {
     let t7 = await helper_ts_member_map(items);
     t6 = (await (async (t8) => ((await (async (t9) => ((await (async (t10) => ((await (t10)(items, t9))))(helper_ts_callable(t8)))))([size]))))(t7));
   }
+  /** Measure every word in the list */
   return k.returnVia(t6, helper_ts_promise_adopt);
 }
 async function main() {
