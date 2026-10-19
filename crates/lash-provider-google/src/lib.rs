@@ -70,6 +70,7 @@ mod tests {
     mod epilogue;
     mod generation_tests;
     mod wire_bytes;
+    mod wire_order;
     use lash_protocol_types::sync::MutexExt;
     use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
@@ -1200,7 +1201,7 @@ mod tests {
                 Some("gemini-test"),
             )
             .expect("streaming function call parses");
-        let streaming_parts = state.tool_call_parts;
+        let streaming_parts = state.output_parts;
         let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[function_part]},

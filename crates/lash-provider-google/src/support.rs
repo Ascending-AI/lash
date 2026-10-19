@@ -40,7 +40,7 @@ pub(crate) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict
 
 pub(crate) use crate::config::*;
 
-pub(crate) use crate::stream::GoogleStreamState;
+pub(crate) use crate::stream::{GoogleStreamState, is_reasoning_emission};
 
 pub(crate) use lash_core::provider::attachment_wire::{
     UnitWriter, check_codec, lower_attachment_json, message_names_missing_file,

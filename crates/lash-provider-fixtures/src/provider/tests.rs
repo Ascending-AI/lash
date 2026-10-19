@@ -293,6 +293,103 @@ async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
     );
 }
 
+fn same_name_error_script(status: u16) -> ProviderWireScript {
+    ProviderWireScript::from_json_str(&format!(
+        r#"{{
+              "schema": "lash.provider-wire-script.v1",
+              "name": "shared-label",
+              "provider_kind": "openai-compatible",
+              "endpoint": {{ "method": "POST", "path": "/chat/completions" }},
+              "request_match": {{ "any": true }},
+              "timeline": [
+                {{ "at": 10, "event": "http_error", "status": {status}, "headers": [], "body": "{{}}" }}
+              ]
+            }}"#
+    ))
+    .expect("same-name script")
+}
+
+fn raw_http_request(body: &'static str) -> lash_llm_transport::LlmHttpRequest {
+    lash_llm_transport::LlmHttpRequest {
+        method: lash_llm_transport::LlmHttpMethod::Post,
+        url: "https://provider.test/chat/completions".to_string(),
+        headers: Vec::new(),
+        body: bytes::Bytes::from_static(body.as_bytes()),
+        body_for_error: None,
+        response_start_timeout_message: None,
+    }
+}
+
+fn exchange_body_keys(exchange: &ScriptedLlmHttpExchange) -> Value {
+    exchange.request.body_shape["keys"].clone()
+}
+
+/// Script names are labels, not identities: each scheduled send completes the exchange row
+/// it inserted, even while another send under the same script name is still pending or is
+/// cancelled before its response starts.
+#[tokio::test]
+async fn scheduled_send_completes_its_own_exchange_when_script_names_repeat() {
+    use lash_llm_transport::LlmHttpTransport as _;
+
+    let schedule = ScriptedTransportSchedule::new();
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts([
+            same_name_error_script(429),
+            same_name_error_script(400),
+            same_name_error_script(503),
+        ])
+        .expect("valid scripts")
+        .with_event_schedule(schedule.clone()),
+    );
+    let send = |body: &'static str| {
+        let transport = transport.clone();
+        tokio::spawn(async move { transport.send(raw_http_request(body), None).await })
+    };
+
+    let a = send(r#"{"a":1}"#);
+    schedule.wait_until_blocked(0, 0).await;
+    let b = send(r#"{"b":1}"#);
+    schedule.wait_until_blocked(1, 0).await;
+    let c = send(r#"{"c":1}"#);
+    schedule.wait_until_blocked(2, 0).await;
+
+    schedule.release(0, 0, "http_error", 10);
+    let a_status = a.await.expect("send A task").expect("send A").status;
+    assert_eq!(a_status, 429);
+    let exchanges = transport.exchanges().expect("exchange log");
+    assert_eq!(exchange_body_keys(&exchanges[0]), json!(["a"]));
+    assert_eq!(
+        exchanges[0].response.status,
+        Some(429),
+        "A must complete the row it inserted"
+    );
+    assert_eq!(exchange_body_keys(&exchanges[1]), json!(["b"]));
+    assert_eq!(
+        exchanges[1].response.status, None,
+        "B's row must stay pending while B is blocked"
+    );
+
+    c.abort();
+    assert!(c.await.expect_err("cancelled send C").is_cancelled());
+    schedule.release(1, 0, "http_error", 10);
+    let b_status = b.await.expect("send B task").expect("send B").status;
+    assert_eq!(b_status, 400);
+
+    let exchanges = transport.exchanges().expect("exchange log");
+    let rows: Vec<_> = exchanges
+        .iter()
+        .map(|exchange| (exchange_body_keys(exchange), exchange.response.status))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            (json!(["a"]), Some(429)),
+            (json!(["b"]), Some(400)),
+            (json!(["c"]), None),
+        ]
+    );
+}
+
 #[test]
 fn provider_wire_script_rejects_non_monotonic_timeline_at_metadata() {
     let err = ProviderWireScript::from_json_str(

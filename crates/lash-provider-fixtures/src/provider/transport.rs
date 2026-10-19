@@ -37,7 +37,6 @@ pub struct ScriptedLlmHttpTransport {
     scripts: Arc<Mutex<VecDeque<ProviderWireScript>>>,
     exchanges: Arc<Mutex<Vec<ScriptedLlmHttpExchange>>>,
     event_schedule: Option<ScriptedTransportSchedule>,
-    next_exchange_index: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -199,7 +198,6 @@ impl ScriptedLlmHttpTransport {
             scripts: Arc::new(Mutex::new(scripts)),
             exchanges: Arc::new(Mutex::new(Vec::new())),
             event_schedule: None,
-            next_exchange_index: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -236,19 +234,22 @@ impl ScriptedLlmHttpTransport {
         Ok(())
     }
 
-    fn record_or_replace_pending_exchange(
-        &self,
-        exchange: ScriptedLlmHttpExchange,
-    ) -> Result<(), LlmTransportError> {
+    /// Append a pending exchange and return its index, the identity its scheduler
+    /// gates and its response observation use. Script names are labels only.
+    fn record_pending_exchange(&self, exchange: ScriptedLlmHttpExchange) -> usize {
         let mut exchanges = self.exchanges.lock_recover();
-        if let Some(existing) = exchanges.iter_mut().rev().find(|existing| {
-            existing.script_name == exchange.script_name && existing.response.event_names.is_empty()
-        }) {
-            *existing = exchange;
-        } else {
-            exchanges.push(exchange);
+        exchanges.push(exchange);
+        exchanges.len() - 1
+    }
+
+    fn record_exchange_response(
+        &self,
+        exchange_index: usize,
+        response: ScriptedLlmHttpResponseExchange,
+    ) {
+        if let Some(exchange) = self.exchanges.lock_recover().get_mut(exchange_index) {
+            exchange.response = response;
         }
-        Ok(())
     }
 }
 
@@ -262,8 +263,8 @@ impl LlmHttpTransport for ScriptedLlmHttpTransport {
         let script = self.next_script()?;
         match_request(&script, &request)?;
         if let Some(schedule) = &self.event_schedule {
-            let exchange_index = self.next_exchange_index.fetch_add(1, Ordering::SeqCst);
-            self.record_exchange(scripted_exchange(&script, &request, false))?;
+            let exchange_index =
+                self.record_pending_exchange(scripted_exchange(&script, &request, false));
             let timeout_message = request
                 .response_start_timeout_message
                 .as_deref()
@@ -277,9 +278,10 @@ impl LlmHttpTransport for ScriptedLlmHttpTransport {
             )
             .await;
             if result.is_ok() {
-                self.record_or_replace_pending_exchange(scripted_exchange(
-                    &script, &request, true,
-                ))?;
+                self.record_exchange_response(
+                    exchange_index,
+                    scripted_response_exchange(&script, true),
+                );
             }
             return result;
         }

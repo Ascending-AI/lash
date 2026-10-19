@@ -271,10 +271,8 @@ fn google_signature_on_function_call_thought_part_yields_only_the_tool_call() {
             Some("gemini-test"),
         )
         .expect("streaming functionCall thought part parses");
-    // The streaming sink splits tool calls from the other output parts; both
-    // sinks together are what the driver emits for the turn, so a duplicate
-    // empty Reasoning part shows up here.
-    let streaming_parts = [state.output_parts, state.tool_call_parts].concat();
+    // A duplicate empty Reasoning part would show up beside the tool call here.
+    let streaming_parts = state.output_parts;
     let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
         &json!({"candidates":[{
             "content":{"parts":[part]},

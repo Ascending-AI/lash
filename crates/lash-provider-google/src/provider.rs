@@ -260,15 +260,7 @@ impl GoogleOAuthProvider {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
                 let prev_usage = stream_state.usage.clone();
                 let prev_execution_evidence = stream_state.execution_evidence.clone();
-                let first_new_tool_call = stream_state.tool_call_parts.len();
                 let deltas = stream_state.push_event(self, raw, origin_model.as_deref())?;
-                if let Some(tx) = stream_events.as_ref()
-                    && expose_thinking
-                {
-                    for event in deltas.reasoning_events {
-                        tx.send(event);
-                    }
-                }
                 if let Some(tx) = stream_events.as_ref() {
                     if stream_state.usage != prev_usage && stream_state.usage != LlmUsage::default()
                     {
@@ -289,11 +281,10 @@ impl GoogleOAuthProvider {
                             ..Default::default()
                         }));
                     }
-                    for event in deltas.text_events {
-                        tx.send(event);
-                    }
-                    for part in &stream_state.tool_call_parts[first_new_tool_call..] {
-                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    for event in deltas.events {
+                        if expose_thinking || !is_reasoning_emission(&event) {
+                            tx.send(event);
+                        }
                     }
                 }
                 Ok(())
@@ -314,38 +305,19 @@ impl GoogleOAuthProvider {
             }
         }
 
-        let partial_response = || {
-            let mut parts = stream_state.output_parts.clone();
-            if parts
-                .iter()
-                .filter_map(|part| match part {
-                    LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<String>()
-                .is_empty()
-                && !stream_state.full.is_empty()
-            {
-                parts.push(LlmOutputPart::Text {
-                    text: stream_state.full.clone(),
-                    response_meta: None,
-                });
-            }
-            parts.extend(stream_state.tool_call_parts.clone());
-            LlmResponse {
-                parts,
-                usage: stream_state.usage.clone(),
-                terminal_reason: LlmTerminalReason::Unknown,
-                terminal_diagnostic: None,
-                discarded_after_cell: None,
-                provider_usage: stream_state.provider_usage.clone(),
-                request_body: request_body.clone(),
-                http_summary: Some(format!("HTTP POST {url} (stream)")),
-                execution_evidence: stream_state.execution_evidence.clone(),
-                generation_disposition,
-                response_metadata: response_metadata.metadata(),
-                expose_thinking: Some(stream_state.expose_thinking),
-            }
+        let partial_response = || LlmResponse {
+            parts: response_parts(stream_state.output_parts.clone(), &stream_state.full),
+            usage: stream_state.usage.clone(),
+            terminal_reason: LlmTerminalReason::Unknown,
+            terminal_diagnostic: None,
+            discarded_after_cell: None,
+            provider_usage: stream_state.provider_usage.clone(),
+            request_body: request_body.clone(),
+            http_summary: Some(format!("HTTP POST {url} (stream)")),
+            execution_evidence: stream_state.execution_evidence.clone(),
+            generation_disposition,
+            response_metadata: response_metadata.metadata(),
+            expose_thinking: Some(stream_state.expose_thinking),
         };
         if let Err(error) = stream_result {
             return Err(error.with_partial_response(partial_response()));
@@ -362,23 +334,7 @@ impl GoogleOAuthProvider {
             );
         }
 
-        let mut parts = stream_state.output_parts;
-        if parts
-            .iter()
-            .filter_map(|part| match part {
-                LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<String>()
-            .is_empty()
-            && !stream_state.full.is_empty()
-        {
-            parts.push(LlmOutputPart::Text {
-                text: stream_state.full.clone(),
-                response_meta: None,
-            });
-        }
-        parts.extend(stream_state.tool_call_parts);
+        let parts = response_parts(stream_state.output_parts, &stream_state.full);
 
         // Mirror the non-streaming path: derive the terminal reason from the
         // last `finishReason` observed across the SSE events. When no event
@@ -1021,4 +977,20 @@ mod token_source_tests {
             "lower asks once, send asks once and once more after the 401"
         );
     }
+}
+
+/// A streamed response's parts in wire order. Visible text that reached `full`
+/// without a text part is kept as one trailing text part.
+fn response_parts(mut parts: Vec<LlmOutputPart>, full: &str) -> Vec<LlmOutputPart> {
+    if !full.is_empty()
+        && parts
+            .iter()
+            .all(|part| !matches!(part, LlmOutputPart::Text { text, .. } if !text.is_empty()))
+    {
+        parts.push(LlmOutputPart::Text {
+            text: full.to_string(),
+            response_meta: None,
+        });
+    }
+    parts
 }

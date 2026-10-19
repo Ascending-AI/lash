@@ -71,74 +71,41 @@ impl GoogleOAuthProvider {
         (evidence != ExecutionEvidence::default()).then_some(evidence)
     }
 
-    fn text_parts_from_event(event: &Value) -> Vec<(String, Option<String>, bool)> {
-        let mut out = Vec::new();
-        let Some(candidates) = event
+    /// Every candidate part of one streamed event, in wire order.
+    fn wire_parts(event: &Value) -> impl Iterator<Item = &Value> {
+        event
             .get("response")
             .and_then(|r| r.get("candidates"))
-            .and_then(|c| c.as_array())
-        else {
-            return out;
-        };
-
-        for candidate in candidates {
-            let Some(parts) = candidate
-                .get("content")
-                .and_then(|c| c.get("parts"))
-                .and_then(|p| p.as_array())
-            else {
-                continue;
-            };
-            for part in parts {
-                let text = part.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
-                let signature = Self::thought_signature(part);
-                // A thought part may carry only a `thoughtSignature` (no text
-                // or empty text). Keep it so the replay payload survives; the
-                // reasoning accumulator turns it into an empty-text part. A
-                // `functionCall` part is excluded: `tool_call_part` already
-                // carries that signature on the ToolCall replay, so keeping it
-                // here too would duplicate the signature across two parts.
-                let signature_only_thought =
-                    is_thought && signature.is_some() && part.get("functionCall").is_none();
-                if text.is_empty() && !signature_only_thought {
-                    continue;
-                }
-                out.push((text.to_string(), signature, is_thought));
-            }
-        }
-
-        out
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|candidate| {
+                candidate
+                    .get("content")
+                    .and_then(|c| c.get("parts"))
+                    .and_then(Value::as_array)
+            })
+            .flatten()
     }
 
-    fn tool_call_parts_from_event(
-        &self,
-        event: &Value,
-        origin_model: Option<&str>,
-    ) -> Vec<LlmOutputPart> {
-        let mut out = Vec::new();
-        let Some(candidates) = event
-            .get("response")
-            .and_then(|r| r.get("candidates"))
-            .and_then(|c| c.as_array())
-        else {
-            return out;
-        };
-        for candidate in candidates {
-            let Some(parts) = candidate
-                .get("content")
-                .and_then(|c| c.get("parts"))
-                .and_then(|p| p.as_array())
-            else {
-                continue;
-            };
-            for part in parts {
-                if let Some(tool_call) = self.tool_call_part(part, origin_model) {
-                    out.push(tool_call);
-                }
-            }
+    /// The text or thought piece one streamed part carries, as
+    /// `(text, signature, is_thought)`.
+    fn text_piece(part: &Value) -> Option<(String, Option<String>, bool)> {
+        let text = part.get("text").and_then(|t| t.as_str()).unwrap_or("");
+        let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
+        let signature = Self::thought_signature(part);
+        // A thought part may carry only a `thoughtSignature` (no text
+        // or empty text). Keep it so the replay payload survives; the
+        // reasoning accumulator turns it into an empty-text part. A
+        // `functionCall` part is excluded: `tool_call_part` already
+        // carries that signature on the ToolCall replay, so keeping it
+        // here too would duplicate the signature across two parts.
+        let signature_only_thought =
+            is_thought && signature.is_some() && part.get("functionCall").is_none();
+        if text.is_empty() && !signature_only_thought {
+            return None;
         }
-        out
+        Some((text.to_string(), signature, is_thought))
     }
 
     fn thought_signature(part: &Value) -> Option<String> {
@@ -378,7 +345,7 @@ impl GoogleOAuthProvider {
 }
 
 /// Owned accumulator for one Cloud Code SSE stream: the running full text,
-/// the assembled output and tool-call parts, the usage snapshot (normalized
+/// the assembled output parts in wire order, the usage snapshot (normalized
 /// plus the raw `usageMetadata` sidecar), the merged execution evidence, the
 /// open reasoning part, and the last finish-bearing event.
 ///
@@ -392,8 +359,9 @@ pub(crate) struct GoogleStreamState {
     pub usage: LlmUsage,
     pub provider_usage: Option<Value>,
     pub execution_evidence: Option<ExecutionEvidence>,
+    /// Text, reasoning and tool-call parts in wire order: the one sequence the
+    /// completed response, a partial response and the live stream all follow.
     pub output_parts: Vec<LlmOutputPart>,
-    pub tool_call_parts: Vec<LlmOutputPart>,
     pub finish_event: Option<Value>,
     open_reasoning_part: Option<usize>,
     /// The reasoning block minted for the open output part. Gemini has no
@@ -416,17 +384,28 @@ pub(crate) struct GoogleStreamState {
 }
 
 /// What one [`GoogleStreamState::push_event`] call produced: the event's own
-/// visible and reasoning deltas, the text stream emissions (a block start
-/// and deltas), the reasoning stream emissions (block start/end, deltas, and
-/// a `Part` close), and how many tool-call parts the
-/// event appended to the state's `tool_call_parts`.
+/// visible and reasoning deltas, and its stream emissions in wire order (text
+/// and reasoning block events, reasoning `Part` closes and tool-call `Part`s).
+/// Publication filters reasoning emissions with [`is_reasoning_emission`].
 #[derive(Default)]
 pub(crate) struct EventDeltas {
     pub text_deltas: Vec<String>,
     pub reasoning_deltas: Vec<String>,
-    pub text_events: Vec<LlmStreamEvent>,
-    pub reasoning_events: Vec<LlmStreamEvent>,
-    pub tool_calls_added: usize,
+    pub events: Vec<LlmStreamEvent>,
+}
+
+/// Whether a stream emission belongs to a reasoning block, which is published
+/// only when the request exposes thinking.
+pub(crate) fn is_reasoning_emission(event: &LlmStreamEvent) -> bool {
+    match event {
+        LlmStreamEvent::Block(
+            StreamBlockEvent::Started { kind, .. }
+            | StreamBlockEvent::Delta { kind, .. }
+            | StreamBlockEvent::Completed { kind, .. },
+        ) => *kind == StreamBlockKind::Reasoning,
+        LlmStreamEvent::Part(part) => matches!(part, LlmOutputPart::Reasoning { .. }),
+        _ => false,
+    }
 }
 
 impl GoogleStreamState {
@@ -473,105 +452,123 @@ impl GoogleStreamState {
                 .cloned();
         }
         let mut saw_thought_in_event = false;
-        for (piece, signature, is_thought) in GoogleOAuthProvider::text_parts_from_event(&event) {
-            if is_thought {
-                self.close_text_run(&mut deltas.text_events);
-                let update = provider.push_reasoning_piece(
-                    &mut self.output_parts,
-                    &mut deltas.reasoning_deltas,
+        for part in GoogleOAuthProvider::wire_parts(&event) {
+            if let Some(piece) = GoogleOAuthProvider::text_piece(part) {
+                self.push_text_piece(
+                    provider,
                     piece,
-                    signature,
-                    !saw_thought_in_event && self.open_reasoning_part.is_some(),
+                    &mut saw_thought_in_event,
+                    &mut deltas,
                     origin_model,
                 );
-                if let Some(opened_part) = update.opened_part {
-                    self.close_reasoning_stream_part(&mut deltas.reasoning_events);
-                    self.open_reasoning_part = Some(opened_part);
-                    // The minted id is also the part's reasoning item_id so
-                    // the completed `Part` folds the streamed block back into
-                    // item granularity. Google replay rides on the
-                    // thoughtSignature; `item_id` is inert on the wire.
-                    let mut block = self.mint_block("reasoning");
-                    block.item_id = Some(block.id.clone());
-                    if let Some(LlmOutputPart::Reasoning { replay, .. }) =
-                        self.output_parts.get_mut(opened_part)
-                    {
-                        replay
-                            .get_or_insert_with(ProviderReasoningReplay::default)
-                            .item_id = block.item_id.clone();
-                    }
-                    deltas.reasoning_events.push(LlmStreamEvent::Block(
-                        StreamBlockEvent::Started {
-                            kind: StreamBlockKind::Reasoning,
-                            block: block.clone(),
-                        },
-                    ));
-                    self.open_reasoning_block = Some(block);
-                }
-                if let Some(delta) = update.delta
-                    && let Some(block) = self.open_reasoning_block.as_ref()
-                {
-                    deltas
-                        .reasoning_events
-                        .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                            kind: StreamBlockKind::Reasoning,
-                            block: block.clone(),
-                            text: delta,
-                        }));
-                }
-                saw_thought_in_event = true;
-                continue;
             }
-            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
-            let Some(delta) =
-                Self::apply_stream_piece(&mut self.full, &mut deltas.text_deltas, &piece)
-            else {
-                continue;
-            };
-            if self.text_block.is_none() {
-                let block = self.mint_block("text");
-                deltas
-                    .text_events
-                    .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
-                        kind: StreamBlockKind::AssistantText,
-                        block: block.clone(),
-                    }));
-                self.text_block = Some(block);
+            if let Some(tool_call) = provider.tool_call_part(part, origin_model) {
+                self.close_reasoning_stream_part(&mut deltas.events);
+                self.close_text_run(&mut deltas.events);
+                deltas.events.push(LlmStreamEvent::Part(tool_call.clone()));
+                self.output_parts.push(tool_call);
             }
-            if let Some(block) = self.text_block.as_ref() {
-                self.open_text_run.push_str(&delta);
-                deltas
-                    .text_events
-                    .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::AssistantText,
-                        block: block.clone(),
-                        text: delta.clone(),
-                    }));
-            }
-            self.output_parts.push(LlmOutputPart::Text {
-                text: delta,
-                response_meta: signature.map(|signature| ResponseTextMeta {
-                    provider_payload: Some(signature),
-                    origin: origin_model.map(|model| provider.route_identity_for_model(model)),
-                    ..ResponseTextMeta::default()
-                }),
-            });
         }
-        let tool_calls = provider.tool_call_parts_from_event(&event, origin_model);
-        if !tool_calls.is_empty() {
-            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
-            self.close_text_run(&mut deltas.text_events);
-        }
-        deltas.tool_calls_added = tool_calls.len();
-        self.tool_call_parts.extend(tool_calls);
         // Capture the last event carrying a non-empty `finishReason` so the
         // streaming finalizer can derive the terminal reason exactly like the
         // non-streaming path instead of hardcoding Stop.
         if GoogleOAuthProvider::finish_reason_str(&event).is_some() {
-            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+            self.close_reasoning_stream_part(&mut deltas.events);
             self.finish_event = Some(event);
         }
         Ok(deltas)
+    }
+
+    /// Fold one text or thought piece into the open reasoning or text run.
+    fn push_text_piece(
+        &mut self,
+        provider: &GoogleOAuthProvider,
+        (piece, signature, is_thought): (String, Option<String>, bool),
+        saw_thought_in_event: &mut bool,
+        deltas: &mut EventDeltas,
+        origin_model: Option<&str>,
+    ) {
+        if is_thought {
+            self.close_text_run(&mut deltas.events);
+            let update = provider.push_reasoning_piece(
+                &mut self.output_parts,
+                &mut deltas.reasoning_deltas,
+                piece,
+                signature,
+                !*saw_thought_in_event && self.open_reasoning_part.is_some(),
+                origin_model,
+            );
+            if let Some(opened_part) = update.opened_part {
+                self.close_reasoning_stream_part(&mut deltas.events);
+                self.open_reasoning_part = Some(opened_part);
+                // The minted id is also the part's reasoning item_id so
+                // the completed `Part` folds the streamed block back into
+                // item granularity. Google replay rides on the
+                // thoughtSignature; `item_id` is inert on the wire.
+                let mut block = self.mint_block("reasoning");
+                block.item_id = Some(block.id.clone());
+                if let Some(LlmOutputPart::Reasoning { replay, .. }) =
+                    self.output_parts.get_mut(opened_part)
+                {
+                    replay
+                        .get_or_insert_with(ProviderReasoningReplay::default)
+                        .item_id = block.item_id.clone();
+                }
+                deltas
+                    .events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                        kind: StreamBlockKind::Reasoning,
+                        block: block.clone(),
+                    }));
+                self.open_reasoning_block = Some(block);
+            }
+            if let Some(delta) = update.delta
+                && let Some(block) = self.open_reasoning_block.as_ref()
+            {
+                deltas
+                    .events
+                    .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::Reasoning,
+                        block: block.clone(),
+                        text: delta,
+                    }));
+            }
+            *saw_thought_in_event = true;
+            return;
+        }
+        self.close_reasoning_stream_part(&mut deltas.events);
+        let Some(delta) = Self::apply_stream_piece(&mut self.full, &mut deltas.text_deltas, &piece)
+        else {
+            return;
+        };
+        if self.text_block.is_none() {
+            let block = self.mint_block("text");
+            deltas
+                .events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
+                    kind: StreamBlockKind::AssistantText,
+                    block: block.clone(),
+                }));
+            self.text_block = Some(block);
+        }
+        if let Some(block) = self.text_block.as_ref() {
+            self.open_text_run.push_str(&delta);
+            deltas
+                .events
+                .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    block: block.clone(),
+                    text: delta.clone(),
+                }));
+        }
+        self.output_parts.push(LlmOutputPart::Text {
+            text: delta,
+            response_meta: signature.map(|signature| ResponseTextMeta {
+                provider_payload: Some(signature),
+                origin: origin_model.map(|model| provider.route_identity_for_model(model)),
+                ..ResponseTextMeta::default()
+            }),
+        });
     }
 
     fn mint_block(&mut self, prefix: &str) -> StreamBlockIdentity {

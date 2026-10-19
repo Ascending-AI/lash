@@ -236,16 +236,16 @@ impl ProviderNormalizer for GoogleNormalizer {
             event_sink.lock_recover().push(event);
         });
         for raw in sse_events {
-            let first_new_tool_call = state.tool_call_parts.len();
-            state
+            let deltas = state
                 .push_event(&GoogleOAuthProvider::for_test(), raw, None)
                 .expect("google sse event parses");
-            for part in &state.tool_call_parts[first_new_tool_call..] {
-                sender.send(LlmStreamEvent::Part(part.clone()));
+            for event in deltas.events {
+                if matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })) {
+                    sender.send(event);
+                }
             }
         }
         let mut parts = state.output_parts;
-        parts.extend(state.tool_call_parts);
         if matches!(
             scenario,
             Scenario::ReasoningReplayRoundTrip | Scenario::ToolCallReplayRoundTrip

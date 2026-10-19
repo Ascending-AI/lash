@@ -26,6 +26,8 @@ use ws_testing::{
 mod continuation_rejection_tests;
 #[path = "idle_timeout_tests.rs"]
 mod idle_timeout_tests;
+#[path = "reservation_tests.rs"]
+mod reservation_tests;
 #[path = "response_error_tests.rs"]
 mod response_error_tests;
 #[path = "session_affinity_tests.rs"]
@@ -510,7 +512,10 @@ async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
     );
     sessions.by_scope.insert(
         "busy".to_string(),
-        CodexWebsocketSessionEntry::Reserved { token_epoch: 0 },
+        CodexWebsocketSessionEntry::Reserved {
+            owner: 1,
+            token_epoch: 0,
+        },
     );
 
     CodexProvider::prune_idle_websocket_sessions(&mut sessions, &policy);
@@ -585,59 +590,13 @@ fn codex_websocket_scope_cache_generation_eviction_preserves_leased_slot() {
     let mut sessions = CodexWebsocketSessions::default();
     sessions.by_scope.insert(
         "leased".to_string(),
-        CodexWebsocketSessionEntry::reserved(4),
+        CodexWebsocketSessionEntry::Reserved {
+            owner: 1,
+            token_epoch: 4,
+        },
     );
     CodexProvider::evict_websocket_sessions_for_epoch(&mut sessions, 5);
     assert!(sessions.by_scope.contains_key("leased"));
-}
-
-fn assert_cleanup_preserves_newer_generation(cleanup: impl FnOnce(&CodexProvider, String)) {
-    let provider = CodexProvider::new(std::sync::Arc::new(
-        lash_core::provider::ProviderToken::new("access"),
-    ));
-    let scope_key = "rotated".to_string();
-    let mut sessions = provider.websocket_sessions.inner.lock_recover();
-    sessions.by_scope.insert(
-        scope_key.clone(),
-        CodexWebsocketSessionEntry::Reserved { token_epoch: 5 },
-    );
-    drop(sessions);
-    cleanup(&provider, scope_key.clone());
-    let sessions = provider.websocket_sessions.inner.lock_recover();
-    let generation = sessions
-        .by_scope
-        .get(&scope_key)
-        .map(CodexWebsocketSessionEntry::token_epoch);
-    assert_eq!(generation, Some(5));
-}
-
-#[tokio::test]
-async fn codex_websocket_release_preserves_newer_generation_reservation() {
-    let ws = spawn_scripted_websocket(Vec::new()).await;
-    let (websocket, _) = tokio_tungstenite::connect_async(&ws.url)
-        .await
-        .expect("connect old-generation websocket");
-    assert_cleanup_preserves_newer_generation(move |provider, scope_key| {
-        provider.release_websocket_lease(
-            CodexWebsocketLease {
-                websocket,
-                scope_key: Some(scope_key),
-                reusable: true,
-                reused: false,
-                continuation: None,
-                token_epoch: 4,
-            },
-            true,
-            None,
-        );
-    });
-}
-
-#[test]
-fn codex_websocket_connect_failure_preserves_newer_generation_reservation() {
-    assert_cleanup_preserves_newer_generation(|provider, scope_key| {
-        provider.remove_websocket_scope(&scope_key, 4);
-    });
 }
 
 async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {

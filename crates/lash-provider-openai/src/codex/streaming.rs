@@ -166,7 +166,7 @@ impl CodexProvider {
             let plan = self.websocket_request_plan(
                 &built_request.body,
                 websocket.continuation.as_ref(),
-                allow_cached_context && websocket.reusable,
+                allow_cached_context && websocket.reusable(),
             );
             match self
                 .run_websocket_attempt(

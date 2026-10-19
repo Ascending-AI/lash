@@ -84,6 +84,59 @@ impl std::fmt::Debug for CodexWebsocketSessionCache {
 pub(super) struct CodexWebsocketSessions {
     pub(super) by_scope: HashMap<String, CodexWebsocketSessionEntry>,
     pub(super) fallback_by_scope: HashMap<String, CodexWebsocketFallbackState>,
+    next_reservation_owner: u64,
+}
+
+impl CodexWebsocketSessions {
+    /// Reserve `scope_key` for a new owner under the cache lock, replacing any
+    /// entry there, and return the owner that must release it.
+    fn reserve(
+        &mut self,
+        cache: &CodexWebsocketSessionCache,
+        scope_key: String,
+        token_epoch: u64,
+    ) -> CodexWebsocketReservation {
+        self.next_reservation_owner += 1;
+        let owner = self.next_reservation_owner;
+        self.by_scope.insert(
+            scope_key.clone(),
+            CodexWebsocketSessionEntry::Reserved { owner, token_epoch },
+        );
+        CodexWebsocketReservation {
+            cache: cache.clone(),
+            scope_key,
+            owner,
+            token_epoch,
+        }
+    }
+
+    fn is_reserved_by(&self, reservation: &CodexWebsocketReservation) -> bool {
+        matches!(
+            self.by_scope.get(&reservation.scope_key),
+            Some(CodexWebsocketSessionEntry::Reserved { owner, .. }) if *owner == reservation.owner
+        )
+    }
+}
+
+/// The obligation behind one `Reserved` cache slot. It exists from the moment
+/// the slot is reserved, before any connection await, and moves into the lease
+/// on success; dropping it anywhere (a failed or cancelled connect, a released
+/// lease that is not kept) removes exactly its own slot and never a reservation
+/// that replaced it.
+pub(super) struct CodexWebsocketReservation {
+    cache: CodexWebsocketSessionCache,
+    scope_key: String,
+    owner: u64,
+    token_epoch: u64,
+}
+
+impl Drop for CodexWebsocketReservation {
+    fn drop(&mut self) {
+        let mut sessions = self.cache.inner.lock_recover();
+        if sessions.is_reserved_by(self) {
+            sessions.by_scope.remove(&self.scope_key);
+        }
+    }
 }
 
 pub(super) struct CodexWebsocketFallbackState {
@@ -92,9 +145,8 @@ pub(super) struct CodexWebsocketFallbackState {
 }
 
 pub(super) enum CodexWebsocketSessionEntry {
-    Reserved {
-        token_epoch: u64,
-    },
+    /// Leased to the live [`CodexWebsocketReservation`] whose `owner` this is.
+    Reserved { owner: u64, token_epoch: u64 },
     Idle {
         connection: Box<CodexWsStream>,
         continuation: Option<CodexContinuation>,
@@ -110,16 +162,6 @@ struct PrunableWebsocketSession {
 }
 
 impl CodexWebsocketSessionEntry {
-    pub(super) fn reserved(token_epoch: u64) -> Self {
-        Self::Reserved { token_epoch }
-    }
-
-    pub(super) fn token_epoch(&self) -> u64 {
-        match self {
-            Self::Reserved { token_epoch } | Self::Idle { token_epoch, .. } => *token_epoch,
-        }
-    }
-
     fn prunable(&self) -> Option<PrunableWebsocketSession> {
         match self {
             Self::Reserved { .. } => None,
@@ -137,11 +179,16 @@ impl CodexWebsocketSessionEntry {
 
 pub(super) struct CodexWebsocketLease {
     pub(super) websocket: CodexWsStream,
-    pub(super) scope_key: Option<String>,
-    pub(super) reusable: bool,
+    /// The cache slot this lease owns; `None` for an ephemeral connection.
+    pub(super) reservation: Option<CodexWebsocketReservation>,
     pub(super) reused: bool,
     pub(super) continuation: Option<CodexContinuation>,
-    pub(super) token_epoch: u64,
+}
+
+impl CodexWebsocketLease {
+    pub(super) fn reusable(&self) -> bool {
+        self.reservation.is_some()
+    }
 }
 
 /// Monotone attempt progress, ordered from no provider evidence to committed output.
@@ -218,17 +265,6 @@ impl CodexWebSocketAttemptError {
 }
 
 impl CodexProvider {
-    pub(super) fn remove_websocket_scope(&self, scope_key: &str, token_epoch: u64) {
-        let mut sessions = self.websocket_sessions.inner.lock_recover();
-        if sessions
-            .by_scope
-            .get(scope_key)
-            .is_some_and(|entry| entry.token_epoch() == token_epoch)
-        {
-            sessions.by_scope.remove(scope_key);
-        }
-    }
-
     pub(super) fn prune_idle_websocket_sessions(
         sessions: &mut CodexWebsocketSessions,
         policy: &WebSocketCachePolicy,
@@ -500,7 +536,7 @@ impl CodexProvider {
 
         enum AcquireDecision {
             Reuse(Box<CodexWebsocketLease>),
-            ConnectReusable(String),
+            ConnectReusable(CodexWebsocketReservation),
             ConnectEphemeral,
         }
 
@@ -510,46 +546,35 @@ impl CodexProvider {
             Self::enforce_websocket_session_cache_cap(&mut sessions, &self.websocket_cache_policy);
             Self::evict_websocket_sessions_for_epoch(&mut sessions, token_epoch);
             match sessions.by_scope.remove(&scope_key) {
-                Some(CodexWebsocketSessionEntry::Reserved {
-                    token_epoch: reserved_epoch,
-                }) if reserved_epoch == token_epoch => {
-                    sessions.by_scope.insert(
-                        scope_key,
-                        CodexWebsocketSessionEntry::reserved(reserved_epoch),
-                    );
+                Some(
+                    reserved @ CodexWebsocketSessionEntry::Reserved {
+                        token_epoch: reserved_epoch,
+                        ..
+                    },
+                ) if reserved_epoch == token_epoch => {
+                    sessions.by_scope.insert(scope_key, reserved);
                     AcquireDecision::ConnectEphemeral
-                }
-                Some(CodexWebsocketSessionEntry::Reserved { .. }) => {
-                    sessions.by_scope.insert(
-                        scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(token_epoch),
-                    );
-                    AcquireDecision::ConnectReusable(scope_key)
                 }
                 Some(CodexWebsocketSessionEntry::Idle {
                     connection,
                     continuation,
                     ..
-                }) => {
-                    sessions.by_scope.insert(
-                        scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(token_epoch),
-                    );
-                    AcquireDecision::Reuse(Box::new(CodexWebsocketLease {
-                        websocket: *connection,
-                        scope_key: Some(scope_key),
-                        reusable: true,
-                        reused: true,
-                        continuation,
+                }) => AcquireDecision::Reuse(Box::new(CodexWebsocketLease {
+                    websocket: *connection,
+                    reservation: Some(sessions.reserve(
+                        &self.websocket_sessions,
+                        scope_key,
                         token_epoch,
-                    }))
-                }
-                None => {
-                    sessions.by_scope.insert(
-                        scope_key.clone(),
-                        CodexWebsocketSessionEntry::reserved(token_epoch),
-                    );
-                    AcquireDecision::ConnectReusable(scope_key)
+                    )),
+                    reused: true,
+                    continuation,
+                })),
+                Some(CodexWebsocketSessionEntry::Reserved { .. }) | None => {
+                    AcquireDecision::ConnectReusable(sessions.reserve(
+                        &self.websocket_sessions,
+                        scope_key,
+                        token_epoch,
+                    ))
                 }
             }
         };
@@ -560,28 +585,19 @@ impl CodexProvider {
                 let websocket = self.connect_websocket(call, connect_timeout, lease).await?;
                 Ok(CodexWebsocketLease {
                     websocket,
-                    scope_key: None,
-                    reusable: false,
+                    reservation: None,
                     reused: false,
                     continuation: None,
-                    token_epoch,
                 })
             }
-            AcquireDecision::ConnectReusable(scope_key) => {
-                let websocket = match self.connect_websocket(call, connect_timeout, lease).await {
-                    Ok(websocket) => websocket,
-                    Err(error) => {
-                        self.remove_websocket_scope(&scope_key, token_epoch);
-                        return Err(error);
-                    }
-                };
+            AcquireDecision::ConnectReusable(reservation) => {
+                // A failed or cancelled connect drops `reservation`, freeing the slot.
+                let websocket = self.connect_websocket(call, connect_timeout, lease).await?;
                 Ok(CodexWebsocketLease {
                     websocket,
-                    scope_key: Some(scope_key),
-                    reusable: true,
+                    reservation: Some(reservation),
                     reused: false,
                     continuation: None,
-                    token_epoch,
                 })
             }
         }
@@ -593,32 +609,34 @@ impl CodexProvider {
         keep_connection: bool,
         continuation: Option<CodexContinuation>,
     ) {
-        let Some(scope_key) = lease.scope_key else {
+        let CodexWebsocketLease {
+            websocket,
+            reservation,
+            ..
+        } = lease;
+        // An ephemeral connection, or one not kept, closes here; dropping its
+        // reservation frees the slot it owned.
+        let Some(reservation) = reservation.filter(|_| keep_connection) else {
             return;
         };
         let mut sessions = self.websocket_sessions.inner.lock_recover();
-        if sessions
-            .by_scope
-            .get(&scope_key)
-            .is_none_or(|entry| entry.token_epoch() != lease.token_epoch)
-        {
-            return;
-        }
-        if !lease.reusable || !keep_connection {
-            sessions.by_scope.remove(&scope_key);
+        if !sessions.is_reserved_by(&reservation) {
             return;
         }
         sessions.by_scope.insert(
-            scope_key,
+            reservation.scope_key.clone(),
             CodexWebsocketSessionEntry::Idle {
-                connection: Box::new(lease.websocket),
+                connection: Box::new(websocket),
                 continuation,
                 last_used: Instant::now(),
-                token_epoch: lease.token_epoch,
+                token_epoch: reservation.token_epoch,
             },
         );
         Self::prune_idle_websocket_sessions(&mut sessions, &self.websocket_cache_policy);
         Self::enforce_websocket_session_cache_cap(&mut sessions, &self.websocket_cache_policy);
+        // The slot is now idle, so dropping `reservation` after the lock is
+        // released finds nothing of its own to remove.
+        drop(sessions);
     }
 }
 
