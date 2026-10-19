@@ -1336,6 +1336,7 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         types,
         [
             "any",
+            "json",
             "null",
             "absent",
             "bool",
@@ -1367,6 +1368,7 @@ fn inventory_types() -> k::Type {
     use k::Type as T;
     T::Tuple(vec![
         T::Any,
+        T::Json,
         T::Null,
         T::Absent,
         T::Bool,
@@ -1410,6 +1412,7 @@ fn inventory_type(ty: &k::Type, variants: &mut BTreeSet<&'static str>) {
     use k::Type as T;
     let tag = match ty {
         T::Any => "any",
+        T::Json => "json",
         T::Null => "null",
         T::Absent => "absent",
         T::Bool => "bool",

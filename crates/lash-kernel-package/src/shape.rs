@@ -488,11 +488,11 @@ impl Fail {
     }
 }
 
-/// The kinds `kind` answers for a value of `ty`, or none for a type any
-/// value has.
+/// The kinds `kind` answers for a value of `ty`, or none when the kernel
+/// decoder owns validation for the type.
 fn kinds(ty: &Type) -> Option<Vec<&'static str>> {
     Some(match ty {
-        Type::Any => return None,
+        Type::Any | Type::Json => return None,
         Type::Null => vec!["null"],
         Type::Absent => vec!["absent"],
         Type::Bool => vec!["bool"],
@@ -523,7 +523,7 @@ fn kinds(ty: &Type) -> Option<Vec<&'static str>> {
 
 /// Whether a value of `ty` needs more than a kind test.
 fn needs_walk(ty: &Type) -> bool {
-    !matches!(ty, Type::Any)
+    !matches!(ty, Type::Any | Type::Json)
 }
 
 /// Emits the test of whether `var`'s kind is one of `kinds`; gives the

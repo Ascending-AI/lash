@@ -50,7 +50,8 @@ impl TokenCodec for Type {
             | Self::Text
             | Self::Bytes
             | Self::Timestamp
-            | Self::Error => out.sum(number, 0),
+            | Self::Error
+            | Self::Json => out.sum(number, 0),
             Self::Tuple(types) | Self::Union(types) => {
                 out.sum(number, 1);
                 types.encode(out);
@@ -85,7 +86,7 @@ impl TokenCodec for Type {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.nested(|input| {
             let number = variant(input, |variant| match variant {
-                0..=9 | 18 => Some(0),
+                0..=9 | 18 | 21 => Some(0),
                 10..=17 | 19 | 20 => Some(1),
                 _ => None,
             })?;
@@ -110,7 +111,8 @@ impl TokenCodec for Type {
                 17 => Self::Task(Box::decode(input)?),
                 18 => Self::Error,
                 19 => Self::Handle(String::decode(input)?),
-                _ => Self::Union(Vec::decode(input)?),
+                20 => Self::Union(Vec::decode(input)?),
+                _ => Self::Json,
             })
         })
     }

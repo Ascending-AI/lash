@@ -244,6 +244,13 @@ impl<'a> Importer<'a> {
     }
 
     fn kind(&mut self, map: &'a Map<String, Value>, depth: usize) -> Result<SchemaShape> {
+        // A lash type is what the slot is: the JSON Schema beside it
+        // describes nothing a value of it could be.
+        if let Some(declaration) = map.get(X_LASH_KEYWORD) {
+            return Ok(self.lash_type(declaration, depth).unwrap_or_else(|_| {
+                projection_note("The x-lash declaration is validated by the tool.")
+            }));
+        }
         // Keep conjunctions factored: the shared object is imported once,
         // never copied into each alternative. References stay graph edges.
         let mut conjuncts = Vec::new();
@@ -259,15 +266,6 @@ impl<'a> Importer<'a> {
             } else {
                 projection_note(&format!("Reference {reference} is validated by the tool; type details are unavailable."))
             });
-        }
-        if let Some(declaration) = map.get(X_LASH_KEYWORD) {
-            conjuncts.push(
-                self.lash_type(declaration, depth)
-                    .map(Into::into)
-                    .unwrap_or_else(|_| {
-                        projection_note("The x-lash declaration is validated by the tool.")
-                    }),
-            );
         }
         if let Some(branches) = map.get("allOf") {
             for branch in branches.as_array().ok_or_else(|| invalid("allOf"))? {
@@ -325,7 +323,7 @@ impl<'a> Importer<'a> {
                 .iter()
                 .any(|key| map.contains_key(*key))
                 || (map.contains_key("patternProperties")
-                    && !["$ref", "allOf", "anyOf", "oneOf", X_LASH_KEYWORD]
+                    && !["$ref", "allOf", "anyOf", "oneOf"]
                         .iter()
                         .any(|key| map.contains_key(*key))) =>
             {
@@ -339,43 +337,49 @@ impl<'a> Importer<'a> {
         Ok(kind.into())
     }
 
+    /// The shape an `x-lash` declaration states: each kind of the one
+    /// decode, matched before any other rule.
+    fn lash_type(&mut self, declaration: &'a Value, depth: usize) -> Result<SchemaShape> {
+        let declared = XLashType::decode(declaration).ok_or_else(|| invalid("x-lash"))?;
+        let signature = match declared.signature() {
+            Some(_) => Some(self.call_shape(declaration, depth)?),
+            None => None,
+        };
+        Ok(match declared {
+            XLashType::Function { .. } => ShapeKind::Function(signature),
+            XLashType::Process { .. } | XLashType::ProcessUnknown => ShapeKind::Process(signature),
+        }
+        .into())
+    }
+
+    /// The call signature a decoded `x-lash` declaration states, each
+    /// parameter and the output imported as schemas.
     #[expect(
         clippy::expect_used,
-        reason = "XLashType deserialization established the signature parameter and output paths"
+        reason = "XLashType::decode established the signature parameter and output paths"
     )]
-    fn lash_type(&mut self, declaration: &'a Value, depth: usize) -> Result<ShapeKind> {
-        match serde_json::from_value::<XLashType>(declaration.clone())
-            .map_err(|_| invalid("x-lash"))?
-        {
-            XLashType::ProcessUnknown => Ok(ShapeKind::Process(None)),
-            XLashType::Process { signature } => {
-                let params = signature
-                    .params
-                    .iter()
-                    .enumerate()
-                    .map(|(index, param)| {
-                        Ok(ProcessParamShape {
-                            name: param.name.clone(),
-                            shape: self.shape(
-                                declaration
-                                    .pointer(&format!("/signature/params/{index}/schema"))
-                                    .expect("typed signature"),
-                                depth + 1,
-                            )?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                let output = Box::new(
-                    self.shape(
-                        declaration
-                            .pointer("/signature/output")
-                            .expect("typed signature"),
-                        depth + 1,
-                    )?,
-                );
-                Ok(ShapeKind::Process(Some(ProcessShape { params, output })))
-            }
-        }
+    fn call_shape(&mut self, declaration: &'a Value, depth: usize) -> Result<ProcessShape> {
+        let params = declaration
+            .pointer("/signature/params")
+            .and_then(Value::as_array)
+            .expect("typed signature")
+            .iter()
+            .map(|param| {
+                Ok(ProcessParamShape {
+                    name: param["name"].as_str().expect("typed signature").to_owned(),
+                    shape: self.shape(&param["schema"], depth + 1)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let output = Box::new(
+            self.shape(
+                declaration
+                    .pointer("/signature/output")
+                    .expect("typed signature"),
+                depth + 1,
+            )?,
+        );
+        Ok(ProcessShape { params, output })
     }
 
     fn named_type(

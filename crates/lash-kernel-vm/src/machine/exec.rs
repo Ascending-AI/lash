@@ -976,12 +976,18 @@ impl KernelMachine {
         self.bounds.charge == crate::Charge::Exact
     }
 
-    /// Copies an effect argument out of the run under the crossing
-    /// policy: a function in it crosses as a function value
-    /// ([`crate::crossing`]). The traversal is a boundary charge, as a
-    /// copy-out is, and so is each byte of a function value's canonical
-    /// form.
-    pub(super) fn copy_out_tool_arg(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
+    /// Copies the argument at `index` of a perform of `effect` out of the
+    /// run, walked with the type the effect's requirement in the manifest
+    /// declares for it: a function in it crosses as a function value where
+    /// that type admits one ([`crate::crossing`]). The traversal is a
+    /// boundary charge, as a copy-out is, and so is each byte of a function
+    /// value's canonical form.
+    pub(super) fn copy_out_tool_arg(
+        &mut self,
+        effect: &lash_kernel_doc::EffectName,
+        index: usize,
+        value: &Value,
+    ) -> Eval<lash_kernel_doc::Datum> {
         if self.metered() {
             let size = self.deep_size(value)?;
             self.charge_boundary(size)?;
@@ -1015,7 +1021,30 @@ impl KernelMachine {
             data: self.limits,
             tag: None,
         };
-        let datum = crate::crossing::copy_out_tool_arg(&mut heap, &mut run, value)?;
+        // Admission declared every operation a document or a body it
+        // reaches performs; an argument past its parameters, or of an effect
+        // the manifest does not list, is data.
+        let param = document
+            .manifest
+            .effects
+            .get(effect)
+            .and_then(|requirement| requirement.signature.params.get(index));
+        let datum = match param {
+            Some(param) => crate::crossing::copy_out_tool_arg(
+                &mut heap,
+                &mut run,
+                value,
+                param.name.as_str(),
+                &param.ty,
+            )?,
+            None => crate::crossing::copy_out_tool_arg(
+                &mut heap,
+                &mut run,
+                value,
+                &format!("args[{index}]"),
+                &lash_kernel_doc::Type::Json,
+            )?,
+        };
         self.charge_boundary(crossed_bytes(&datum))?;
         Ok(datum)
     }

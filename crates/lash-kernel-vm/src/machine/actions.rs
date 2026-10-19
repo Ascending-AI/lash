@@ -106,8 +106,8 @@ impl KernelMachine {
             } => {
                 let values = self.perform_atoms(task, exe, args)?;
                 let mut copied = Vec::with_capacity(values.len());
-                for value in &values {
-                    copied.push(self.copy_out_tool_arg(value)?);
+                for (index, value) in values.iter().enumerate() {
+                    copied.push(self.copy_out_tool_arg(effect, index, value)?);
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement: no wait,
@@ -263,7 +263,7 @@ impl KernelMachine {
                 let mut copied = Vec::with_capacity(count);
                 for at in args..args + count {
                     let value = self.take(at);
-                    copied.push(self.copy_out_tool_arg(&value)?);
+                    copied.push(self.copy_out_tool_arg(effect, at - args, &value)?);
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement, and the

@@ -573,7 +573,7 @@ export type TryStmt = {
   "finally"?: (Array<Stmt> | null);
 };
 
-export type Type = (("null" | "absent" | "bool" | "int" | "float" | "text" | "bytes" | "timestamp" | "error") | "any" | "number" | {
+export type Type = (("null" | "absent" | "bool" | "int" | "float" | "text" | "bytes" | "timestamp" | "error") | "any" | "json" | "number" | {
   "tuple": Array<Type>;
 } | {
   "list": Type;

@@ -30,19 +30,12 @@ use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 use crate::done_without_intents;
 
-pub(crate) fn function_value_schema() -> Value {
+/// The slot a program passes a function in: the `x-lash` function marker,
+/// the one JSON-schema form that admits a function, which crosses as a
+/// function value.
+pub(crate) fn function_slot_schema() -> Value {
     serde_json::json!({
-        "type": "object",
-        "properties": {
-            "$lash_function": {
-                "type": "object",
-                "properties": { "document": { "type": "object" }, "entry": { "type": "string" }, "captions": { "type": "object" } },
-                "required": ["document", "entry", "captions"],
-                "additionalProperties": false
-            }
-        },
-        "required": ["$lash_function"],
-        "additionalProperties": false,
+        "x-lash": { "kind": "function" },
         "description": "An async function passed directly; the runtime copies its code and captures inline."
     })
 }
@@ -60,7 +53,7 @@ pub fn process_start_tool_definition() -> ToolDefinition {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "definition": function_value_schema(),
+                "definition": function_slot_schema(),
                 "definition_id": definition_id_schema(),
                 "args": { "type": "object" },
                 "label": { "type": "string" }

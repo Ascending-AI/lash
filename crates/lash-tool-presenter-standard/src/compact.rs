@@ -105,8 +105,14 @@ pub fn compact_type(
             .join(" & "),
         ShapeKind::Named(name) => name.clone(),
         ShapeKind::Process(None) => "process".to_string(),
-        ShapeKind::Process(Some(signature)) => format!(
-            "process[({}) -> {}]",
+        ShapeKind::Function(None) => "function".to_string(),
+        ShapeKind::Process(Some(signature)) | ShapeKind::Function(Some(signature)) => format!(
+            "{}[({}) -> {}]",
+            if matches!(shape.kind, ShapeKind::Process(_)) {
+                "process"
+            } else {
+                "function"
+            },
             signature
                 .params
                 .iter()
@@ -269,7 +275,7 @@ pub fn compact_note_rows(shape: &SchemaShape, path: &str) -> Vec<CompactNoteRow>
                     walk(item, path, rows);
                 }
             }
-            ShapeKind::Process(Some(process)) => {
+            ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
                 for param in &process.params {
                     walk(&param.shape, &format!("{path}({})", key(&param.name)), rows);
                 }

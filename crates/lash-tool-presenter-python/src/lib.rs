@@ -464,7 +464,8 @@ fn scope_union_notes(
                     collect(item, path, scopes);
                 }
             }
-            lash_tool_shape::ShapeKind::Process(Some(process)) => {
+            lash_tool_shape::ShapeKind::Process(Some(process))
+            | lash_tool_shape::ShapeKind::Function(Some(process)) => {
                 for param in &process.params {
                     collect(&param.shape, &format!("{path}({})", param.name), scopes);
                 }

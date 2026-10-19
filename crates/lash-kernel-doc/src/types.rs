@@ -15,6 +15,11 @@ use crate::name::Name;
 pub enum Type {
     /// Every value.
     Any,
+    /// Every value `Any` admits that holds no closure, function reference,
+    /// dialect token holding one, task or handle anywhere in it: data, as a
+    /// JSON-schema slot describes it (`K-EFF-002`). It serves where `Any` is
+    /// expected; `Any` does not serve where it is.
+    Json,
     Null,
     Absent,
     Bool,

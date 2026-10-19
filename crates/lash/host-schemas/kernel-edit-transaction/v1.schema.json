@@ -2203,6 +2203,11 @@
           "type": "string"
         },
         {
+          "const": "json",
+          "description": "Every value `Any` admits that holds no closure, function reference,\ndialect token holding one, task or handle anywhere in it: data, as a\nJSON-schema slot describes it (`K-EFF-002`). It serves where `Any` is\nexpected; `Any` does not serve where it is.",
+          "type": "string"
+        },
+        {
           "const": "number",
           "description": "An integer or a float. In an effect's result this is the bare number\nthe document's number policy decodes (`K-EFF-006`).",
           "type": "string"

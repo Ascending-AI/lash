@@ -1168,6 +1168,7 @@ fn check_type(ty: &Type) -> Result<(), InvalidReason> {
     };
     match ty {
         Type::Any
+        | Type::Json
         | Type::Null
         | Type::Absent
         | Type::Bool

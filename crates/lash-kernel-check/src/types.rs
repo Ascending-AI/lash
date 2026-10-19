@@ -63,6 +63,8 @@ pub(crate) fn stable(ty: &Type) -> Type {
         Type::Tuple(members) => Type::Tuple(members.iter().map(stable).collect()),
         Type::Union(members) => union(members.iter().map(stable)),
         Type::Task(result) => Type::Task(Box::new(stable(result))),
+        // A list or a record read as data may be given a function later.
+        Type::Json => Type::Any,
         other => other.clone(),
     }
 }
@@ -89,6 +91,7 @@ pub(crate) fn disjoint(a: &Type, b: &Type) -> bool {
         (Type::Union(members), other) | (other, Type::Union(members)) => {
             members.iter().all(|member| disjoint(member, other))
         }
+        (Type::Json, other) | (other, Type::Json) => !admits_data(other),
         (Type::Number, Type::Int | Type::Float | Type::Number)
         | (Type::Int | Type::Float, Type::Number)
         | (Type::Text, Type::Enum(_))
@@ -107,6 +110,37 @@ pub(crate) fn disjoint(a: &Type, b: &Type) -> bool {
         | (Type::Function(_), Type::Function(_))
         | (Type::Task(_), Type::Task(_)) => false,
         (a, b) => a != b,
+    }
+}
+
+/// Some value of `ty` holds no function, task or handle.
+fn admits_data(ty: &Type) -> bool {
+    !matches!(ty, Type::Function(_) | Type::Task(_) | Type::Handle(_))
+}
+
+/// Every value of `ty` is data ([`Type::Json`]): it holds no function,
+/// task or handle anywhere. An error's data may hold one.
+fn data_only(ty: &Type) -> bool {
+    match ty {
+        Type::Json
+        | Type::Null
+        | Type::Absent
+        | Type::Bool
+        | Type::Int
+        | Type::Float
+        | Type::Number
+        | Type::Text
+        | Type::Bytes
+        | Type::Timestamp
+        | Type::Enum(_) => true,
+        Type::Tuple(members) | Type::Union(members) => members.iter().all(data_only),
+        Type::List(item) | Type::Set(item) => data_only(item),
+        Type::Map(map) => data_only(&map.key) && data_only(&map.value),
+        Type::Record(record) => {
+            record.fields.iter().all(|field| data_only(&field.ty))
+                && record.rest.as_deref().is_none_or(data_only)
+        }
+        Type::Any | Type::Function(_) | Type::Task(_) | Type::Error | Type::Handle(_) => false,
     }
 }
 
@@ -164,6 +198,7 @@ fn subtype_at(sub: &Type, sup: &Type, path: &str) -> Option<TypeMismatch> {
                 Some(differs(path, sub, sup))
             }
         }
+        (sub, Type::Json) if data_only(sub) => None,
         (Type::Int | Type::Float, Type::Number) | (Type::Enum(_), Type::Text) => None,
         (Type::Enum(subs), Type::Enum(sups)) if subs.iter().all(|member| sups.contains(member)) => {
             None

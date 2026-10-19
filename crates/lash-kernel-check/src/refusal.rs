@@ -251,6 +251,7 @@ impl fmt::Display for SignatureMismatch {
 fn describe_type(ty: &Type) -> String {
     match ty {
         Type::Any => "open/unconstrained (Any)".into(),
+        Type::Json => "JSON data, holding no function (Json)".into(),
         Type::Record(record) if record.rest.is_none() => format!("closed object {ty:?}"),
         Type::Record(_) => format!("object with declared fields and open rest {ty:?}"),
         other => format!("{other:?}"),

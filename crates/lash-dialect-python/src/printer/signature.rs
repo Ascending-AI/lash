@@ -207,9 +207,12 @@ impl Classes {
         path: &mut Vec<String>,
     ) -> String {
         match ty {
-            Type::Any | Type::Handle(_) | Type::Function(_) | Type::Task(_) | Type::Timestamp => {
-                "Any".into()
-            }
+            Type::Any
+            | Type::Json
+            | Type::Handle(_)
+            | Type::Function(_)
+            | Type::Task(_)
+            | Type::Timestamp => "Any".into(),
             Type::Null | Type::Absent => "None".into(),
             Type::Bool => "bool".into(),
             Type::Int => "int".into(),

@@ -38,6 +38,8 @@ mod workflow;
 #[cfg(test)]
 mod closure_tests;
 #[cfg(test)]
+mod schema_tests;
+#[cfg(test)]
 mod tests;
 
 pub use admit::{

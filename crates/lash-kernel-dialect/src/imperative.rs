@@ -257,6 +257,7 @@ fn check_type(ty: &lash_kernel_doc::Type, limit: usize) -> Result<(), PrintError
                 stack.extend(s.params.iter().map(|p| (&p.ty, next)));
             }
             Type::Any
+            | Type::Json
             | Type::Null
             | Type::Absent
             | Type::Bool

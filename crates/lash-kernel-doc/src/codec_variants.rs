@@ -307,6 +307,7 @@ impl CodecVariant for Type {
             Self::Error => 18,
             Self::Handle(..) => 19,
             Self::Union(..) => 20,
+            Self::Json => 21,
         }
     }
 }

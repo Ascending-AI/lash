@@ -84,7 +84,7 @@ pub fn reserve_host_names(shape: &SchemaShape, allocator: &mut ReadableNameAlloc
                 reserve_host_names(extra, allocator);
             }
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
                 reserve_host_names(&param.shape, allocator);
             }
@@ -194,8 +194,8 @@ pub fn render_type(
             }
         }
         ShapeKind::Named(name) => host_name(name),
-        ShapeKind::Process(None) => "Callable[..., Any]".to_owned(),
-        ShapeKind::Process(Some(process)) => format!(
+        ShapeKind::Process(None) | ShapeKind::Function(None) => "Callable[..., Any]".to_owned(),
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => format!(
             "Callable[[{}], {}]",
             process
                 .params

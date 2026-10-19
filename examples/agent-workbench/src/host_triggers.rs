@@ -1090,7 +1090,7 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
                     ]
                 },
                 "definition": {
-                    "type": "object",
+                    "x-lash": { "kind": "function" },
                     "description": "An async function passed directly; its code and captures are copied inline."
                 },
                 "event_arg": { "type": "string" },

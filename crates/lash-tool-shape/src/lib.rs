@@ -28,23 +28,53 @@ use serde_json::{Map, Number, Value};
 
 /// The JSON Schema keyword that carries the types JSON Schema cannot say.
 ///
-/// JSON Schema has no vocabulary for a callable process, so a tool contract
-/// that traffics in one spells it under this
-/// extension keyword. A contract that does not carry it reads as plain JSON
-/// Schema.
+/// JSON Schema describes data only: it has no vocabulary for a function a
+/// program hands over or a callable process, so a tool contract that
+/// traffics in one spells it under this extension keyword. A contract that
+/// does not carry it reads as plain JSON Schema, and a slot it does not mark
+/// admits no function.
 pub const X_LASH_KEYWORD: &str = "x-lash";
 
 /// The lash-only half of a type, as it rides inside a JSON Schema.
+///
+/// [`XLashType::decode`] is its one reader: the kernel's projection of a
+/// schema and every presenter match the decoded kind, so a kind neither
+/// maps does not compile.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum XLashType {
+    /// A function the program passes, crossing as a function value; with
+    /// the signature it is called under, when the contract states one.
+    Function {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<XLashSignature>,
+    },
     /// A process with an authoritative call signature.
     Process { signature: XLashSignature },
     /// A process the host can only describe as callable.
     ProcessUnknown,
 }
 
-/// An ordered process-call signature in schema form.
+impl XLashType {
+    /// The `x-lash` declaration `value` states, or `None` when it states
+    /// none this vocabulary has.
+    #[must_use]
+    pub fn decode(value: &Value) -> Option<Self> {
+        Self::deserialize(value).ok()
+    }
+
+    /// The call signature the declaration states.
+    #[must_use]
+    pub fn signature(&self) -> Option<&XLashSignature> {
+        match self {
+            Self::Function { signature } => signature.as_ref(),
+            Self::Process { signature } => Some(signature),
+            Self::ProcessUnknown => None,
+        }
+    }
+}
+
+/// An ordered call signature in schema form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct XLashSignature {
@@ -52,7 +82,7 @@ pub struct XLashSignature {
     pub output: Box<Value>,
 }
 
-/// One named process parameter in schema form.
+/// One named call parameter in schema form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct XLashParam {
@@ -127,6 +157,9 @@ pub enum ShapeKind {
     Named(String),
     /// A process value; `None` when the host only says it is callable.
     Process(Option<ProcessShape>),
+    /// A function the program passes; `None` when the contract states no
+    /// signature for it.
+    Function(Option<ProcessShape>),
 }
 
 /// An object's named fields and its stance on keys it does not name.
@@ -193,7 +226,7 @@ pub struct ShapeConstraints {
     pub rules: Vec<String>,
 }
 
-/// A process call signature.
+/// A process's or a function's call signature.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessShape {
     pub params: Vec<ProcessParamShape>,
@@ -431,6 +464,7 @@ impl SchemaShape {
             ShapeKind::Intersection(_) => "intersection".into(),
             ShapeKind::Named(name) => name.clone(),
             ShapeKind::Process(_) => "process".into(),
+            ShapeKind::Function(_) => "function".into(),
         }
     }
 

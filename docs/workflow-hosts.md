@@ -451,8 +451,12 @@ reference, so one publication is all a run needs.
 The admitted document is the draft's document: publication does not rewrite
 it. A run reports against its sites.
 
-A function a run handed to a tool arrives as a function value,
-`{"$lash_function": <FunctionValue>}`, and needs no publication to start.
+A tool takes a function only in a slot its input schema marks
+`{"x-lash": {"kind": "function"}}` (optionally with a `signature`): JSON
+Schema describes data, so a function anywhere else in a tool's input raises
+`not_data` at the call, naming its path. A function a run handed to a tool
+there arrives as a function value, `{"$lash_function": <FunctionValue>}`,
+and needs no publication to start.
 `ProcessStartRequest::inline(LASH_VM_ENGINE_KIND, value, args, launch, ..)`
 starts it under your key (`with_host_start_key`): realization checks the
 value against the build's library and its bounds, publishes its document
@@ -466,8 +470,8 @@ published workflow: it contains the statement captions spelled in the cell's
 function, including when the function was saved in an earlier cell. Extraction
 re-keys those captions to the new document's sites, accounting for frozen
 captures and canonical function names. The transport payload has three fields:
-`document`, `entry` and `captions`; hosts that declare its schema must accept
-all three. Rust constructors without captions use
+`document`, `entry` and `captions`; the slot's schema is the marker, not the
+payload's shape. Rust constructors without captions use
 `Captions::empty(document.identity())`. Captions remain outside the document's
 executable identity.
 

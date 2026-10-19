@@ -3229,6 +3229,7 @@ dependencies = [
 name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-tool-shape",
  "lash-kernel-doc",
  "schemars",
  "serde",

@@ -363,7 +363,7 @@ fn process_list_tool_definition() -> ToolDefinition {
                     ],
                     "description": "Any-of lifecycle status set. Absence selects running runs; `any` includes every status."
                 },
-                "definition": declarations::function_value_schema(),
+                "definition": declarations::function_slot_schema(),
                 "definition_id": declarations::definition_id_schema()
             },
             "additionalProperties": false

@@ -104,7 +104,7 @@ pub(crate) fn typescript_process_prompt(process_surface: bool) -> String {
     if !process_surface {
         return String::new();
     }
-    r#"Async functions are ordinary cell code: they may capture cell bindings and be called locally. Passing a function anywhere in a tool input copies its code and current captures inline. A later mutation is invisible to that copy; tasks, handles and cyclic captures cannot cross.
+    r#"Async functions are ordinary cell code: they may capture cell bindings and be called locally. Passing a function to a tool slot typed as a function (such as `processes.start`'s `definition`) copies its code and current captures inline. A later mutation is invisible to that copy; tasks, handles and cyclic captures cannot cross. A function in a slot typed as data throws `not_data`.
 Start one with `await processes.start({ definition: review, args: { request: "x" } })`, or pass `definition_id` for a published workflow. Start arguments key by parameter name. Returning succeeds; throwing fails. Defining a function publishes nothing.
 The returned handle includes `definition_id`. List runs with `processes.list({ definition: review })` or `processes.list({ definition_id: handle.definition_id })`; the function itself has no definition id property.
 A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#

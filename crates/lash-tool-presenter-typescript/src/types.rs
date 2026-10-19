@@ -98,6 +98,21 @@ pub fn render_type_expression(
         }
         ShapeKind::Named(name) => render_type_name(name),
         ShapeKind::Process(None) => "Process".to_string(),
+        ShapeKind::Function(None) => "(...args: any[]) => Promise<unknown>".to_string(),
+        ShapeKind::Function(Some(signature)) => format!(
+            "({}) => Promise<{}>",
+            signature
+                .params
+                .iter()
+                .map(|param| Ok(format!(
+                    "{}: {}",
+                    render_property_name(&param.name),
+                    render(&param.shape)?
+                )))
+                .collect::<Result<Vec<_>, ShapeImportRefusal>>()?
+                .join(", "),
+            render(&signature.output)?
+        ),
         ShapeKind::Process(Some(signature)) => format!(
             "Process<[{}], {}>",
             signature

@@ -177,7 +177,7 @@ fn reserve_shape(names: &mut ReadableNameAllocator, shape: &SchemaShape) {
                 reserve_shape(names, extra);
             }
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
                 reserve_shape(names, &param.shape);
             }

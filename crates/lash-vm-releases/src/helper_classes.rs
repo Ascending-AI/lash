@@ -581,7 +581,8 @@ fn can_hold_closure(ty: &Type) -> bool {
                 .any(|field| can_hold_closure(&field.ty))
                 || record.rest.as_deref().is_some_and(can_hold_closure)
         }
-        Type::Null
+        Type::Json
+        | Type::Null
         | Type::Absent
         | Type::Bool
         | Type::Int

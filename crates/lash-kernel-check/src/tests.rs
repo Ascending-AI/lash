@@ -719,7 +719,7 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     assert!(message.contains("output"), "{message}");
     assert!(message.contains("/output"), "{message}");
     assert!(
-        message.contains("declared fields") && message.contains("open/unconstrained"),
+        message.contains("declared fields") && message.contains("JSON data"),
         "{message}"
     );
     let RefusalReason::EffectSignature {

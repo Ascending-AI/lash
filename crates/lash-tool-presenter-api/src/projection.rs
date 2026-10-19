@@ -108,13 +108,17 @@ fn expand(
             }
             ShapeKind::Object(object)
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             let mut process = process.clone();
             for param in &mut process.params {
                 param.shape = child(&param.shape);
             }
             process.output = Box::new(child(&process.output));
-            ShapeKind::Process(Some(process))
+            if matches!(shape.kind, ShapeKind::Process(_)) {
+                ShapeKind::Process(Some(process))
+            } else {
+                ShapeKind::Function(Some(process))
+            }
         }
         other => other.clone(),
     };

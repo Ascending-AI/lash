@@ -33,8 +33,9 @@ pub(crate) fn admit_value(
     let value = value();
     schema.validate(&value)?;
     let ty = lash_kernel_check::result_type_of_schema(schema.as_value());
-    // Every value a cell can receive decodes as `Any`.
-    if ty == Type::Any {
+    // Every value a cell can receive decodes as `Any`, and every JSON value
+    // as `Json`.
+    if matches!(ty, Type::Any | Type::Json) {
         return Ok(());
     }
     let depth = KernelDataLimits::standard().value_depth();

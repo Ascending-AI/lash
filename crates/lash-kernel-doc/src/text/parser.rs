@@ -1384,6 +1384,7 @@ impl Parser {
             let word = parser.keyword("a type")?;
             Ok(match word.as_str() {
                 "Any" => Type::Any,
+                "Json" => Type::Json,
                 "Null" => Type::Null,
                 "Absent" => Type::Absent,
                 "Bool" => Type::Bool,

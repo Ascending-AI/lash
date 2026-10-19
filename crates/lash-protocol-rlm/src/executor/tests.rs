@@ -329,16 +329,51 @@ async fn open_host() -> DurableHost {
 }
 
 fn definition(id: &str, name: &str, module: &str, operation: &str) -> lash_core::ToolDefinition {
+    typed_definition(
+        id,
+        name,
+        module,
+        operation,
+        lash_core::ToolDefinition::default_input_schema(),
+    )
+}
+
+fn typed_definition(
+    id: &str,
+    name: &str,
+    module: &str,
+    operation: &str,
+    input: serde_json::Value,
+) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         id,
         name,
         "Echo the text back",
-        lash_core::ToolDefinition::default_input_schema(),
+        input,
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_vm_runtime::ToolBinding::new([module], operation))
+}
+
+/// `echo.say`: it echoes its `text`, and takes a function in `add`, the one
+/// slot of its input that admits one.
+fn echo_say() -> lash_core::ToolDefinition {
+    typed_definition(
+        "tool:echo",
+        "echo",
+        "echo",
+        "say",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": { "type": "string" },
+                "add": { "x-lash": { "kind": "function" } }
+            },
+            "additionalProperties": false
+        }),
+    )
 }
 
 /// The tools a law's cells call: `echo.say` and `echo.await`, listed in the
@@ -374,7 +409,7 @@ impl lash_core::ToolProvider for CellTools {
     > {
         Ok({
             vec![
-                definition("tool:echo", "echo", "echo", "say").manifest(),
+                echo_say().manifest(),
                 definition("tool:echo_await", "echo_await", "echo", "await").manifest(),
             ]
         })
@@ -386,7 +421,7 @@ impl lash_core::ToolProvider for CellTools {
         _config: &lash_core::OwnerConfigView,
     ) -> Option<lash_core::ToolManifest> {
         match id.as_str() {
-            "tool:echo" => Some(definition("tool:echo", "echo", "echo", "say").manifest()),
+            "tool:echo" => Some(echo_say().manifest()),
             "tool:echo_await" => {
                 Some(definition("tool:echo_await", "echo_await", "echo", "await").manifest())
             }
@@ -403,9 +438,7 @@ impl lash_core::ToolProvider for CellTools {
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
         match name {
-            "echo" | "tool:echo" => Some(Arc::new(
-                definition("tool:echo", "echo", "echo", "say").contract(),
-            )),
+            "echo" | "tool:echo" => Some(Arc::new(echo_say().contract())),
             "echo_await" | "tool:echo_await" => Some(Arc::new(
                 definition("tool:echo_await", "echo_await", "echo", "await").contract(),
             )),

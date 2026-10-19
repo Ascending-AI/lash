@@ -1,27 +1,66 @@
 //! A function a cell hands to a tool crosses as a self-contained frozen
-//! function value (`K-EFF-002`, `K-CLO-004`; FIG-6381): a tool reads it in
-//! its transport form, `{"$lash_function": <FunctionValue>}`, which only the
-//! typed datum encoder writes.
+//! function value (`K-EFF-002`, `K-CLO-004`; FIG-6381) wherever the tool's
+//! schema marks the slot `{"x-lash": {"kind": "function"}}`: a tool reads it
+//! in its transport form, `{"$lash_function": <FunctionValue>}`, which only
+//! the typed datum encoder writes. Every other JSON-schema slot is data, and
+//! a function there raises `not_data` naming its path.
 
 use lash_kernel_doc::{FUNCTION_VALUE_TAG, FunctionValue, FunctionValueLimits, KernelDataLimits};
 
 use super::*;
 
-/// `keep.run`: a tool that takes any record and keeps every call's
-/// arguments, in order.
-#[derive(Default)]
+/// `keep.run`: a tool that keeps every call's arguments, in order. Its
+/// input marks each slot a law passes a function in; `forged` is data.
 struct Keeps {
+    tool: fn() -> lash_core::ToolDefinition,
     received: std::sync::Mutex<Vec<serde_json::Value>>,
 }
 
+impl Default for Keeps {
+    fn default() -> Self {
+        Self::of(keep)
+    }
+}
+
 impl Keeps {
+    fn of(tool: fn() -> lash_core::ToolDefinition) -> Self {
+        Self {
+            tool,
+            received: std::sync::Mutex::default(),
+        }
+    }
+
     fn received(&self) -> Vec<serde_json::Value> {
         self.received.lock().expect("received arguments").clone()
     }
 }
 
 fn keep() -> lash_core::ToolDefinition {
-    definition("tool:keep_run", "keep_run", "keep", "run")
+    let function = serde_json::json!({ "x-lash": { "kind": "function" } });
+    let mut properties = serde_json::Map::new();
+    for name in ["pick", "a", "b", "c", "d", "run"] {
+        properties.insert(name.to_owned(), function.clone());
+    }
+    properties.insert(
+        "nested".to_owned(),
+        serde_json::json!({
+            "type": "object",
+            "properties": { "list": { "type": "array", "items": function } },
+            "additionalProperties": false
+        }),
+    );
+    properties.insert("forged".to_owned(), serde_json::json!({ "type": "object" }));
+    typed_definition(
+        "tool:keep_run",
+        "keep_run",
+        "keep",
+        "run",
+        serde_json::json!({
+            "type": "object",
+            "properties": properties,
+            "additionalProperties": false
+        }),
+    )
 }
 
 #[async_trait::async_trait]
@@ -33,7 +72,7 @@ impl lash_core::ToolProvider for Keeps {
         Vec<lash_core::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        Ok(vec![keep().manifest()])
+        Ok(vec![(self.tool)().manifest()])
     }
 
     fn resolve_contract(
@@ -41,7 +80,8 @@ impl lash_core::ToolProvider for Keeps {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        matches!(name, "keep_run" | "tool:keep_run").then(|| Arc::new(keep().contract()))
+        let tool = (self.tool)();
+        (name == tool.name() || name == tool.id().as_str()).then(|| Arc::new(tool.contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -200,6 +240,121 @@ async fn a_function_that_cannot_cross_raises_before_the_call() {
             tools.received().is_empty(),
             "{setup}: nothing was requested"
         );
+    }
+}
+
+/// `slots.take`: a tool shaped like `processes.start`: a function slot the
+/// `x-lash` marker declares, an open object, a text and a closed object.
+fn slots() -> lash_core::ToolDefinition {
+    typed_definition(
+        "tool:slots_take",
+        "slots_take",
+        "slots",
+        "take",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "definition": { "x-lash": { "kind": "function" } },
+                "args": { "type": "object" },
+                "label": { "type": "string" },
+                "plan": {
+                    "type": "object",
+                    "properties": { "step": { "type": "string" } },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+/// What `slots.take(input)` raised, as text, `input` written in `dialect`
+/// and handed through a helper, so only the perform knows what it holds,
+/// and what the tool received.
+async fn slots_raised(dialect: &CellDialect, input: &str) -> (String, Vec<serde_json::Value>) {
+    let code = if dialect.name() == CellDialect::python().name() {
+        format!(
+            "async def f():\n    return 1\n\n\nasync def take(value):\n    return await slots_take(value)\n\n\nraised = 'none'\ntry:\n    await take({input})\nexcept Exception as error:\n    raised = str(error)\nawait control_finish(raised)"
+        )
+    } else {
+        format!(
+            "const f = async () => 1;\nconst take = async (input) => await slots.take(input);\nlet raised = \"none\";\ntry {{\n  await take({input});\n}} catch (error) {{\n  raised = String(error.message);\n}}\nawait control.finish(raised);"
+        )
+    };
+    let tools = Arc::new(Keeps::of(slots));
+    let host = open_host().await;
+    let response = run_cell(
+        &mut crate::testing::session_state(dialect),
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &crossing_services(dialect),
+        &code,
+    )
+    .await;
+    let raised = finish_of(&response);
+    (
+        raised
+            .as_str()
+            .unwrap_or_else(|| panic!("{code}: the raised error, as text: {raised}"))
+            .to_owned(),
+        tools.received(),
+    )
+}
+
+/// CROSS-BY-TYPE: a function crosses into a tool exactly where the tool's
+/// schema marks the slot with the `x-lash` function kind, as
+/// `processes.start`'s `definition` is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_crosses_in_a_slot_the_x_lash_function_marker_declares() {
+    for (dialect, input) in [
+        (
+            CellDialect::typescript(),
+            "{ definition: f, args: { n: 1 } }",
+        ),
+        (CellDialect::python(), "{'definition': f, 'args': {'n': 1}}"),
+    ] {
+        let (raised, received) = slots_raised(&dialect, input).await;
+        assert_eq!(raised, "none", "{}", dialect.name());
+        assert_eq!(received[0]["args"], serde_json::json!({"n": 1}));
+        assert_eq!(
+            function_value(&received[0]["definition"]).entry.as_str(),
+            "run"
+        );
+    }
+}
+
+/// CROSS-PATH: a function in a slot a JSON schema types as data (a text, a
+/// closed object, an open object and everything in it) raises `not_data`
+/// naming its argument path at the `perform`, and the tool is not called.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_in_a_json_schema_data_slot_raises_not_data_naming_its_path() {
+    let cases = [
+        (
+            CellDialect::typescript(),
+            "{ definition: f, args: { g: f } }",
+            "input.args.g",
+        ),
+        (
+            CellDialect::python(),
+            "{'definition': f, 'args': {'g': f}}",
+            "input.args.g",
+        ),
+        (CellDialect::typescript(), "{ label: f }", "input.label"),
+        (CellDialect::typescript(), "{ plan: f }", "input.plan"),
+        (
+            CellDialect::typescript(),
+            "{ plan: { step: f } }",
+            "input.plan.step",
+        ),
+    ];
+    for (dialect, input, path) in cases {
+        let (raised, received) = slots_raised(&dialect, input).await;
+        assert!(
+            raised.contains("a function cannot leave the run")
+                && raised.contains(&format!("`{path}`")),
+            "{}: {input}: {raised}",
+            dialect.name()
+        );
+        assert!(received.is_empty(), "{input}: nothing was requested");
     }
 }
 

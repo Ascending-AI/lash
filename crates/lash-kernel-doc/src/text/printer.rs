@@ -788,6 +788,7 @@ impl<'a> Printer<'a> {
     fn ty(&mut self, ty: &Type) {
         match ty {
             Type::Any => self.out.push_str("Any"),
+            Type::Json => self.out.push_str("Json"),
             Type::Null => self.out.push_str("Null"),
             Type::Absent => self.out.push_str("Absent"),
             Type::Bool => self.out.push_str("Bool"),

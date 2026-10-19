@@ -61,7 +61,7 @@ fn collect(shape: &SchemaShape, path: &str, rows: &mut Vec<String>) {
                 collect(item, path, rows);
             }
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
                 collect(&param.shape, &format!("{path}({})", param.name), rows);
             }

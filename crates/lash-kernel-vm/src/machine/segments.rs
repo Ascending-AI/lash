@@ -48,7 +48,9 @@ use super::ops::{Answer, Flow, Reg, Status};
 use super::plans::{PlanRun, Steady, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
 use crate::compile::segments::{Segment, SiteControl};
-use crate::compile::{CodeId, Executable, LibId, LibRun, PreparedPlan};
+use crate::compile::{
+    ActionKind, CodeId, Executable, Form, LibId, LibRun, NestedKind, PreparedPlan,
+};
 use crate::interface::{EffectMode, Host};
 use crate::observe::Event;
 
@@ -223,19 +225,40 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// (`K-EFF-002`): the plan yields, and its frames stand to wait in the
     /// effect.
     pub(super) fn perform_at(&mut self, site: u32, at: Reg, count: usize) -> Result<(), PlanExit> {
+        let (segment, _) = match segment_of(self.exe, self.lib, self.owner) {
+            Ok(segment) => segment,
+            Err(halt) => return self.held(Err(halt)),
+        };
+        let segment_site = &segment.sites[site as usize];
+        let (stream, stmt, _) = self.exe.statement(segment_site.stmt);
+        let effect = match segment_site.act {
+            Some(act) => match &stream.nested[act.ix()].kind {
+                NestedKind::Perform { effect, .. } => Some(effect.clone()),
+                _ => None,
+            },
+            None => match &stmt.form {
+                Form::Action(action) => match &action.kind {
+                    ActionKind::Perform { effect, .. } => Some(effect.clone()),
+                    _ => None,
+                },
+                _ => None,
+            },
+        };
+        let Some(effect) = effect else {
+            return self.held(Err(fault("a segment perform site has no effect")));
+        };
         // A statement's own `perform` reads its arguments as atoms, each a
         // boundary charge of 1 (`K-CHG-002`, `K-CHG-007`); a nested one's
         // are its statement's operands, covered by the formula.
-        let own = segment_of(self.exe, self.lib, self.owner)
-            .map(|(segment, _)| segment.sites[site as usize].act.is_none());
-        if self.held(own)? {
+        let own = segment_site.act.is_none();
+        if self.held(Ok(own))? {
             let charged = self.machine.charge_boundary(count as u64);
             self.held(charged)?;
         }
         let mut copied = Vec::with_capacity(count);
-        for at in at..at + count {
+        for (index, at) in (at..at + count).enumerate() {
             let value = self.machine.take(at);
-            let datum = self.machine.copy_out_tool_arg(&value);
+            let datum = self.machine.copy_out_tool_arg(&effect, index, &value);
             copied.push(self.check(datum)?);
         }
         #[cfg(test)]

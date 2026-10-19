@@ -175,6 +175,7 @@ impl Decoder<'_> {
                     DecodeMismatch::new(format!("{} fits no member of the union", kind(datum)))
                 }),
             (Type::Any, _) => self.any(datum, budget),
+            (Type::Json, _) => self.json(datum, budget),
             (Type::Null, Datum::Null)
             | (Type::Absent, Datum::Absent)
             | (Type::Bool, Datum::Bool(_))
@@ -313,6 +314,53 @@ impl Decoder<'_> {
             (Type::Error, _) => mismatch("an error"),
             (Type::Handle(_), _) => mismatch("a handle"),
         }
+    }
+
+    /// Reads `datum` as [`Type::Json`]: as [`Self::any`] does, refusing
+    /// a function reference or a handle at any depth.
+    fn json(&self, datum: &Datum, budget: usize) -> Fit {
+        let Some(budget) = budget.checked_sub(1) else {
+            return Err(self.too_deep());
+        };
+        let all = |items: &[Datum]| -> Result<Vec<Datum>, DecodeMismatch> {
+            items.iter().map(|item| self.json(item, budget)).collect()
+        };
+        Ok(match datum {
+            Datum::Number(token) => self.bare(token)?,
+            Datum::Function(_) | Datum::Handle(_) | Datum::FunctionValue(_) => {
+                return Err(DecodeMismatch::new(format!(
+                    "expected data, found {}",
+                    kind(datum)
+                )));
+            }
+            Datum::Tuple(items) => Datum::Tuple(all(items)?),
+            Datum::List(items) => Datum::List(all(items)?),
+            Datum::Set(items) => Datum::Set(all(items)?),
+            Datum::Map(entries) => Datum::Map(
+                entries
+                    .iter()
+                    .map(|(key, value)| Ok((self.json(key, budget)?, self.json(value, budget)?)))
+                    .collect::<Result<_, DecodeMismatch>>()?,
+            ),
+            Datum::Record(fields) => Datum::Record(
+                fields
+                    .iter()
+                    .map(|(name, value)| {
+                        Ok((
+                            name.clone(),
+                            self.json(value, budget)
+                                .map_err(|mismatch| mismatch.within(name))?,
+                        ))
+                    })
+                    .collect::<Result<_, DecodeMismatch>>()?,
+            ),
+            Datum::Error(error) => Datum::Error(Box::new(ErrorDatum {
+                kind: error.kind.clone(),
+                message: error.message.clone(),
+                data: self.json(&error.data, budget)?,
+            })),
+            other => other.clone(),
+        })
     }
 
     fn bare(&self, token: &NumberToken) -> Fit {

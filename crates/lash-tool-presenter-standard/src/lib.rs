@@ -393,7 +393,7 @@ fn reserve_host_names(document: &SchemaDocument, allocator: &mut ReadableNameAll
                     reserve(item, allocator);
                 }
             }
-            ShapeKind::Process(Some(process)) => {
+            ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
                 for param in &process.params {
                     reserve(&param.shape, allocator);
                 }

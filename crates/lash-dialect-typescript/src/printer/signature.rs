@@ -87,7 +87,7 @@ impl Renderer<'_> {
     /// `path` and its name give it.
     fn ts_type(&mut self, ty: &Type, function: &k::Name, root: &FieldRoot, path: &mut Vec<String>) {
         match ty {
-            Type::Any | Type::Handle(_) => self.out.write("unknown"),
+            Type::Any | Type::Json | Type::Handle(_) => self.out.write("unknown"),
             Type::Null => self.out.write("null"),
             Type::Absent => self.out.write("undefined"),
             Type::Bool => self.out.write("boolean"),

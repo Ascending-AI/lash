@@ -77,7 +77,7 @@
     "peak_bytes": 13676544,
     "samples": 13
   },
-  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_55cb55e9": {
+  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_068a9386": {
     "cpu_count": 1,
     "mean_cores": 0.0,
     "memory_kb": 262144,
@@ -86,7 +86,7 @@
     "peak_bytes": 12873728,
     "samples": 3
   },
-  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_82a1351c": {
+  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_83d90633": {
     "cpu_count": 1,
     "mean_cores": 0.71,
     "memory_kb": 262144,
@@ -95,7 +95,7 @@
     "peak_bytes": 11710464,
     "samples": 3
   },
-  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_edf65480": {
+  "//crates/lash-core-ids:lash-core-ids__unit_test__fv_2e98fbc6": {
     "cpu_count": 1,
     "mean_cores": 0.97,
     "memory_kb": 262144,
@@ -113,7 +113,7 @@
     "peak_bytes": 14659584,
     "samples": 27
   },
-  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_6c0743b0": {
+  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_5bf56cde": {
     "cpu_count": 1,
     "mean_cores": 0.55,
     "memory_kb": 262144,
@@ -122,7 +122,7 @@
     "peak_bytes": 14143488,
     "samples": 3
   },
-  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_6fe59be0": {
+  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_c4b9b303": {
     "cpu_count": 1,
     "mean_cores": 0.51,
     "memory_kb": 262144,
@@ -131,7 +131,7 @@
     "peak_bytes": 14368768,
     "samples": 3
   },
-  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_843a748b": {
+  "//crates/lash-core-llm:lash-core-llm__unit_test__fv_b59c2016": {
     "cpu_count": 1,
     "mean_cores": 0.37,
     "memory_kb": 262144,
@@ -1523,7 +1523,7 @@
     "peak_bytes": 15785984,
     "samples": 25
   },
-  "//crates/lash-sansio:lash-sansio__unit_test__fv_08afc767": {
+  "//crates/lash-sansio:lash-sansio__unit_test__fv_3f0434ba": {
     "cpu_count": 1,
     "mean_cores": 0.75,
     "memory_kb": 262144,
@@ -1532,7 +1532,7 @@
     "peak_bytes": 15863808,
     "samples": 9
   },
-  "//crates/lash-sansio:lash-sansio__unit_test__fv_1bb96bf3": {
+  "//crates/lash-sansio:lash-sansio__unit_test__fv_46de4c01": {
     "cpu_count": 1,
     "mean_cores": 0.74,
     "memory_kb": 262144,
@@ -1730,7 +1730,7 @@
     "peak_bytes": 830087168,
     "samples": 15
   },
-  "//crates/lash-trace:lash-trace__unit_test__fv_b01c89f8": {
+  "//crates/lash-trace:lash-trace__unit_test__fv_69dd7e6b": {
     "cpu_count": 2,
     "mean_cores": 1.05,
     "memory_kb": 1048576,
@@ -1739,7 +1739,7 @@
     "peak_bytes": 803647488,
     "samples": 12
   },
-  "//crates/lash-trace:lash-trace__unit_test__fv_eaa35e38": {
+  "//crates/lash-trace:lash-trace__unit_test__fv_d4b688bd": {
     "cpu_count": 2,
     "mean_cores": 1.14,
     "memory_kb": 1048576,
@@ -1757,7 +1757,7 @@
     "peak_bytes": 17879040,
     "samples": 15
   },
-  "//crates/lash-trace:schema__test__fv_b01c89f8": {
+  "//crates/lash-trace:schema__test__fv_69dd7e6b": {
     "cpu_count": 1,
     "mean_cores": 0.89,
     "memory_kb": 262144,
@@ -1766,7 +1766,7 @@
     "peak_bytes": 14790656,
     "samples": 13
   },
-  "//crates/lash-trace:schema__test__fv_eaa35e38": {
+  "//crates/lash-trace:schema__test__fv_d4b688bd": {
     "cpu_count": 1,
     "mean_cores": 0.89,
     "memory_kb": 262144,
@@ -1792,7 +1792,7 @@
     "peak_bytes": 13676544,
     "samples": 3
   },
-  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_b01c89f8": {
+  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_69dd7e6b": {
     "cpu_count": 1,
     "mean_cores": 0.86,
     "memory_kb": 262144,
@@ -1801,7 +1801,7 @@
     "peak_bytes": 13729792,
     "samples": 8
   },
-  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_eaa35e38": {
+  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_d4b688bd": {
     "cpu_count": 1,
     "mean_cores": 0.84,
     "memory_kb": 262144,
@@ -1871,7 +1871,7 @@
     "peak_bytes": 99364864,
     "samples": 10
   },
-  "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_4a2cbc8c": {
+  "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_26c5e88b": {
     "cpu_count": 1,
     "mean_cores": 0.95,
     "memory_kb": 262144,

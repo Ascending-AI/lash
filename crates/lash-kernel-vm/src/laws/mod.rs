@@ -7,6 +7,7 @@ mod bounds;
 mod chunks;
 mod cold;
 mod continuation;
+mod crossing;
 pub(crate) mod embedder;
 mod forms;
 mod frames;

@@ -220,7 +220,7 @@ pub(crate) fn visit(shape: &SchemaShape, f: &mut impl FnMut(&SchemaShape)) {
                 visit(extra, f);
             }
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
                 visit(&param.shape, f);
             }
@@ -351,7 +351,7 @@ fn collect_notes(shape: &SchemaShape, path: &str, required: bool, rows: &mut Vec
                 collect_notes(item, path, required, rows);
             }
         }
-        ShapeKind::Process(Some(process)) => {
+        ShapeKind::Process(Some(process)) | ShapeKind::Function(Some(process)) => {
             for param in &process.params {
                 collect_notes(&param.shape, &format!("{path}({})", param.name), true, rows);
             }

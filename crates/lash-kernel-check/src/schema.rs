@@ -3,7 +3,7 @@
 //! effect (R7, D4).
 //!
 //! A tool's result is projected **open**: an object schema with closed
-//! properties is a record whose rest is `Any`, so a tool that adds an output
+//! properties is a record whose rest is `Json`, so a tool that adds an output
 //! field still serves a document checked against its earlier result. Input
 //! stays closed: it is contravariant, and a tool accepts only what its
 //! schema states. A manually authored closed kernel result stays closed, and
@@ -12,9 +12,12 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_tool_shape::{X_LASH_KEYWORD, XLashType};
 
-/// The kernel type a JSON schema describes. A schema the grammar has no
-/// exact type for is [`Type::Any`]: the tool still validates its own input.
+/// The kernel type a JSON schema describes. A JSON schema describes data:
+/// a form the grammar has no exact type for is [`Type::Json`], which
+/// admits no function, and only a slot an `x-lash` declaration marks
+/// admits one. The tool still validates its own input.
 #[must_use]
 pub fn type_of_schema(schema: &serde_json::Value) -> Type {
     project(schema, Openness::Closed)
@@ -64,8 +67,11 @@ enum Openness {
 
 fn project(schema: &serde_json::Value, openness: Openness) -> Type {
     let Some(object) = schema.as_object() else {
-        return Type::Any;
+        return Type::Json;
     };
+    if let Some(declaration) = object.get(X_LASH_KEYWORD) {
+        return lash_type(declaration);
+    }
     if let Some(values) = object.get("enum").and_then(serde_json::Value::as_array) {
         let texts: Option<Vec<String>> = values
             .iter()
@@ -73,7 +79,7 @@ fn project(schema: &serde_json::Value, openness: Openness) -> Type {
             .collect();
         return texts
             .filter(|texts| !texts.is_empty())
-            .map_or(Type::Any, Type::Enum);
+            .map_or(Type::Json, Type::Enum);
     }
     match object.get("type").and_then(serde_json::Value::as_str) {
         Some("null") => Type::Null,
@@ -84,24 +90,53 @@ fn project(schema: &serde_json::Value, openness: Openness) -> Type {
         Some("array") => Type::List(Box::new(
             object
                 .get("items")
-                .map_or(Type::Any, |items| project(items, openness)),
+                .map_or(Type::Json, |items| project(items, openness)),
         )),
         Some("object") => record_of(object, openness),
-        _ => Type::Any,
+        _ => Type::Json,
     }
 }
 
-/// A closed object schema as a record, open when `openness` says so; any
-/// other object schema is `Any`.
+/// The kernel type of an `x-lash` declaration, one for each kind of the
+/// one decode the presenters read too. A process value is a handle record,
+/// which a cell calls through its dialect, so a process slot stays open.
+/// A declaration this vocabulary has no kind for is data.
+fn lash_type(declaration: &serde_json::Value) -> Type {
+    let Some(declared) = XLashType::decode(declaration) else {
+        return Type::Json;
+    };
+    match declared {
+        XLashType::Function {
+            signature: Some(signature),
+        } => Type::Function(Box::new(Signature {
+            params: signature
+                .params
+                .iter()
+                .map(|param| Param {
+                    name: Name::new(param.name.as_str()),
+                    ty: type_of_schema(&param.schema),
+                    optional: false,
+                })
+                .collect(),
+            result: result_type_of_schema(&signature.output),
+        })),
+        XLashType::Function { signature: None }
+        | XLashType::Process { .. }
+        | XLashType::ProcessUnknown => Type::Any,
+    }
+}
+
+/// A closed object schema as a record, open when `openness` says so, the
+/// rest of an open one data; any other object schema is data.
 fn record_of(object: &serde_json::Map<String, serde_json::Value>, openness: Openness) -> Type {
     let Some(properties) = object
         .get("properties")
         .and_then(serde_json::Value::as_object)
     else {
-        return Type::Any;
+        return Type::Json;
     };
     if object.get("additionalProperties") != Some(&serde_json::Value::Bool(false)) {
-        return Type::Any;
+        return Type::Json;
     }
     let required: BTreeSet<&str> = object
         .get("required")
@@ -121,7 +156,7 @@ fn record_of(object: &serde_json::Map<String, serde_json::Value>, openness: Open
             .collect(),
         rest: match openness {
             Openness::Closed => None,
-            Openness::Open => Some(Box::new(Type::Any)),
+            Openness::Open => Some(Box::new(Type::Json)),
         },
     })
 }
