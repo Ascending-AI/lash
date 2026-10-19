@@ -474,8 +474,16 @@ kiln run //crates/lash-perf:lash-perf__bin -- replay-record \
   --name <new-name> --protocol standard --out crates/lash-perf/workloads/replay/<new-name>.json
 ```
 
-The recorder reads the session's committed transcript and keeps its shape,
-not its content. Every user and assistant text becomes deterministic filler
+`--protocol` is the session's own protocol: the recorder reads the session's
+committed transcript through that protocol's decoder, so a code-mode session
+yields the cells it committed. It keeps the transcript's shape, not its
+content. A turn is one turn identity; inputs a turn admitted together become
+one user input as long as their texts joined by newlines. Its replies are the
+model's: a text, a native tool batch or a cell, each cell once whatever
+companion context its channel committed. Reasoning alone and the reply a
+cell's `finish` sealed are not replies. A tool result sizes the call its id
+names, and a call no result answers refuses the capture, as does a code-mode
+reply whose native tool calls ran no cell. Every user and assistant text becomes deterministic filler
 of the same byte length. A native tool call becomes a `fixture_large` call
 answering as many bytes as the real result. A cell keeps its source, since it
 must still run, with e-mail-, key- and long-digit-shaped tokens replaced by

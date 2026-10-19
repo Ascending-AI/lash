@@ -347,3 +347,82 @@ fn a_coding_turn_loads_its_window_only_where_it_holds_none() {
 
 /// The measured count after FIG-6634.
 const WINDOW_BOUND: u64 = 15;
+
+/// REPLAY-RECORD typed capture: a committed TypeScript session records
+/// back as its cells, each turn's cells in order with their source, then its
+/// text answer. The reader decodes the session's own cell records; neither a
+/// cell's companion assistant context nor its fenced reply text becomes a
+/// second reply.
+#[test]
+fn a_recorded_code_mode_session_keeps_its_cells() {
+    use lash_perf::replay::recorder::redact_code;
+    use lash_perf::replay::script::{Reply, Source, Workload};
+
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("cells.json");
+    let first = "const result = await tools.fixture_lookup({key: \"json\"});\nconsole.log(JSON.stringify(result));";
+    let second = "console.log(\"bob@corp.io\".length);";
+    std::fs::write(
+        &script,
+        serde_json::to_vec(&serde_json::json!({
+            "format": "lash-perf-replay/1",
+            "name": "recorded-cells",
+            "description": "A code-mode session the recorder captures back",
+            "protocol": "typescript",
+            "sessions": 1,
+            "turns": [
+                {"user": "Read a value", "replies": [{"cell": first}, {"text": "done"}]},
+                {"user": "Count it", "replies": [{"cell": first}, {"cell": second}, {"text": "ok"}]}
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let stores = dir.path().join("stores");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay")
+        .arg(&script)
+        .arg("--store-dir")
+        .arg(&stores)
+        .arg("--out")
+        .arg(dir.path().join("receipt.json"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let captured = dir.path().join("captured.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay-record")
+        .arg("--db")
+        .arg(stores.join("recorded-cells").join("lash.db"))
+        .args(["--session", "replay-recorded-cells-0", "--name", "captured"])
+        .args(["--protocol", "typescript", "--out"])
+        .arg(&captured)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let workload = Workload::parse(&std::fs::read_to_string(&captured).unwrap()).unwrap();
+    let replies: Vec<_> = workload
+        .turns
+        .iter()
+        .map(|turn| turn.replies.clone())
+        .collect();
+    let cell = |code: &str| Reply::Cell(Source(redact_code(code)));
+    let text = |bytes| Reply::Text(lash_perf::replay::provider::large_text("reply", bytes));
+    assert_eq!(
+        replies,
+        vec![
+            vec![cell(first), text(4)],
+            vec![cell(first), cell(second), text(2)],
+        ],
+        "{}",
+        std::fs::read_to_string(&captured).unwrap()
+    );
+}
