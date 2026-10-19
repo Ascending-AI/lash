@@ -405,6 +405,7 @@ impl Host for ScriptHost<'_> {
         effect: &lash_kernel_doc::EffectName,
         args: &[Datum],
         _site: &lash_kernel_doc::PositionLabel,
+        _origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         match self.answers.pop_front() {
             Some(HostAnswer::Perform(perform))

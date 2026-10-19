@@ -24,6 +24,7 @@ fn bucket(index: u64) -> std::ops::Range<usize> {
 impl Task {
     pub(super) fn fresh(
         identity: lash_kernel_state::paged::TaskIdentityRef,
+        spawn_origin: Option<lash_kernel_state::paged::SiteRef>,
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
@@ -38,6 +39,7 @@ impl Task {
                 passed: false,
                 occurrences: Tree::new(false),
                 frames: Tree::new(true),
+                spawn_origin,
             },
             frames: Frames::new(access, arena, exe),
             published: None,

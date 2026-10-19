@@ -331,12 +331,14 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
     }
 }
 
-/// The world outside the run: a clock, random bits, one projection, and
-/// what the run printed and read.
+/// The world outside the run: a clock, random bits, one projection, the
+/// effects a run binds as reads, and what the run printed and read.
 #[derive(Default)]
 pub(crate) struct World {
     pub(crate) printed: Vec<Datum>,
     pub(crate) reads: Vec<Datum>,
+    /// Each read-bound `perform`, with its arguments and its origin.
+    pub(crate) performed: Vec<(lash_kernel_doc::EffectName, Vec<Datum>, Site)>,
     pub(crate) now: i64,
     pub(crate) random: u64,
     pub(crate) cancel: bool,
@@ -365,6 +367,23 @@ impl Host for World {
         Ok(match request {
             Datum::Text(text) if text == "index" => int(0),
             other => other.clone(),
+        })
+    }
+
+    /// Answers a read-bound `perform` from the effects' table.
+    fn perform(
+        &mut self,
+        effect: &lash_kernel_doc::EffectName,
+        args: &[Datum],
+        _site: &lash_kernel_doc::PositionLabel,
+        origin: &Site,
+    ) -> Result<Result<Datum, ErrorDatum>, crate::HostFault> {
+        self.performed
+            .push((effect.clone(), args.to_vec(), origin.clone()));
+        Ok(match answer_effect(effect.as_str(), args) {
+            Outcome::Completed(datum) => Ok(datum),
+            Outcome::Failed(error) => Err(error),
+            Outcome::Elapsed => unreachable!("an effect never elapses"),
         })
     }
 
@@ -449,8 +468,15 @@ pub(crate) fn answer(request: &Request) -> Outcome {
     let Request::Effect(effect) = request else {
         return Outcome::Elapsed;
     };
-    let first = effect.args.first().cloned().unwrap_or(Datum::Null);
-    match effect.effect.as_str() {
+    answer_effect(effect.effect.as_str(), &effect.args)
+}
+
+/// What `effect` answers `args` with: `echo` its first argument, `num`
+/// its first text as a number, anything else an error named by the first
+/// text.
+fn answer_effect(effect: &str, args: &[Datum]) -> Outcome {
+    let first = args.first().cloned().unwrap_or(Datum::Null);
+    match effect {
         "echo" => Outcome::Completed(first),
         "num" => match first {
             Datum::Text(text) => Outcome::Completed(Datum::Number(NumberToken::new(text).unwrap())),
@@ -458,7 +484,10 @@ pub(crate) fn answer(request: &Request) -> Outcome {
         },
         _ => Outcome::Failed(ErrorDatum {
             kind: "boom".to_string(),
-            message: label(request),
+            message: match &first {
+                Datum::Text(text) => text.clone(),
+                _ => effect.to_string(),
+            },
             data: first,
         }),
     }

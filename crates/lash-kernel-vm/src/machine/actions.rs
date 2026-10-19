@@ -104,7 +104,7 @@ impl KernelMachine {
                 result,
                 ..
             } => {
-                let values = self.atoms(task, exe, args)?;
+                let values = self.perform_atoms(task, exe, args)?;
                 let mut copied = Vec::with_capacity(values.len());
                 for value in &values {
                     copied.push(self.copy_out_tool_arg(value)?);
@@ -113,7 +113,7 @@ impl KernelMachine {
                     // A read completes here, inside its statement: no wait,
                     // and the task keeps its turn (`K-EFF-012`).
                     let value =
-                        self.perform_read(host, exe, effect, &copied, &action.site, result)?;
+                        self.perform_read(task, host, exe, effect, &copied, &action.site, result)?;
                     // Held as a delivered outcome is, until the statement
                     // binds it.
                     self.put(out, value);
@@ -276,7 +276,8 @@ impl KernelMachine {
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement, and the
                     // task keeps its turn (`K-EFF-012`).
-                    let value = self.perform_read(host, exe, effect, &copied, site, result)?;
+                    let value =
+                        self.perform_read(task, host, exe, effect, &copied, site, result)?;
                     self.put(args, value);
                     self.pin(args)?;
                     return Ok(Flow::Done);
@@ -662,12 +663,29 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Reads an action's atoms, left to right (`K-EVAL-004`).
-    fn atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom]) -> Eval<Vec<Value>> {
-        atoms
-            .iter()
-            .map(|atom| self.atom(task, exe, atom))
-            .collect()
+    /// Reads a `perform`'s atoms, left to right (`K-EVAL-004`), each a
+    /// boundary charge of 1 in whatever code the `perform` stands
+    /// (`K-CHG-002`, `K-CHG-007`).
+    fn perform_atoms(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        atoms: &[Atom],
+    ) -> Eval<Vec<Value>> {
+        let mut values = Vec::with_capacity(atoms.len());
+        for atom in atoms {
+            if self.paced {
+                self.charged += 1;
+            } else {
+                self.charge_boundary(1)?;
+            }
+            self.observe_expression();
+            values.push(match atom {
+                Atom::Var(var) => self.read_var(task, exe, var)?,
+                Atom::Literal(value) => self.literal(value)?,
+            });
+        }
+        Ok(values)
     }
 
     /// Reads a callee. One held in a variable is a closure or a function
@@ -751,8 +769,13 @@ impl KernelMachine {
     /// decoded by the `perform`'s type, or the error the host answered
     /// raised here, each charged as a recorded `perform`'s outcome is
     /// (`K-EFF-005`, `K-EFF-009`, `K-EFF-012`).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a read is its task, its effect, its copied arguments, its site and its type"
+    )]
     fn perform_read(
         &mut self,
+        task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         effect: &EffectName,
@@ -760,12 +783,17 @@ impl KernelMachine {
         site: &Site,
         result: &Type,
     ) -> Eval<Value> {
+        let origin = self.origin(task)?;
         self.report_ran(host);
-        match host.perform(effect, args, &site.position()) {
+        match host.perform(effect, args, &site.position(), &origin) {
             Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),
             Ok(Err(error)) => {
                 let datum = Datum::Error(Box::new(error));
-                Err(Interrupt::raised(self.decode(exe, &datum, &Type::Any)?))
+                Err(Interrupt::raised(self.decode_answer(
+                    exe,
+                    &datum,
+                    &Type::Any,
+                )?))
             }
             Err(fault) => Err(Halt::Host(fault).into()),
         }
@@ -862,6 +890,7 @@ impl KernelMachine {
             .map_err(|error| lash_kernel_doc::heap::HeapFault::Malformed(error.to_string()))?;
         let access = self.heap.pages().clone();
         self.reconcile_sweep()?;
+        let origin = self.origin(task)?;
         let running = self.tasks.get_mut(task.0 as usize)?.ok_or_else(|| {
             lash_kernel_doc::heap::HeapFault::Malformed("issued task is missing".into())
         })?;
@@ -907,6 +936,7 @@ impl KernelMachine {
                     effect,
                     args,
                     result: result.clone(),
+                    origin,
                 })
             }
         })
@@ -959,6 +989,7 @@ impl KernelMachine {
             host.enter_site(&at);
         }
 
+        let spawn_origin = self.spawn_origin(task, exe, site, &target)?;
         let parent = self.task(task)?.identity;
         let child = TaskId(self.task_table()?.len() as u64);
         self.tasks.push(Task::fresh(
@@ -968,6 +999,7 @@ impl KernelMachine {
                 occurrence,
                 self.heap.pages(),
             )?,
+            spawn_origin,
             self.heap.pages().clone(),
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),

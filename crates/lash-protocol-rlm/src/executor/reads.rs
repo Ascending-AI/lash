@@ -141,6 +141,7 @@ impl EffectReads for CellReads {
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        _origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         // The plan names every effect the machine binds as a read, and the
         // activation routed each before the run started.

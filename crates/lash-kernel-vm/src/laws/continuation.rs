@@ -63,13 +63,17 @@ fn setup(slice: u64) -> Setup {
 }
 
 /// What a run leaves observable: its end, what it printed, every request
-/// it handed out, and its charge.
+/// it handed out, every read-bound `perform` it made, each effect's
+/// origin, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
     checkpoints: Vec<crate::conformance::Checkpoint>,
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
+    performed: Vec<String>,
+    /// The origin of each effect request, then of each read, in order.
+    origins: Vec<Site>,
     charged: u64,
 }
 
@@ -106,6 +110,14 @@ struct Drive {
     probes: embedder::Probes,
     /// The entry the run starts on, with its one argument, or `main`.
     entry: Option<(&'static str, i64)>,
+    /// `echo` bound as a read (`K-EFF-012`).
+    reads: bool,
+    /// A reopening run is also sealed and opened cold after each delivery,
+    /// before the delivered task consumes its outcome.
+    reopen_delivered: bool,
+    /// At its `n`th park the run is asked to cancel, and nothing more is
+    /// delivered.
+    cancel_at: Option<usize>,
 }
 
 impl Drive {
@@ -116,6 +128,9 @@ impl Drive {
             bounds: embedder::ROOMY,
             probes: bodies,
             entry: None,
+            reads: false,
+            reopen_delivered: false,
+            cancel_at: None,
         }
     }
 }
@@ -141,6 +156,10 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         setup.start.target = crate::Target::Entry(lash_kernel_doc::Name::new(entry));
         setup.start.args = vec![int(arg)];
     }
+    if drive.reads {
+        setup.start.modes =
+            crate::EffectModes::reading([lash_kernel_doc::EffectName::new("echo").unwrap()]);
+    }
     let mut embedder = match Embedder::try_with(text, setup) {
         Ok(embedder) => embedder,
         Err(error) => {
@@ -149,6 +168,8 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
                 end: format!("start refused: {error:?}"),
                 printed: Vec::new(),
                 requests: Vec::new(),
+                performed: Vec::new(),
+                origins: Vec::new(),
                 charged: 0,
             };
             return (trace, Seen::default());
@@ -157,6 +178,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     let mut seen = Seen::default();
     let mut order = order.iter();
     let mut hops = 0;
+    let mut parks = 0;
     let mut checkpoints = Vec::new();
     let end = loop {
         let step = match embedder.machine.run(&mut embedder.world, drive.slice) {
@@ -194,6 +216,11 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             }
         }
         if matches!(step, Step::Parked(_)) {
+            parks += 1;
+            if drive.cancel_at == Some(parks) {
+                embedder.world.cancel = true;
+                continue;
+            }
             let next = match order.next() {
                 Some(name) => (*name).to_string(),
                 None => label(
@@ -204,6 +231,13 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
                 ),
             };
             embedder.deliver(&next);
+            if drive.reopens && drive.reopen_delivered {
+                hops += 1;
+                let (layout, native_twice) = hop(hops);
+                if let Err(error) = embedder.try_reopen(layout, native_twice) {
+                    break format!("reopen refused after delivery: {error}");
+                }
+            }
         }
     };
     let trace = Trace {
@@ -216,6 +250,21 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             .map(|datum| format!("{datum:?}"))
             .collect(),
         requests: embedder.requests.iter().map(|r| format!("{r:?}")).collect(),
+        performed: embedder
+            .world
+            .performed
+            .iter()
+            .map(|read| format!("{read:?}"))
+            .collect(),
+        origins: embedder
+            .requests
+            .iter()
+            .filter_map(|request| match request {
+                Request::Effect(effect) => Some(effect.origin.clone()),
+                Request::Sleep(_) => None,
+            })
+            .chain(embedder.world.performed.iter().map(|(_, _, at)| at.clone()))
+            .collect(),
         charged: embedder.machine.meters().charged.expect("exact charge"),
     };
     (trace, seen)
@@ -1205,6 +1254,7 @@ fn nested_join_resumes_exactly() {
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
 
+mod body_performs;
 mod protocol;
 
 /// FIG-6471 / CONT-EXACT: do discards only the final value; nested calls,

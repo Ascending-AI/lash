@@ -445,6 +445,11 @@ pub mod execution {
         pub passed: bool,
         pub occurrences: Tree<u64>,
         pub frames: Tree<FrameRecord>,
+        /// The authored statement a task spawned from library code, or
+        /// rooted in it, was spawned under: its spawner's origin at the
+        /// spawn, written once. The task's own frames hold no authored
+        /// statement to derive its origin from.
+        pub spawn_origin: Option<SiteRef>,
     }
     impl FrameRecord {
         pub fn fresh(statement: SiteRef) -> Self {
@@ -729,6 +734,11 @@ pub mod execution {
                 && self.frames.same_version(&other.frames)
                 && self.joiners.same_version(&other.joiners)
                 && self.occurrences.same_version(&other.occurrences)
+                && match (&self.spawn_origin, &other.spawn_origin) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_version(b),
+                    _ => false,
+                }
         }
         fn live_members(&self) -> u64 {
             u64::from(self.is_outstanding())
@@ -750,6 +760,9 @@ pub mod execution {
             self.joiners.children(out);
             self.occurrences.children(out);
             self.frames.children(out);
+            if let Some(origin) = &self.spawn_origin {
+                origin.children(out);
+            }
             if let Some(v) = self.held() {
                 value_children(v, out)
             }
@@ -759,6 +772,9 @@ pub mod execution {
             self.joiners.grants(children)?;
             self.occurrences.grants(children)?;
             self.frames.grants(children)?;
+            if let Some(origin) = &mut self.spawn_origin {
+                origin.grants(children)?;
+            }
             let held = match &mut self.state {
                 TaskStateRecord::Resuming {
                     incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
@@ -802,7 +818,7 @@ pub mod execution {
 
     impl TokenCodec for TaskRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(7);
+            out.seq(8);
             self.identity.encode(out);
             self.state.encode(out);
             self.joiners.encode(out);
@@ -810,9 +826,10 @@ pub mod execution {
             self.passed.encode(out);
             self.occurrences.encode(out);
             self.frames.encode(out);
+            self.spawn_origin.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(7)?;
+            input.expect_struct(8)?;
             Ok(Self {
                 identity: <TaskIdentityRef>::decode(input)?,
                 state: <TaskStateRecord>::decode(input)?,
@@ -821,6 +838,7 @@ pub mod execution {
                 passed: <bool>::decode(input)?,
                 occurrences: <Tree<u64>>::decode(input)?,
                 frames: <Tree<FrameRecord>>::decode(input)?,
+                spawn_origin: <Option<SiteRef>>::decode(input)?,
             })
         }
     }

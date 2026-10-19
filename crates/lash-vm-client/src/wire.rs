@@ -355,14 +355,15 @@ impl StartWire {
 }
 
 /// One read-bound `perform`, as the worker asks its parent to answer it
-/// (`K-EFF-012`): the effect, its arguments copied out of the run, and the
-/// site of the `perform`.
+/// (`K-EFF-012`): the effect, its arguments copied out of the run, the
+/// site of the `perform` and the authored statement it stands under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectRead {
     pub effect: EffectName,
     pub args: Vec<Datum>,
     pub site: lash_kernel_doc::PositionLabel,
+    pub origin: lash_kernel_doc::Site,
 }
 
 /// The parent's answer to an [`EffectRead`]: the effect's result, or the
@@ -402,6 +403,7 @@ pub enum RequestWire {
         effect: EffectName,
         args: Vec<Datum>,
         result: Type,
+        origin: lash_kernel_doc::Site,
     },
     Sleep {
         wait: WaitId,
@@ -435,6 +437,7 @@ impl From<Park> for ParkWire {
                         effect: request.effect,
                         args: request.args,
                         result: request.result,
+                        origin: request.origin,
                     },
                     Request::Sleep(sleep) => RequestWire::Sleep {
                         wait: sleep.wait,
@@ -466,12 +469,14 @@ impl TryFrom<ParkWire> for MachinePark {
                         effect,
                         args,
                         result,
+                        origin,
                     } => Ok(Request::Effect(EffectRequest {
                         wait,
                         identity,
                         effect,
                         args,
                         result,
+                        origin,
                     })),
                     RequestWire::Sleep {
                         wait,

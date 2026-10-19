@@ -140,15 +140,17 @@ pub trait RunHost: Send + Sync {
         request: &Datum,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
-    /// A `perform` the run binds as a read (`K-EFF-012`), at `site`: the
-    /// effect's result, or the error raised at the `perform`, which the
-    /// guest may catch. `Err` is the parent's own failure: the run stops
-    /// there, unanswered, and its last save stands.
+    /// A `perform` the run binds as a read (`K-EFF-012`), at `site` under
+    /// the authored statement `origin`: the effect's result, or the error
+    /// raised at the `perform`, which the guest may catch. `Err` is the
+    /// parent's own failure: the run stops there, unanswered, and its last
+    /// save stands.
     async fn perform(
         &self,
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -694,7 +696,9 @@ async fn answer(
             let read: EffectRead = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
             wire::encode_within(
                 PayloadKind::HostAnswer,
-                &host.perform(&read.effect, &read.args, &read.site).await?,
+                &host
+                    .perform(&read.effect, &read.args, &read.site, &read.origin)
+                    .await?,
                 bound,
             )
         }

@@ -956,14 +956,35 @@ impl KernelMachine {
         deep_size(&self.arena.borrow(), value).map_err(|error| fault(&error.to_string()))
     }
 
+    /// Charges `units` of a `perform`'s boundary work, whatever code the
+    /// `perform` stands in (`K-CHG-002`, `K-CHG-007`): its atoms, its
+    /// arguments' copy-out, the bytes of each function value crossing in
+    /// them, a read-bound result's decode and a delivered outcome's
+    /// consumption. Nothing else is charged through it: a library body's
+    /// own forms stay covered by its completion formula.
+    pub(super) fn charge_boundary(&mut self, units: u64) -> Result<(), Halt> {
+        if self.metered() {
+            self.charge(units)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Whether the run counts charge (`Charge::Exact`): what a boundary
+    /// charge is measured under.
+    fn metered(&self) -> bool {
+        self.bounds.charge == crate::Charge::Exact
+    }
+
     /// Copies an effect argument out of the run under the crossing
     /// policy: a function in it crosses as a function value
-    /// ([`crate::crossing`]). The traversal is charged as a copy-out is,
-    /// and each byte of a function value's canonical form besides.
+    /// ([`crate::crossing`]). The traversal is a boundary charge, as a
+    /// copy-out is, and so is each byte of a function value's canonical
+    /// form.
     pub(super) fn copy_out_tool_arg(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        if self.charging {
+        if self.metered() {
             let size = self.deep_size(value)?;
-            self.charge(size)?;
+            self.charge_boundary(size)?;
         }
         // Only a function crossing reads the session: the bindings the
         // cell wrote go to the heap first.
@@ -995,9 +1016,7 @@ impl KernelMachine {
             tag: None,
         };
         let datum = crate::crossing::copy_out_tool_arg(&mut heap, &mut run, value)?;
-        if self.charging {
-            self.charge(crossed_bytes(&datum))?;
-        }
+        self.charge_boundary(crossed_bytes(&datum))?;
         Ok(datum)
     }
 
@@ -1076,16 +1095,16 @@ impl KernelMachine {
                 self.heap.instantiate(&frozen).map_err(Interrupt::from)?,
                 true,
             ),
+            // Consuming the outcome is the `perform`'s boundary charge, in
+            // the code it stands in, sealed since delivery or not.
             CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
-                let charge = if self.charging {
+                let charge = if self.metered() {
                     self.heap.frozen_charge(&frozen)?
                 } else {
                     0
                 };
                 let value = self.heap.instantiate(&frozen).map_err(Interrupt::from)?;
-                if self.charging {
-                    self.charge(charge)?;
-                }
+                self.charge_boundary(charge)?;
                 (value, matches!(outcome, CommittedOutcomeRecord::Failed(_)))
             }
         };
@@ -1124,18 +1143,31 @@ impl KernelMachine {
     }
 
     /// Decodes an inbound datum by a type and builds it as a fresh graph,
-    /// charging its deep size (`K-EFF-003`, `K-EFF-007`, `K-CHG-002`).
+    /// charging its deep size in charged code (`K-EFF-003`, `K-EFF-007`,
+    /// `K-CHG-002`).
     pub(super) fn decode(
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
         ty: &lash_kernel_doc::Type,
     ) -> Eval<Value> {
-        self.decode_as(exe, datum, ty, "the result")
+        self.decode_as(exe, datum, ty, "the result", self.charging)
     }
 
-    /// [`Self::decode`] of the result `effect` answered a `perform` with:
-    /// a raise that it does not fit names the effect.
+    /// [`Self::decode`] of the error a read-bound `perform` was answered
+    /// with: a boundary charge, in whatever code the `perform` stands.
+    pub(super) fn decode_answer(
+        &mut self,
+        exe: &Executable,
+        datum: &lash_kernel_doc::Datum,
+        ty: &lash_kernel_doc::Type,
+    ) -> Eval<Value> {
+        let metered = self.metered();
+        self.decode_as(exe, datum, ty, "the result", metered)
+    }
+
+    /// [`Self::decode_answer`] of the result `effect` answered a read-bound
+    /// `perform` with: a raise that it does not fit names the effect.
     pub(super) fn decode_result(
         &mut self,
         exe: &Executable,
@@ -1143,15 +1175,24 @@ impl KernelMachine {
         ty: &lash_kernel_doc::Type,
         effect: &lash_kernel_doc::EffectName,
     ) -> Eval<Value> {
-        self.decode_as(exe, datum, ty, &format!("the result of `{effect}`"))
+        let metered = self.metered();
+        self.decode_as(
+            exe,
+            datum,
+            ty,
+            &format!("the result of `{effect}`"),
+            metered,
+        )
     }
 
+    /// Decodes and builds `datum`, charging its deep size when `charged`.
     fn decode_as(
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
         ty: &lash_kernel_doc::Type,
         what: &str,
+        charged: bool,
     ) -> Eval<Value> {
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),
@@ -1168,14 +1209,14 @@ impl KernelMachine {
             }
         };
         let frozen = self.heap.freeze_datum(&decoded).map_err(Interrupt::from)?;
-        let charge = if self.charging {
+        let charge = if charged {
             self.heap.frozen_charge(&frozen)?
         } else {
             0
         };
         let value = self.heap.instantiate(&frozen).map_err(Interrupt::from)?;
         let value = self.admit_page(&value)?;
-        if self.charging {
+        if charged {
             self.charge(charge)?;
         }
         Ok(value)

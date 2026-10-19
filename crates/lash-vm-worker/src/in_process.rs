@@ -136,8 +136,9 @@ impl<H: Host> Host for Cancelling<'_, H> {
         effect: &lash_kernel_doc::EffectName,
         args: &[lash_kernel_doc::Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<lash_kernel_doc::Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
-        self.host.perform(effect, args, site)
+        self.host.perform(effect, args, site, origin)
     }
     fn print(&mut self, value: &lash_kernel_doc::Datum) {
         self.host.print(value);

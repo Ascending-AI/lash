@@ -254,3 +254,43 @@ pub fn paths(dialect: Dialect) -> (&'static str, &'static str) {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use lash_kernel_doc::{FunctionRegistry, parse_definition};
+
+    use super::generate_library;
+    use crate::library::{Dialect, Library};
+
+    /// A body that performs is not planned, whether it otherwise reaches
+    /// only the host or applies guest code too: a plan yields at no
+    /// `perform`, so the body runs in its frame (FIG-6914 case (a)).
+    #[test]
+    fn a_performing_body_is_not_planned() {
+        let mut registry = FunctionRegistry::new();
+        let mut helpers = Vec::new();
+        for definition in [
+            "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any\n\
+             body { let v = perform echo(x) as Any return v }\n",
+            "function pkg.visit(f: Fn(x: Any) -> Any, x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any\n\
+             body { let y = apply f(x) let v = perform echo(y) as Any return v }\n",
+        ] {
+            let definition = parse_definition(definition).unwrap();
+            helpers.push(registry.register(definition, None).unwrap());
+        }
+        let generated = generate_library(&Library { registry, helpers }, Dialect::Python).unwrap();
+        assert_eq!(generated.planned, 0, "{}", generated.manifest);
+        let outcomes: Vec<&str> = generated
+            .manifest
+            .lines()
+            .skip(2)
+            .map(|line| line.rsplit('\t').next().unwrap())
+            .collect();
+        assert_eq!(
+            outcomes,
+            ["reaches task", "acts other than by a library call"],
+            "{}",
+            generated.manifest
+        );
+    }
+}

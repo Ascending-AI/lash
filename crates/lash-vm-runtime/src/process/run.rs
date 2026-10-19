@@ -208,6 +208,7 @@ impl RunHost for StepHost {
         effect: &lash_kernel_doc::EffectName,
         _args: &[Datum],
         _site: &lash_kernel_doc::PositionLabel,
+        _origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         Err(ParentFault(format!(
             "a kernel process binds no read, and its run performed `{effect}` as one"

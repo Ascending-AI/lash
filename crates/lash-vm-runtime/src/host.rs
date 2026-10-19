@@ -12,14 +12,15 @@ use crate::ProjectionCatalog;
 /// planned reads, through the providers its plan retained.
 #[async_trait::async_trait]
 pub trait EffectReads: Send + Sync {
-    /// One read of `effect` with `args`, performed at `site`: its result,
-    /// or the error raised at the `perform`. `Err` is the parent's own
-    /// failure, and stops the run.
+    /// One read of `effect` with `args`, performed at `site` under the
+    /// authored statement `origin`: its result, or the error raised at the
+    /// `perform`. `Err` is the parent's own failure, and stops the run.
     async fn perform(
         &self,
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 }
 
@@ -79,8 +80,9 @@ impl RunHost for ParentHost {
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        self.reads.perform(effect, args, site).await
+        self.reads.perform(effect, args, site, origin).await
     }
 
     fn print(&self, value: Datum) -> Result<(), ParentFault> {

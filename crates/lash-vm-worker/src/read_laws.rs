@@ -53,6 +53,7 @@ impl Host for Answering {
         _effect: &EffectName,
         _args: &[Datum],
         _site: &lash_kernel_doc::PositionLabel,
+        _origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         Ok(self.answer.take().expect("the cell reads once"))
     }

@@ -127,6 +127,7 @@ pub(crate) fn start(
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,
+        None,
         access,
         arena,
         Arc::clone(&exe),

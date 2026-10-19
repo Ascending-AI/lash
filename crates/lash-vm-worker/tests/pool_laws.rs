@@ -1806,6 +1806,7 @@ impl RunHost for Stalled {
         _: &lash_kernel_doc::EffectName,
         _: &[Datum],
         _: &lash_kernel_doc::PositionLabel,
+        _: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
         panic!("the run binds no read")
     }

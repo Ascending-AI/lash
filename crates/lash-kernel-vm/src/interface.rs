@@ -292,18 +292,20 @@ pub trait Host {
     /// error is raised in the guest at the read.
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum>;
     /// Performs `effect`, which the run binds as a read, with `args` copied
-    /// out of the run, for the `perform` at `site` (`K-EFF-012`). The
-    /// answer is the effect's result, decoded by the `perform`'s type, or
-    /// the error raised at the `perform`, which the guest may catch.
-    /// `Err` is the host's own fault: the run stops and nothing is raised.
-    /// A host that binds no read is never asked.
+    /// out of the run, for the `perform` at `site` under the authored
+    /// statement `origin` (`K-EFF-012`, ORIGIN). The answer is the
+    /// effect's result, decoded by the `perform`'s type, or the error
+    /// raised at the `perform`, which the guest may catch. `Err` is the
+    /// host's own fault: the run stops and nothing is raised. A host that
+    /// binds no read is never asked.
     fn perform(
         &mut self,
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
-        let _ = (args, site);
+        let _ = (args, site, origin);
         Err(HostFault::new(format!(
             "this host performs no read, and the run binds `{effect}` as one"
         )))
@@ -346,6 +348,11 @@ pub struct EffectRequest {
     pub args: Vec<Datum>,
     /// The type the `perform` decodes its result by.
     pub result: Type,
+    /// The nearest authored statement the `perform` stands under
+    /// (ORIGIN): its own statement in document code, the document
+    /// statement that entered a library body. Derived when the request is
+    /// reported, and no part of its identity.
+    pub origin: lash_kernel_doc::Site,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -640,40 +640,46 @@ impl Frame {
         exe: &Executable,
         access: &Access<'_>,
     ) -> Result<bool, HeapFault> {
-        let block = match self.control.as_slice() {
-            [.., Control::Block { block, next }] => Some((*block, *next)),
-            [
-                ..,
-                Control::Block { block, next },
-                Control::While { .. } | Control::For { .. },
-            ] if self.awaiting.is_some() => Some((*block, *next)),
-            [] => None,
-            // Between a loop test or a departure and its block, the frame
-            // stands where it was last projected.
-            _ if self.owned => return Ok(false),
-            _ => None,
-        };
-        let statement = match block {
-            Some((block, next)) => {
-                let index = if self.awaiting.is_some() {
-                    next.checked_sub(1)
-                        .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
-                } else {
-                    next
-                };
-                let index =
-                    u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?;
-                let statement = exe.block(block).site.child(index);
+        let statement = match self.block_statement(exe, self.awaiting.is_some())? {
+            Some(statement) => {
                 if stored.statement.matches(&statement, access)? {
                     return Ok(false);
                 }
                 SiteRef::new(&statement, access)?
             }
+            // Between a loop test or a departure and its block, the frame
+            // stands where it was last projected.
+            None if self.owned && !self.control.is_empty() => return Ok(false),
             None if stored.statement.same_version(&self.statement) => return Ok(false),
             None => self.statement.clone(),
         };
         stored.statement = statement;
         Ok(true)
+    }
+
+    /// The statement the frame's innermost block stands at: the one it
+    /// is `within`, waiting in it or running it (a `while` stands in its
+    /// condition above its loop, a `for` in a protocol hook of its
+    /// header), else the block's next. None when no block says where the
+    /// frame stands.
+    fn block_statement(&self, exe: &Executable, within: bool) -> Result<Option<Site>, HeapFault> {
+        let (block, next) = match self.control.as_slice() {
+            [.., Control::Block { block, next }] => (*block, *next),
+            [
+                ..,
+                Control::Block { block, next },
+                Control::While { .. } | Control::For { .. },
+            ] if within => (*block, *next),
+            _ => return Ok(None),
+        };
+        let index = if within {
+            next.checked_sub(1)
+                .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
+        } else {
+            next
+        };
+        let index = u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?;
+        Ok(Some(exe.block(block).site.child(index)))
     }
 }
 
@@ -906,6 +912,56 @@ impl Frames {
         }
         Ok(())
     }
+    /// The nearest authored statement the task stands in (ORIGIN): the
+    /// statement of its topmost frame whose code is document code, through
+    /// the library bodies above it. None when every frame runs library
+    /// code. Asked from inside a statement, where each frame stands within
+    /// one: below the top it waits in its call, and the top runs or waits
+    /// in its own. Derived from where the frames stand, and never saved.
+    pub(super) fn authored(&self) -> Result<Option<Site>, HeapFault> {
+        for index in (0..self.len).rev() {
+            let statement = match self.cache.iter().find(|(at, _)| *at == index) {
+                Some((_, frame)) => {
+                    if matches!(self.exe.code(frame.code).site.unit, Unit::Library(_)) {
+                        continue;
+                    }
+                    match frame.block_statement(&self.exe, true)? {
+                        Some(statement) => statement,
+                        None if frame.owned && !frame.control.is_empty() => {
+                            let row = row(&self.rows, index, &self.access)?;
+                            row.statement.resolve(&self.access)?.as_ref().clone()
+                        }
+                        None => frame.statement.resolve(&self.access)?.as_ref().clone(),
+                    }
+                }
+                None => row(&self.rows, index, &self.access)?
+                    .statement
+                    .resolve(&self.access)?
+                    .as_ref()
+                    .clone(),
+            };
+            if !matches!(statement.unit, Unit::Library(_)) {
+                return Ok(Some(statement));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Where the task's root frame stands: its entry, when no frame of
+    /// it is document code and it was not spawned from a library.
+    pub(super) fn root_statement(&self) -> Result<Option<Site>, HeapFault> {
+        if self.len == 0 {
+            return Ok(None);
+        }
+        let statement = match self.cache.iter().find(|(at, _)| *at == 0) {
+            Some((_, frame)) => frame.statement.resolve(&self.access)?,
+            None => row(&self.rows, 0, &self.access)?
+                .statement
+                .resolve(&self.access)?,
+        };
+        Ok(Some(statement.as_ref().clone()))
+    }
+
     /// The operation the guest called, where the top of the stack runs
     /// its body: the outermost of the uncharged library bodies above the
     /// topmost charged frame. A bound passed there is the operation's, as

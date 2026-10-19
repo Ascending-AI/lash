@@ -203,6 +203,7 @@ impl RunHost for ReplayHost {
         effect: &lash_kernel_doc::EffectName,
         _args: &[Datum],
         _site: &lash_kernel_doc::PositionLabel,
+        _origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         Err(self.diverge(&format!(
             "a kernel process binds no read, and the segment performed `{effect}` as one"

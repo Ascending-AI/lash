@@ -101,6 +101,7 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
                     passed: false,
                     occurrences: Tree::new(false),
                     frames: Tree::new(true),
+                    spawn_origin: None,
                 },
                 &heap.access,
             )

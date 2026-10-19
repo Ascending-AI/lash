@@ -359,6 +359,7 @@ impl lash_kernel_vm::Host for WireHost {
         effect: &EffectName,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let answer: EffectAnswer = self.exchange(
             HostReadKind::Effect,
@@ -366,6 +367,7 @@ impl lash_kernel_vm::Host for WireHost {
                 effect: effect.clone(),
                 args: args.to_vec(),
                 site: site.clone(),
+                origin: origin.clone(),
             },
         );
         Ok(answer)
