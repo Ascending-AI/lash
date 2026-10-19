@@ -13,6 +13,7 @@ use crate::function::{Formula, FunctionDefinition, Operand};
 use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
 use crate::name::{FunctionId, FunctionName, Name, is_identifier};
 use crate::number::NumberPolicy;
+use crate::requirement::OperationRequirement;
 use crate::types::{Signature, Type};
 
 /// Writes a document as kernel text. [`super::parse_document`] reads the
@@ -33,11 +34,7 @@ pub fn print_document_with_ranges(
         NumberPolicy::Float => "numbers float\n",
         NumberPolicy::BySpelling => "numbers by_spelling\n",
     });
-    for (name, signature) in &document.manifest.effects {
-        printer.out.push_str(&format!("effect {name}"));
-        printer.signature(signature);
-        printer.out.push('\n');
-    }
+    printer.effects(&document.manifest.effects);
     printer.uses(&document.manifest.functions);
     for (name, entry) in &document.entries {
         printer.out.push_str("entry ");
@@ -78,6 +75,15 @@ pub fn print_document_with_ranges(
         })
         .collect();
     (printer.out, ranges)
+}
+
+/// A requirement as an `effect` line writes it after the effect's name:
+/// its signature, then its contract.
+pub(crate) fn requirement_text(requirement: &OperationRequirement) -> String {
+    let no_functions = BTreeMap::new();
+    let mut printer = Printer::new(&no_functions);
+    printer.requirement(requirement);
+    printer.out
 }
 
 /// Writes a library-function definition as kernel text.
@@ -125,6 +131,7 @@ pub fn print_definition(definition: &FunctionDefinition) -> String {
         printer.out.push('\n');
     }
     if let Some(body) = definition.body() {
+        printer.effects(&body.effects);
         printer.uses(&body.functions);
         printer.out.push_str("body ");
         printer.block(&body.block);
@@ -719,6 +726,25 @@ impl<'a> Printer<'a> {
                 self.function(cleanup);
                 self.out.push_str(") ");
             }
+        }
+    }
+
+    /// One `effect` line for each operation the code requires.
+    fn effects(&mut self, effects: &BTreeMap<crate::EffectName, OperationRequirement>) {
+        for (name, requirement) in effects {
+            self.out.push_str(&format!("effect {name}"));
+            self.requirement(requirement);
+            self.out.push('\n');
+        }
+    }
+
+    /// A requirement's signature, and its contract unless that is the
+    /// signature's own ([`crate::ContractId::of_signature`]).
+    fn requirement(&mut self, requirement: &OperationRequirement) {
+        self.signature(&requirement.signature);
+        if requirement.contract != crate::ContractId::of_signature(&requirement.signature) {
+            self.out.push_str(" contract ");
+            write_quoted(requirement.contract.as_str(), '"', &mut self.out);
         }
     }
 

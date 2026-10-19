@@ -150,7 +150,7 @@ fn main() -> Result<()> {
         &unregistered
     };
     let environment = lash_kernel_check::Environment {
-        effects: document.manifest.effects.clone(),
+        effects: document.manifest.signatures(),
         functions: catalog,
         bindings: BTreeSet::new(),
     };

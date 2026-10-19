@@ -88,10 +88,10 @@ fn independent_source_reads_its_environment_from_the_base_document() {
     let mut changed = expected.clone();
     changed.manifest.effects.insert(
         k::EffectName::new("unused.effect").unwrap(),
-        k::Signature {
+        k::OperationRequirement::of_signature(k::Signature {
             params: vec![],
             result: k::Type::Any,
-        },
+        }),
     );
     controls.push(changed);
     let mut changed = expected.clone();
@@ -894,10 +894,10 @@ fn inventory_document() -> k::Document {
     );
     document.manifest.effects.insert(
         k::EffectName::new("echo").unwrap(),
-        k::Signature {
+        k::OperationRequirement::of_signature(k::Signature {
             params: vec![],
             result: inventory_types(),
-        },
+        }),
     );
     document
 }
@@ -1327,6 +1327,7 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
     let mut types = BTreeSet::new();
     for signature in effects
         .values()
+        .map(|requirement| &requirement.signature)
         .chain(entries.values().map(|entry| &entry.signature))
     {
         inventory_signature(signature, &mut types);
@@ -1601,14 +1602,14 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
     let effect = k::EffectName::new("tools.inspect").unwrap();
     document.manifest.effects.insert(
         effect.clone(),
-        k::Signature {
+        k::OperationRequirement::of_signature(k::Signature {
             params: vec![k::Param {
                 name: "input".into(),
                 ty: ty.clone(),
                 optional: true,
             }],
             result: k::Type::Any,
-        },
+        }),
     );
     document.main.push(k::Stmt::Do {
         value: (k::Action::Perform {

@@ -14,8 +14,9 @@ use crate::ast::{
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
 use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
-use crate::name::{FunctionId, FunctionName, Name, QualifiedName};
+use crate::name::{EffectName, FunctionId, FunctionName, Name, QualifiedName};
 use crate::number::{Float, NumberPolicy};
+use crate::requirement::{ContractId, OperationRequirement};
 use crate::types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 use crate::validate::StatementForm;
 use crate::value::Bytes;
@@ -67,14 +68,7 @@ pub fn parse_document_with_limits(
                 };
                 parser.once(numbers.replace(policy), "`numbers`")?;
             }
-            "effect" => {
-                let name = parser.qualified_name()?;
-                let signature = parser.signature()?;
-                parser.once(
-                    effects.insert(name.clone(), signature),
-                    &format!("effect `{name}`"),
-                )?;
-            }
+            "effect" => parser.effect_line(&mut effects)?,
             "use" => parser.use_line()?,
             "entry" => {
                 let name = parser.name()?;
@@ -173,6 +167,7 @@ pub fn parse_definition_with_limits(
     let mut guard = None;
     let mut native = false;
     let mut native_version = None;
+    let mut effects = BTreeMap::new();
     let mut body_start = None;
     while parser.peek() != &Token::End {
         let word = parser.keyword("a definition item")?;
@@ -203,6 +198,7 @@ pub fn parse_definition_with_limits(
                     parser.once(native_version.replace(version), "the native version")?;
                 }
             }
+            "effect" => parser.effect_line(&mut effects)?,
             "use" => parser.use_line()?,
             "body" => {
                 parser.once(body_start.replace(parser.position), "`body`")?;
@@ -217,8 +213,13 @@ pub fn parse_definition_with_limits(
             let block = parser.block()?;
             Some(FunctionBody {
                 functions: std::mem::take(&mut parser.uses),
+                effects,
                 block,
             })
+        }
+        // Only a body performs: an `effect` line needs one.
+        None if !effects.is_empty() => {
+            return Err(parser.missing("the `body` its `effect` lines are performed by"));
         }
         None => None,
     };
@@ -447,6 +448,33 @@ impl Parser {
                 .ok_or_else(|| self.unexpected_previous("a kernel version")),
             _ => Err(self.unexpected_previous("a kernel version")),
         }
+    }
+
+    /// An `effect` line after its keyword: the operation's name, the
+    /// signature it is required under and its contract. A line that states
+    /// no contract requires the signature's own
+    /// ([`ContractId::of_signature`]).
+    fn effect_line(
+        &mut self,
+        effects: &mut BTreeMap<EffectName, OperationRequirement>,
+    ) -> Parsed<()> {
+        let name = self.qualified_name()?;
+        let signature = self.signature()?;
+        let contract = if self.eat_word("contract") {
+            ContractId::new(self.text()?)
+        } else {
+            ContractId::of_signature(&signature)
+        };
+        self.once(
+            effects.insert(
+                name.clone(),
+                OperationRequirement {
+                    signature,
+                    contract,
+                },
+            ),
+            &format!("effect `{name}`"),
+        )
     }
 
     fn use_line(&mut self) -> Parsed<()> {

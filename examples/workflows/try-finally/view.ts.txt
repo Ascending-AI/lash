@@ -4,7 +4,7 @@ statement fn demo/1 ordinal=4 depth=0 block=fn demo Try(TryStmt { body: [Assign 
 statement fn demo/1/0/0 ordinal=6 depth=1 block=fn demo/1/0 Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }), order: ValueFirst }
 statement fn demo/1/1/0 ordinal=8 depth=1 block=fn demo/1/1 Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))), order: ValueFirst }
 statement fn demo/1/2/0 ordinal=10 depth=1 block=fn demo/1/2 Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }
-statement fn demo/2 ordinal=11 depth=0 block=fn demo ReturnVia { value: Variable(Name("result")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/2 ordinal=11 depth=0 block=fn demo ReturnVia { value: Variable(Name("result")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/1/0 ordinal=5 depth=1 Try
 scope fn demo/1/1 ordinal=7 depth=1 Catch

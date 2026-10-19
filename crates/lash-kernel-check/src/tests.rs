@@ -699,10 +699,10 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     let mut document = document(
         "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
     );
-    document
-        .manifest
-        .effects
-        .insert(effect("chat.message_to_self"), expected);
+    document.manifest.effects.insert(
+        effect("chat.message_to_self"),
+        lash_kernel_doc::OperationRequirement::of_signature(expected),
+    );
     let catalog = BTreeMap::new();
     let mut environment = Environment::new(&catalog);
     environment
@@ -1071,8 +1071,12 @@ fn an_optional_result_field_does_not_serve_a_required_one() {
     let offered = "kernel 1\nnumbers float\neffect get() -> Record{x?: Int}\nmain { let r = perform get() as Record{x?: Int} }\n";
     // The empty record is allowed by the provided result, but cannot
     // satisfy the required x in the expected result.
-    let provided = document(offered).manifest.effects[&effect("get")].clone();
-    let expected = document(wanted).manifest.effects[&effect("get")].clone();
+    let provided = document(offered).manifest.effects[&effect("get")]
+        .signature
+        .clone();
+    let expected = document(wanted).manifest.effects[&effect("get")]
+        .signature
+        .clone();
     environment.effects.insert(effect("get"), provided.clone());
     assert_eq!(
         refusals(wanted, &environment),
@@ -1105,7 +1109,7 @@ fn records_that_differ_only_in_optional_fields_share_a_value() {
     let doc = document(text);
     environment.effects.insert(
         effect("count"),
-        doc.manifest.effects[&effect("count")].clone(),
+        doc.manifest.effects[&effect("count")].signature.clone(),
     );
     admit(&doc, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
@@ -1235,8 +1239,8 @@ fn cached_library_refusals_keep_the_uncached_errors_and_view() {
 /// harmless name and type differences, and escapes field names as pointers.
 #[test]
 fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
-    let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int\nmain { finish null }\n").manifest.effects[&effect("check")].clone();
-    let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text\nmain { finish null }\n").manifest.effects[&effect("check")].clone();
+    let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
+    let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
     let mismatch = crate::signature_mismatch(&provided, &expected).expect("input mismatch first");
     assert_eq!(
         mismatch,
@@ -1283,4 +1287,115 @@ fn conditional_facets_join_and_expression_let_scopes_do_not_escape() {
         &environment(&library),
     );
     assert!(refused.iter().any(|error| matches!(&error.reason, RefusalReason::UnboundVariable { name } if name.as_str() == "x")));
+}
+
+/// What reaches `web.fetch` through two bodies: `probe.fetch` performs it
+/// under contract "3", and `probe.outer` calls `probe.fetch`. Answers the
+/// catalog, both identities and the requirement the inner body lists.
+fn reached_perform() -> (
+    BTreeMap<FunctionId, FunctionDefinition>,
+    FunctionId,
+    FunctionId,
+    lash_kernel_doc::OperationRequirement,
+) {
+    let mut catalog = BTreeMap::new();
+    let fetch = register(
+        &mut catalog,
+        "function probe.fetch(x: Any) -> Any\nkernel 1\ncharge 1\n\
+         effect web.fetch(value?: Any) -> Any contract \"3\"\n\
+         body { let y = perform web.fetch(x) as Any return y }\n",
+    );
+    let outer = register(
+        &mut catalog,
+        &format!(
+            "function probe.outer(x: Any) -> Any\nkernel 1\ncharge 1\n\
+             use probe.fetch = @{fetch}\nbody {{ let y = invoke probe.fetch(x) return y }}\n"
+        ),
+    );
+    let requirement = catalog[&fetch].body().unwrap().effects[&effect("web.fetch")].clone();
+    (catalog, fetch, outer, requirement)
+}
+
+/// `K-DOC-002`: the manifest lists every requirement reached through
+/// bodies, and a document that lists it is admitted.
+#[test]
+fn the_manifest_lists_every_requirement_reached_through_bodies() {
+    let (catalog, fetch, outer, requirement) = reached_perform();
+    let text = format!(
+        "kernel 1\nnumbers float\neffect web.fetch(value?: Any) -> Any contract \"3\"\n\
+         use probe.outer = @{outer}\nuse probe.fetch = @{fetch}\n\
+         main {{ let x = invoke probe.outer(1) finish x }}\n"
+    );
+    let derived = requirements(&document(&text), &catalog);
+    assert!(derived.effects.is_empty());
+    assert_eq!(
+        derived.performs,
+        BTreeMap::from([(
+            effect("web.fetch"),
+            BTreeMap::from([(fetch, requirement.clone())])
+        )])
+    );
+    let mut environment = Environment::new(&catalog);
+    environment
+        .effects
+        .insert(effect("web.fetch"), requirement.signature);
+    admit(&document(&text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
+}
+
+/// `K-ADM-007`: a manifest omitting a requirement a reached body lists is
+/// refused, naming the body.
+#[test]
+fn a_manifest_omitting_a_reached_requirement_is_refused() {
+    let (catalog, fetch, outer, requirement) = reached_perform();
+    let text = format!(
+        "kernel 1\nnumbers float\nuse probe.outer = @{outer}\nuse probe.fetch = @{fetch}\n\
+         main {{ let x = invoke probe.outer(1) finish x }}\n"
+    );
+    assert_eq!(
+        refusals(&text, &Environment::new(&catalog)),
+        [Refused {
+            site: None,
+            reason: RefusalReason::RequirementNotListed {
+                effect: effect("web.fetch"),
+                through: fetch,
+                requirement,
+            },
+        }]
+    );
+}
+
+/// `ADM-REQUIREMENT`: a document whose code and reached bodies require one
+/// effect name under two requirements is refused, naming both.
+#[test]
+fn one_effect_under_two_requirements_is_refused_naming_both() {
+    let (catalog, fetch, outer, requirement) = reached_perform();
+    // The document's own perform requires the signature's interim contract.
+    let text = format!(
+        "kernel 1\nnumbers float\neffect web.fetch(value?: Any) -> Any\n\
+         use probe.outer = @{outer}\nuse probe.fetch = @{fetch}\n\
+         main {{ let own = perform web.fetch(1) as Any let x = invoke probe.outer(own) finish x }}\n"
+    );
+    let own = document(&text).manifest.effects[&effect("web.fetch")].clone();
+    assert_ne!(own, requirement);
+    let mut environment = Environment::new(&catalog);
+    environment
+        .effects
+        .insert(effect("web.fetch"), requirement.signature.clone());
+    assert_eq!(
+        refusals(&text, &environment),
+        [Refused {
+            site: None,
+            reason: RefusalReason::RequirementConflict {
+                effect: effect("web.fetch"),
+                first: Box::new(crate::RequiredBy {
+                    through: None,
+                    requirement: own,
+                }),
+                second: Box::new(crate::RequiredBy {
+                    through: Some(fetch),
+                    requirement,
+                }),
+            },
+        }]
+    );
 }

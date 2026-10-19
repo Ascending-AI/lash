@@ -212,7 +212,10 @@ fn tool_keywords_name_the_declared_input_fields() {
         let source = format!("async def demo():\n    return await {call}\n");
         let lowered = crate::lower(&source, &environment, Mode::Module)
             .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"));
-        assert_eq!(lowered.document.manifest.effects[&show], signature);
+        assert_eq!(
+            lowered.document.manifest.effects[&show].signature,
+            signature
+        );
         let mut admission = lash_kernel_check::Environment::new(machine::library());
         admission.effects = effects.clone();
         lash_kernel_check::admit(&lowered.document, &admission).expect("valid tool input");

@@ -60,7 +60,7 @@ fn program(case: &Case, registry: Arc<FunctionRegistry>) -> Program {
 
 fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) -> KernelMachine {
     let mut admission = lash_kernel_check::Environment::new(program.library.registry().as_ref());
-    admission.effects = program.document.manifest.effects.clone();
+    admission.effects = program.document.manifest.signatures();
     admission.bindings = session.names();
     lash_kernel_check::admit(&program.document, &admission).expect("admit protocol document");
     KernelMachine::start(

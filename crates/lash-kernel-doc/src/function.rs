@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::ast::Block;
 use crate::document::{DecodeError, EncodeError, from_versioned_json_with_limits, to_json};
 use crate::graph_tokens::{encode_body, logical_digest};
-use crate::name::{FunctionId, FunctionName, Name};
+use crate::name::{EffectName, FunctionId, FunctionName, Name};
+use crate::requirement::OperationRequirement;
 use crate::types::Signature;
 
 /// A library's declarations by content identity, without native implementations.
@@ -88,6 +89,11 @@ pub struct FunctionBody {
     /// its definition carries.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub functions: BTreeMap<FunctionId, FunctionName>,
+    /// Every operation the body performs itself, with what it requires of
+    /// it (`K-LIB-004`). A body beside a native implementation performs
+    /// nothing. What the functions it calls perform is theirs to list.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub effects: BTreeMap<EffectName, OperationRequirement>,
     pub block: Block,
 }
 

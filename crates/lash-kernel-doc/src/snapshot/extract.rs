@@ -294,6 +294,18 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
         }
     }
     value.manifest.functions = library_closure(document, crossing.catalog, library)?;
+    // What the bodies it reaches perform, it requires through them
+    // (`K-DOC-002`).
+    let through = crate::performed_by(crossing.catalog, value.manifest.functions.keys().copied());
+    for (effect, bodies) in through {
+        if let Some(requirement) = bodies.into_values().next() {
+            value
+                .manifest
+                .effects
+                .entry(effect)
+                .or_insert_with(|| requirement.clone());
+        }
+    }
     value.functions = units;
     let public = Name::new(crate::FUNCTION_VALUE_ENTRY);
     let names = super::canon::canonical(&mut value, &entry, &public);

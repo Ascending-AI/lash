@@ -915,7 +915,7 @@ impl<'a> Walk<'a> {
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
             (None, Some(effect)) => (
                 Some(CalleeView::Effect(effect.clone())),
-                signature.map_or_else(Vec::new, |signature| signature.params.clone()),
+                signature.map_or_else(Vec::new, |required| required.signature.params.clone()),
             ),
             (None, None) => (None, Vec::new()),
         };
@@ -1025,7 +1025,7 @@ impl<'a> Walk<'a> {
                     result: Type::Any, ..
                 },
                 _,
-            ) => signature.map_or(Type::Any, |signature| signature.result.clone()),
+            ) => signature.map_or(Type::Any, |required| required.signature.result.clone()),
             _ => node.facet.clone().unwrap_or(Type::Any),
         };
         let role = match (kind, &callee) {

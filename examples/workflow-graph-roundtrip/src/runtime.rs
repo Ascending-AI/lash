@@ -5,7 +5,7 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::workflow::document::{Document, EffectId, Name, Site, TaskLabel};
+use lash::workflow::document::{Document, EffectId, Name, OperationRequirement, Site, TaskLabel};
 use lash::workflow::edit::Draft;
 use lash::workflow::view::{ActionObservation, ActionState, WorkflowCoverage, WorkflowView};
 use lash::workflow::{
@@ -107,12 +107,14 @@ pub(crate) fn complete(
     mut document: Document,
     environment: &WorkflowEnvironment,
 ) -> Result<Document, RunError> {
-    for (effect, signature) in &mut document.manifest.effects {
-        *signature = environment
-            .effects()
-            .get(effect)
-            .ok_or_else(|| RunError::Invalid(format!("this host offers no effect `{effect}`")))?
-            .clone();
+    for (effect, requirement) in &mut document.manifest.effects {
+        *requirement = OperationRequirement::of_signature(
+            environment
+                .effects()
+                .get(effect)
+                .ok_or_else(|| RunError::Invalid(format!("this host offers no effect `{effect}`")))?
+                .clone(),
+        );
     }
     document.manifest.functions =
         lash::workflow::graph::requirements(&document, environment.functions()).functions;

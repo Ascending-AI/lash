@@ -918,9 +918,11 @@ mod tests {
             );
         }
         let mut document = parse_document(&text).expect("the fixture parses");
-        for (effect, signature) in &mut document.manifest.effects {
-            *signature = serde_json::from_value(environment["effects"][effect.to_string()].clone())
-                .unwrap_or_else(|error| panic!("the host offers `{effect}`: {error}"));
+        for (effect, requirement) in &mut document.manifest.effects {
+            *requirement = lash::workflow::document::OperationRequirement::of_signature(
+                serde_json::from_value(environment["effects"][effect.to_string()].clone())
+                    .unwrap_or_else(|error| panic!("the host offers `{effect}`: {error}")),
+            );
         }
         let required = answered(
             read_requirements(State(host.clone()), Json(Box::new(document.clone()))).await,

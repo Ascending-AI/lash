@@ -157,6 +157,7 @@ impl lash_kernel_vm::CellSave for Saving {
                 written: &self.written,
                 values: &crate::function_values(),
                 release: cell.release,
+                catalog: cell.catalog,
             },
             cell.held,
         )?;
@@ -181,10 +182,10 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
     let written = lowered.written;
     let mut document = lowered.document.into_document();
     let echo = lash_kernel_doc::EffectName::new("echo").unwrap();
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), machine::effects()[&echo].clone());
+    document.manifest.effects.insert(
+        echo.clone(),
+        lash_kernel_doc::OperationRequirement::of_signature(machine::effects()[&echo].clone()),
+    );
     let mut bodies = 0;
     for stmt in &mut document.main {
         if let Stmt::Assign {

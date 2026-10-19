@@ -1,6 +1,6 @@
 unit Function(Name("demo"))
 statement fn demo/0 ordinal=3 depth=0 block=fn demo Do { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Sleep { then_yield: true }, args: [Literal(Float(Float(5.0)))] }), body: Literal(Absent) } }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Literal(Text("awake")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Literal(Text("awake")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0/0 None
 caption callable 0 block=fn demo "Wait a moment, then report"

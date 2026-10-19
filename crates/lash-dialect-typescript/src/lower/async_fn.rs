@@ -296,7 +296,10 @@ impl Lowerer<'_> {
                 // it gives is known to be that type.
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
-                self.performed.insert(effect.clone(), signature);
+                self.performed.insert(
+                    effect.clone(),
+                    lash_kernel_doc::OperationRequirement::of_signature(signature),
+                );
                 let mut copied = Vec::with_capacity(args.len());
                 for expr in args {
                     // The boundary gives a literal back as it is: it holds

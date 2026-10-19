@@ -19,8 +19,9 @@ pub struct Extraction {
     /// Omitted on the wire; a decoded result carries only the document and effects.
     #[serde(skip)]
     pub applied: Option<Applied>,
-    /// Exactly the effects performed by the entry and its reachable declared
-    /// functions and closures. Unrelated entries and `main` contribute none.
+    /// Exactly the effects performed by the entry, its reachable declared
+    /// functions and closures, and the library bodies they reach. Unrelated
+    /// entries and `main` contribute none.
     pub requirements: BTreeSet<EffectName>,
 }
 
@@ -87,8 +88,16 @@ pub fn extract_entry(
     }
     let published = working.publish(base, environment)?;
     Ok(Extraction {
+        // The extracted document requires what its manifest lists: its own
+        // performs and those of the bodies it reaches (`K-DOC-002`).
+        requirements: published
+            .document
+            .manifest
+            .effects
+            .keys()
+            .cloned()
+            .collect(),
         document: published.document,
-        requirements: reached.effects,
         applied: Some(Applied {
             correspondence: published.correspondence,
             admitted: published.admitted,

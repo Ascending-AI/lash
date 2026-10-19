@@ -216,7 +216,7 @@ main {
     let mut draft = Draft::open(document.clone()).expect("draft");
     let functions = FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
-    environment.effects = document.manifest.effects.clone();
+    environment.effects = document.manifest.signatures();
     let anchor = site("notify", &[1]);
     let effect = EffectName::new("mail.send").unwrap();
     let transaction = Transaction {
@@ -867,7 +867,7 @@ fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_plac
     let mut draft = Draft::open(document.clone()).expect("draft");
     let functions = FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
-    environment.effects = document.manifest.effects.clone();
+    environment.effects = document.manifest.signatures();
     let subject = at(&[0, 0, 1, 0]);
     let replace = |draft: &Draft, with: &str| Transaction {
         base: draft.identity(),

@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::arena::native::NativeFunction;
 use crate::function::FunctionDefinition;
-use crate::name::{FunctionId, FunctionName};
+use crate::name::{EffectName, FunctionId, FunctionName};
 use crate::plan::HelperPlan;
 use crate::released::{BodyCensus, ReleasedFunctions};
+use crate::requirement::OperationRequirement;
 use crate::validate::{Invalid, validate_identified_definition};
 
 /// The counter a native function is handed: it counts the function's guard
@@ -278,6 +279,15 @@ impl RegisteredFunction {
                 .map(|body| crate::Node::Block(&body.block).functions_within())
                 .unwrap_or_default()
         })
+    }
+
+    /// Every operation the body performs itself, with what it requires of
+    /// it ([`crate::FunctionBody::effects`]): none for a function with no
+    /// body. A document reaching this function requires them through it
+    /// (`K-DOC-002`); what its callees perform is theirs.
+    pub fn performs(&self) -> &BTreeMap<EffectName, OperationRequirement> {
+        static NONE: BTreeMap<EffectName, OperationRequirement> = BTreeMap::new();
+        self.definition().body().map_or(&NONE, |body| &body.effects)
     }
 }
 

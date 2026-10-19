@@ -1,5 +1,9 @@
 {
   "$defs": {
+    "ContractId": {
+      "description": "What pins an operation's meaning under its signature: opaque text,\ncompared for equality and never read for anything else.",
+      "type": "string"
+    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -594,8 +598,9 @@
         },
         {
           "additionalProperties": false,
+          "description": "`K-LIB-004`: a library body performs only the operations its\n`effects` lists.",
           "properties": {
-            "perform_in_library": {
+            "effect_not_declared": {
               "additionalProperties": false,
               "properties": {
                 "effect": {
@@ -609,7 +614,7 @@
             }
           },
           "required": [
-            "perform_in_library"
+            "effect_not_declared"
           ],
           "type": "object"
         },
@@ -927,6 +932,23 @@
         "expression"
       ],
       "type": "string"
+    },
+    "OperationRequirement": {
+      "additionalProperties": false,
+      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against. A manifest\nstates one for each operation the document performs or reaches, and a\nlibrary body one for each operation it performs itself.",
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/ContractId"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "signature",
+        "contract"
+      ],
+      "type": "object"
     },
     "Param": {
       "additionalProperties": false,
@@ -1258,6 +1280,66 @@
         },
         {
           "additionalProperties": false,
+          "description": "`K-ADM-007`: a library body the document reaches performs an\noperation the manifest does not list.",
+          "properties": {
+            "requirement_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "requirement": {
+                  "$ref": "#/$defs/OperationRequirement"
+                },
+                "through": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "effect",
+                "through",
+                "requirement"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "requirement_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`ADM-REQUIREMENT`: the document's code and the bodies it reaches\nrequire one effect name under two requirements.",
+          "properties": {
+            "requirement_conflict": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "first": {
+                  "$ref": "#/$defs/RequiredBy"
+                },
+                "second": {
+                  "$ref": "#/$defs/RequiredBy"
+                }
+              },
+              "required": [
+                "effect",
+                "first",
+                "second"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "requirement_conflict"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "`K-ADM-007`: a function is listed under a name its definition does\nnot carry.",
           "properties": {
             "function_name": {
@@ -1287,6 +1369,30 @@
           "type": "object"
         }
       ]
+    },
+    "RequiredBy": {
+      "additionalProperties": false,
+      "description": "A requirement of an effect, and the code that states it.",
+      "properties": {
+        "requirement": {
+          "$ref": "#/$defs/OperationRequirement"
+        },
+        "through": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The library function whose body states it; `None` for the\ndocument's manifest, which states its own code's."
+        }
+      },
+      "required": [
+        "requirement"
+      ],
+      "type": "object"
     },
     "Signature": {
       "additionalProperties": false,

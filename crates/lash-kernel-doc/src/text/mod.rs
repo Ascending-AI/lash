@@ -14,6 +14,7 @@ use crate::validate::StatementForm;
 pub use parser::{
     parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
 };
+pub(crate) use printer::requirement_text;
 pub use printer::{print_definition, print_document, print_document_with_ranges};
 
 /// A kernel text that is not a document or a definition, and where.

@@ -1197,3 +1197,50 @@ fn plan_callback_membership_preserves_first_refusal_and_atomic_installation() {
         }
     }
 }
+
+/// `K-LIB-004`: a body-only definition may perform what its `effects`
+/// lists, and nothing else; a body beside a native lists nothing. What it
+/// lists is part of the definition, contract included.
+#[test]
+fn a_body_performs_only_what_its_effects_list() {
+    let catalog = BTreeMap::new();
+    let text = |effects: &str, native: &str| {
+        format!(
+            "function probe.fetch(url: Text) -> Any\nkernel 1\ncharge 1\n{native}{effects}\
+             body {{ let page = perform web.fetch(url) as Any return page }}\n"
+        )
+    };
+    let listed = parse_definition(&text(
+        "effect web.fetch(url: Text) -> Any contract \"3\"\n",
+        "",
+    ))
+    .unwrap();
+    crate::validate_definition(&listed, &catalog).unwrap();
+    assert_eq!(
+        parse_definition(&print_definition(&listed)).unwrap(),
+        listed
+    );
+    let fetch = crate::EffectName::new("web.fetch").unwrap();
+    assert_eq!(
+        listed.body().unwrap().effects[&fetch].contract,
+        crate::ContractId::new("3")
+    );
+    let unlisted = parse_definition(&text("", "")).unwrap();
+    assert_ne!(unlisted.identity(), listed.identity());
+    assert_eq!(
+        *crate::validate_definition(&unlisted, &catalog)
+            .unwrap_err()
+            .reason,
+        InvalidReason::EffectNotDeclared { effect: fetch }
+    );
+    let beside_native =
+        parse_definition(&text("effect web.fetch(url: Text) -> Any\n", "native\n")).unwrap();
+    assert_eq!(
+        *crate::validate_definition(&beside_native, &catalog)
+            .unwrap_err()
+            .reason,
+        InvalidReason::NativeBodyMayWait {
+            form: StatementForm::Perform
+        }
+    );
+}

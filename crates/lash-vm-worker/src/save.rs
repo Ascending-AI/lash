@@ -47,6 +47,7 @@ impl CellSave for DialectSave {
                 written: &self.written,
                 values,
                 release: cell.release,
+                catalog: cell.catalog,
             },
             cell.held,
         )?;

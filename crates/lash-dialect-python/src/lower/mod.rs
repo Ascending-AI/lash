@@ -163,7 +163,7 @@ pub(crate) struct Lowerer<'a> {
     /// The effects whose call ends the turn: a control call ends `main`
     /// when it settles, and is written only where it can.
     controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
-    performed: BTreeMap<EffectName, Signature>,
+    performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     taken: HashSet<String>,
@@ -385,6 +385,7 @@ pub(crate) fn lower_with_calls(
     }
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
+    lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     if !lowerer.saved_used.is_empty() {
         let catalog: &dyn FunctionCatalog = environment.library;
         lash_kernel_dialect::install(
@@ -404,6 +405,7 @@ pub(crate) fn lower_with_calls(
             std::mem::take(&mut document.manifest.functions),
             environment.library,
         );
+        lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     }
     validate_document(&document, environment.library).map_err(|invalid| {
         diagnostics::unplaced(

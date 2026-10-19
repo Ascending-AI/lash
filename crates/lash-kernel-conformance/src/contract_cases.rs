@@ -201,7 +201,7 @@ fn body_rules() {
         let invalid = validate_definition(&definition(&text), &catalog).unwrap_err();
         assert!(matches!(
             *invalid.reason,
-            InvalidReason::PerformInLibrary { .. } | InvalidReason::NativeBodyMayWait { .. }
+            InvalidReason::EffectNotDeclared { .. } | InvalidReason::NativeBodyMayWait { .. }
         ));
     }
 }
@@ -277,7 +277,7 @@ fn typed_refusals(shard: &Shard, registry: &FunctionRegistry) {
         }
         let document = doc(&case.document);
         let mut env = Environment::new(registry);
-        env.effects = document.manifest.effects.clone();
+        env.effects = document.manifest.signatures();
         let errors = admit(&document, &env).unwrap_err().errors;
         assert!(errors.iter().any(|error| match shard.rule.as_str() {
             "K-ADM-005" => matches!(error.reason, RefusalReason::ArgumentType { .. }),

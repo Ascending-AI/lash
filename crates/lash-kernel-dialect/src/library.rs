@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
-    RegisteredFunction,
+    FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Manifest,
+    RegisteredFunction, performed_by,
 };
 
 /// One function per name: the choice of identities a front end lowers
@@ -17,6 +17,21 @@ use lash_kernel_doc::{
 pub trait Library: FunctionCatalog + Send + Sync {
     /// The function `name` stands for.
     fn resolve(&self, name: &str) -> Option<FunctionId>;
+}
+
+/// Lists in `manifest` what the bodies of the functions it lists perform,
+/// each under what the body requires of it (`K-DOC-002`). An effect the
+/// document's own code performs keeps the manifest's requirement: admission
+/// refuses one name under two (`ADM-REQUIREMENT`).
+pub fn require_through_bodies(manifest: &mut Manifest, catalog: &dyn FunctionCatalog) {
+    for (effect, bodies) in performed_by(catalog, manifest.functions.keys().copied()) {
+        if let Some(requirement) = bodies.into_values().next() {
+            manifest
+                .effects
+                .entry(effect)
+                .or_insert_with(|| requirement.clone());
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

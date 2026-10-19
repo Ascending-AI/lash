@@ -957,12 +957,14 @@ async fn payload_under(
         .expect("the environment is read")
         .expect("the core reads workflow documents");
     let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
-    for (effect, signature) in &mut document.manifest.effects {
-        *signature = environment
-            .effects()
-            .get(effect)
-            .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
-            .clone();
+    for (effect, requirement) in &mut document.manifest.effects {
+        *requirement = lash::workflow::document::OperationRequirement::of_signature(
+            environment
+                .effects()
+                .get(effect)
+                .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
+                .clone(),
+        );
     }
     document.manifest.functions =
         lash::workflow::graph::requirements(&document, environment.functions()).functions;

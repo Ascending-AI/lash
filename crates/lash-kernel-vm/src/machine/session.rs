@@ -357,6 +357,7 @@ impl KernelMachine {
                 bindings: &bindings,
                 dropped,
                 held: &held,
+                catalog: self.program.library.registry().as_ref(),
             },
         );
         self.save = Some(save);

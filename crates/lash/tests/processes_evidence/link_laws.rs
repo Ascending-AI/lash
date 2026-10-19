@@ -201,9 +201,11 @@ async fn payload(
     for (effect, tool) in typed {
         document.manifest.effects.insert(
             lash::workflow::document::EffectName::new(*effect).expect("an effect name"),
-            lash_protocol_types::tool_signature(
-                &tool.contract.input_schema.canonical,
-                &tool.contract.output_schema.canonical,
+            lash::workflow::document::OperationRequirement::of_signature(
+                lash_protocol_types::tool_signature(
+                    &tool.contract.input_schema.canonical,
+                    &tool.contract.output_schema.canonical,
+                ),
             ),
         );
     }

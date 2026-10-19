@@ -1,13 +1,13 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Call { function: FunctionId(34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e), args: [Call { function: FunctionId(d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df), args: [Variable(Name("value"))] }, Literal(Float(Float(0.0)))] }, then_block: [ReturnVia { value: Literal(Text("negative")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 ReturnVia { value: Literal(Text("negative")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
-statement fn demo/1 ordinal=7 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d))), args: [Variable(Name("value"))] })] }) }
-statement fn demo/2 ordinal=8 depth=0 block=fn demo ReturnVia { value: Literal(Text("done")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Call { function: FunctionId(34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e), args: [Call { function: FunctionId(d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df), args: [Variable(Name("value"))] }, Literal(Float(Float(0.0)))] }, then_block: [ReturnVia { value: Literal(Text("negative")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }], else_block: [] }
+statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 ReturnVia { value: Literal(Text("negative")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Variable(Name("value"))] })] }) }
+statement fn demo/2 ordinal=8 depth=0 block=fn demo ReturnVia { value: Literal(Text("done")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then
 scope fn demo/0/2 ordinal=6 depth=1 Else
 action fn demo/1/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/1/0/0 library id=1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d name=ts.boundary label="TypeScript boundary"
+action fn demo/1/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
 caption callable 0 block=fn demo "Echo a value unless it is negative"
 caption node 0 site=fn demo/0 "Check for a negative value"
 caption node 0 site=fn demo/0/1/0 "Stop and report that it is negative"

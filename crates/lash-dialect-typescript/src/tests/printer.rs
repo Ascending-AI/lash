@@ -118,9 +118,10 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         bindings: &bindings,
         functions: &BTreeMap::new(),
     });
+    let signatures = document.manifest.signatures();
     let environment = Environment {
         library,
-        effects: &document.manifest.effects,
+        effects: &signatures,
         controls: &BTreeMap::new(),
         tool_roots: &std::collections::BTreeSet::new(),
     };
@@ -306,7 +307,7 @@ main {
     ))
     .unwrap();
     let mut environment = lash_kernel_check::Environment::new(&library);
-    environment.effects = draft.document().manifest.effects.clone();
+    environment.effects = draft.document().manifest.signatures();
     let main = |path: &[u32]| k::Site::new(k::Unit::Main, path.to_vec());
     draft
         .apply(

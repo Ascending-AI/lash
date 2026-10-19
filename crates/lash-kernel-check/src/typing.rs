@@ -9,8 +9,8 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    EffectName, Function, FunctionCatalog, JoinMode, Literal, MapType, Name, RecordType,
-    RecordTypeField, Signature, Type,
+    EffectName, Function, FunctionCatalog, JoinMode, Literal, MapType, Name, OperationRequirement,
+    RecordType, RecordTypeField, Signature, Type,
 };
 
 use crate::graph::{
@@ -23,8 +23,9 @@ use crate::types::{common, disjoint, function_of, stable, union};
 pub(crate) struct Typer<'a> {
     pub(crate) graph: &'a mut Graph,
     pub(crate) catalog: &'a dyn FunctionCatalog,
-    /// The effects the code may perform; none inside a library body.
-    pub(crate) effects: Option<&'a BTreeMap<EffectName, Signature>>,
+    /// The operations the code may perform: the document's manifest, or a
+    /// library body's own `effects`.
+    pub(crate) effects: &'a BTreeMap<EffectName, OperationRequirement>,
     /// The declared functions a literal may reference.
     pub(crate) declared: Option<&'a BTreeMap<Name, Function>>,
     pub(crate) errors: &'a mut Vec<Refused>,
@@ -289,10 +290,8 @@ impl Typer<'_> {
                         Type::Task(Box::new(stable(&self.nested_call(&callee, &args, &found))))
                     }
                     ActNode::Perform { effect, result } => {
-                        if let Some(signature) =
-                            self.effects.and_then(|effects| effects.get(&effect))
-                        {
-                            let signature = signature.clone();
+                        if let Some(required) = self.effects.get(&effect) {
+                            let signature = required.signature.clone();
                             for (index, found) in found.iter().enumerate() {
                                 let site = self.graph.node(args[index]).site.clone();
                                 self.argument(effect.as_str(), &signature, index, found, &site);
@@ -408,8 +407,8 @@ impl Typer<'_> {
                 args,
                 result,
             } => {
-                if let Some(signature) = self.effects.and_then(|effects| effects.get(effect)) {
-                    let signature = signature.clone();
+                if let Some(required) = self.effects.get(effect) {
+                    let signature = required.signature.clone();
                     self.arguments(id, effect.as_str(), &signature, args);
                     if disjoint(result, &signature.result) {
                         let site = self.graph.node(id).site.clone();

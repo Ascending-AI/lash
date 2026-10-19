@@ -123,10 +123,10 @@ pub enum InvalidReason {
     FunctionNotDeclared { name: Name },
     #[error("a library function's body cannot name a declared function (`{name}`)")]
     DeclaredFunctionInLibrary { name: Name },
-    #[error(
-        "a library function's body cannot perform an effect (`{effect}`); take a function argument that performs it"
-    )]
-    PerformInLibrary { effect: EffectName },
+    /// `K-LIB-004`: a library body performs only the operations its
+    /// `effects` lists.
+    #[error("effect `{effect}` is performed but not listed in the body's `effects`")]
+    EffectNotDeclared { effect: EffectName },
     #[error("entry `{entry}` names no declared function")]
     EntryNotDeclared { entry: Name },
     #[error(
@@ -256,8 +256,8 @@ pub fn validate_document_with_limits(
     for function in document.manifest.functions.keys() {
         check_written_for(catalog, function, version)?;
     }
-    for signature in document.manifest.effects.values() {
-        check_signature(signature)?;
+    for requirement in document.manifest.effects.values() {
+        check_signature(&requirement.signature)?;
     }
     for name in &document.private_bindings {
         check_name(name, None)?;
@@ -304,6 +304,7 @@ pub fn validate_document_with_limits(
         limits,
         document: Some(document),
         functions: &document.manifest.functions,
+        effects: &document.manifest.effects,
         catalog,
         native_body: false,
     };
@@ -355,6 +356,9 @@ pub(crate) fn validate_identified_definition(
         for function in body.functions.keys() {
             check_written_for(catalog, function, version)?;
         }
+        for requirement in body.effects.values() {
+            check_signature(&requirement.signature)?;
+        }
     }
     check_signature(&definition.signature)?;
     check_formula(&definition.charge, &definition.signature, true)?;
@@ -393,14 +397,25 @@ pub(crate) fn validate_identified_definition(
     let Some(body) = definition.body() else {
         return Ok(None);
     };
+    let native_body = matches!(definition.implementation, Implementation::Both(_));
+    // A body beside a native performs nothing (`K-LIB-004`).
+    if native_body && !body.effects.is_empty() {
+        return Err(invalid(
+            None,
+            InvalidReason::NativeBodyMayWait {
+                form: StatementForm::Perform,
+            },
+        ));
+    }
     // The site names the body by the definition's own identity.
     let function = definition.identity();
     let scope = Scope {
         limits,
         document: None,
         functions: &body.functions,
+        effects: &body.effects,
         catalog,
-        native_body: matches!(definition.implementation, Implementation::Both(_)),
+        native_body,
     };
     scope.check_unit(&body.block, Site::new(Unit::Library(function), []))?;
     Ok(Some(function))
@@ -470,6 +485,9 @@ struct Scope<'a> {
     document: Option<&'a Document>,
     /// The library functions this code may name.
     functions: &'a std::collections::BTreeMap<FunctionId, FunctionName>,
+    /// The operations this code may perform: the document's manifest, or
+    /// the body's own `effects`.
+    effects: &'a std::collections::BTreeMap<EffectName, crate::OperationRequirement>,
     catalog: &'a dyn FunctionCatalog,
     /// The code is a body that stands beside a native implementation.
     native_body: bool,
@@ -666,22 +684,7 @@ impl Scope<'_> {
                 self.check_callee(callee, act.args.len(), site)?
             }
             ActKind::Perform { effect, result, .. } => {
-                let Some(document) = self.document else {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::PerformInLibrary {
-                            effect: effect.clone(),
-                        },
-                    ));
-                };
-                let Some(signature) = document.manifest.effects.get(effect) else {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::EffectNotListed {
-                            effect: effect.clone(),
-                        },
-                    ));
-                };
+                let signature = self.performed(effect, site)?;
                 check_arity(effect.as_str(), act.args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
             }
@@ -774,22 +777,7 @@ impl Scope<'_> {
                 result,
                 ..
             } => {
-                let Some(document) = self.document else {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::PerformInLibrary {
-                            effect: effect.clone(),
-                        },
-                    ));
-                };
-                let Some(signature) = document.manifest.effects.get(effect) else {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::EffectNotListed {
-                            effect: effect.clone(),
-                        },
-                    ));
-                };
+                let signature = self.performed(effect, site)?;
                 check_arity(effect.as_str(), args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
                 self.check_atoms(args, site)
@@ -855,6 +843,26 @@ impl Scope<'_> {
             check_arity(definition.name.as_str(), given, &definition.signature, site)?;
         }
         Ok(())
+    }
+
+    /// The signature this code requires `effect` under: the manifest's
+    /// for a document, the body's own `effects` for a library body.
+    fn performed(&self, effect: &EffectName, site: &Site) -> Result<&Signature, Invalid> {
+        match self.effects.get(effect) {
+            Some(requirement) => Ok(&requirement.signature),
+            None if self.document.is_some() => Err(invalid(
+                Some(site),
+                InvalidReason::EffectNotListed {
+                    effect: effect.clone(),
+                },
+            )),
+            None => Err(invalid(
+                Some(site),
+                InvalidReason::EffectNotDeclared {
+                    effect: effect.clone(),
+                },
+            )),
+        }
     }
 
     /// The parameter count of the declared function `name`.

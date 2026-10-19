@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use lash_kernel_check::{Admitted, Environment, admit, requirements};
 use lash_kernel_doc::{
-    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, NodeMut, Place, Rhs, Site,
-    Stmt, Unit,
+    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, NodeMut,
+    OperationRequirement, Place, Rhs, Site, Stmt, Unit,
 };
 
 use crate::edit::{Edit, Position};
@@ -500,15 +500,22 @@ impl Working {
         let required = requirements(&self.document, environment.functions);
         let manifest = &mut self.document.manifest;
         manifest.functions = required.functions;
-        manifest
-            .effects
-            .retain(|effect, _| required.effects.contains(effect));
+        manifest.effects.retain(|effect, _| {
+            required.effects.contains(effect) || required.performs.contains_key(effect)
+        });
         for effect in required.effects {
             if let Some(signature) = environment.effects.get(&effect) {
                 manifest
                     .effects
                     .entry(effect)
-                    .or_insert_with(|| signature.clone());
+                    .or_insert_with(|| OperationRequirement::of_signature(signature.clone()));
+            }
+        }
+        // What the bodies the code reaches perform, it requires through
+        // them (`K-DOC-002`).
+        for (effect, bodies) in required.performs {
+            if let Some(requirement) = bodies.into_values().next() {
+                manifest.effects.entry(effect).or_insert(requirement);
             }
         }
 

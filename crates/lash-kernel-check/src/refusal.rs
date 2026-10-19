@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use lash_kernel_doc::{
-    EffectName, FunctionId, FunctionName, Invalid, InvalidReason, Name, Signature, Site, Type,
+    EffectName, FunctionId, FunctionName, Invalid, InvalidReason, Name, OperationRequirement,
+    Signature, Site, Type,
 };
 
 /// Everything that keeps a document from being admitted. Admission does not
@@ -121,6 +122,27 @@ pub enum RefusalReason {
         name: FunctionName,
         through: FunctionId,
     },
+    /// `K-ADM-007`: a library body the document reaches performs an
+    /// operation the manifest does not list.
+    #[error(
+        "effect `{effect}` is performed by the body of {through}, which requires {requirement}, \
+         but not listed in the manifest"
+    )]
+    RequirementNotListed {
+        effect: EffectName,
+        through: FunctionId,
+        requirement: OperationRequirement,
+    },
+    /// `ADM-REQUIREMENT`: the document's code and the bodies it reaches
+    /// require one effect name under two requirements.
+    #[error(
+        "effect `{effect}` is required as {first} and as {second}; one name is one requirement"
+    )]
+    RequirementConflict {
+        effect: EffectName,
+        first: Box<RequiredBy>,
+        second: Box<RequiredBy>,
+    },
     /// `K-ADM-007`: a function is listed under a name its definition does
     /// not carry.
     #[error(
@@ -151,6 +173,27 @@ impl RefusalReason {
             Self::FunctionNotReached { .. } => "function_not_reached",
             Self::FunctionNotListed { .. } => "function_not_listed",
             Self::FunctionName { .. } => "function_name",
+            Self::RequirementNotListed { .. } => "requirement_not_listed",
+            Self::RequirementConflict { .. } => "requirement_conflict",
+        }
+    }
+}
+
+/// A requirement of an effect, and the code that states it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequiredBy {
+    /// The library function whose body states it; `None` for the
+    /// document's manifest, which states its own code's.
+    pub through: Option<FunctionId>,
+    pub requirement: OperationRequirement,
+}
+
+impl fmt::Display for RequiredBy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.through {
+            Some(function) => write!(f, "{} by the body of {function}", self.requirement),
+            None => write!(f, "{} by the manifest", self.requirement),
         }
     }
 }

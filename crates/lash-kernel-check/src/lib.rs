@@ -50,8 +50,10 @@ pub use graph::{
     NodeId, NodeKind, PlaceNode, RecordEntryNode, Reference, Scope, ScopeId, SiteKind, StmtNode,
     Target, UnitView,
 };
-pub use manifest::{EntryReachability, Requirements, entry_reachability, requirements};
-pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureSide};
+pub use manifest::{
+    EntryReachability, Performs, Requirements, entry_reachability, library_performs, requirements,
+};
+pub use refusal::{Refusal, RefusalReason, Refused, RequiredBy, SignatureMismatch, SignatureSide};
 pub use schema::{
     result_type_of_schema, signature_mismatch, signature_serves, tool_signature, type_of_schema,
 };

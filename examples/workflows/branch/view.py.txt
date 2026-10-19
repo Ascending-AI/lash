@@ -1,11 +1,11 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Return { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
+statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
 statement fn demo/1 ordinal=7 depth=0 block=fn demo Return { value: Literal(Text("no")) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then
 scope fn demo/0/2 ordinal=6 depth=1 Else
-action fn demo/0/1/0/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
+action fn demo/0/1/0/0 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
 action fn demo/0/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
 caption callable 0 block=fn demo "Answer yes or no"
 caption node 0 site=fn demo/0 "Check whether the answer is yes"

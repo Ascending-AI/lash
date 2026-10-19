@@ -10,6 +10,7 @@ use crate::ast::{Block, Function, Node, Site};
 use crate::graph_tokens::{encode_body, logical_digest};
 use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
 use crate::number::NumberPolicy;
+use crate::requirement::OperationRequirement;
 use crate::types::Signature;
 
 /// The kernel version this crate's forms, values, evaluation order,
@@ -64,9 +65,10 @@ pub struct Entry {
 pub struct Manifest {
     /// The kernel version the document is written in.
     pub kernel: u32,
-    /// Every effect the document performs, with the signature it expects.
+    /// Every operation the document performs, or a library body it reaches
+    /// performs, with what the code requires of it (`K-DOC-002`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub effects: BTreeMap<EffectName, Signature>,
+    pub effects: BTreeMap<EffectName, OperationRequirement>,
     /// Every library function the document reaches, directly or through
     /// another function's body, by identity, with the name its definition
     /// carries.
@@ -85,6 +87,15 @@ impl Manifest {
             functions: BTreeMap::new(),
             numbers,
         }
+    }
+
+    /// The signature each effect is required under: what an environment
+    /// offers that serves exactly these requirements.
+    pub fn signatures(&self) -> BTreeMap<EffectName, Signature> {
+        self.effects
+            .iter()
+            .map(|(effect, requirement)| (effect.clone(), requirement.signature.clone()))
+            .collect()
     }
 }
 

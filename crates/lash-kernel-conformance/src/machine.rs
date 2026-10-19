@@ -171,7 +171,7 @@ pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Pro
         .environment
         .effects
         .clone()
-        .unwrap_or_else(|| document.manifest.effects.clone());
+        .unwrap_or_else(|| document.manifest.signatures());
     lash_kernel_check::admit(&document, &admission).ok()?;
     Some(Program {
         release: crate::pages::RELEASE,

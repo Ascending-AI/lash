@@ -176,8 +176,8 @@ pub struct UnitView {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectSet {
     /// The effects performed by the unit's own code, the closures it
-    /// writes, and every declared function it calls, spawns or references,
-    /// transitively.
+    /// writes, the library bodies it calls and every declared function it
+    /// calls, spawns or references, transitively.
     pub effects: BTreeSet<EffectName>,
     /// The unit, or a function it reaches, calls a function held in a
     /// variable, a library function with only a kernel-code body, or one

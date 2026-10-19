@@ -530,7 +530,9 @@ main { let got = perform a.run(null) as Any finish got }
     let mut environment = lash_kernel_check::Environment::new(&functions);
     environment.effects.insert(
         lash_kernel_doc::EffectName::new("b.run").unwrap(),
-        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()].clone(),
+        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()]
+            .signature
+            .clone(),
     );
     super::WorkflowDocument::admit(
         document,

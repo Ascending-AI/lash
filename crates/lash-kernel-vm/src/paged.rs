@@ -88,6 +88,8 @@ pub struct SaveCell<'a> {
     pub dropped: &'a [Name],
     /// The declared names of the functions the session already holds.
     pub held: &'a BTreeSet<Name>,
+    /// The library the cell ran against.
+    pub catalog: &'a dyn lash_kernel_doc::FunctionCatalog,
 }
 
 /// What a cell's end saved.

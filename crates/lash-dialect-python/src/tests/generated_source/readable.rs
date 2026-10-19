@@ -1050,10 +1050,10 @@ fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
                 if declared {
                     doc.manifest.effects.insert(
                         effect.clone(),
-                        k::Signature {
+                        k::OperationRequirement::of_signature(k::Signature {
                             params: vec![],
                             result: k::Type::Any,
-                        },
+                        }),
                     );
                 }
                 let printed = roundtrip(&doc, true);
@@ -1177,10 +1177,10 @@ fn generic_member_assignments_decode_native_await_rhs() {
             });
             doc.manifest.effects.insert(
                 k::EffectName::new("echo").unwrap(),
-                k::Signature {
+                k::OperationRequirement::of_signature(k::Signature {
                     params: vec![],
                     result: k::Type::Any,
-                },
+                }),
             );
             roundtrip(&doc, true);
         }

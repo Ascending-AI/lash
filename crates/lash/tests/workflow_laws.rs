@@ -399,10 +399,12 @@ main { finish null }
         .expect("environment")
         .expect("kernel environment");
     let effect = lash::workflow::document::EffectName::new("processes.list").expect("effect");
-    document
-        .manifest
-        .effects
-        .insert(effect.clone(), checked.effects()[&effect].clone());
+    document.manifest.effects.insert(
+        effect.clone(),
+        lash::workflow::document::OperationRequirement::of_signature(
+            checked.effects()[&effect].clone(),
+        ),
+    );
     let publication = published(
         artifacts
             .publish_workflow(
@@ -492,10 +494,12 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         .cloned()
         .collect::<Vec<_>>()
     {
-        document
-            .manifest
-            .effects
-            .insert(effect.clone(), checked.effects()[&effect].clone());
+        document.manifest.effects.insert(
+            effect.clone(),
+            lash::workflow::document::OperationRequirement::of_signature(
+                checked.effects()[&effect].clone(),
+            ),
+        );
     }
     let publication = published(
         artifacts
@@ -824,10 +828,12 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         .expect("environment")
         .expect("kernel");
     let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), checked.effects()[&echo].clone());
+    document.manifest.effects.insert(
+        echo.clone(),
+        lash::workflow::document::OperationRequirement::of_signature(
+            checked.effects()[&echo].clone(),
+        ),
+    );
     let publication = published(
         artifacts
             .publish_workflow(
@@ -1120,11 +1126,13 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     // The document states the signature the host offers the effect under.
     document.manifest.effects.insert(
         echo.clone(),
-        checked
-            .effects()
-            .get(&echo)
-            .expect("the host offers the tool")
-            .clone(),
+        lash::workflow::document::OperationRequirement::of_signature(
+            checked
+                .effects()
+                .get(&echo)
+                .expect("the host offers the tool")
+                .clone(),
+        ),
     );
     let entry = Name::new("fan");
     let publication = published(
@@ -1287,10 +1295,12 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     let mut document = lash::workflow::document::parse_document(&text).expect("document");
     for effect in ["processes.start", "processes.await", "tools.echo"] {
         let name = lash::workflow::document::EffectName::new(effect).expect("effect name");
-        document
-            .manifest
-            .effects
-            .insert(name.clone(), checked.effects()[&name].clone());
+        document.manifest.effects.insert(
+            name.clone(),
+            lash::workflow::document::OperationRequirement::of_signature(
+                checked.effects()[&name].clone(),
+            ),
+        );
     }
     let worker =
         lash_vm_runtime::definition_of_entry(&document, document.identity(), &Name::new("worker"))

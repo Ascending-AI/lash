@@ -129,10 +129,12 @@ async fn publish_nodes(
     let echo = lash::workflow::document::EffectName::new("tools.echo").expect("an effect name");
     let mut document =
         lash::workflow::document::parse_document(NODES).expect("the document parses");
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), checked.effects()[&echo].clone());
+    document.manifest.effects.insert(
+        echo.clone(),
+        lash::workflow::document::OperationRequirement::of_signature(
+            checked.effects()[&echo].clone(),
+        ),
+    );
     let draft = Draft::open(document).expect("the document opens");
     let publication = published(
         artifacts

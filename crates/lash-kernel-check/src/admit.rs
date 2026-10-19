@@ -88,13 +88,14 @@ pub fn derive_entry(
         return Err(Refusal { errors });
     };
     let units = crate::closure::executed_units(&graph, catalog, entry);
-    let (_, libraries) = manifest::reach_blocks(
+    let libraries = manifest::reach_blocks(
         units.iter().filter_map(|unit| match unit {
             Unit::Function(name) => document.functions.get(name).map(|function| &function.body),
             _ => None,
         }),
         catalog,
-    );
+    )
+    .reached;
     errors.retain(|error| match error.site.as_ref().map(|site| &site.unit) {
         Some(Unit::Library(function)) => libraries.contains_key(function),
         Some(unit) => units.contains(unit),
@@ -142,7 +143,8 @@ pub fn derive_definition(
 /// document itself.
 pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admitted, Refusal> {
     let mut errors = Vec::new();
-    for (effect, expected) in &document.manifest.effects {
+    for (effect, required) in &document.manifest.effects {
+        let expected = &required.signature;
         let reason = match environment.effects.get(effect) {
             None => Some(RefusalReason::MissingEffect {
                 effect: effect.clone(),
@@ -191,8 +193,8 @@ fn check(
     // Validation reads the definitions of the functions a statement calls
     // (`K-LIB-002`), so a missing definition is named before anything else
     // is read.
-    let (effects, reached) = manifest::reach(document, catalog);
-    let missing = manifest::missing_functions(document, catalog, &reached);
+    let reach = manifest::reach(document, catalog);
+    let missing = manifest::missing_functions(document, catalog, &reach.reached);
     if !missing.is_empty() {
         errors.extend(missing);
         return None;
@@ -203,13 +205,13 @@ fn check(
     }
     // Structural validation and the scope rule hold of every body the
     // document reaches, as they do of the document (`K-ADM-008`).
-    for function in reached.keys() {
+    for function in reach.reached.keys() {
         if let Some(definition) = catalog.definition(function) {
             let checked = library(definition, catalog, catalog.registered(function));
             errors.extend(checked.errors.iter().cloned());
         }
     }
-    manifest::check(document, catalog, &effects, &reached, errors);
+    manifest::check(document, catalog, &reach, errors);
 
     let mut linker = Linker::new();
     linker.unit(Unit::Main, &[], &document.main, None);
@@ -229,7 +231,7 @@ fn check(
     Typer {
         graph: &mut graph,
         catalog,
-        effects: Some(&document.manifest.effects),
+        effects: &document.manifest.effects,
         declared: Some(&document.functions),
         errors,
     }
@@ -330,7 +332,7 @@ fn library_graph(
     Typer {
         graph: &mut graph,
         catalog,
-        effects: None,
+        effects: &body.effects,
         declared: None,
         errors,
     }

@@ -598,7 +598,10 @@ impl Lowerer<'_> {
         } else {
             self.tool_arguments(effect, signature, call)?
         };
-        self.performed.insert(effect.clone(), signature.clone());
+        self.performed.insert(
+            effect.clone(),
+            lash_kernel_doc::OperationRequirement::of_signature(signature.clone()),
+        );
         Ok(ActExpr {
             kind: ActKind::Perform {
                 effect: effect.clone(),

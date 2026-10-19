@@ -5,17 +5,21 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
     ActKind, Action, Atom, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId,
-    FunctionName, InvalidReason, Literal, Name, Node,
+    FunctionName, InvalidReason, Literal, Name, Node, OperationRequirement, performed_by,
 };
 
-use crate::refusal::{RefusalReason, Refused, refused};
+use crate::refusal::{RefusalReason, Refused, RequiredBy, refused};
 
 /// What a document's code requires of an environment, derived from the code
 /// alone.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Requirements {
-    /// Every effect some `perform` names.
+    /// Every effect some `perform` of the document's own code names. What
+    /// it requires of each is the manifest's to state.
     pub effects: BTreeSet<EffectName>,
+    /// Every operation a library body the code reaches performs, with what
+    /// each body that performs it requires (`K-DOC-002`).
+    pub performs: Performs,
     /// Every library function the code reaches, directly or through another
     /// function's body, with the name its definition carries. A function
     /// the catalog does not hold is listed under the name its caller gives
@@ -178,10 +182,19 @@ pub fn entry_reachability(
 /// the document's own code calls it.
 pub(crate) type Reached = BTreeMap<FunctionId, Option<FunctionId>>;
 
-pub(crate) fn reach(
-    document: &Document,
-    catalog: &dyn FunctionCatalog,
-) -> (BTreeSet<EffectName>, Reached) {
+/// For each operation reached library bodies perform, what each body that
+/// performs it requires, by the body's function.
+pub type Performs = BTreeMap<EffectName, BTreeMap<FunctionId, OperationRequirement>>;
+
+/// What code reaches: the effects its own `perform`s name, the library
+/// functions it reaches and what their bodies perform.
+pub(crate) struct Reach {
+    pub(crate) effects: BTreeSet<EffectName>,
+    pub(crate) reached: Reached,
+    pub(crate) performs: Performs,
+}
+
+pub(crate) fn reach(document: &Document, catalog: &dyn FunctionCatalog) -> Reach {
     // A declared function's start adapter calls its functions when the
     // function is started, as an entry's convention does: they are reached,
     // with what they call.
@@ -200,7 +213,7 @@ pub(crate) fn reach(
 pub(crate) fn reach_blocks<'a>(
     blocks: impl IntoIterator<Item = &'a Block>,
     catalog: &dyn FunctionCatalog,
-) -> (BTreeSet<EffectName>, Reached) {
+) -> Reach {
     reach_from(blocks, std::iter::empty(), catalog)
 }
 
@@ -209,7 +222,7 @@ fn reach_from<'a>(
     blocks: impl IntoIterator<Item = &'a Block>,
     roots: impl IntoIterator<Item = FunctionId>,
     catalog: &dyn FunctionCatalog,
-) -> (BTreeSet<EffectName>, Reached) {
+) -> Reach {
     let mut effects = BTreeSet::new();
     let mut direct: BTreeSet<FunctionId> = roots.into_iter().collect();
     for block in blocks {
@@ -247,7 +260,65 @@ fn reach_from<'a>(
             }
         }
     }
-    (effects, reached)
+    let performs = performed_by(catalog, reached.keys().copied())
+        .into_iter()
+        .map(|(effect, bodies)| {
+            let bodies = bodies
+                .into_iter()
+                .map(|(function, requirement)| (function, requirement.clone()))
+                .collect();
+            (effect, bodies)
+        })
+        .collect();
+    Reach {
+        effects,
+        reached,
+        performs,
+    }
+}
+
+/// Every operation `function`'s body performs, and the bodies of the
+/// functions it reaches perform: what a call of it may perform
+/// (`K-DOC-002`). Any catalog serves, a workflow's declarations among them.
+pub fn library_performs(
+    catalog: &dyn FunctionCatalog,
+    function: &FunctionId,
+) -> BTreeSet<EffectName> {
+    performs_through(catalog, function, &mut BTreeMap::new())
+}
+
+/// [`library_performs`], keeping each answer in `known` for one derivation.
+pub(crate) fn performs_through(
+    catalog: &dyn FunctionCatalog,
+    function: &FunctionId,
+    known: &mut BTreeMap<FunctionId, BTreeSet<EffectName>>,
+) -> BTreeSet<EffectName> {
+    if let Some(performs) = known.get(function) {
+        return performs.clone();
+    }
+    let (mut performs, callees): (BTreeSet<EffectName>, Vec<FunctionId>) =
+        match catalog.registered(function) {
+            Some(registered) => (
+                registered.performs().keys().cloned().collect(),
+                registered.callees().iter().copied().collect(),
+            ),
+            None => match catalog.definition(function).and_then(|d| d.body()) {
+                Some(body) => (
+                    body.effects.keys().cloned().collect(),
+                    Node::Block(&body.block)
+                        .functions_within()
+                        .into_iter()
+                        .collect(),
+                ),
+                None => Default::default(),
+            },
+        };
+    // Identities are content hashes, so the calls form no cycle.
+    for callee in callees {
+        performs.extend(performs_through(catalog, &callee, known));
+    }
+    known.insert(*function, performs.clone());
+    performs
 }
 
 /// The name `function` goes by: its definition's, or the one the body that
@@ -272,14 +343,22 @@ fn name_of(
 /// Derives a document's requirements from its code and the bodies of the
 /// library functions it reaches.
 pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requirements {
-    let (effects, reached) = reach(document, catalog);
+    let Reach {
+        effects,
+        reached,
+        performs,
+    } = reach(document, catalog);
     let functions = reached
         .iter()
         .filter_map(|(function, through)| {
             name_of(function, through.as_ref(), document, catalog).map(|name| (*function, name))
         })
         .collect();
-    Requirements { effects, functions }
+    Requirements {
+        effects,
+        performs,
+        functions,
+    }
 }
 
 /// Every function the document needs that `catalog` does not hold: those
@@ -316,16 +395,60 @@ pub(crate) fn missing_functions(
 pub(crate) fn check(
     document: &Document,
     catalog: &dyn FunctionCatalog,
-    effects: &BTreeSet<EffectName>,
-    reached: &Reached,
+    reach: &Reach,
     errors: &mut Vec<Refused>,
 ) {
+    let Reach {
+        effects,
+        reached,
+        performs,
+    } = reach;
     for effect in document.manifest.effects.keys() {
-        if !effects.contains(effect) {
+        if !effects.contains(effect) && !performs.contains_key(effect) {
             errors.push(refused(
                 None,
                 RefusalReason::EffectNotPerformed {
                     effect: effect.clone(),
+                },
+            ));
+        }
+    }
+    for (effect, bodies) in performs {
+        let listed = document.manifest.effects.get(effect);
+        let mut required = bodies.iter().map(|(function, requirement)| RequiredBy {
+            through: Some(*function),
+            requirement: requirement.clone(),
+        });
+        let first = match listed {
+            Some(requirement) => RequiredBy {
+                through: None,
+                requirement: requirement.clone(),
+            },
+            None => {
+                let Some(first) = required.next() else {
+                    continue;
+                };
+                errors.push(refused(
+                    None,
+                    RefusalReason::RequirementNotListed {
+                        effect: effect.clone(),
+                        through: first
+                            .through
+                            .unwrap_or_else(|| unreachable!("a body's requirement names the body")),
+                        requirement: first.requirement.clone(),
+                    },
+                ));
+                first
+            }
+        };
+        // One effect name is one requirement (`ADM-REQUIREMENT`).
+        if let Some(second) = required.find(|other| other.requirement != first.requirement) {
+            errors.push(refused(
+                None,
+                RefusalReason::RequirementConflict {
+                    effect: effect.clone(),
+                    first: Box::new(first),
+                    second: Box::new(second),
                 },
             ));
         }

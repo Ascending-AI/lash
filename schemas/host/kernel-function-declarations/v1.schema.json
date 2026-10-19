@@ -513,6 +513,10 @@
       ],
       "type": "object"
     },
+    "ContractId": {
+      "description": "What pins an operation's meaning under its signature: opaque text,\ncompared for equality and never read for anything else.",
+      "type": "string"
+    },
     "Expr": {
       "description": "An expression, evaluated within one statement. Only an [`Expr::Act`]\nin it may pause the task (`K-EVAL-008`).",
       "oneOf": [
@@ -927,6 +931,16 @@
           },
           "type": "array"
         },
+        "effects": {
+          "additionalProperties": false,
+          "description": "Every operation the body performs itself, with what it requires of\nit (`K-LIB-004`). A body beside a native implementation performs\nnothing. What the functions it calls perform is theirs to list.",
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$": {
+              "$ref": "#/$defs/OperationRequirement"
+            }
+          },
+          "type": "object"
+        },
         "functions": {
           "additionalProperties": false,
           "description": "Every library function the body calls, by identity, with the name\nits definition carries.",
@@ -1323,6 +1337,23 @@
           "type": "string"
         }
       ]
+    },
+    "OperationRequirement": {
+      "additionalProperties": false,
+      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against. A manifest\nstates one for each operation the document performs or reaches, and a\nlibrary body one for each operation it performs itself.",
+      "properties": {
+        "contract": {
+          "$ref": "#/$defs/ContractId"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "signature",
+        "contract"
+      ],
+      "type": "object"
     },
     "Param": {
       "additionalProperties": false,

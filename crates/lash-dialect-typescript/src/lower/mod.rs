@@ -390,7 +390,7 @@ pub(crate) struct Lowerer<'a> {
     /// when it settles, and is written only where it can.
     controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
     /// The effects the document performs, for its manifest (`K-DOC-002`).
-    performed: BTreeMap<EffectName, Signature>,
+    performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
     session: &'a BTreeSet<Name>,
     table: &'static Table,
     /// Every word of the source, every session binding and every name
@@ -564,6 +564,7 @@ pub(crate) fn lower(
     }
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
+    lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     if !lowerer.saved_used.is_empty() {
         // The saved functions the source names are declared in the cell's
         // own document, with what they require.
@@ -588,6 +589,7 @@ pub(crate) fn lower(
             std::mem::take(&mut document.manifest.functions),
             environment.library,
         );
+        lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     }
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let mut layers = lash_kernel_dialect::site_layers(

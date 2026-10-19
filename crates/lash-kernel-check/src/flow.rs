@@ -418,21 +418,35 @@ struct Direct {
     through_values: bool,
 }
 
+/// What a derivation has learned of the library functions a graph calls.
+struct Known<'c> {
+    catalog: &'c dyn FunctionCatalog,
+    applies: BTreeMap<FunctionId, bool>,
+    performs: BTreeMap<FunctionId, BTreeSet<EffectName>>,
+}
+
+impl Known<'_> {
+    /// What a call of the library function `function` lets a unit reach:
+    /// what its body and the bodies it reaches perform, and the functions
+    /// it may apply.
+    fn library(&mut self, unit: &mut Direct, function: &FunctionId) {
+        unit.through_values |= library_applies(self.catalog, function, &mut self.applies);
+        unit.effects.extend(crate::manifest::performs_through(
+            self.catalog,
+            function,
+            &mut self.performs,
+        ));
+    }
+}
+
 /// What a call or a `spawn` of `callee` lets a unit reach.
-fn reach(
-    unit: &mut Direct,
-    callee: &CalleeNode,
-    catalog: &dyn FunctionCatalog,
-    applies: &mut BTreeMap<FunctionId, bool>,
-) {
+fn reach(unit: &mut Direct, callee: &CalleeNode, known: &mut Known<'_>) {
     match callee {
         CalleeNode::Declared(name) => {
             unit.reaches.insert(name.clone());
         }
         CalleeNode::Value(_) => unit.through_values = true,
-        CalleeNode::Library(function) => {
-            unit.through_values |= library_applies(catalog, function, applies);
-        }
+        CalleeNode::Library(function) => known.library(unit, function),
     }
 }
 
@@ -497,11 +511,16 @@ fn library_applies(
     applies
 }
 
-/// Fills each unit's effect set: its own performs, then those of every
-/// declared function it calls, spawns or references, to a fixed point.
+/// Fills each unit's effect set: its own performs and those of the library
+/// bodies it calls, then those of every declared function it calls, spawns
+/// or references, to a fixed point.
 fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
     let mut direct: BTreeMap<Unit, Direct> = BTreeMap::new();
-    let mut applies = BTreeMap::new();
+    let mut known = Known {
+        catalog,
+        applies: BTreeMap::new(),
+        performs: BTreeMap::new(),
+    };
     for node in &graph.nodes {
         let unit = direct.entry(node.site.unit.clone()).or_default();
         match &node.kind {
@@ -512,12 +531,8 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                 ActNode::Perform { effect, .. } => {
                     unit.effects.insert(effect.clone());
                 }
-                ActNode::Call(callee) | ActNode::Spawn(callee) => {
-                    reach(unit, callee, catalog, &mut applies);
-                }
-                ActNode::Await(policy) => {
-                    reach(unit, &CalleeNode::Library(*policy), catalog, &mut applies);
-                }
+                ActNode::Call(callee) | ActNode::Spawn(callee) => reach(unit, callee, &mut known),
+                ActNode::Await(policy) => known.library(unit, policy),
                 ActNode::Sleep
                 | ActNode::Join
                 | ActNode::JoinMany(_)
@@ -527,18 +542,16 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
             NodeKind::Expr(ExprNode::Call { function, .. })
             | NodeKind::Stmt(StmtNode::ReturnVia {
                 policy: function, ..
-            }) => {
-                unit.through_values |= library_applies(catalog, function, &mut applies);
-            }
+            }) => known.library(unit, function),
             NodeKind::Action(action) => {
                 if let ActionNode::Perform { effect, .. } = action {
                     unit.effects.insert(effect.clone());
                 }
                 if let ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } = action {
-                    reach(unit, callee, catalog, &mut applies);
+                    reach(unit, callee, &mut known);
                 }
                 if let ActionNode::Await { policy, .. } = action {
-                    reach(unit, &CalleeNode::Library(*policy), catalog, &mut applies);
+                    known.library(unit, policy);
                 }
                 for atom in atoms(action) {
                     if let AtomNode::Literal(Literal::Function(name)) = atom {

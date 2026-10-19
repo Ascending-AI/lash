@@ -11,8 +11,8 @@ use lash_kernel_doc::snapshot::{
     freeze_token, gather, members, text_is, text_of, token_closure,
 };
 use lash_kernel_doc::{
-    Action, Callee, Document, EffectName, Expr, Function, FunctionId, FunctionRepresentation, Name,
-    Rhs, Signature, Site, Stmt, Unit,
+    Action, Callee, Document, EffectName, Expr, Function, FunctionCatalog, FunctionId,
+    FunctionRepresentation, Name, OperationRequirement, Rhs, Signature, Site, Stmt, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
@@ -118,6 +118,9 @@ pub struct Left<'a> {
     /// How the dialect holds a function as a value.
     pub values: &'a FunctionRepresentation,
     pub release: PageRef,
+    /// The library the cell ran against: what the bodies its functions
+    /// reach perform is read from it.
+    pub catalog: &'a dyn FunctionCatalog,
 }
 #[derive(Debug, thiserror::Error)]
 enum SaveError {
@@ -261,6 +264,17 @@ pub enum Unusable {
         "the saved function `{function}` calls `{effect}` under a signature this session does not offer it under"
     )]
     EffectSignature { function: Name, effect: EffectName },
+    /// It requires an effect under another requirement than the document
+    /// or another saved function does (`ADM-REQUIREMENT`).
+    #[error(
+        "the saved function `{function}` requires `{effect}` as {saved}, and the cell requires it as {held}"
+    )]
+    EffectRequirement {
+        function: Name,
+        effect: EffectName,
+        held: Box<OperationRequirement>,
+        saved: Box<OperationRequirement>,
+    },
     /// The effect's call now ends the turn. A saved function was kept
     /// because none of its effects did (`NotSaved::PerformsControl`), so
     /// what the effect declares has changed since.
@@ -303,9 +317,19 @@ fn save_closure(
         helper_owners,
         &|capture| left.bindings.contains_key(capture),
     )?;
+    // The functions its code calls, and those the start adapters of its
+    // function and closures call.
+    let mut library = gathered.library.clone();
+    each_start(&gathered.function, &mut |start| {
+        library.extend(start.functions());
+    });
+    // What it performs: its own code, and the bodies it reaches
+    // (`K-DOC-002`).
+    let through = lash_kernel_doc::performed_through(left.catalog, library.iter().copied());
     if let Some(effect) = gathered
         .effects
         .iter()
+        .chain(through.keys())
         .find(|effect| left.controls.contains_key(*effect))
     {
         return Err(NotSaved::PerformsControl {
@@ -325,12 +349,18 @@ fn save_closure(
                 .clone(),
         );
     }
-    // The functions its code calls, and those the start adapters of its
-    // function and closures call.
-    let mut library = gathered.library.clone();
-    each_start(&gathered.function, &mut |start| {
-        library.extend(start.functions());
-    });
+    for (effect, bodies) in through {
+        for requirement in bodies.into_values() {
+            let held = document
+                .manifest
+                .effects
+                .entry(effect.clone())
+                .or_insert_with(|| requirement.clone());
+            if held != requirement {
+                return Err(unreadable("it requires one effect under two requirements"));
+            }
+        }
+    }
     for function in &library {
         document.manifest.functions.insert(
             *function,
@@ -658,6 +688,9 @@ pub fn install(
     installed: &dyn Fn(&FunctionId) -> bool,
 ) -> Result<BTreeMap<Name, InstalledFunction>, Unusable> {
     let mut declarations = BTreeMap::new();
+    // One effect name is one requirement across the document and every
+    // function installed into it (`ADM-REQUIREMENT`).
+    let mut required = document.manifest.effects.clone();
     for (name, function) in closure_of(functions, roots)? {
         if function
             .token
@@ -669,7 +702,7 @@ pub fn install(
         if function.document.manifest.numbers != document.manifest.numbers {
             return Err(Unusable::Numbers { function: name });
         }
-        for (effect, signature) in &function.document.manifest.effects {
+        for (effect, requirement) in &function.document.manifest.effects {
             if effects.contains_key(effect) && controls.contains_key(effect) {
                 return Err(Unusable::EffectControls {
                     function: name,
@@ -683,13 +716,24 @@ pub fn install(
                         effect: effect.clone(),
                     });
                 }
-                Some(v) if v != signature => {
+                Some(v) if *v != requirement.signature => {
                     return Err(Unusable::EffectSignature {
                         function: name,
                         effect: effect.clone(),
                     });
                 }
                 _ => (),
+            }
+            let held = required
+                .entry(effect.clone())
+                .or_insert_with(|| requirement.clone());
+            if held != requirement {
+                return Err(Unusable::EffectRequirement {
+                    function: name,
+                    effect: effect.clone(),
+                    held: Box::new(held.clone()),
+                    saved: Box::new(requirement.clone()),
+                });
             }
         }
         for (library, listed) in &function.document.manifest.functions {
@@ -724,11 +768,8 @@ pub fn install(
             .functions
             .insert(name.clone(), declaration.code.clone());
     }
+    document.manifest.effects = required;
     for function in closure_of(functions, roots)?.values() {
-        document
-            .manifest
-            .effects
-            .extend(function.document.manifest.effects.clone());
         document
             .manifest
             .functions

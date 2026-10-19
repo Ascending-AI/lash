@@ -38,7 +38,7 @@ pub use dialect::{
     Printer, ReadSource,
 };
 pub use lash_kernel_state::WaitId;
-pub use library::{Library, LibraryError, NamedLibrary};
+pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
 pub use names::{

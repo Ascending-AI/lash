@@ -267,6 +267,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
                     id: PageId([1; 32]),
                     grant: PageGrant::NONE,
                 },
+                catalog: &lash_kernel_doc::FunctionRegistry::new(),
             },
             &BTreeSet::new(),
         )
@@ -403,10 +404,10 @@ fn a_bundle_is_its_functions_closure_and_is_refused_unless_its_members_agree() {
     let mut effects = body.clone();
     effects.effects.push((
         lash_kernel_doc::EffectName::new("echo").expect("an effect name"),
-        lash_kernel_doc::Signature {
+        lash_kernel_doc::OperationRequirement::of_signature(lash_kernel_doc::Signature {
             params: Vec::new(),
             result: lash_kernel_doc::Type::Any,
-        },
+        }),
     ));
     assert!(matches!(read(effects), Err(BundleRefusal::RequiredEffects)));
     let mut renamed = body;
@@ -427,4 +428,142 @@ fn a_bundle_is_its_functions_closure_and_is_refused_unless_its_members_agree() {
     let mut bad = documents.values().next().expect("doc").clone();
     bad.functions.clear();
     assert!(Bundle::assemble::<BundleError>(body, |_| Ok(bad.clone())).is_err());
+}
+/// A body-only definition that performs `effect` under `contract`,
+/// registered on its own: no package install vets what it lists.
+fn performing(effect: &str, contract: &str) -> lash_kernel_doc::FunctionDefinition {
+    lash_kernel_doc::parse_definition(&format!(
+        "function probe.perform() -> Any\nkernel 1\ncharge 1\n\
+         effect {effect}(value?: Any) -> Any contract \"{contract}\"\n\
+         body {{ let x = perform {effect}() as Any return x }}\n"
+    ))
+    .expect("the definition parses")
+}
+/// SAVE-CONTROL: a saved function that reaches a control through a library
+/// body is not saved, as one that performs it itself is not.
+#[test]
+fn a_function_reaching_a_control_through_a_body_is_not_saved() {
+    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    let definition = performing("control.finish", "c");
+    let name = definition.name.clone();
+    let stop = registry
+        .register(definition, None)
+        .expect("register the malformed body");
+    let closure = lash_kernel_doc::Closure {
+        params: Vec::new(),
+        body: vec![
+            Stmt::Let {
+                name: Name::new("x"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Library(stop),
+                    args: Vec::new(),
+                }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(Name::new("x")),
+            },
+        ],
+        start: None,
+    };
+    let mut document = Document::new(
+        lash_kernel_doc::NumberPolicy::Float,
+        vec![Stmt::Let {
+            name: Name::new("stop"),
+            value: Rhs::Expr(Expr::Closure(Box::new(closure))),
+        }],
+    );
+    document.manifest.functions.insert(stop, name);
+    let (mut heap, _) = fresh();
+    let site = Site {
+        unit: Unit::Main,
+        path: vec![0, 0],
+    };
+    let made = heap
+        .allocate_object(ObjectInit::Closure {
+            site: SiteRef::new(&site, heap.pages()).unwrap(),
+            captures: Vec::new(),
+        })
+        .expect("closure");
+    let bindings = BTreeMap::from([(Name::new("stop"), PageValue::Closure(made))]);
+    let dropped = vec![Name::new("stop")];
+    let finish = EffectName::new("control.finish").expect("an effect name");
+    let (saved, refused) = save(
+        &mut heap,
+        Left {
+            document: &document,
+            bindings: &bindings,
+            not_carried: &dropped,
+            controls: &BTreeMap::from([(
+                finish.clone(),
+                BTreeSet::from([crate::EffectControl::Finish]),
+            )]),
+            written: &BTreeMap::new(),
+            values: &lash_kernel_doc::FunctionRepresentation::Bare,
+            release: PageRef {
+                id: PageId([1; 32]),
+                grant: PageGrant::NONE,
+            },
+            catalog: &registry,
+        },
+        &BTreeSet::new(),
+    )
+    .expect("save");
+    assert!(saved.is_empty());
+    assert_eq!(
+        refused[&Name::new("stop")],
+        NotSaved::PerformsControl { effect: finish }
+    );
+}
+/// ADM-REQUIREMENT: installing joins the saved functions' requirements
+/// with the document's by a checked union: one name under one requirement
+/// joins, and under two is refused, naming both.
+#[test]
+fn installing_refuses_a_second_requirement_of_one_effect() {
+    let fetch = EffectName::new("web.fetch").expect("an effect name");
+    let signature = lash_kernel_doc::Signature {
+        params: Vec::new(),
+        result: lash_kernel_doc::Type::Any,
+    };
+    let interim = OperationRequirement::of_signature(signature.clone());
+    let declared = OperationRequirement {
+        signature: signature.clone(),
+        contract: lash_kernel_doc::ContractId::new("3"),
+    };
+    let install_requiring = |saved: &OperationRequirement| {
+        let mut function = calling("load", &[], &[]);
+        function
+            .document
+            .manifest
+            .effects
+            .insert(fetch.clone(), saved.clone());
+        let functions = BTreeMap::from([(function.name.clone(), function)]);
+        let mut document = Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+        document
+            .manifest
+            .effects
+            .insert(fetch.clone(), interim.clone());
+        install(
+            &mut document,
+            &functions,
+            &BTreeSet::from([Name::new("load")]),
+            &lash_kernel_doc::FunctionRepresentation::Bare,
+            &BTreeMap::from([(fetch.clone(), signature.clone())]),
+            &BTreeMap::new(),
+            &|_| true,
+        )
+        .map(|_| document.manifest.effects)
+    };
+    assert_eq!(
+        install_requiring(&interim).expect("one requirement joins"),
+        BTreeMap::from([(fetch.clone(), interim.clone())])
+    );
+    assert_eq!(
+        install_requiring(&declared).expect_err("two requirements are refused"),
+        Unusable::EffectRequirement {
+            function: Name::new("load"),
+            effect: fetch.clone(),
+            held: Box::new(interim.clone()),
+            saved: Box::new(declared.clone()),
+        }
+    );
 }

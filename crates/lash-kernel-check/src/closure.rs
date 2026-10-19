@@ -4,8 +4,8 @@
 //! unit may perform through every function it reaches, references included.
 //! A process env links exactly an entry's linked effects, so this set counts
 //! only what the entry runs: its own performs and those of its closures,
-//! and those of every declared function it calls or spawns, to a fixed
-//! point. A declared function the entry only passes as a value is a template
+//! those of the library bodies it calls (`K-DOC-002`), and those of every
+//! declared function it calls or spawns, to a fixed point. A declared function the entry only passes as a value is a template
 //! its receiver links, and is not counted.
 //!
 //! A call through a value runs a closure, a library function or a declared
@@ -27,6 +27,7 @@ use crate::graph::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, NodeId, NodeKind,
     PlaceNode, Reference, StmtNode,
 };
+use crate::manifest::performs_through;
 
 /// Why an entry's linked-effect set cannot be certified.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -117,7 +118,7 @@ fn linked_effects(
     effects
         .into_iter()
         .map(|effect| match document.manifest.effects.get(&effect) {
-            Some(signature) => Ok((effect, signature.clone())),
+            Some(required) => Ok((effect, required.signature.clone())),
             None => Err(EntryEffectsRefusal::UndeclaredEffect { effect }),
         })
         .collect()
@@ -149,11 +150,15 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
     let targets = function_targets(graph);
     let mut runs: BTreeMap<Unit, Runs> = BTreeMap::new();
     let mut callback_helpers = BTreeMap::new();
+    let mut performs = BTreeMap::new();
     for node in &graph.nodes {
         let unit = runs.entry(node.site.unit.clone()).or_default();
-        // A library function with a kernel-code body calls the functions
+        // A library function's body, and the bodies it reaches, perform
+        // what they list. One with a kernel-code body calls the functions
         // it is passed: what the expressions passed to it can hold.
         let mut library_call = |unit: &mut Runs, function: &FunctionId, args: &[NodeId]| {
+            unit.effects
+                .extend(performs_through(catalog, function, &mut performs));
             if !*callback_helpers
                 .entry(*function)
                 .or_insert_with(|| library_calls_values(catalog, function))
@@ -253,6 +258,8 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
                 // functions it is passed: a declared function passed to it
                 // by name is called.
                 CalleeNode::Library(function) => {
+                    unit.effects
+                        .extend(performs_through(catalog, function, &mut performs));
                     if *callback_helpers
                         .entry(*function)
                         .or_insert_with(|| library_calls_values(catalog, function))

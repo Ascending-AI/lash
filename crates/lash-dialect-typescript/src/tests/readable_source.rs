@@ -823,10 +823,10 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
     let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
     document.manifest.effects.insert(
         effect.clone(),
-        k::Signature {
+        k::OperationRequirement::of_signature(k::Signature {
             params: vec![],
             result: k::Type::Any,
-        },
+        }),
     );
     for (args, result) in [
         (vec![], k::Type::Any),

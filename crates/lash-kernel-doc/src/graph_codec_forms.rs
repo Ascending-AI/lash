@@ -15,6 +15,7 @@ use crate::{
     NumberPolicy, Operand, Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry,
     RecordType, RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
 };
+use crate::{ContractId, OperationRequirement};
 use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
 impl TokenCodec for crate::Entry {
@@ -1122,6 +1123,32 @@ impl TokenCodec for Function {
 
 // Documents.
 
+impl TokenCodec for ContractId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.text(self.as_str());
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(Self::new(String::decode(input)?))
+    }
+}
+
+impl TokenCodec for OperationRequirement {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.signature.encode(out);
+        self.contract.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            signature: Signature::decode(input)?,
+            contract: ContractId::decode(input)?,
+        })
+    }
+}
+
 impl TokenCodec for Manifest {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(4);
@@ -1351,15 +1378,17 @@ impl TokenCodec for Guard {
 
 impl TokenCodec for FunctionBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(3);
         self.functions.encode(out);
+        self.effects.encode(out);
         self.block.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(3)?;
         Ok(Self {
             functions: BTreeMap::decode(input)?,
+            effects: BTreeMap::decode(input)?,
             block: Vec::decode(input)?,
         })
     }

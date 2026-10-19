@@ -78,7 +78,7 @@ impl Smith {
     /// from an executor defect. Projection handles are supplied at start.
     pub fn admit(&self) -> Result<lash_kernel_check::Admitted, lash_kernel_check::Refusal> {
         let mut env = lash_kernel_check::Environment::new(library().registry.as_ref());
-        env.effects = self.document.manifest.effects.clone();
+        env.effects = self.document.manifest.signatures();
         env.bindings.insert(Name::new("projection"));
         lash_kernel_check::admit(&self.document, &env)
     }

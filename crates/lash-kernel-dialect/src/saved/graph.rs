@@ -20,7 +20,7 @@ use lash_kernel_doc::graph_tokens::{
     encode_body,
 };
 use lash_kernel_doc::heap::PageRef;
-use lash_kernel_doc::{Document, EffectName, Name, Signature};
+use lash_kernel_doc::{Document, EffectName, Name, OperationRequirement};
 use lash_kernel_state::paged::FrozenRef;
 
 use super::{CaptureRefusal, NotSaved, SavedFunction, Token};
@@ -100,25 +100,25 @@ impl Bundle {
             .and_then(|at| self.members.values().nth(at))
     }
 
-    /// The effects the members perform, each with the signature its member
-    /// expects: sorted by effect, then by member, each pair once.
+    /// The effects the members perform, each with what its member requires
+    /// of it: sorted by effect, then by member, each pair once.
     #[must_use]
-    pub fn required_effects(&self) -> Vec<(EffectName, Signature)> {
-        let mut required: Vec<(EffectName, Signature)> = Vec::new();
-        let mut by_effect: BTreeMap<&EffectName, Vec<&Signature>> = BTreeMap::new();
+    pub fn required_effects(&self) -> Vec<(EffectName, OperationRequirement)> {
+        let mut required: Vec<(EffectName, OperationRequirement)> = Vec::new();
+        let mut by_effect: BTreeMap<&EffectName, Vec<&OperationRequirement>> = BTreeMap::new();
         for function in self.members.values() {
-            for (effect, signature) in &function.document.manifest.effects {
-                let signatures = by_effect.entry(effect).or_default();
-                if !signatures.contains(&signature) {
-                    signatures.push(signature);
+            for (effect, requirement) in &function.document.manifest.effects {
+                let requirements = by_effect.entry(effect).or_default();
+                if !requirements.contains(&requirement) {
+                    requirements.push(requirement);
                 }
             }
         }
-        for (effect, signatures) in by_effect {
+        for (effect, requirements) in by_effect {
             required.extend(
-                signatures
+                requirements
                     .into_iter()
-                    .map(|signature| (effect.clone(), signature.clone())),
+                    .map(|requirement| (effect.clone(), requirement.clone())),
             );
         }
         required
@@ -202,7 +202,7 @@ pub struct BundleBody {
     /// Sorted by name, each once.
     pub members: Vec<MemberBody>,
     /// [`Bundle::required_effects`].
-    pub effects: Vec<(EffectName, Signature)>,
+    pub effects: Vec<(EffectName, OperationRequirement)>,
 }
 
 /// One member's row: a [`SavedFunction`] with its document by reference.
@@ -223,10 +223,10 @@ impl TokenCodec for BundleBody {
         out.seq(2);
         self.members.encode(out);
         out.seq(self.effects.len() as u64);
-        for (effect, signature) in &self.effects {
+        for (effect, requirement) in &self.effects {
             out.seq(2);
             effect.encode(out);
-            signature.encode(out);
+            requirement.encode(out);
         }
     }
 
@@ -243,7 +243,10 @@ impl TokenCodec for BundleBody {
         let mut effects = Vec::new();
         for _ in 0..count {
             input.expect_struct(2)?;
-            effects.push((EffectName::decode(input)?, Signature::decode(input)?));
+            effects.push((
+                EffectName::decode(input)?,
+                OperationRequirement::decode(input)?,
+            ));
         }
         Ok(Self { members, effects })
     }

@@ -127,6 +127,7 @@ pub fn check_document_depth(
         .manifest
         .effects
         .values()
+        .map(|requirement| &requirement.signature)
         .chain(document.entries.values().map(|entry| &entry.signature))
     {
         check_signature(signature, limit)?;

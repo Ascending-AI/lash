@@ -367,12 +367,14 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
         .workflow_environment(&environment)
         .await?
         .context("this core reads no workflow documents")?;
-    for (effect, signature) in &mut document.manifest.effects {
-        *signature = offered
-            .effects()
-            .get(effect)
-            .with_context(|| format!("this host offers no effect `{effect}`"))?
-            .clone();
+    for (effect, requirement) in &mut document.manifest.effects {
+        *requirement = lash::workflow::document::OperationRequirement::of_signature(
+            offered
+                .effects()
+                .get(effect)
+                .with_context(|| format!("this host offers no effect `{effect}`"))?
+                .clone(),
+        );
     }
     let pin = HostArtifactPin::mint();
     let publication = match within(
