@@ -1,9 +1,5 @@
 use super::{policy::TOOL_LIVE_ENVELOPE_BYTES, *};
-use std::{
-    collections::VecDeque,
-    io::Write,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::{collections::VecDeque, io::Write};
 use tokio::time::Instant;
 
 #[derive(Clone)]
@@ -16,7 +12,6 @@ struct Call {
     address_bytes: usize,
     /// Refused at admission: counted once, publishes nothing.
     refused: bool,
-    ended: AtomicBool,
 }
 struct Slot {
     call: Arc<Call>,
@@ -25,7 +20,10 @@ struct Slot {
     dirty: bool,
     logs: VecDeque<(ToolLiveFact, usize)>,
     omitted: [u64; CAUSES.len()],
-    /// Sealed calls only: the fence or the slot's latest write.
+    /// The call's lifecycle, read and changed only under `pending`: `None`
+    /// while live; once sealed, the fence or the slot's latest write. Only a
+    /// drained sealed slot retires, so an admitted call without a slot is
+    /// sealed.
     settled_at: Option<Instant>,
     in_flight: bool,
 }
@@ -88,6 +86,13 @@ fn cause_index(cause: ToolLiveOmission) -> usize {
         .unwrap_or_default()
 }
 
+/// A fact validated and sized outside the owner lock.
+struct Measured {
+    fact: ToolLiveFact,
+    charge: Option<usize>,
+    cause: Option<ToolLiveOmission>,
+    progress: bool,
+}
 enum Draft {
     Call(Arc<Call>, ToolLivePayload),
     Owner(u64),
@@ -149,7 +154,7 @@ impl Owner {
         if let Some(slot) = pending
             .slots
             .iter()
-            .find(|slot| slot.call.address == address && !slot.call.ended.load(Ordering::Acquire))
+            .find(|slot| slot.call.address == address && slot.settled_at.is_none())
         {
             return ToolLivePublisher {
                 owner: self.clone(),
@@ -161,7 +166,6 @@ impl Owner {
             address_bytes: serde_json::to_vec(&address).map_or(0, |bytes| bytes.len()),
             address,
             refused,
-            ended: AtomicBool::new(refused),
         });
         if !refused {
             pending.slots.push(Slot::new(call.clone()));
@@ -208,7 +212,14 @@ impl Owner {
         if call.refused {
             return;
         }
-        let mut pending = self.pending.lock_recover();
+        self.count_locked(&mut self.pending.lock_recover(), call, cause);
+    }
+    fn count_locked(
+        self: &Arc<Self>,
+        pending: &mut Pending,
+        call: &Arc<Call>,
+        cause: ToolLiveOmission,
+    ) {
         if let Some(slot) = pending
             .slots
             .iter_mut()
@@ -218,20 +229,20 @@ impl Owner {
             *count = count.saturating_add(1);
             return;
         }
-        if self.room(&mut pending) {
+        if self.room(pending) {
             let mut slot = Slot::new(call.clone());
             slot.omitted[cause_index(cause)] = 1;
             slot.settled_at = Some(Instant::now());
             pending.slots.push(slot);
         }
-        self.start(&mut pending);
+        self.start(pending);
     }
     pub(super) fn diagnostics(&self) -> ToolLiveDiagnostics {
         let pending = self.pending.lock_recover();
         let sealed = pending
             .slots
             .iter()
-            .filter(|slot| slot.call.ended.load(Ordering::Acquire))
+            .filter(|slot| slot.settled_at.is_some())
             .count();
         ToolLiveDiagnostics {
             policy: self.policy.snapshot(),
@@ -445,15 +456,13 @@ impl ToolLivePublisher {
     /// a valid gauge is never refused for space; logs share the owner's log
     /// budget. Invalid facts are counted, never stored.
     pub fn publish(&self, fact: ToolLiveFact) {
-        let policy = self.owner.policy;
         if self.call.refused {
             return;
         }
-        if self.call.ended.load(Ordering::Acquire) {
-            self.owner
-                .count(&self.call, ToolLiveOmission::AfterCompletion);
-            return;
-        }
+        self.admit(self.measure(fact));
+    }
+    fn measure(&self, fact: ToolLiveFact) -> Measured {
+        let policy = self.owner.policy;
         let cause = match &fact {
             ToolLiveFact::Progress {
                 progress, total, ..
@@ -469,12 +478,32 @@ impl ToolLivePublisher {
             Some(charge) if !progress || charge <= policy.progress_bytes => None,
             _ => Some(ToolLiveOmission::Oversized),
         });
+        Measured {
+            fact,
+            charge,
+            cause,
+            progress,
+        }
+    }
+    /// Classifies the call against its fence and admits the fact in one
+    /// critical section: a publication racing `finish` lands before the seal
+    /// or is counted `AfterCompletion`, even when the slot already retired.
+    fn admit(&self, measured: Measured) {
+        let policy = self.owner.policy;
+        let Measured {
+            fact,
+            charge,
+            cause,
+            progress,
+        } = measured;
         let mut pending = self.owner.pending.lock_recover();
-        let Some(index) = pending
+        let live = pending
             .slots
             .iter()
-            .position(|slot| Arc::ptr_eq(&slot.call, &self.call))
-        else {
+            .position(|slot| Arc::ptr_eq(&slot.call, &self.call) && slot.settled_at.is_none());
+        let Some(index) = live else {
+            self.owner
+                .count_locked(&mut pending, &self.call, ToolLiveOmission::AfterCompletion);
             return;
         };
         let charge = charge.unwrap_or_default();
@@ -513,14 +542,11 @@ impl ToolLivePublisher {
     /// Seal at the attempt's completion fence. The final progress is written
     /// again even when an earlier interval already carried it.
     pub fn finish(&self) {
-        if self.call.ended.swap(true, Ordering::AcqRel) {
-            return;
-        }
         let mut pending = self.owner.pending.lock_recover();
         if let Some(slot) = pending
             .slots
             .iter_mut()
-            .find(|slot| Arc::ptr_eq(&slot.call, &self.call))
+            .find(|slot| Arc::ptr_eq(&slot.call, &self.call) && slot.settled_at.is_none())
         {
             slot.dirty = slot.progress.is_some();
             slot.settled_at = Some(Instant::now());

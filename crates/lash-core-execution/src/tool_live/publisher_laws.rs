@@ -366,6 +366,79 @@ async fn refusals_late_facts_and_non_finite_gauges_are_counted_where_they_belong
     assert!(!gauges.iter().any(|(call, ..)| *call == address(2).call_id));
 }
 
+/// TOOL-LIVE-FENCE: publication and the completion fence are classified
+/// under one owner lock. A fact measured before its call's fence and admitted
+/// after it is counted `AfterCompletion` whether the sealed slot still
+/// lingers or has already retired: never written after the final gauge, never
+/// lost (FIG-6854).
+#[tokio::test(start_paused = true)]
+async fn a_publication_racing_the_completion_fence_is_refused_and_counted_never_lost() {
+    let window = Arc::new(ToolLiveMemoryWindow::default());
+    let lane = ToolLive::new(Some(window), None, policy());
+    let mut feed = lane
+        .subscribe(ToolLiveFilter::Owner(owner()))
+        .await
+        .unwrap();
+    let log = |data: &str| ToolLiveFact::Log {
+        level: ToolLiveLogLevel::Info,
+        logger: None,
+        data: serde_json::json!(data),
+    };
+    let mut seen = Vec::new();
+    let drain = async |feed: &mut ToolLiveSubscription, seen: &mut Vec<ToolLiveEmission>| {
+        for _ in 0..40 {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            while let std::task::Poll::Ready(Some(item)) = futures_util::poll!(feed.next()) {
+                if let ToolLiveItem::Emission { emission, .. } = item.unwrap() {
+                    seen.push(emission);
+                }
+            }
+        }
+    };
+    let (lingering, retired) = (lane.bind(address(0)), lane.bind(address(1)));
+    lingering.publish(progress(1));
+    retired.publish(progress(1));
+    let (sealed_late, retired_late) = (
+        lingering.measure(log("after the seal")),
+        retired.measure(log("after retirement")),
+    );
+    lingering.finish();
+    retired.finish();
+    lingering.admit(sealed_late);
+    drain(&mut feed, &mut seen).await;
+    assert_eq!(lane.diagnostics(&owner()).unwrap().sealed_calls, 0);
+    retired.admit(retired_late);
+    drain(&mut feed, &mut seen).await;
+    for call in 0..2 {
+        let emissions = seen
+            .iter()
+            .filter(|emission| emission.address == address(call))
+            .map(|emission| &emission.payload)
+            .collect::<Vec<_>>();
+        let late = emissions
+            .iter()
+            .filter_map(|payload| match payload {
+                ToolLivePayload::Omitted {
+                    cause: ToolLiveOmission::AfterCompletion,
+                    count,
+                } => Some(*count),
+                _ => None,
+            })
+            .sum::<u64>();
+        assert_eq!(late, 1, "call {call} counts its late fact: {emissions:?}");
+        assert!(
+            !emissions.iter().any(|payload| matches!(
+                payload,
+                ToolLivePayload::Fact {
+                    fact: ToolLiveFact::Log { .. }
+                }
+            )),
+            "call {call} writes nothing after its fence: {emissions:?}"
+        );
+        assert!(emissions.contains(&&ToolLivePayload::Fact { fact: progress(1) }));
+    }
+}
+
 /// TOOL-LIVE-POLICY: a refused setting names its field, the supplied value
 /// and the bound or relationship it broke (figments feedback-14 b4).
 #[test]
