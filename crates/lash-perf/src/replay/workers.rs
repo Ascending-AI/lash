@@ -8,10 +8,8 @@ use std::time::Duration;
 /// it, through the builder every host uses.
 fn python_embedding(
     _tuning: &lash::vm::WorkerTuning,
-) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    lash_vm_worker::Embedder::kernel()?
-        .dialect(lash_vm_worker::python())?
-        .finish()
+) -> Result<lash_vm_worker::Embedder, lash_vm_worker::EmbedError> {
+    lash_vm_worker::Embedder::new().dialect(lash_vm_worker::python())
 }
 
 /// Serve as a Python worker when this process was started as one: a pool

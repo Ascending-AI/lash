@@ -1,25 +1,28 @@
 //! Native bootstrap, entered before the host initializes credentials.
 use crate::PoolError;
-use crate::embedding::{EmbedError, Embedding};
+use crate::embedding::{EmbedError, Embedder, Embedding};
 use crate::process::inherited_pipe;
 use crate::worker::Server;
 use lash_vm_client::ipc::Bootstrap;
 use lash_vm_protocol::*;
 
-/// Enter the credential-free worker with the host's embedding: the dialects
-/// it names and any functions of its own, assembled once the process knows
-/// it is a worker. Register it as the host binary's first action, before
+/// Enter the credential-free worker with the host's configuration: the
+/// dialects it names and the natives of its own packages, assembled once
+/// the process knows it is a worker and bound to the packages its parent
+/// holds. Register it as the host binary's first action, before
 /// constructing the host runtime or credentials. Returns false for a normal
 /// host invocation. The pool always execs with an empty environment.
 ///
 /// There is no embedding a host gets without choosing (FIG-5990): `embed`
-/// builds one from [`crate::Embedder`], naming each dialect.
+/// configures one with [`crate::Embedder`], naming each dialect. It names
+/// no package (V1).
 pub fn worker_entry(embed: &Embed) -> Result<bool, PoolError> {
     worker_entry_inner(embed, None)
 }
 
-/// Assembles what a worker runs from the parent's working policy.
-pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError>;
+/// Configures what a worker runs from the parent's working policy: its
+/// natives and dialects, never its packages.
+pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedder, EmbedError>;
 
 #[cfg(feature = "testing")]
 pub fn worker_entry_with_hook(
@@ -79,11 +82,19 @@ fn worker_entry_inner(
     .with_detail_limit(bootstrap.tuning.diagnostic_bytes);
     // A registry that cannot be assembled is a defect of this build: the
     // worker never becomes ready, and the pool reports its bootstrap.
-    let embedding = embed(&bootstrap.tuning).map_err(|error| {
-        PoolError::breach(ProtocolBreach::Machine {
-            detail: Detail::new(error),
+    // The worker binds to lash's packages, the ones its parent holds when
+    // it installs none of its own.
+    let embedding = embed(&bootstrap.tuning)
+        .and_then(|embedder| {
+            let packages = lash_vm_library::lash_packages()
+                .map_err(|error| EmbedError::Registry(error.to_string()))?;
+            embedder.finish(&packages)
         })
-    })?;
+        .map_err(|error| {
+            PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(error),
+            })
+        })?;
     #[cfg(target_os = "linux")]
     crate::process::confine(&bootstrap.confinement)?;
     run_server(pipe, codec, bootstrap, &embedding, &mut hook)?;

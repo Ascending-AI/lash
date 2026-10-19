@@ -79,6 +79,7 @@ lash-kernel-lib = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-dialect = { workspace = true }
+lash-kernel-package = { workspace = true }
 lash-vm-library = { workspace = true }
 lash-vm-releases = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }
@@ -110,6 +111,7 @@ sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing", "dialect-typescript", "dialect-python"] }
+lash-kernel-package = { workspace = true, features = ["testing"] }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
 rmp-serde = { workspace = true }

@@ -8,6 +8,10 @@
 //! ones its body calls, and joins the library, so a later definition may
 //! call an earlier one. A function never calls itself: its identity covers
 //! its body.
+//!
+//! The header may also state operations, one `effect <name>(<slots>) -> T
+//! contract "<id>"` per line: a package's bodies perform them under that
+//! requirement. Each definition lists only the ones its body performs.
 
 use lash_kernel_doc::{
     FunctionDefinition, Implementation, Invalid, Node, ParseError, parse_definition,
@@ -20,7 +24,9 @@ use crate::library::{Library, LibraryError, NamedLibrary};
 pub enum SourceError {
     /// Text other than comments and `use <name>` lines stands before the
     /// first definition.
-    #[error("line {line}: expected `use <name>` or `function`, found `{found}`")]
+    #[error(
+        "line {line}: expected `use <name>`, `effect <operation>` or `function`, found `{found}`"
+    )]
     Header { line: usize, found: String },
     #[error("`{function}`, line {line} column {column} of its definition: {reason}")]
     Parse {
@@ -35,6 +41,9 @@ pub enum SourceError {
         #[source]
         source: Invalid,
     },
+    /// What the caller adds to a definition could not be added.
+    #[error("`{function}`: {reason}")]
+    Complete { function: String, reason: String },
     #[error(transparent)]
     Library(#[from] LibraryError),
 }
@@ -45,7 +54,18 @@ pub fn define_functions(
     source: &str,
     library: &mut NamedLibrary,
 ) -> Result<Vec<FunctionDefinition>, SourceError> {
-    let (uses, chunks) = split(source)?;
+    define_functions_with(source, library, &mut |_, _| Ok(()))
+}
+
+/// [`define_functions`], with `complete` given each definition as read,
+/// before it is checked and joins `library`: a package builder adds the
+/// argument checks a member's body begins with there.
+pub fn define_functions_with(
+    source: &str,
+    library: &mut NamedLibrary,
+    complete: &mut dyn FnMut(&mut FunctionDefinition, &NamedLibrary) -> Result<(), String>,
+) -> Result<Vec<FunctionDefinition>, SourceError> {
+    let (header, chunks) = split(source)?;
     let mut definitions = Vec::with_capacity(chunks.len());
     for chunk in chunks {
         let label = chunk
@@ -57,7 +77,10 @@ pub fn define_functions(
             .trim()
             .to_string();
         let mut text = chunk;
-        for name in &uses {
+        for effect in &header.effects {
+            text.push_str(&format!("\neffect {effect}"));
+        }
+        for name in &header.uses {
             // A name the library does not hold yet is one a later definition
             // gives; a body that calls it here fails to parse, naming it.
             if let Some(function) = library.resolve(name) {
@@ -73,6 +96,11 @@ pub fn define_functions(
                 reason: error.reason.to_string(),
             })?;
         keep_called(&mut definition);
+        keep_performed(&mut definition);
+        complete(&mut definition, library).map_err(|reason| SourceError::Complete {
+            function: label.clone(),
+            reason,
+        })?;
         validate_definition(&definition, library).map_err(|source| SourceError::Invalid {
             function: label.clone(),
             source,
@@ -83,9 +111,19 @@ pub fn define_functions(
     Ok(definitions)
 }
 
-/// The names the header lists and the text of each definition.
-fn split(source: &str) -> Result<(Vec<String>, Vec<String>), SourceError> {
-    let mut uses = Vec::new();
+/// What a source's header states before its first definition.
+#[derive(Default)]
+struct Header {
+    /// The functions its bodies call, by name.
+    uses: Vec<String>,
+    /// The operations its bodies perform, each as its `effect` line states
+    /// it after the keyword.
+    effects: Vec<String>,
+}
+
+/// The header and the text of each definition.
+fn split(source: &str) -> Result<(Header, Vec<String>), SourceError> {
+    let mut header = Header::default();
     let mut chunks: Vec<String> = Vec::new();
     for (index, line) in source.lines().enumerate() {
         if line.starts_with("function ") {
@@ -95,8 +133,12 @@ fn split(source: &str) -> Result<(Vec<String>, Vec<String>), SourceError> {
             chunk.push_str(line);
         } else {
             let text = line.split('#').next().unwrap_or_default().trim();
+            if let Some(effect) = text.strip_prefix("effect ") {
+                header.effects.push(effect.trim().to_string());
+                continue;
+            }
             match text.strip_prefix("use ") {
-                Some(name) => uses.push(name.trim().to_string()),
+                Some(name) => header.uses.push(name.trim().to_string()),
                 None if text.is_empty() => {}
                 None => {
                     return Err(SourceError::Header {
@@ -107,7 +149,33 @@ fn split(source: &str) -> Result<(Vec<String>, Vec<String>), SourceError> {
             }
         }
     }
-    Ok((uses, chunks))
+    Ok((header, chunks))
+}
+
+/// Drops from a body's operation list every operation the body does not
+/// perform: a header states the operations of every definition it heads.
+fn keep_performed(definition: &mut FunctionDefinition) {
+    let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
+    else {
+        return;
+    };
+    let mut performed = std::collections::BTreeSet::new();
+    let mut pending = vec![Node::Block(&body.block)];
+    while let Some(node) = pending.pop() {
+        match node {
+            Node::Action(lash_kernel_doc::Action::Perform { effect, .. }) => {
+                performed.insert(effect.clone());
+            }
+            Node::Expr(lash_kernel_doc::Expr::Act(act)) => {
+                if let lash_kernel_doc::ActKind::Perform { effect, .. } = &act.kind {
+                    performed.insert(effect.clone());
+                }
+            }
+            _ => {}
+        }
+        pending.extend(node.children());
+    }
+    body.effects.retain(|effect, _| performed.contains(effect));
 }
 
 /// Drops from a body's function list every function the body does not

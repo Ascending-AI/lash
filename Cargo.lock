@@ -2103,13 +2103,13 @@ name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
- "libc",
  "lash-dialect-python",
  "lash-ext-date-ecma",
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-vm-worker",
  "lash-kernel-check",
  "lash-kernel-conformance",
  "lash-kernel-dialect",
@@ -2118,7 +2118,7 @@ dependencies = [
  "lash-kernel-lib",
  "lash-kernel-state",
  "lash-kernel-vm",
- "lash-internal-vm-releases",
+ "libc",
  "ryu-js",
  "serde",
  "serde_json",
@@ -3102,7 +3102,8 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-internal-vm-releases",
  "lash-kernel-doc",
- "lash-kernel-migrate",
+ "lash-kernel-package",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3135,6 +3136,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-package",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -3207,6 +3209,7 @@ dependencies = [
  "lash-kernel-doc",
  "lash-kernel-lib",
  "lash-kernel-migrate",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
@@ -3327,6 +3330,23 @@ dependencies = [
  "lash-kernel-doc",
  "schemars",
  "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "lash-kernel-package"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "lash-helper-labels",
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-lib",
+ "lash-kernel-migrate",
+ "lash-kernel-state",
+ "lash-kernel-vm",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3532,6 +3552,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-edit",
+ "lash-kernel-package",
  "lash-kernel-view",
  "opentelemetry_sdk",
  "rusqlite",

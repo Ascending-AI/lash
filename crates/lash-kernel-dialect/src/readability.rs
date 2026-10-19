@@ -20,7 +20,7 @@ pub struct Dialect<'a> {
     pub name: &'a str,
     pub printer: &'a dyn Printer,
     /// Read exported source against the base document it was printed from:
-    /// the dialect's [`crate::Package::read`].
+    /// the dialect's [`crate::Dialect::read`].
     pub decode: crate::ReadSource,
     /// Return a documented generic rule for this node's final source range.
     /// Do not scan quoted data or count child occurrences again in a parent.

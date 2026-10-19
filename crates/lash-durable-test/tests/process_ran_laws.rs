@@ -94,7 +94,9 @@ enum Plan {
 
 /// The source with the library functions it calls bound.
 fn source() -> String {
-    let library = lash_vm_runtime::standard_functions().expect("the shipped library");
+    let library = lash_vm_runtime::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the shipped library");
     let (id, _) = library
         .iter()
         .find(|(_, entry)| entry.definition().name.to_string() == "num.lt")
@@ -216,7 +218,8 @@ impl Counted {
                 ))
                 .expect("a host pin is unguarded"),
                 &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-                &lash_vm_runtime::standard_functions()
+                &lash_vm_runtime::lash_packages()
+                    .map(|packages| std::sync::Arc::clone(packages.functions()))
                     .ok()
                     .and_then(|functions| {
                         lash::workflow::document::CheckedDeclarations::required(

@@ -69,6 +69,7 @@ members = [
     "crates/lash-kernel-lib",
     "crates/lash-helper-labels",
     "crates/lash-kernel-migrate",
+    "crates/lash-kernel-package",
     "crates/lash-kernel-state",
     "crates/lash-kernel-vm",
     "crates/lash-ext-helper-compiler",
@@ -380,6 +381,7 @@ lash-kernel-exec = { path = "crates/lash-kernel-exec", version = "=0.0.0-dev" }
 lash-helper-labels = { path = "crates/lash-helper-labels", version = "=0.0.0-dev" }
 lash-kernel-lib = { path = "crates/lash-kernel-lib", version = "=0.0.0-dev" }
 lash-kernel-migrate = { path = "crates/lash-kernel-migrate", version = "=0.0.0-dev" }
+lash-kernel-package = { path = "crates/lash-kernel-package", version = "=0.0.0-dev" }
 lash-kernel-state = { path = "crates/lash-kernel-state", version = "=0.0.0-dev" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm", version = "=0.0.0-dev" }
 lash-ext-date-ecma = { path = "crates/lash-ext-date-ecma", version = "=0.0.0-dev" }

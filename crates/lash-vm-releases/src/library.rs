@@ -1,64 +1,52 @@
-//! The library functions lash ships, each registered by the crate that
-//! implements it: what an embedding holds before a dialect adds its
-//! helpers. Every embedding holds the kernel library; the extensions are
-//! the TypeScript dialect's (FIG-5990). Each dialect's hot operations have
-//! partial natives in a dialect-free crate, added to the helpers once they
-//! are registered (FIG-6440).
+//! lash's own packages (FIG-6917): each one's definitions, as the crate that
+//! implements it registers them, and its natives, by the package's path.
+//! Every embedding holds `kernel`; `regex.ecma`, `date.ecma`, `url.whatwg`
+//! and `typescript` are the TypeScript dialect's (FIG-5990), and `python`
+//! the Python dialect's. Each dialect's hot operations have partial natives
+//! in a dialect-free crate (FIG-6440).
 //!
 //! This crate's build script includes this file, and so does
-//! `lash-vm-worker`: the build defines each dialect's helpers and the
-//! release the tree builds against these functions once, when this crate is
-//! built, and a worker registers the functions again at startup beside
-//! their native implementations. The library of this crate holds data
-//! alone, and does not compile this file.
+//! `lash-vm-worker`: the build makes each package once, when this crate is
+//! built, and a worker adds the natives of the packages its parent holds,
+//! by identity. The library of this crate holds data alone, and does not
+//! compile this file.
 
-use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::{FunctionId, FunctionRegistry};
+
+/// The release label of every lash package this tree builds.
+#[allow(
+    dead_code,
+    reason = "the build labels the packages; a worker reads none"
+)]
+pub(crate) const RELEASE: &str = "1.0";
 
 /// How many compiled patterns the regular-expression extension keeps.
 #[cfg(feature = "dialect-typescript")]
 const CACHED_PATTERNS: usize = 256;
 
-/// Registers the kernel's native base and the machine's own functions.
-/// Collection definitions are supplied separately by the release build.
-/// The build writes these definitions into its kernel image; a worker
-/// registers that image and adds the natives (FIG-6843).
+/// Registers the `kernel` package's definitions: the numbers, text and
+/// JSON functions, the machine's own, the collections and `brand.of`.
 #[allow(
     dead_code,
-    reason = "the build registers the base from source; a worker only in its laws"
+    reason = "the build defines the packages; a worker only implements them"
 )]
-pub(crate) fn register_kernel_base(registry: &mut FunctionRegistry) -> Result<(), String> {
+pub(crate) fn define_kernel(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
     lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
     lash_kernel_vm::register_machine_functions(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_collections(registry).map_err(|error| error.to_string())?;
+    lash_kernel_lib::register_brands(registry).map_err(|error| error.to_string())?;
     Ok(())
 }
 
-/// Registers the regular-expression extension, which the build writes
-/// into the TypeScript extensions' image beside the date and URL
-/// definitions.
+/// Registers the `regex.ecma` package's definitions.
 #[cfg(feature = "dialect-typescript")]
 #[allow(
     dead_code,
-    reason = "the build registers the extension from source; a worker only in its laws"
+    reason = "the build defines the packages; a worker only implements them"
 )]
-pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
+pub(crate) fn define_regex(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_ext_regex_ecma::register(
-        registry,
-        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-/// Adds the regular-expression natives to the definitions the
-/// TypeScript extensions' image holds.
-#[cfg(feature = "dialect-typescript")]
-#[allow(
-    dead_code,
-    reason = "a worker adds the natives; the build registers them"
-)]
-pub(crate) fn implement_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
-    lash_ext_regex_ecma::implement(
         registry,
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
     )
@@ -66,24 +54,71 @@ pub(crate) fn implement_extensions(registry: &mut FunctionRegistry) -> Result<()
     .map_err(|error| error.to_string())
 }
 
-/// Adds the natives of the TypeScript dialect's operations to its
-/// registered `helpers`.
+/// Registers the `date.ecma` package's definitions.
 #[cfg(feature = "dialect-typescript")]
-pub(crate) fn implement_typescript(
-    registry: &mut FunctionRegistry,
-    helpers: &[lash_kernel_doc::FunctionId],
-) -> Result<(), String> {
-    lash_ext_ts_core::implement(registry, helpers.iter().copied())
+#[allow(
+    dead_code,
+    reason = "the build defines the packages; a worker only implements them"
+)]
+pub(crate) fn define_date(registry: &mut FunctionRegistry) -> Result<(), String> {
+    lash_ext_date_ecma::register(registry)
+        .map(|_| ())
         .map_err(|error| error.to_string())
 }
 
-/// Adds the natives of the Python dialect's operations to its registered
-/// `helpers`.
-#[cfg(feature = "dialect-python")]
-pub(crate) fn implement_python(
-    registry: &mut FunctionRegistry,
-    helpers: &[lash_kernel_doc::FunctionId],
-) -> Result<(), String> {
-    lash_ext_py_core::implement(registry, helpers.iter().copied())
+/// Registers the `url.whatwg` package's definitions.
+#[cfg(feature = "dialect-typescript")]
+#[allow(
+    dead_code,
+    reason = "the build defines the packages; a worker only implements them"
+)]
+pub(crate) fn define_url(registry: &mut FunctionRegistry) -> Result<(), String> {
+    lash_ext_url_whatwg::register(registry)
+        .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// Adds the natives and plans of the lash package at `path` to its
+/// `functions`, which `registry` holds beside every package they require.
+/// A package whose dialect this build was built without has none here.
+#[allow(
+    dead_code,
+    reason = "a worker implements the packages; the build defines them"
+)]
+pub(crate) fn implement(
+    path: &str,
+    registry: &mut FunctionRegistry,
+    functions: &[FunctionId],
+) -> Result<(), String> {
+    #[cfg(not(feature = "dialect-typescript"))]
+    let _ = functions;
+    match path {
+        "kernel" => {
+            lash_kernel_lib::implement_numbers(registry).map_err(|error| error.to_string())?;
+            lash_kernel_lib::implement_text_json(registry).map_err(|error| error.to_string())?;
+            lash_kernel_vm::implement_machine_functions(registry)
+                .map_err(|error| error.to_string())?;
+            lash_kernel_lib::implement_collections(registry).map_err(|error| error.to_string())
+        }
+        #[cfg(feature = "dialect-typescript")]
+        "regex.ecma" => lash_ext_regex_ecma::implement(
+            registry,
+            &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
+        #[cfg(feature = "dialect-typescript")]
+        "date.ecma" => lash_ext_date_ecma::implement(registry, functions.iter().copied())
+            .map_err(|error| error.to_string()),
+        #[cfg(feature = "dialect-typescript")]
+        "url.whatwg" => lash_ext_url_whatwg::implement(registry, functions.iter().copied())
+            .map_err(|error| error.to_string()),
+        #[cfg(feature = "dialect-typescript")]
+        "typescript" => lash_ext_ts_core::implement(registry, functions.iter().copied())
+            .map_err(|error| error.to_string()),
+        #[cfg(feature = "dialect-python")]
+        "python" => lash_ext_py_core::implement(registry, functions.iter().copied())
+            .map_err(|error| error.to_string()),
+        _ => Ok(()),
+    }
 }

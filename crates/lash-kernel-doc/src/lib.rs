@@ -64,6 +64,7 @@ pub use observation::{ExecutionPath, RanCounts, ReplayPath, RunObservation, Site
 mod name;
 mod native;
 mod number;
+mod package_ids;
 /// Generated execution plans for library bodies (FIG-6678): what a build's
 /// helper compiler emits and an embedder installs beside the definitions.
 pub mod plan;
@@ -123,11 +124,13 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
+pub use package_ids::{ArtifactDigest, InvalidDigest, PackageSetDigest};
 pub use released::{BodyCensus, ImageError, ReleasedFunctions};
 pub use requirement::{ContractId, OperationRequirement, performed_by, performed_through};
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits, parse_document,
-    parse_document_with_limits, print_definition, print_document, print_document_with_ranges,
+    parse_document_with_limits, parse_signature, print_definition, print_document,
+    print_document_with_ranges, print_type,
 };
 pub use types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 pub use validate::{

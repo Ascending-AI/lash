@@ -55,11 +55,11 @@ impl KernelCarry {
     pub(crate) fn library(&self) -> Result<Arc<FunctionRegistry>, KernelMigrationRefusal> {
         match &self.functions {
             Some(functions) => Ok(Arc::clone(functions)),
-            None => lash_vm_runtime::standard_functions().map_err(|error| {
-                KernelMigrationRefusal::State {
+            None => lash_vm_runtime::lash_packages()
+                .map(|packages| std::sync::Arc::clone(packages.functions()))
+                .map_err(|error| KernelMigrationRefusal::State {
                     message: format!("the build's library does not assemble: {error}"),
-                }
-            }),
+                }),
         }
     }
 

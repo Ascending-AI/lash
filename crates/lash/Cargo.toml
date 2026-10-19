@@ -33,6 +33,7 @@ lash-kernel-check = { workspace = true, optional = true }
 lash-kernel-edit = { workspace = true, optional = true }
 lash-kernel-view = { workspace = true, optional = true }
 lash-kernel-dialect = { workspace = true, optional = true }
+lash-kernel-package = { workspace = true, optional = true }
 lash-vm-client = { workspace = true, optional = true }
 lash-vm-worker = { workspace = true, optional = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
@@ -86,6 +87,7 @@ codemode = [
     "dep:lash-kernel-doc",
     "dep:lash-kernel-check",
     "dep:lash-kernel-dialect",
+    "dep:lash-kernel-package",
     "dep:lash-llm-tools",
     "lash-plugin-mcp?/lash-vm",
 ]

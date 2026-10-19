@@ -14,6 +14,7 @@
 
 mod diagnostic;
 mod dialect;
+mod exports;
 mod imperative;
 mod library;
 mod metadata;
@@ -34,8 +35,12 @@ mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
-    CaptionSupport, CellEnvironment, EffectControl, Environment, FrontEnd, Lowered, Mode, Package,
+    CaptionSupport, CellEnvironment, Dialect, EffectControl, Environment, FrontEnd, Lowered, Mode,
     Printer, ReadSource,
+};
+pub use exports::{
+    BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, OperationExport, TypeMember, ValueType,
+    Visibility, brand_tuple, brand_type,
 };
 pub use lash_kernel_state::WaitId;
 pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
@@ -55,7 +60,7 @@ pub use saved::{
 /// host carries one between the dialect and the machine, never into it.
 #[doc(hidden)]
 pub use saved::{InstalledFunction, MemberBody, SavedFunction, Token};
-pub use source::{SourceError, define_functions};
+pub use source::{SourceError, define_functions, define_functions_with};
 pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
 

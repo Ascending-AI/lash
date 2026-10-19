@@ -1,0 +1,46 @@
+[package]
+name = "lash-kernel-package"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Packages: what a host and lash install as one keyed artifact of operations and code, their dependency-closed sets and the one registry derived from them."
+keywords = ["lash", "kernel", "workflow", "package"]
+categories = ["compilers"]
+publish = false
+
+[lib]
+name = "lash_kernel_package"
+doctest = false
+
+[features]
+# The `dataframe` fixture, for other crates' laws.
+testing = []
+# The synthetic successor's kernel version, which held code is redeclared
+# for.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+]
+
+[lints]
+workspace = true
+
+[dependencies]
+blake3 = { workspace = true }
+lash-helper-labels = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-migrate = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lash-kernel-lib = { workspace = true }
+lash-kernel-state = { workspace = true }
+lash-kernel-vm = { workspace = true }

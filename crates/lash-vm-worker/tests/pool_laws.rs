@@ -132,7 +132,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
 
 /// `body` as a document against the registry every worker assembles.
 fn parsed(body: &str) -> lash_kernel_doc::Document {
-    let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard())
+    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
         .expect("an embedding of every built dialect");
     let mut text = String::from("numbers by_spelling\nkernel 1\neffect echo(x?: Any) -> Any\n");
     for (name, id) in embedding.library().iter() {
@@ -1946,7 +1946,7 @@ fn bootstrap_uses_the_builds_allowance_without_extending_live_silence() {
 fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     HOST_DIALECTS.set("typescript");
     let workers = service::Service::new(config("normal")).with_worker_receipts();
-    let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard()).expect("embedding");
     let effects = Default::default();
     let roots = Default::default();
     let controls = Default::default();

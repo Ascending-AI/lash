@@ -144,7 +144,7 @@ PACKAGE_DEPS = {
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
-            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0188",
             "serde": "//third-party/rust:p0317",
             "serde_yaml": "//third-party/rust:p0326",
@@ -1230,8 +1230,9 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
         }
     },
@@ -1263,6 +1264,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
@@ -1326,6 +1328,7 @@ PACKAGE_DEPS = {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
@@ -1355,6 +1358,7 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
@@ -1479,6 +1483,24 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
+    "lash-kernel-package": {
+        "build": {},
+        "dev": {
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+        },
+        "normal": {
+            "blake3": "//third-party/rust:p0032",
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
         }
     },
@@ -1678,6 +1700,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",

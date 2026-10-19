@@ -229,6 +229,20 @@ pub mod scenario_contracts;
 #[cfg(feature = "codemode")]
 /// Code mode: kernel execution, worker pools and host boundaries (`codemode`).
 pub mod vm;
+/// Packages (FIG-6917): what a host installs as one keyed artifact of
+/// operations and code beside lash's own six, registered once as a
+/// [`package::HeldPackages`] from which the parent's admission and every
+/// worker's registry are derived. A host builds its package against lash's
+/// (`Package::build(path, release, &sources, &[kernel])`, with `kernel`
+/// from [`package::lash_packages`]), installs both, and gives its workers
+/// natives only, by function identity.
+#[cfg(feature = "codemode")]
+pub mod package {
+    pub use lash_kernel_package::*;
+    /// lash's own packages as this build holds them, and why they did not
+    /// assemble: a defect of the build.
+    pub use lash_vm_runtime::{LibraryError, lash_packages};
+}
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
     pub use lash_core::sync::*;

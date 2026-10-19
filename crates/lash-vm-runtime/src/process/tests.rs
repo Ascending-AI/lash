@@ -807,7 +807,9 @@ fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refu
         Document, Expr, Function, FunctionId, FunctionValue, Name, NumberPolicy, Param, Rhs,
         Signature, Stmt, Type,
     };
-    let functions = lash_vm_library::standard_functions().expect("the build's library");
+    let functions = lash_vm_library::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the build's library");
     let (abs, name) = functions
         .iter()
         .find(|(_, registered)| {

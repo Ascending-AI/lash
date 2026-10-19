@@ -268,7 +268,7 @@ fn iterations(json_bytes: usize) -> u32 {
 fn main() -> Result<()> {
     let root = std::path::PathBuf::from(std::env::args().nth(1).context("checkout root")?);
     let counter = Counter::open()?;
-    let embedding = lash_vm_worker::built_dialects(&lash_vm_client::WorkerTuning::default())?;
+    let embedding = lash_vm_worker::built_embedding(&lash_vm_client::WorkerTuning::default())?;
     let mut documents = conformance(&root)?
         .into_iter()
         .map(|(rule, document)| ("conformance", rule, document))

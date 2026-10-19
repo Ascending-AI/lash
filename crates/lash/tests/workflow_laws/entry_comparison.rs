@@ -28,7 +28,7 @@ enum Dialect {
 /// The view of `entry` in `source`, lowered as a module against one
 /// `inbox.send_item` tool.
 fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),

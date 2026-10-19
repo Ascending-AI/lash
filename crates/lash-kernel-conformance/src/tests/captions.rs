@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{EffectControl, Environment, Mode, NamedLibrary, Package, SourceFormat};
+use lash_kernel_dialect::{Dialect, EffectControl, Environment, Mode, NamedLibrary, SourceFormat};
 use lash_kernel_doc::{
     ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal,
     CaptionTarget, Captions, CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node,
@@ -46,7 +46,7 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
     let effects = effects();
     let tool_roots = BTreeSet::from([Name::new("corpus")]);
     let controls: BTreeMap<EffectName, BTreeSet<EffectControl>> = BTreeMap::new();
-    let dialects: [(Package, NamedLibrary, SourceFormat, &str); 2] = [
+    let dialects: [(Dialect, NamedLibrary, SourceFormat, &str); 2] = [
         (
             typescript(),
             library(lash_dialect_typescript::define_helpers),
@@ -54,7 +54,7 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
             TYPESCRIPT,
         ),
         (
-            lash_dialect_python::package(Vec::new()),
+            lash_dialect_python::dialect(),
             library(lash_dialect_python::define_helpers),
             SourceFormat::PythonV1,
             PYTHON,
@@ -73,13 +73,13 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
             format: *format,
             corpus: &corpus,
         };
-        law(&dialect).unwrap_or_else(|error| panic!("{}: {error}", package.dialect));
+        law(&dialect).unwrap_or_else(|error| panic!("{}: {error}", package.name));
     }
 }
 
-fn typescript() -> Package {
-    Package {
-        dialect: "typescript".into(),
+fn typescript() -> Dialect {
+    Dialect {
+        name: "typescript".into(),
         front_end: Box::new(lash_dialect_typescript::TypeScript::default()),
         read: |source, base, limits| {
             lash_dialect_typescript::read(source, base, limits).map_err(Into::into)
@@ -87,7 +87,6 @@ fn typescript() -> Package {
         printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
         captions: lash_dialect_typescript::CAPTIONS,
         function_values: Some(lash_dialect_typescript::function_values()),
-        functions: Vec::new(),
     }
 }
 

@@ -255,11 +255,10 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
 
 fn embedding(
     tuning: &lash::vm::WorkerTuning,
-) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    lash_vm_worker::Embedder::kernel()?
-        .dialect(lash_vm_worker::typescript(tuning))?
-        .dialect(lash_vm_worker::python())?
-        .finish()
+) -> Result<lash_vm_worker::Embedder, lash_vm_worker::EmbedError> {
+    lash_vm_worker::Embedder::new()
+        .dialect(lash_vm_worker::typescript(tuning)?)?
+        .dialect(lash_vm_worker::python())
 }
 pub fn worker_entry() -> Result<bool, lash::vm::PoolError> {
     lash_vm_worker::worker_entry(&embedding)

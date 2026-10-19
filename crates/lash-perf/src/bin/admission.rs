@@ -76,10 +76,12 @@ fn main() -> Result<()> {
         "unknown catalog mode"
     );
     let counter = Counter::open()?;
-    let (standard, assembly) = counter.measure(lash_vm_library::standard_functions)?;
+    let (standard, assembly) = counter.measure(|| {
+        lash_vm_library::lash_packages().map(|packages| std::sync::Arc::clone(packages.functions()))
+    })?;
     let standard = standard?;
     let (embedding, boot) = counter
-        .measure(|| lash_vm_worker::built_dialects(&lash_vm_client::WorkerTuning::default()))?;
+        .measure(|| lash_vm_worker::built_embedding(&lash_vm_client::WorkerTuning::default()))?;
     let embedding = embedding?;
     let workload =
         lash_perf::workload::Workload::parse(include_str!("../../workloads/figments-v1.json"))?;

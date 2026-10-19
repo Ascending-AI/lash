@@ -234,7 +234,7 @@ pub enum Response {
         captions: Option<lash_kernel_doc::Captions>,
         /// What the dialect's function values are, where its sessions keep
         /// the functions a cell binds for later cells
-        /// ([`lash_kernel_dialect::Package::function_values`]).
+        /// ([`lash_kernel_dialect::Dialect::function_values`]).
         function_values: Option<lash_kernel_doc::FunctionRepresentation>,
         /// Those of the request's `reads` the document's `main` calls or
         /// spawns, as the checked document's linked effects count them;

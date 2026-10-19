@@ -62,7 +62,7 @@ pub(crate) const FUNCTION_TAG: &str = "ts.function";
 pub(crate) const FUNCTION_CALLABLE: u32 = 4;
 
 /// What a TypeScript function value is, as the dialect's package declares
-/// it ([`lash_kernel_dialect::Package::function_values`]).
+/// it ([`lash_kernel_dialect::Dialect::function_values`]).
 pub fn function_values() -> lash_kernel_doc::FunctionRepresentation {
     lash_kernel_doc::FunctionRepresentation::Token {
         tag: FUNCTION_TAG.to_owned(),

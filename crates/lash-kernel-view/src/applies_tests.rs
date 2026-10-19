@@ -4,7 +4,7 @@ use lash_kernel_dialect::{CellEnvironment, Environment, Mode};
 use lash_kernel_doc::{Name, WorkflowDocumentEntry};
 
 fn lowered_holder(source: &str, typescript: bool, cell: bool) -> WorkflowDocument {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).unwrap();
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let env = Environment {
         library: embedding.library(),
         effects: &Default::default(),

@@ -6,7 +6,9 @@ use super::*;
 use lash::workflow::document::{FunctionValue, FunctionValueLimits};
 
 fn checked_function(json: &Value) -> Result<FunctionValue, String> {
-    let functions = lash::vm::standard_functions().map_err(|error| error.to_string())?;
+    let functions = lash::package::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .map_err(|error| error.to_string())?;
     FunctionValue::from_transport_json(
         json,
         functions.as_ref(),

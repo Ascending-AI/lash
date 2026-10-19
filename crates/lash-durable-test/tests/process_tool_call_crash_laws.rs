@@ -1077,7 +1077,8 @@ impl DynamicCalls {
                 ))
                 .expect("a host pin is unguarded"),
                 &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-                &lash_vm_runtime::standard_functions()
+                &lash_vm_runtime::lash_packages()
+                    .map(|packages| std::sync::Arc::clone(packages.functions()))
                     .ok()
                     .and_then(|functions| {
                         lash::workflow::document::CheckedDeclarations::required(

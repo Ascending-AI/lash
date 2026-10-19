@@ -6,8 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    CaptionKind, Captions, Document, EffectName, FunctionDefinition, Name, Signature, Site,
-    SourceMap,
+    CaptionKind, Captions, Document, EffectName, Name, Signature, Site, SourceMap,
 };
 
 use crate::diagnostic::Diagnostic;
@@ -135,7 +134,7 @@ pub trait FrontEnd {
 /// Writes a document as plain source in the dialect, without compiling or
 /// admitting it: only code an agent could have written. The environment (the
 /// manifest, entries' signatures, private bindings, helper identities and
-/// name renames) stays in the document; [`Package::read`] takes it from the
+/// name renames) stays in the document; [`Dialect::read`] takes it from the
 /// document the source was printed from and reconstructs identical canonical
 /// bytes. Optional maps describe final UTF-8 offsets and never change the
 /// source.
@@ -179,16 +178,17 @@ impl CaptionSupport {
     }
 }
 
-/// A dialect's reader of exported source ([`Package::read`]): the source,
+/// A dialect's reader of exported source ([`Dialect::read`]): the source,
 /// the base document it was printed from and the limits it is read under,
 /// to the document and the captions the source spells.
 pub type ReadSource =
     fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<(Document, Captions), Diagnostic>;
 
-/// A dialect, as an embedder installs it.
-pub struct Package {
+/// A dialect, as an embedder installs it: its front end, reader and
+/// printer. The library functions it lowers to are lash's packages.
+pub struct Dialect {
     /// The dialect's name, as a session and a cell envelope record it.
-    pub dialect: String,
+    pub name: String,
     pub front_end: Box<dyn FrontEnd>,
     /// Read exported source back against `base`, the document it was printed
     /// from, without a library, admission or execution: the environment is
@@ -204,8 +204,4 @@ pub struct Package {
     /// keeps the functions a cell binds for later cells; `None` for a
     /// dialect whose sessions keep none ([`crate::NotSaved::Dialect`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
-    /// The helpers and extension functions the front end emits calls to,
-    /// each after every function its body calls, so an embedder registers
-    /// them in this order.
-    pub functions: Vec<FunctionDefinition>,
 }

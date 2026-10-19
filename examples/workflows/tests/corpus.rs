@@ -145,7 +145,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let roots = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("corpus")]);
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).unwrap();
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let environment = lash_kernel_dialect::Environment {
         library: embedding.library(),
         effects: &effects,
@@ -277,7 +277,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
 #[test]
 fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_loop() {
     use lash_kernel_doc::{Node, Stmt};
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).unwrap();
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let effects = [
         "corpus.echo",
         "finish",

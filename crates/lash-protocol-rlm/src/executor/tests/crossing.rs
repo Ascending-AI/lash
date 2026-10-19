@@ -67,7 +67,9 @@ fn crossing_services(dialect: &CellDialect) -> super::super::CellServices {
 /// The function value `json` carries, read as every consumer reads one:
 /// within the standard limits, validated against the build's library.
 fn function_value(json: &serde_json::Value) -> FunctionValue {
-    let functions = lash_vm_runtime::standard_functions().expect("the build's library");
+    let functions = lash_vm_runtime::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the build's library");
     FunctionValue::from_transport_json(
         json,
         functions.as_ref(),

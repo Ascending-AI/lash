@@ -1,6 +1,7 @@
-//! Each built dialect's current helper release, defined by the build.
-//! A checkpoint pins its exact manifest and refuses a different release.
-//! Parents read definitions as data without linking dialect compilers.
+//! lash's own packages and each built dialect's current helper release,
+//! made by the build. A checkpoint pins its exact manifest and refuses a
+//! different release. Parents read definitions as data without linking
+//! dialect compilers.
 
 mod manifest;
 mod releases;
@@ -24,9 +25,6 @@ pub use releases::{HeldReleases, HelperRelease, HelperReleaseIndex, ReleasedFunc
 pub struct DialectReleases {
     /// The dialect's name: what a session records and a run names.
     pub dialect: &'static str,
-    /// The dialect's helpers as the build defined them against the library
-    /// it ships with, validated in a registry holding exactly that.
-    pub helpers: &'static [u8],
     /// The index of each helper release the build retains for the dialect,
     /// oldest first.
     pub helper_release_index: &'static [u8],
@@ -57,7 +55,6 @@ macro_rules! built {
     ($dialect:literal) => {
         DialectReleases {
             dialect: $dialect,
-            helpers: include_bytes!(concat!(env!("OUT_DIR"), "/", $dialect, "_helpers.bin")),
             helper_release_index: include_bytes!(concat!(
                 env!("OUT_DIR"),
                 "/",
@@ -104,32 +101,46 @@ pub fn dialect(dialect: &str) -> Option<&'static DialectReleases> {
 #[cfg(test)]
 mod tests;
 
-/// The closed set of TypeScript helpers defined from the package's kernel sources.
-#[cfg(feature = "dialect-typescript")]
-mod typescript_helpers {
-    include!(concat!(env!("OUT_DIR"), "/typescript_helpers.rs"));
+/// One of lash's packages as the build made it: its header and the
+/// release image of its code (`lash_kernel_package::Package::from_image`).
+#[derive(Clone, Copy, Debug)]
+pub struct BuiltPackage {
+    /// The package's path.
+    pub path: &'static str,
+    /// Its `PackageHeader`, as JSON.
+    pub header: &'static str,
+    /// Its code, validated against the packages it requires.
+    pub image: &'static [u8],
 }
-#[cfg(feature = "dialect-typescript")]
-pub use typescript_helpers::TypeScriptHelper;
-/// The closed set of Python helpers defined from the package's kernel sources.
-#[cfg(feature = "dialect-python")]
-mod python_helpers {
-    include!(concat!(env!("OUT_DIR"), "/python_helpers.rs"));
+
+macro_rules! package {
+    ($path:literal, $stem:literal) => {
+        BuiltPackage {
+            path: $path,
+            header: include_str!(concat!(env!("OUT_DIR"), "/", $stem, ".package.json")),
+            image: include_bytes!(concat!(env!("OUT_DIR"), "/", $stem, ".bin")),
+        }
+    };
 }
-#[cfg(feature = "dialect-python")]
-pub use python_helpers::PythonHelper;
 
-/// The kernel's native base: its number, text and JSON functions and the
-/// machine's own, each a definition its embedder adds the native of.
-pub const KERNEL_BASE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/kernel_base.bin"));
+/// lash's packages this build holds, each after the packages it requires:
+/// `kernel` always, and those of the dialects its features name.
+pub const PACKAGES: &[BuiltPackage] = &[
+    package!("kernel", "kernel"),
+    #[cfg(feature = "dialect-typescript")]
+    package!("regex.ecma", "regex_ecma"),
+    #[cfg(feature = "dialect-typescript")]
+    package!("date.ecma", "date_ecma"),
+    #[cfg(feature = "dialect-typescript")]
+    package!("url.whatwg", "url_whatwg"),
+    #[cfg(feature = "dialect-typescript")]
+    package!("typescript", "typescript"),
+    #[cfg(feature = "dialect-python")]
+    package!("python", "python"),
+];
 
-/// Kernel collection definitions, validated against the kernel's native base
-/// and encoded in the same token form as dialect helpers.
-pub const KERNEL_COLLECTIONS: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/kernel_collections.bin"));
-
-/// TypeScript regular-expression, date and URL definitions, validated
-/// against its kernel.
-#[cfg(feature = "dialect-typescript")]
-pub const TYPESCRIPT_EXTENSIONS: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/typescript_extensions.bin"));
+/// The package at `path`, when this build holds it.
+#[must_use]
+pub fn package(path: &str) -> Option<&'static BuiltPackage> {
+    PACKAGES.iter().find(|built| built.path == path)
+}

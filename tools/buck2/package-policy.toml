@@ -30,13 +30,6 @@
 #
 # Rules apply in file order; list values accumulate in that order.
 
-# The benchmark compiles the worker's exact token bootstrap.
-[[rule]]
-packages = ["lash-dialect-typescript"]
-kinds = ["example"]
-targets = ["kernel_perf"]
-compile_data = ["//crates/lash-vm-worker:src/token_bootstrap.rs"]
-
 # --- Test partition policy ---------------------------------------------------
 
 # Git provenance needs the host's Git executable; the pool has no Git tool.
@@ -597,7 +590,6 @@ test262_corpus = { glob = [
 # artifact itself, materialized at its repository path. A filegroup would hand
 # it a symlinked directory instead.
 [exported_files]
-lash-internal-vm-worker = ["src/token_bootstrap.rs"]
 lash-runtime = [
   "host-schemas/kernel-authoring-operation/v1.d.ts",
   "host-schemas/kernel-authoring-operation/v1.schema.json",

@@ -41,7 +41,7 @@ pub const CAPTIONS: CaptionSupport = CaptionSupport {
     guide: captions::GUIDE,
 };
 
-use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Mode, Package};
+use lash_kernel_dialect::{Diagnostic, Dialect, Environment, FrontEnd, Lowered, Mode};
 use lash_kernel_doc::Span;
 use ruff_text_size::Ranged;
 
@@ -197,17 +197,16 @@ impl FrontEnd for Python {
     }
 }
 
-/// The dialect as an embedder installs it: the front end and the helpers
-/// in `functions`, in registration order, with its exact generated-source printer.
-pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
-    Package {
-        dialect: DIALECT.to_string(),
+/// The dialect as an embedder installs it: the front end, with its exact
+/// generated-source printer. Its helpers are lash's `python` package.
+pub fn dialect() -> Dialect {
+    Dialect {
+        name: DIALECT.to_string(),
         front_end: Box::new(Python::default()),
         read,
         printer: Some(Box::new(Python::default())),
         captions: CAPTIONS,
         function_values: Some(lash_kernel_doc::FunctionRepresentation::Bare),
-        functions,
     }
 }
 

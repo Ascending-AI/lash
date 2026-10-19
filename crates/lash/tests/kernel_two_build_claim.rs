@@ -238,7 +238,9 @@ fn environment() -> lash::process::ProcessEnv {
 /// helper's body resumes only in a body its document lists.
 async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
     let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
-    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
+    let functions = lash::package::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the shipped library assembles");
     document.manifest.functions =
         lash::workflow::graph::requirements(&document, functions.as_ref()).functions;
     lash::workflow::graph::admit(
@@ -371,7 +373,9 @@ async fn parked_cell(
 
 /// What `lashctl kernel-migration list` prints for `backend`.
 async fn survey(backend: &lash::Backend) -> serde_json::Value {
-    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
+    let functions = lash::package::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the shipped library assembles");
     let survey = lash::vm::survey_kernel_migration(backend, &functions)
         .await
         .expect("the survey reads the store");

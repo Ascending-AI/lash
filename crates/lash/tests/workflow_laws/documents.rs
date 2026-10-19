@@ -13,7 +13,9 @@ use super::{core_over, environment, linking, published, start_with, timer_park_a
 /// library functions, then sleeps for an hour: a process of it stands
 /// waiting with every helper it reached listed in its manifest.
 fn holding() -> Document {
-    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
+    let functions = lash::package::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the shipped library assembles");
     let map = functions
         .iter()
         .find(|(_, function)| function.definition().name.to_string() == "collection.map")

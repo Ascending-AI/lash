@@ -32,9 +32,10 @@
 /// A host names the dialects it runs: `dialect-typescript` and
 /// `dialect-python` are build features, neither a default, and each builds
 /// that dialect's helper releases for the parent. A single-binary host also
-/// enables the `worker` feature and calls `worker_entry` with the embedding
-/// it builds, naming each dialect
-/// (`WorkerEmbedder::kernel()?.dialect(typescript_worker_dialect(tuning))?.finish()`),
+/// enables the `worker` feature and calls `worker_entry` with the worker
+/// configuration it builds, naming each dialect and supplying the natives
+/// of its own packages by function identity
+/// (`WorkerEmbedder::new().native(id, native)?.dialect(typescript_worker_dialect(tuning)?)`),
 /// as its first action, before runtime creation, credentials, stores or
 /// providers, and returns from main when that call returns `true`. It
 /// selects [`WorkerEntry::reexec`]. An embedding with no dialect is refused.
@@ -76,13 +77,15 @@ pub use lash_vm_runtime::{PYTHON_DIALECT, TYPESCRIPT_DIALECT};
 /// The TypeScript dialect, for a host to install in its worker embedding.
 #[cfg(all(feature = "worker", feature = "dialect-typescript"))]
 pub use lash_vm_worker::typescript as typescript_worker_dialect;
-/// What a worker registers when it starts: the kernel library, extension
-/// functions and the dialects it lowers and prints.
+/// What a worker is configured with: the natives of the host's packages, by
+/// function identity, and the dialects it lowers and prints. Its registry
+/// is derived from the packages its parent holds (`lash::package`).
 #[cfg(feature = "worker")]
 pub use lash_vm_worker::{
     Dialect as WorkerDialect, Embed as WorkerEmbed, EmbedError as WorkerEmbedError,
     Embedder as WorkerEmbedder, Embedding as WorkerEmbedding,
-    built_dialects as built_worker_dialects, worker_entry,
+    built_dialects as built_worker_dialects, built_embedding as built_worker_embedding,
+    worker_entry,
 };
 /// The Python dialect, for a host to install in its worker embedding.
 #[cfg(all(feature = "worker", feature = "dialect-python"))]
@@ -122,15 +125,12 @@ pub use lash_vm_client::{
     SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
     WorkerWork,
 };
-/// Why lash's shipped library did not assemble: a defect of the build.
-#[cfg(feature = "codemode")]
-pub use lash_vm_runtime::LibraryError;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_function_value, standard_functions,
+    UnmigratedKernelSession, migrate_function_value,
 };
 /// What still pins a helper release before this build's own, and why a
 /// process's run would not carry onto the build's helpers (FIG-5799).

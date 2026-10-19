@@ -63,7 +63,7 @@ fn sites(document: &Document) -> Vec<Site> {
 /// default printing sends no map and is independent of ordinary cell caps.
 #[tokio::test]
 async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps() {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let environment = lash::dialect::Environment {
         library: embedding.library(),
@@ -163,7 +163,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
 /// missing and mismatched requirements at normal admission.
 #[tokio::test]
 async fn exported_reading_preserves_dependency_identities_for_admission() {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let mut document = k::parse_document("kernel 1\nnumbers float\nmain { finish null }\n")
         .expect("host document");
@@ -216,7 +216,7 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
 /// before reading dependencies that already carry their complete identities.
 #[tokio::test]
 async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let definition = embedding
         .registry()
         .expect("registry")
@@ -303,7 +303,7 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
 fn a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declarations() {
     use lash::helper_labels::{labels, title};
     use lash::workflow::view::{CalleeView, derive};
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let environment = lash::dialect::Environment {
         library: embedding.library(),

@@ -154,10 +154,11 @@ fn workbench_effects(dialect: WorkbenchDialect) -> lash::vm::HostBoundary {
 fn the_workbench_tutorials_lower_in_each_dialect() {
     // The Workbench names both dialects, as its worker does.
     let tuning = lash::vm::WorkerTuning::default();
-    let embedding = lash::vm::WorkerEmbedder::kernel()
-        .and_then(|embedder| embedder.dialect(lash::vm::typescript_worker_dialect(&tuning)))
+    let packages = lash::package::lash_packages().expect("lash's packages");
+    let embedding = lash::vm::typescript_worker_dialect(&tuning)
+        .and_then(|dialect| lash::vm::WorkerEmbedder::new().dialect(dialect))
         .and_then(|embedder| embedder.dialect(lash::vm::python_worker_dialect()))
-        .and_then(lash::vm::WorkerEmbedder::finish)
+        .and_then(|embedder| embedder.finish(&packages))
         .expect("embedding");
     for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
         let boundary = workbench_effects(dialect);

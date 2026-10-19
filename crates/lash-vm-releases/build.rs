@@ -1,5 +1,6 @@
-//! Defines and validates each built dialect's current helpers once.
-//! Workers and parents read the same build artifacts.
+//! Makes lash's own packages once (FIG-6917), and from their definitions
+//! each built dialect's current helper release. Workers and parents read
+//! the same build artifacts.
 
 #![cfg_attr(
     not(any(feature = "dialect-typescript", feature = "dialect-python")),
@@ -30,8 +31,10 @@ mod sets;
 #[path = "src/manifest.rs"]
 mod manifest;
 
-use lash_kernel_dialect::NamedLibrary;
-use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
+use std::collections::BTreeSet;
+
+use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
+use lash_kernel_package::{Package, PackagePath, Root};
 
 use crate::releases::{HelperRelease, HelperReleaseIndex};
 
@@ -43,52 +46,181 @@ type BuildError = Box<dyn std::error::Error>;
 )]
 fn main() -> Result<(), BuildError> {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
-    let mut kernel = FunctionRegistry::new();
-    library::register_kernel_base(&mut kernel)?;
-    write_functions(
-        &out.join("kernel_base.bin"),
-        &FunctionRegistry::new(),
-        &kernel,
+    let kernel = package("kernel", None, &[], &mut |registry| {
+        library::define_kernel(registry)
+    })?;
+    write_package(&out, &kernel, &[])?;
+    std::fs::write(
+        out.join("kernel_helpers.rs"),
+        sets::kernel_source(&registry_of(&[&kernel])?)?,
     )?;
-    let basis = kernel.clone();
-    lash_kernel_lib::register_collections(&mut kernel)?;
-    write_kernel_set(&out, &kernel)?;
-    write_functions(&out.join("kernel_collections.bin"), &basis, &kernel)?;
     #[cfg(feature = "dialect-typescript")]
     {
-        let mut registry = kernel.clone();
-        library::register_extensions(&mut registry)?;
-        lash_ext_date_ecma::register(&mut registry)?;
-        lash_ext_url_whatwg::register(&mut registry)?;
-        write_functions(&out.join("typescript_extensions.bin"), &kernel, &registry)?;
+        let regex = package(
+            "regex.ecma",
+            Some("regex.ecma"),
+            &[&kernel],
+            &mut |registry| library::define_regex(registry),
+        )?;
+        let date = package(
+            "date.ecma",
+            Some("date.ecma"),
+            &[&kernel],
+            &mut |registry| library::define_date(registry),
+        )?;
+        let url = package(
+            "url.whatwg",
+            Some("url.whatwg"),
+            &[&kernel],
+            &mut |registry| library::define_url(registry),
+        )?;
+        let requires = [&kernel, &regex, &date, &url];
+        let typescript = helpers("typescript", "ts", &requires, |library| {
+            Ok(lash_dialect_typescript::define_helpers(library)?)
+        })?;
+        for package in [&regex, &date, &url] {
+            write_package(&out, package, &[&kernel])?;
+        }
+        write_package(&out, &typescript, &requires)?;
         dialect(
             &out,
             "typescript",
-            registry,
-            |library| Ok(lash_dialect_typescript::define_helpers(library)?),
-            library::implement_typescript,
+            &[&kernel, &regex, &date, &url, &typescript],
+            &typescript,
         )?;
     }
     #[cfg(feature = "dialect-python")]
     {
-        dialect(
-            &out,
-            "python",
-            kernel,
-            |library| Ok(lash_dialect_python::define_helpers(library)?),
-            library::implement_python,
-        )?;
+        let python = helpers("python", "py", &[&kernel], |library| {
+            Ok(lash_dialect_python::define_helpers(library)?)
+        })?;
+        write_package(&out, &python, &[&kernel])?;
+        dialect(&out, "python", &[&kernel, &python], &python)?;
     }
-    #[cfg(not(any(feature = "dialect-typescript", feature = "dialect-python")))]
-    let _ = (&out, "typescript", "python");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())
 }
 
-/// Defines `dialect`'s helpers against `registry`, the library it ships
-/// with, adds the natives of its operations (`implement`), resolves and
-/// checks its releases, and writes all of it under the dialect's name.
+/// The lash package at `path` whose definitions `define` registers over
+/// `requires`, under `root`, or, with none, under the first segment of
+/// each of its definitions' names (the kernel library's families).
+fn package(
+    path: &str,
+    root: Option<&str>,
+    requires: &[&Package],
+    define: &mut dyn FnMut(&mut FunctionRegistry) -> Result<(), String>,
+) -> Result<Package, BuildError> {
+    let mut registered = |registry: &mut FunctionRegistry| {
+        let before: BTreeSet<FunctionId> = registry.iter().map(|(function, _)| *function).collect();
+        define(registry)?;
+        Ok(defined_since(registry, &before))
+    };
+    let roots: Vec<Root> = match root {
+        Some(root) => vec![Root::new(root)],
+        None => {
+            let mut probe = registry_of(requires)?;
+            registered(&mut probe)?
+                .iter()
+                .map(|definition| {
+                    let name = definition.name.as_str();
+                    Root::new(name.split('.').next().unwrap_or(name))
+                })
+                .collect()
+        }
+    };
+    Ok(Package::lash(
+        PackagePath::parse(path)?,
+        library::RELEASE,
+        roots,
+        requires,
+        false,
+        registered,
+    )?)
+}
+
+/// A dialect's helpers as a package: defined against the names of every
+/// function `requires` holds.
+#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
+fn helpers(
+    path: &str,
+    root: &str,
+    requires: &[&Package],
+    define: impl Fn(
+        &mut lash_kernel_dialect::NamedLibrary,
+    ) -> Result<Vec<FunctionDefinition>, BuildError>,
+) -> Result<Package, BuildError> {
+    Ok(Package::lash(
+        PackagePath::parse(path)?,
+        library::RELEASE,
+        [Root::new(root)],
+        requires,
+        false,
+        |registry| {
+            let mut library = lash_kernel_dialect::NamedLibrary::from_registry(registry)
+                .map_err(|error| error.to_string())?;
+            define(&mut library).map_err(|error| error.to_string())
+        },
+    )?)
+}
+
+/// The functions `registry` holds that `before` did not, each after the
+/// functions it calls.
+fn defined_since(
+    registry: &FunctionRegistry,
+    before: &BTreeSet<FunctionId>,
+) -> Vec<FunctionDefinition> {
+    release::current(registry)
+        .functions
+        .into_iter()
+        .filter(|function| !before.contains(&function.function))
+        .map(|function| function.definition)
+        .collect()
+}
+
+/// A declarations registry holding the code of every package of `packages`.
+fn registry_of(packages: &[&Package]) -> Result<FunctionRegistry, BuildError> {
+    let mut registry = FunctionRegistry::declarations();
+    for package in packages {
+        package.code().register_into(&mut registry, &|_| None)?;
+    }
+    Ok(registry)
+}
+
+/// Writes `package` as its header and the release image of its code,
+/// validated against `requires`, the packages it requires.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a build script writes its OUT_DIR artifacts"
+)]
+fn write_package(
+    out: &std::path::Path,
+    package: &Package,
+    requires: &[&Package],
+) -> Result<(), BuildError> {
+    let stem = package.path().to_string().replace('.', "_");
+    let mut checked = registry_of(requires)?;
+    let mut definitions = Vec::with_capacity(package.code().len());
+    for at in 0..package.code().len() {
+        definitions.push(FunctionDefinition::clone(
+            package.code().definition(at)?.as_ref(),
+        ));
+    }
+    let validated = checked.validate_functions(definitions)?;
+    std::fs::write(
+        out.join(format!("{stem}.package.json")),
+        serde_json::to_vec(&package.header())?,
+    )?;
+    std::fs::write(
+        out.join(format!("{stem}.bin")),
+        validated.to_image(&lash_kernel_vm::body_census),
+    )?;
+    Ok(())
+}
+
+/// Resolves and checks `dialect`'s helper releases over `packages`, the
+/// packages it ships with, `helpers` its own, and writes them under the
+/// dialect's name.
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
 #[expect(
     clippy::disallowed_methods,
@@ -97,33 +229,16 @@ fn main() -> Result<(), BuildError> {
 fn dialect(
     out: &std::path::Path,
     dialect: &str,
-    mut registry: FunctionRegistry,
-    define: impl FnOnce(&mut NamedLibrary) -> Result<Vec<FunctionDefinition>, BuildError>,
-    implement: fn(&mut FunctionRegistry, &[lash_kernel_doc::FunctionId]) -> Result<(), String>,
+    packages: &[&Package],
+    helpers: &Package,
 ) -> Result<(), BuildError> {
     let write =
         |file: &str, bytes: &[u8]| std::fs::write(out.join(format!("{dialect}_{file}")), bytes);
-    let mut named = NamedLibrary::from_registry(&registry)?;
-    let helpers = define(&mut named)?;
-    let ty = match dialect {
-        "typescript" => "TypeScriptHelper",
-        "python" => "PythonHelper",
-        _ => return Err("undeclared dialect".into()),
-    };
-    write(
-        "helpers.rs",
-        sets::enum_source(ty, helpers.iter().map(|f| f.name.as_str()))?.as_bytes(),
-    )?;
-    let helper_names: Vec<_> = helpers.iter().map(|helper| helper.name.clone()).collect();
-    let validated = registry.validate_functions(helpers)?;
-    let ids: Vec<_> = validated.iter().map(|(function, _)| *function).collect();
-    implement(&mut registry, &ids)?;
+    let registry = registry_of(packages)?;
+    let helper_names: Vec<_> = (0..helpers.code().len())
+        .map(|at| lash_kernel_doc::FunctionName::new(helpers.code().name(at)))
+        .collect::<Result<_, _>>()?;
     sets::validate(&registry, &helper_names, dialect == "typescript")?;
-    write(
-        "helpers.bin",
-        &validated.to_image(&lash_kernel_vm::body_census),
-    )?;
-
     let held = releases::HeldReleases {
         retained: vec![release::current(&registry)],
     };
@@ -164,39 +279,4 @@ fn checkpoint_catalog(held: &releases::HeldReleases) -> Result<(Vec<u8>, Vec<u8>
         nodes.bytes(&node.bytes);
     }
     Ok((manifests.into_bytes(), nodes.into_bytes()))
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a build script writes its OUT_DIR artifacts"
-)]
-fn write_kernel_set(out: &std::path::Path, registry: &FunctionRegistry) -> Result<(), BuildError> {
-    std::fs::write(
-        out.join("kernel_helpers.rs"),
-        sets::kernel_source(registry)?,
-    )?;
-    Ok(())
-}
-
-/// Reuses the release's dependency order and the helper boot image.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the build writes its OUT_DIR artifacts"
-)]
-fn write_functions(
-    path: &std::path::Path,
-    basis: &FunctionRegistry,
-    registry: &FunctionRegistry,
-) -> Result<(), BuildError> {
-    let ordered = release::current(registry);
-    let (base, definitions): (Vec<_>, Vec<_>) = ordered
-        .functions
-        .into_iter()
-        .partition(|function| basis.get(&function.function).is_some());
-    let mut checked = FunctionRegistry::declarations();
-    checked.validate_functions(base.into_iter().map(|f| f.definition).collect())?;
-    let validated =
-        checked.validate_functions(definitions.into_iter().map(|f| f.definition).collect())?;
-    std::fs::write(path, validated.to_image(&lash_kernel_vm::body_census))?;
-    Ok(())
 }

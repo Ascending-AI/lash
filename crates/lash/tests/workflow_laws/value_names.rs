@@ -36,7 +36,7 @@ const PYTHON: &str = "async def route(priority: str):
 /// `source` lowered as a module against one `inbox.send_item` tool, with
 /// the captions it spells.
 fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),
         k::Signature {
@@ -69,7 +69,7 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
 
 /// The checked holder and view of `document` entered at `route`.
 fn view(document: Document) -> (WorkflowDocument, WorkflowView) {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let functions = embedding
         .registry()
         .expect("registry")

@@ -76,7 +76,9 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
         .find(|args| args["value"] == marker)
         .expect("the process called the tool")["nested"]["fact"]
         .clone();
-    let functions = lash::vm::standard_functions().expect("the build's library");
+    let functions = lash::package::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
+        .expect("the build's library");
     let value = FunctionValue::from_transport_json(
         &shipped,
         functions.as_ref(),

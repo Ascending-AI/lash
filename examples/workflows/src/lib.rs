@@ -200,7 +200,7 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
     reason = "corpus tooling reads explicitly supplied fixture paths"
 )]
 pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
-    let embedding = lash_vm_worker::built_dialects(&Default::default())?;
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in tools()? {

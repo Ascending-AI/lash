@@ -1091,5 +1091,12 @@
     "compile_data": [
       "tests/control.kernel"
     ]
+  },
+  "crates/lash-kernel-package": {
+    "compile_data": [
+      "src/testing/dataframe.kernel",
+      "src/testing/dataframe.labels.tsv",
+      "src/testing/dataframe.surface"
+    ]
   }
 }

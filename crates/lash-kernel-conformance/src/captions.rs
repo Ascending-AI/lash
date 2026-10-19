@@ -1,5 +1,5 @@
 //! The caption conformance harness (`K-CAP-001`..`K-CAP-007`), the same for
-//! every dialect: it takes a dialect [`Package`] and that dialect's
+//! every dialect: it takes a [`Dialect`] and that dialect's
 //! [`CaptionCorpus`], and checks each rule against what the package's front
 //! end, printer and reader do. A dialect that spells no caption declares no
 //! [`lash_kernel_dialect::CaptionSupport::kinds`]: every caption it prints is
@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_dialect::{
-    Environment, Lowered, Mode, Package, PrintError, PrintOptions, SourceFormat,
+    Dialect, Environment, Lowered, Mode, PrintError, PrintOptions, SourceFormat,
 };
 use lash_kernel_doc::{Caption, CaptionEntry, CaptionTarget, Captions, Document, Site};
 use serde::Deserialize;
@@ -54,7 +54,7 @@ pub struct ReadbackCase {
 /// A dialect under test: its package, what its modules lower against, the
 /// generated format its printer writes, and its corpus.
 pub struct CaptionDialect<'a> {
-    pub package: &'a Package,
+    pub package: &'a Dialect,
     pub environment: Environment<'a>,
     pub format: SourceFormat,
     pub corpus: &'a CaptionCorpus,

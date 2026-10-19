@@ -7,6 +7,7 @@
 //! domains, charges, and native work guard.
 
 mod arithmetic;
+mod brand;
 mod comparison;
 mod helpers;
 pub use helpers::{KERNEL_NAME_FAMILIES, KernelHelper};
@@ -15,6 +16,7 @@ mod numbers;
 mod numeric;
 mod text_json;
 
+pub use brand::register_brands;
 pub use comparison::{compare, equal, same};
 pub use numbers::{implement_numbers, numbers, register_numbers};
 pub use numeric::{float_to_integer, integer_to_float};

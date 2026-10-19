@@ -12,24 +12,24 @@ mod embedding;
 mod heap_profile;
 #[cfg(all(unix, feature = "testing"))]
 pub mod in_process;
-/// The library functions lash ships, as `lash-vm-releases`' build defines
-/// each dialect's helpers against them.
+/// lash's own packages: the natives of each, by its path, as
+/// `lash-vm-releases`' build defines them.
 #[path = "../../lash-vm-releases/src/library.rs"]
 mod library;
 #[cfg(all(test, unix))]
 mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod read_laws;
-mod token_bootstrap;
 #[cfg(all(test, unix))]
 mod turn_laws;
 #[cfg(feature = "dialect-typescript")]
 pub use embedding::typescript;
-pub use embedding::{Dialect, EmbedError, Embedder, Embedding};
+pub use embedding::{EmbedError, Embedder, Embedding};
 #[cfg(feature = "dialect-python")]
 pub use embedding::{python, python_with_limits};
 #[cfg(feature = "dialect-python")]
 pub use lash_dialect_python::SourceLimits as PythonSourceLimits;
+pub use lash_kernel_dialect::Dialect;
 
 #[cfg(unix)]
 mod entry;
@@ -47,27 +47,28 @@ mod worker;
 pub use entry::{Embed, worker_entry};
 pub use lash_vm_client::PoolError;
 
-/// Assembles what a worker runs from the parent's working policy.
+/// Configures what a worker runs from the parent's working policy.
 #[cfg(not(unix))]
-pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError>;
+pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedder, EmbedError>;
 
 #[cfg(not(unix))]
 pub fn worker_entry(_embed: &Embed) -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 
-/// The embedding of the helper executable and of a host that runs every
-/// dialect its build names: each dialect this crate was built with
+/// The configuration of the helper executable and of a host that runs
+/// every dialect its build names: each dialect this crate was built with
 /// (`dialect-typescript`, `dialect-python`). A build with neither feature
-/// names none, and the embedding is refused ([`EmbedError::NoDialect`]).
+/// names none, and the embedding is refused when it is bound
+/// ([`EmbedError::NoDialect`]).
 ///
 /// # Errors
 ///
 /// [`EmbedError`].
-pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError> {
-    let embedder = Embedder::kernel()?;
+pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedder, EmbedError> {
+    let embedder = Embedder::new();
     #[cfg(feature = "dialect-typescript")]
-    let embedder = embedder.dialect(typescript(tuning))?;
+    let embedder = embedder.dialect(typescript(tuning)?)?;
     #[cfg(feature = "dialect-python")]
     let embedder = embedder.dialect(python_with_limits(
         lash_dialect_python::SourceLimits::new(
@@ -81,7 +82,20 @@ pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding
     ))?;
     #[cfg(not(feature = "dialect-typescript"))]
     let _ = tuning;
-    embedder.finish()
+    Ok(embedder)
+}
+
+/// [`built_dialects`] bound to lash's own packages, as this process's
+/// parent holds them: the embedding of a host that installs no package of
+/// its own.
+///
+/// # Errors
+///
+/// [`EmbedError`].
+pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError> {
+    let packages = lash_vm_library::lash_packages()
+        .map_err(|error| EmbedError::Registry(error.to_string()))?;
+    built_dialects(tuning)?.finish(&packages)
 }
 
 #[cfg(all(unix, feature = "testing"))]

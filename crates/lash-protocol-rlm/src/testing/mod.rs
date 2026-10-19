@@ -297,10 +297,8 @@ const PYTHON_WORKER_ENTRY: &str = "testing::python_worker_entry";
 /// library and the Python dialect, through the builder every host uses.
 fn python_embedding(
     _tuning: &lash_vm_client::WorkerTuning,
-) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    lash_vm_worker::Embedder::kernel()?
-        .dialect(lash_vm_worker::python())?
-        .finish()
+) -> Result<lash_vm_worker::Embedder, lash_vm_worker::EmbedError> {
+    lash_vm_worker::Embedder::new().dialect(lash_vm_worker::python())
 }
 
 /// The worker entry of [`python_workers`]: a pool execs this test binary
@@ -364,13 +362,14 @@ const UNMAPPED_WORKER_ENTRY: &str = "testing::unmapped_worker_entry";
 /// Both dialects, each lowering with no source map.
 fn unmapped_embedding(
     tuning: &lash_vm_client::WorkerTuning,
-) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    let unmapped =
-        |front_end| -> Box<dyn lash_kernel_dialect::FrontEnd> { Box::new(Unmapped(front_end)) };
-    lash_vm_worker::Embedder::kernel()?
-        .dialect(lash_vm_worker::typescript(tuning).with_front_end(unmapped))?
-        .dialect(lash_vm_worker::python().with_front_end(unmapped))?
-        .finish()
+) -> Result<lash_vm_worker::Embedder, lash_vm_worker::EmbedError> {
+    let mut typescript = lash_vm_worker::typescript(tuning)?;
+    typescript.front_end = Box::new(Unmapped(typescript.front_end));
+    let mut python = lash_vm_worker::python();
+    python.front_end = Box::new(Unmapped(python.front_end));
+    lash_vm_worker::Embedder::new()
+        .dialect(typescript)?
+        .dialect(python)
 }
 
 /// The worker entry of [`unmapped_workers`], as [`python_worker_entry`] is

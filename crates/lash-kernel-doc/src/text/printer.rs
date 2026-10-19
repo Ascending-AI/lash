@@ -86,6 +86,14 @@ pub(crate) fn requirement_text(requirement: &OperationRequirement) -> String {
     printer.out
 }
 
+/// Writes a type in kernel text, as a signature writes it.
+pub fn print_type(ty: &Type) -> String {
+    let no_functions = BTreeMap::new();
+    let mut printer = Printer::new(&no_functions);
+    printer.ty(ty);
+    printer.out
+}
+
 /// Writes a library-function definition as kernel text.
 /// [`super::parse_definition`] reads the text back to an equal definition.
 pub fn print_definition(definition: &FunctionDefinition) -> String {

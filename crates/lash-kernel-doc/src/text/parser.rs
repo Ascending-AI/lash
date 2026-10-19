@@ -148,6 +148,17 @@ pub fn parse_document_with_limits(
     })
 }
 
+/// Reads a signature, `(name: Type, …) -> Type`, from kernel text: the
+/// notation a package surface declares its members' slots in.
+pub fn parse_signature(text: &str) -> Result<Signature, ParseError> {
+    let mut parser = Parser::new(text, crate::KernelDataLimits::standard())?;
+    let signature = parser.signature()?;
+    if parser.peek() != &Token::End {
+        return Err(parser.unexpected("the end of the signature"));
+    }
+    Ok(signature)
+}
+
 /// Reads a library-function definition from kernel text.
 pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
     parse_definition_with_limits(text, crate::KernelDataLimits::standard())

@@ -180,11 +180,7 @@ fn main() {
     // The pool laws run under a host that names TypeScript alone and under
     // one that names every dialect the fixture is built with (FIG-5990).
     let embed: &lash_vm_worker::Embed = if args.iter().any(|arg| arg == "--dialects=typescript") {
-        &|tuning| {
-            lash_vm_worker::Embedder::kernel()?
-                .dialect(lash_vm_worker::typescript(tuning))?
-                .finish()
-        }
+        &|tuning| lash_vm_worker::Embedder::new().dialect(lash_vm_worker::typescript(tuning)?)
     } else {
         &lash_vm_worker::built_dialects
     };

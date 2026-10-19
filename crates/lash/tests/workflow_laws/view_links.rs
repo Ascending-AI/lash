@@ -23,7 +23,7 @@ fn echo() -> BTreeMap<k::EffectName, k::Signature> {
 /// The TypeScript and Python views, each with its canonical source for
 /// failure messages.
 fn views() -> [(&'static str, WorkflowView); 2] {
-    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let effects = echo();
     let environment = lash::dialect::Environment {

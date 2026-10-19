@@ -51,8 +51,12 @@ fn the_build_holds_the_releases_it_declares_for_each_dialect() {
                 .map(HelperRelease::index)
                 .collect::<Vec<_>>()
         );
-        let helpers =
-            lash_kernel_doc::ReleasedFunctions::read(built.helpers).expect("the helpers read");
+        let helpers = lash_kernel_doc::ReleasedFunctions::read(
+            crate::package(built.dialect)
+                .expect("the dialect's package")
+                .image,
+        )
+        .expect("the helpers read");
         let building = held.retained.last().expect("the release the tree builds");
         for function in helpers.ids() {
             assert!(
@@ -69,10 +73,14 @@ fn the_build_holds_the_releases_it_declares_for_each_dialect() {
 #[test]
 fn a_dialects_release_holds_none_of_another_dialects_helpers() {
     let helpers = |built: &DialectReleases| -> std::collections::BTreeSet<_> {
-        lash_kernel_doc::ReleasedFunctions::read(built.helpers)
-            .expect("the helpers read")
-            .ids()
-            .collect()
+        lash_kernel_doc::ReleasedFunctions::read(
+            crate::package(built.dialect)
+                .expect("the dialect's package")
+                .image,
+        )
+        .expect("the helpers read")
+        .ids()
+        .collect()
     };
     for built in DIALECTS {
         let held = built.held_releases().expect("the build's releases");
@@ -267,29 +275,26 @@ fn helper_sets_and_labels_cover_every_release_write_set() {
             .iter()
             .map(|h| h.name())
             .collect();
-        match dialect.dialect {
-            #[cfg(feature = "dialect-typescript")]
-            TYPESCRIPT => {
-                for helper in TypeScriptHelper::ALL {
-                    assert!(expected.insert(helper.name()));
-                }
-                for op in lash_ext_regex_ecma::Operation::ALL {
-                    assert!(expected.insert(op.name()));
-                }
-                for op in lash_ext_date_ecma::Operation::ALL {
-                    assert!(expected.insert(op.name()));
-                }
-                for op in lash_ext_url_whatwg::Operation::ALL {
-                    assert!(expected.insert(op.name()));
-                }
+        let helpers = lash_kernel_doc::ReleasedFunctions::read(
+            crate::package(dialect.dialect)
+                .expect("the dialect's package")
+                .image,
+        )
+        .expect("the helpers read");
+        for at in 0..helpers.len() {
+            assert!(expected.insert(helpers.name(at)));
+        }
+        #[cfg(feature = "dialect-typescript")]
+        if dialect.dialect == TYPESCRIPT {
+            for op in lash_ext_regex_ecma::Operation::ALL {
+                assert!(expected.insert(op.name()));
             }
-            #[cfg(feature = "dialect-python")]
-            PYTHON => {
-                for helper in PythonHelper::ALL {
-                    assert!(expected.insert(helper.name()));
-                }
+            for op in lash_ext_date_ecma::Operation::ALL {
+                assert!(expected.insert(op.name()));
             }
-            other => panic!("undeclared dialect {other}"),
+            for op in lash_ext_url_whatwg::Operation::ALL {
+                assert!(expected.insert(op.name()));
+            }
         }
         for release in &held.retained {
             let mut names = BTreeSet::new();

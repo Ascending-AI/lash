@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Each built dialect's current helper release, as build-generated data."
+description = "lash's own packages and each built dialect's current helper release, as build-generated data."
 
 [lib]
 name = "lash_vm_releases"
@@ -41,6 +41,7 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 lash-helper-labels = { workspace = true }
+lash-kernel-package = { workspace = true }
 lash-checkpoint-encoder = { workspace = true }
 thiserror = { workspace = true }
 lash-kernel-doc = { workspace = true }

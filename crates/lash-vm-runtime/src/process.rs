@@ -435,7 +435,8 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_library::LibraryError> {
-        let functions = lash_vm_library::standard_functions()?;
+        let functions = lash_vm_library::lash_packages()
+            .map(|packages| std::sync::Arc::clone(packages.functions()))?;
         Ok(Self::with_functions(
             documents, dialect, functions, workers, bounds,
         ))

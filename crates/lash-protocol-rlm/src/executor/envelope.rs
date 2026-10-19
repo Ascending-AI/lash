@@ -58,7 +58,7 @@ pub struct CellEnvelope {
     /// ([`lash_kernel_dialect::Lowered::written`]).
     pub written: BTreeMap<Site, Written>,
     /// What the dialect's function values are, where its sessions keep the
-    /// functions a cell binds ([`lash_kernel_dialect::Package::function_values`]).
+    /// functions a cell binds ([`lash_kernel_dialect::Dialect::function_values`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     /// The effects the document was lowered against.
     pub effects: BTreeMap<EffectName, RecordedEffect>,

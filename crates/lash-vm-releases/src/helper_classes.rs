@@ -725,8 +725,12 @@ pub(super) fn current_census() -> String {
     dialects.sort_by_key(|built| built.dialect);
     assert_eq!(dialects.len(), 2, "the census checks both shipped dialects");
     for built in dialects {
-        let helpers =
-            lash_kernel_doc::ReleasedFunctions::read(built.helpers).expect("helpers read");
+        let helpers = lash_kernel_doc::ReleasedFunctions::read(
+            crate::package(built.dialect)
+                .expect("the dialect's package")
+                .image,
+        )
+        .expect("helpers read");
         let exports = helpers.ids().collect();
         let held = built.held_releases().expect("releases decode");
         let definitions: BTreeMap<_, _> = held

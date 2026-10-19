@@ -1,48 +1,52 @@
-//! What a worker can run: the function registry it assembles when it
-//! starts, and the dialects it lowers and prints.
+//! What a worker can run: the function registry it derives from its
+//! parent's one registration of packages, and the dialects it lowers and
+//! prints.
 //!
 //! A host names its dialects: there is no embedding it gets without
-//! choosing (FIG-5990). It builds one from the kernel library and each
-//! dialect it installs, `Embedder::kernel()?.dialect(typescript(tuning))?
-//! .dialect(python())?.finish()`, and an embedding with no dialect is
-//! refused. Each dialect is a build feature of this crate
-//! (`dialect-typescript`, `dialect-python`), off by default: a host that
-//! enables one compiles none of the other's parser.
+//! choosing (FIG-5990). It configures a worker with natives and dialects
+//! only, `Embedder::new().native(id, native)?.dialect(typescript(tuning)?)?`,
+//! and binds that configuration once to the packages its parent holds,
+//! `.finish(&packages)` (FIG-6917, V1): a worker never lists packages of
+//! its own, so it cannot hold a package the parent lacks or miss one it
+//! holds. An embedding with no dialect is refused. Each dialect is a build
+//! feature of this crate (`dialect-typescript`, `dialect-python`), off by
+//! default: a host that enables one compiles none of the other's parser.
 //!
 //! A document names every function it uses by content identity and carries
 //! none of them (kernel spec §9 rule 2), so the registry is fixed before the
-//! first document arrives: the kernel library, the machine's own functions,
-//! and each installed dialect's extensions and helpers. A dialect's helpers
-//! are defined once, when `lash-vm-releases` is built; a worker registers
-//! them as built (FIG-5796).
+//! first document arrives: every held artifact's code, lash's packages'
+//! natives and plans, and the host's natives, each by identity. lash's
+//! packages are made once, when `lash-vm-releases` is built; a worker
+//! registers their images as built (FIG-5796, FIG-6843).
 //!
-//! The embedding also holds every function of the helper releases each of
-//! its dialects retains that it does not define itself (FIG-5799,
-//! `lash-vm-releases`): a run parked under an earlier release's helpers,
-//! and a saved function written against them, resume on exactly the
-//! functions they pin. Names resolve against the embedding's own functions
-//! alone, or, for a writer the fleet holds to an earlier release, against
-//! that release's.
+//! The embedding also holds the helper releases its parent's dialects
+//! retain (FIG-5799, `lash-vm-releases`): names resolve against the
+//! embedding's own functions alone, or, for a writer the fleet holds to an
+//! earlier release, against that release's.
 
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode, NamedLibrary, Package};
-#[cfg(test)]
-use lash_kernel_doc::ReleasedFunctions;
-use lash_kernel_doc::{FunctionId, FunctionRegistry};
+use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction};
+use lash_kernel_package::{HeldPackages, Origin, PackageInstall, PackageRefusal};
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::graph::ReleaseGraph;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
-/// start: it is a defect of the build, never of a document.
+/// start: it is a defect of the build or of the host's configuration,
+/// never of a document.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error("the function registry refused a definition: {0}")]
     Registry(String),
+    /// The packages refused: a `Native`-only function with no native, a
+    /// native for no held function, or an artifact the registry refused.
+    #[error(transparent)]
+    Package(#[from] PackageRefusal),
     #[error("the dialect `{dialect}` is installed twice")]
     DuplicateDialect { dialect: String },
     #[error("the dialect `{dialect}` could not be installed: {message}")]
@@ -51,7 +55,7 @@ pub enum EmbedError {
     /// installs each dialect its sessions and processes are written in.
     #[error(
         "the embedding installs no dialect; name each one the host runs, as in \
-         `Embedder::kernel()?.dialect(typescript(tuning))?.finish()`"
+         `Embedder::new().dialect(typescript(tuning)?)?.finish(&packages)`"
     )]
     NoDialect,
     /// A writer asked for the names of a helper release the embedding does
@@ -81,7 +85,7 @@ pub struct Embedding {
     prepared_written: OnceLock<PreparedLibrary>,
     prepared_interpreted: OnceLock<PreparedLibrary>,
     pub(crate) library: NamedLibrary,
-    pub(crate) dialects: BTreeMap<String, Package>,
+    pub(crate) dialects: BTreeMap<String, Dialect>,
     /// The helper release the embedding's own names are.
     writes: u32,
     /// The released helper sets the embedding holds, each with the names a
@@ -135,7 +139,7 @@ impl Embedding {
     }
 
     /// The released helper sets the embedding holds besides its own
-    /// functions, oldest first: each release as every installed dialect
+    /// functions, oldest first: each release as every dialect of the build
     /// holds it, together.
     pub fn helper_releases(&self) -> impl Iterator<Item = &HelperReleaseIndex> {
         self.releases.iter().map(|(release, _)| release)
@@ -239,176 +243,128 @@ impl Embedding {
         environment: &Environment<'_>,
         mode: Mode<'_>,
     ) -> Option<Result<Lowered, Diagnostic>> {
-        let package = self.dialects.get(dialect)?;
-        Some(package.front_end.lower(source, environment, mode))
+        let dialect = self.dialects.get(dialect)?;
+        Some(dialect.front_end.lower(source, environment, mode))
     }
 }
 
-/// A dialect a host installs in its worker embedding: its front end and
-/// printer, the library it ships with beyond the kernel's, and its helpers
-/// as the build defined them ([`typescript`], [`python`]).
-pub struct Dialect {
-    name: &'static str,
-    package: Result<Package, EmbedError>,
-    /// Registers the functions the dialect's helpers call beyond the
-    /// kernel library's.
-    extensions: Option<RegisterExtensions>,
-    /// Adds the natives of the dialect's operations to its registered
-    /// helpers.
-    natives: ImplementOperations,
-}
-
-/// Registers a dialect's extension functions.
-type RegisterExtensions = fn(&mut FunctionRegistry) -> Result<(), String>;
-
-/// Adds a dialect's operation natives to its helpers, by identity.
-type ImplementOperations = fn(&mut FunctionRegistry, &[FunctionId]) -> Result<(), String>;
-
-impl Dialect {
-    /// The dialect's name: what a session records and a run names.
-    #[must_use]
-    pub fn name(&self) -> &str {
-        self.name
-    }
-
-    /// This dialect, its front end replaced by what `wrap` makes of it.
-    /// Hidden from docs: test support, not dialect surface.
-    #[doc(hidden)]
-    #[cfg(feature = "testing")]
-    #[must_use]
-    pub fn with_front_end(
-        mut self,
-        wrap: impl FnOnce(
-            Box<dyn lash_kernel_dialect::FrontEnd>,
-        ) -> Box<dyn lash_kernel_dialect::FrontEnd>,
-    ) -> Self {
-        self.package = self.package.map(|mut package| {
-            package.front_end = wrap(package.front_end);
-            package
-        });
-        self
-    }
-}
-
-/// A worker's registry while it is assembled.
+/// A worker's configuration while it is assembled: the natives the host
+/// supplies and the dialects it installs. It holds no package: it is bound
+/// once to its parent's ([`Embedder::finish`]).
+#[derive(Default)]
 pub struct Embedder {
-    registry: FunctionRegistry,
-    dialects: BTreeMap<String, Package>,
-    /// The current build's helper release ordinal.
-    writes: u32,
-    /// Each retained release, by ordinal, as the dialects installed so far
-    /// hold it.
-    releases: BTreeMap<u32, HelperReleaseIndex>,
+    natives: PackageInstall,
+    dialects: BTreeMap<String, Dialect>,
 }
 
 impl Embedder {
-    /// The kernel library and the machine's own functions: what every
-    /// embedding holds before the host names a dialect.
+    /// A worker with no host native and no dialect yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Supplies `native` for the held function `function`: the only thing
+    /// a host gives a worker of its own packages.
     ///
     /// # Errors
     ///
-    /// [`EmbedError::Registry`].
-    pub fn kernel() -> Result<Self, EmbedError> {
-        let registry = crate::token_bootstrap::kernel().map_err(EmbedError::Registry)?;
-        Ok(Self {
-            registry,
-            dialects: BTreeMap::new(),
-            writes: HELPER_RELEASE,
-            releases: BTreeMap::new(),
-        })
-    }
-
-    /// The registry, for an extension crate to register its functions in.
-    pub fn registry(&mut self) -> &mut FunctionRegistry {
-        &mut self.registry
-    }
-
-    /// Every function registered so far, by name.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::Registry`] when two functions share a name.
-    pub fn library(&self) -> Result<NamedLibrary, EmbedError> {
-        NamedLibrary::from_registry(&self.registry)
-            .map_err(|error| EmbedError::Registry(error.to_string()))
-    }
-
-    /// Installs `dialect`: registers the library it ships with, its helpers
-    /// as the build defined them, and the functions of the helper releases
-    /// the build retains for it, and keeps its front end and printer.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::DuplicateDialect`]; [`EmbedError::Dialect`] when the
-    /// build holds no helper release of the dialect; [`EmbedError::Registry`]
-    /// when a function is refused.
-    pub fn dialect(mut self, dialect: Dialect) -> Result<Self, EmbedError> {
-        let Dialect {
-            name: _,
-            package,
-            extensions,
-            natives,
-        } = dialect;
-        let package = package?;
-        if self.dialects.contains_key(&package.dialect) {
-            return Err(EmbedError::DuplicateDialect {
-                dialect: package.dialect,
-            });
+    /// [`EmbedError::Registry`] when a native for `function` was supplied
+    /// already.
+    pub fn native(
+        mut self,
+        function: FunctionId,
+        native: Arc<dyn NativeFunction>,
+    ) -> Result<Self, EmbedError> {
+        if self.natives.natives.insert(function, native).is_some() {
+            return Err(EmbedError::Registry(format!(
+                "a native for {function} is supplied twice"
+            )));
         }
-        let built =
-            lash_vm_releases::dialect(&package.dialect).ok_or_else(|| EmbedError::Dialect {
-                dialect: package.dialect.clone(),
-                message: "the build holds no helper release of it".to_owned(),
-            })?;
-        let registry = |error: &dyn std::fmt::Display| EmbedError::Registry(error.to_string());
-        if let Some(extensions) = extensions {
-            extensions(&mut self.registry).map_err(EmbedError::Registry)?;
-        }
-        let operations = crate::token_bootstrap::register(&mut self.registry, built.helpers)
-            .map_err(EmbedError::Registry)?;
-        natives(&mut self.registry, &operations).map_err(EmbedError::Registry)?;
-        let releases: Vec<HelperReleaseIndex> =
-            serde_json::from_slice(built.helper_release_index).map_err(|error| registry(&error))?;
-        for release in releases {
-            match self.releases.entry(release.ordinal) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(release);
-                }
-                std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    let held = entry.get_mut();
-                    held.writes.extend(release.writes);
-                    held.functions.extend(release.functions);
-                }
-            }
-        }
-        self.dialects.insert(package.dialect.clone(), package);
         Ok(self)
     }
 
-    /// The finished embedding.
+    /// Installs `dialect`'s front end, reader and printer.
     ///
     /// # Errors
     ///
-    /// [`EmbedError::NoDialect`] when the host installed none, and
-    /// [`EmbedError::Registry`].
-    pub fn finish(self) -> Result<Embedding, EmbedError> {
+    /// [`EmbedError::DuplicateDialect`].
+    pub fn dialect(mut self, dialect: Dialect) -> Result<Self, EmbedError> {
+        if self.dialects.contains_key(&dialect.name) {
+            return Err(EmbedError::DuplicateDialect {
+                dialect: dialect.name,
+            });
+        }
+        self.dialects.insert(dialect.name.clone(), dialect);
+        Ok(self)
+    }
+
+    /// Binds this configuration to `packages`, the parent's one
+    /// registration: registers every held artifact's code, lash's natives
+    /// and plans and the host's natives, each by identity.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::NoDialect`]; [`PackageRefusal::NativeMissing`] for a
+    /// `Native`-only function no native is supplied for, and
+    /// [`PackageRefusal::NativeUnused`] for a native of no held function
+    /// that states one; [`EmbedError::Registry`].
+    pub fn finish(self, packages: &HeldPackages) -> Result<Embedding, EmbedError> {
         if self.dialects.is_empty() {
             return Err(EmbedError::NoDialect);
+        }
+        let mut install = lash_install(packages)?;
+        for (function, native) in self.natives.natives {
+            if install.natives.insert(function, native).is_some() {
+                return Err(EmbedError::Registry(format!(
+                    "lash implements {function}; a host supplies no native for it"
+                )));
+            }
+        }
+        let mut registry = FunctionRegistry::new();
+        packages.register_into(&mut registry, &|function| {
+            install.natives.get(function).cloned()
+        })?;
+        for function in install.natives.keys() {
+            if registry
+                .get(function)
+                .is_none_or(|registered| !registered.states_native())
+            {
+                return Err(PackageRefusal::NativeUnused {
+                    function: *function,
+                }
+                .into());
+            }
+        }
+        registry
+            .install_plans(&install.plans)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        if let Some((function, registered)) = registry.iter().find(|(_, registered)| {
+            registered.states_native() && !registered.has_body() && registered.native().is_none()
+        }) {
+            return Err(PackageRefusal::NativeMissing {
+                function: *function,
+                name: registered.definition().name.clone(),
+            }
+            .into());
         }
         // The names a front end resolves are those of the version it
         // writes. A successor's functions are redeclared when a document
         // of it first runs (`Embedding::registry`).
+        let library = NamedLibrary::from_registry(&registry)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        let releases = lash_vm_library::standard_helper_releases()
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         Ok(Embedding {
-            library: self.library()?,
-            written: Arc::new(self.registry),
+            library,
+            written: Arc::new(registry),
             interpreted: OnceLock::new(),
             prepared_written: OnceLock::new(),
             prepared_interpreted: OnceLock::new(),
             dialects: self.dialects,
-            writes: self.writes,
-            releases: self
-                .releases
-                .into_values()
+            writes: HELPER_RELEASE,
+            releases: releases
+                .into_iter()
                 .map(|release| (release, OnceLock::new()))
                 .collect(),
             manifests: OnceLock::new(),
@@ -416,28 +372,47 @@ impl Embedder {
     }
 }
 
-/// The TypeScript dialect, its parser's stack sized by the parent's working
-/// policy. It ships with lash's extensions: ECMAScript regular expressions
-/// and dates, and WHATWG URLs.
-#[cfg(feature = "dialect-typescript")]
-#[must_use]
-pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
-    Dialect {
-        name: lash_vm_releases::TYPESCRIPT,
-        package: typescript::FrontEnd::new(tuning).map(|front_end| Package {
-            dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
-            front_end: Box::new(front_end),
-            read: |source, base, limits| {
-                lash_dialect_typescript::read(source, base, limits).map_err(Into::into)
-            },
-            printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
-            captions: lash_dialect_typescript::CAPTIONS,
-            function_values: Some(lash_dialect_typescript::function_values()),
-            functions: Vec::new(),
-        }),
-        extensions: Some(register_typescript_extensions),
-        natives: crate::library::implement_typescript,
+/// The natives and plans of lash's held packages, by identity: each one's
+/// crate implements it by name in a registry holding every held artifact,
+/// requirements first, and hands it on.
+fn lash_install(packages: &HeldPackages) -> Result<PackageInstall, EmbedError> {
+    let mut registry = FunctionRegistry::declarations();
+    packages.register_into(&mut registry, &|_| None)?;
+    let mut functions = Vec::new();
+    for package in packages.in_order() {
+        if package.origin() == Origin::Lash {
+            crate::library::implement(
+                &package.path().to_string(),
+                &mut registry,
+                package.code().ids(),
+            )
+            .map_err(EmbedError::Registry)?;
+            functions.extend_from_slice(package.code().ids());
+        }
     }
+    Ok(PackageInstall::of_registry(&registry, &functions))
+}
+
+/// The TypeScript dialect, its parser's stack sized by the parent's working
+/// policy. It runs on lash's `typescript` package and the extensions it
+/// requires: ECMAScript regular expressions and dates, and WHATWG URLs.
+///
+/// # Errors
+///
+/// [`EmbedError::Dialect`] when the policy's source limits are invalid.
+#[cfg(feature = "dialect-typescript")]
+pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Result<Dialect, EmbedError> {
+    let front_end = typescript::FrontEnd::new(tuning)?;
+    Ok(Dialect {
+        name: lash_vm_releases::TYPESCRIPT.to_owned(),
+        front_end: Box::new(front_end),
+        read: |source, base, limits| {
+            lash_dialect_typescript::read(source, base, limits).map_err(Into::into)
+        },
+        printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
+        captions: lash_dialect_typescript::CAPTIONS,
+        function_values: Some(lash_dialect_typescript::function_values()),
+    })
 }
 
 /// The Python dialect. Its helpers call the kernel library alone.
@@ -451,14 +426,9 @@ pub fn python() -> Dialect {
 #[cfg(feature = "dialect-python")]
 #[must_use]
 pub fn python_with_limits(limits: lash_dialect_python::SourceLimits) -> Dialect {
-    let mut package = lash_dialect_python::package(Vec::new());
-    package.front_end = Box::new(lash_dialect_python::Python { limits });
-    Dialect {
-        name: lash_vm_releases::PYTHON,
-        package: Ok(package),
-        extensions: None,
-        natives: crate::library::implement_python,
-    }
+    let mut dialect = lash_dialect_python::dialect();
+    dialect.front_end = Box::new(lash_dialect_python::Python { limits });
+    dialect
 }
 
 #[cfg(feature = "dialect-typescript")]
@@ -531,20 +501,27 @@ mod typescript {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lash_kernel_doc::FunctionDefinition;
+    use lash_kernel_doc::{FunctionDefinition, ReleasedFunctions};
     use lash_vm_client::WorkerTuning;
+
+    /// lash's own packages, as the parent holds them.
+    pub(crate) fn lash() -> Arc<HeldPackages> {
+        lash_vm_library::lash_packages().expect("lash's packages")
+    }
 
     /// A host that names TypeScript alone.
     pub(crate) fn typescript_only(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
-        Embedder::kernel()?.dialect(typescript(tuning))?.finish()
+        Embedder::new()
+            .dialect(typescript(tuning)?)?
+            .finish(&lash())
     }
 
     /// A host that names every dialect lash ships.
     pub(crate) fn every_dialect(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
-        Embedder::kernel()?
-            .dialect(typescript(tuning))?
+        Embedder::new()
+            .dialect(typescript(tuning)?)?
             .dialect(python())?
-            .finish()
+            .finish(&lash())
     }
 
     /// FIG-5990: an embedding has no default dialect. A host that names
@@ -553,70 +530,16 @@ pub(crate) mod tests {
     #[test]
     fn an_embedding_with_no_dialect_is_refused() {
         assert!(matches!(
-            Embedder::kernel().expect("the kernel library").finish(),
+            Embedder::new().finish(&lash()),
             Err(EmbedError::NoDialect)
         ));
         assert!(matches!(
-            Embedder::kernel()
-                .expect("the kernel library")
+            Embedder::new()
                 .dialect(python())
                 .expect("the Python dialect")
                 .dialect(python()),
             Err(EmbedError::DuplicateDialect { dialect }) if dialect == "python"
         ));
-    }
-
-    /// FIG-5990: an embedding holds the dialects its host named and no
-    /// other: a TypeScript-only one installs no Python front end and holds
-    /// none of Python's helpers, a Python-only one holds none of
-    /// TypeScript's or of its extensions, and one with both holds each.
-    #[test]
-    fn an_embedding_holds_only_the_dialects_its_host_named() {
-        let tuning = WorkerTuning::standard();
-        let helpers = |dialect: &str| -> BTreeSet<FunctionId> {
-            let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            ReleasedFunctions::read(built.helpers)
-                .expect("the built helpers")
-                .ids()
-                .collect()
-        };
-        let (ts, py) = (helpers("typescript"), helpers("python"));
-        let holds = |embedding: &Embedding, functions: &BTreeSet<FunctionId>| {
-            functions
-                .iter()
-                .filter(|function| embedding.written.get(function).is_some())
-                .count()
-        };
-        let typescript_only = typescript_only(&tuning).expect("a TypeScript embedding");
-        assert_eq!(
-            typescript_only.dialects().collect::<Vec<_>>(),
-            ["typescript"]
-        );
-        assert!(!typescript_only.installs("python"));
-        assert_eq!(holds(&typescript_only, &ts), ts.len());
-        assert_eq!(holds(&typescript_only, &py), 0);
-
-        let python_only = Embedder::kernel()
-            .and_then(|embedder| embedder.dialect(python()))
-            .and_then(Embedder::finish)
-            .expect("a Python embedding");
-        assert_eq!(python_only.dialects().collect::<Vec<_>>(), ["python"]);
-        assert_eq!(holds(&python_only, &py), py.len());
-        assert_eq!(holds(&python_only, &ts), 0);
-        assert!(
-            python_only
-                .library()
-                .iter()
-                .all(|(name, _)| !name.to_string().starts_with("regex.ecma.")),
-            "the extensions are the TypeScript dialect's"
-        );
-
-        let both = every_dialect(&tuning).expect("an embedding of both");
-        assert_eq!(
-            both.dialects().collect::<Vec<_>>(),
-            ["python", "typescript"]
-        );
-        assert_eq!(holds(&both, &ts) + holds(&both, &py), ts.len() + py.len());
     }
 
     /// V25: a fixed assembly failure is initialized once, just like a successful catalog.
@@ -665,44 +588,99 @@ pub(crate) mod tests {
         }
     }
 
-    /// The helpers the build defined for a dialect are the ones the dialect
-    /// defines against the library it ships with (the kernel library, and
-    /// for TypeScript lash's extensions), in order and under the same
-    /// identities: a worker holds exactly the functions it would have
-    /// defined itself, and defines none when it starts (FIG-5796).
+    /// PKG-IDENTITY: moving lash's libraries into packages changes no
+    /// definition bytes. Each package the build made holds exactly the
+    /// definitions its crates define (the kernel library, the extensions,
+    /// each dialect's helpers against the library it ships with), under the
+    /// same identities, so a worker holds exactly the functions it would
+    /// have defined itself, and defines none when it starts (FIG-5796).
     #[test]
-    fn the_built_helpers_are_the_ones_each_dialect_defines() {
-        let mut registry = FunctionRegistry::new();
-        crate::library::register_kernel_base(&mut registry).expect("the kernel base");
-        lash_kernel_lib::register_collections(&mut registry).expect("the kernel library");
-        let mut library = NamedLibrary::from_registry(&registry).expect("the library");
-        let python = lash_dialect_python::define_helpers(&mut library).expect("Python's helpers");
-        crate::library::register_extensions(&mut registry).expect("regex extensions");
-        lash_ext_date_ecma::register(&mut registry).expect("date extensions");
-        lash_ext_url_whatwg::register(&mut registry).expect("URL extensions");
+    fn lash_packages_hold_exactly_what_their_crates_define() {
+        let defined_since = |registry: &FunctionRegistry, before: &BTreeSet<FunctionId>| {
+            registry
+                .iter()
+                .filter(|(function, _)| !before.contains(function))
+                .map(|(function, registered)| {
+                    (
+                        *function,
+                        FunctionDefinition::clone(registered.definition()),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut registry = FunctionRegistry::declarations();
+        let mut defined = BTreeMap::new();
+        let mut step =
+            |path: &str,
+             registry: &mut FunctionRegistry,
+             define: &dyn Fn(&mut FunctionRegistry) -> Result<(), String>| {
+                let before: BTreeSet<FunctionId> =
+                    registry.iter().map(|(function, _)| *function).collect();
+                define(registry).expect("the package's definitions");
+                defined.insert(path.to_owned(), defined_since(registry, &before));
+            };
+        step("kernel", &mut registry, &crate::library::define_kernel);
+        let kernel = registry.clone();
+        step("regex.ecma", &mut registry, &crate::library::define_regex);
+        step("date.ecma", &mut registry, &crate::library::define_date);
+        step("url.whatwg", &mut registry, &crate::library::define_url);
         let mut library = NamedLibrary::from_registry(&registry).expect("the library");
         let typescript =
             lash_dialect_typescript::define_helpers(&mut library).expect("TypeScript's helpers");
-        for (dialect, defined) in [("python", python), ("typescript", typescript)] {
-            let mut defined: Vec<_> = defined
-                .into_iter()
-                .map(|definition| (definition.identity(), definition))
-                .collect();
+        let mut library = NamedLibrary::from_registry(&kernel).expect("the library");
+        let python = lash_dialect_python::define_helpers(&mut library).expect("Python's helpers");
+        for (path, helpers) in [("typescript", typescript), ("python", python)] {
+            defined.insert(
+                path.to_owned(),
+                helpers
+                    .into_iter()
+                    .map(|definition| (definition.identity(), definition))
+                    .collect(),
+            );
+        }
+        assert_eq!(defined.len(), lash_vm_releases::PACKAGES.len());
+        for (path, mut defined) in defined {
             // The image holds its functions in identity order.
             defined.sort_by_key(|(function, _)| *function);
-            let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            let built = ReleasedFunctions::read(built.helpers).expect("the built helpers");
+            let built = lash_vm_releases::package(&path).expect("the built package");
+            let built = ReleasedFunctions::read(built.image).expect("the built image");
             let built: Vec<_> = (0..built.len())
                 .map(|at| {
-                    let definition = built.definition(at).expect("a built helper decodes");
+                    let definition = built.definition(at).expect("a built definition decodes");
                     (built.id(at), definition)
                 })
                 .collect();
-            assert_eq!(built.len(), defined.len(), "{dialect}: as many helpers");
+            assert_eq!(built.len(), defined.len(), "{path}: as many definitions");
+            assert!(built == defined, "{path}: the built definitions differ");
+        }
+    }
+
+    /// PKG-PURE-BUILTIN: lash's six packages export no operations and no
+    /// body lists one.
+    #[test]
+    fn lash_packages_export_and_perform_no_operation() {
+        let packages = lash_vm_library::built().expect("lash's packages");
+        assert_eq!(packages.len(), lash_vm_releases::PACKAGES.len());
+        for package in &packages {
             assert!(
-                built == defined,
-                "{dialect}: the built helpers differ from the defined ones"
+                package
+                    .exports()
+                    .values()
+                    .all(|export| !matches!(export, lash_kernel_package::Export::Operation(_))),
+                "{} exports an operation",
+                package.path()
             );
+            for at in 0..package.code().len() {
+                let definition = package.code().definition(at).expect("a definition decodes");
+                let Some(body) = definition.body() else {
+                    continue;
+                };
+                assert!(
+                    body.effects.is_empty(),
+                    "{} lists an operation",
+                    definition.name
+                );
+            }
         }
     }
 
@@ -776,8 +754,12 @@ pub(crate) mod tests {
     /// every session it opens links against the same one (FIG-5759).
     #[test]
     fn a_parent_holds_exactly_the_functions_a_worker_holds() {
-        let parent = lash_vm_library::standard_functions().expect("the parent's functions");
-        let again = lash_vm_library::standard_functions().expect("the parent's functions");
+        let parent = lash_vm_library::lash_packages()
+            .map(|packages| std::sync::Arc::clone(packages.functions()))
+            .expect("the parent's functions");
+        let again = lash_vm_library::lash_packages()
+            .map(|packages| std::sync::Arc::clone(packages.functions()))
+            .expect("the parent's functions");
         assert!(Arc::ptr_eq(&parent, &again), "assembled once in a process");
         let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
         let worker = embedding.registry().expect("every version's functions");
@@ -937,12 +919,12 @@ pub(crate) mod tests {
         let mut invalid = tuning;
         invalid.typescript_source_nesting = 29;
         assert!(matches!(
-            Embedder::kernel().unwrap().dialect(typescript(&invalid)),
+            typescript(&invalid),
             Err(EmbedError::Dialect { .. })
         ));
         let python_source = format!("#{}", "x".repeat(1 << 20));
         tuning.python_source_bytes = python_source.len();
-        let embedding = crate::built_dialects(&tuning).unwrap();
+        let embedding = crate::built_embedding(&tuning).unwrap();
         let environment = Environment {
             library: embedding.library(),
             effects: &BTreeMap::new(),
@@ -963,15 +945,3 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod release_tests;
-
-#[cfg(feature = "dialect-typescript")]
-fn register_typescript_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
-    let functions =
-        crate::token_bootstrap::register(registry, lash_vm_releases::TYPESCRIPT_EXTENSIONS)?;
-    crate::library::implement_extensions(registry)?;
-    lash_ext_date_ecma::implement(registry, functions.iter().copied())
-        .map_err(|error| error.to_string())?;
-    lash_ext_url_whatwg::implement(registry, functions.iter().copied())
-        .map_err(|error| error.to_string())?;
-    crate::token_bootstrap::implemented(registry, &functions)
-}

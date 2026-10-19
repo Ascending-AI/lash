@@ -17,7 +17,7 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
     let before = allocations();
     let start = Instant::now();
     let embedding =
-        lash_vm_worker::built_dialects(&WorkerTuning::standard()).expect("a fresh embedding");
+        lash_vm_worker::built_embedding(&WorkerTuning::standard()).expect("a fresh embedding");
     let _prepared = lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::clone(
         embedding.registry().expect("the registered functions"),
     ));
@@ -36,7 +36,8 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
     let registry = embedding.registry().expect("the worker registry");
     // The parent catalog holds retained releases plus changed helpers and
     // every successor kernel declaration this feature resolution interprets.
-    let expected = lash_vm_library::standard_functions()
+    let expected = lash_vm_library::lash_packages()
+        .map(|packages| std::sync::Arc::clone(packages.functions()))
         .expect("the complete interpreted release declarations")
         .export_declarations();
     assert_eq!(
@@ -79,6 +80,212 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
         parses, 0,
         "a fresh worker must read no kernel text after the build"
     );
+}
+
+/// FIG-6917: a host package installs once, beside lash's own, and its one
+/// native reaches the worker by identity alone. A canonical document
+/// calling its members is admitted against the parent's registry and runs
+/// on the registry the single-binary worker derives from the same
+/// registration.
+#[test]
+fn a_host_package_installs_once_and_runs_in_a_single_binary_worker() {
+    use std::sync::Arc;
+
+    use lash_kernel_doc::{Datum, Integer, parse_document};
+    use lash_kernel_package::{HeldPackages, testing};
+    use lash_kernel_vm::Machine as _;
+
+    let lash = lash_vm_library::built().expect("lash's packages");
+    let kernel = lash
+        .iter()
+        .find(|package| package.path().to_string() == "kernel")
+        .expect("the kernel package");
+    let dataframe = testing::dataframe(kernel).expect("the fixture builds");
+    let width = dataframe
+        .function("dataframe.width")
+        .expect("its native function");
+    let held = HeldPackages::install(lash.iter().cloned().chain([dataframe.clone()]))
+        .expect("one registration");
+
+    let embedding = lash_vm_worker::Embedder::new()
+        .native(width, Arc::new(Width))
+        .and_then(|embedder| {
+            embedder.dialect(lash_vm_worker::typescript(&WorkerTuning::standard())?)
+        })
+        .and_then(|embedder| embedder.finish(&held))
+        .expect("the worker binds to the parent's registration");
+    let worker = Arc::clone(embedding.registry().expect("the worker registry"));
+    assert!(
+        worker
+            .get(&width)
+            .and_then(|function| function.native())
+            .is_some(),
+        "the host's native is installed by identity"
+    );
+    assert_eq!(
+        worker.export_declarations(),
+        held.functions().export_declarations(),
+        "the worker holds exactly what the parent registered"
+    );
+
+    let mut text = String::from("kernel 1\nnumbers by_spelling\n");
+    for name in [
+        "dataframe.width",
+        "dataframe.col",
+        "dataframe.expr.name",
+        "dataframe.data_quanta.read_text",
+        "dataframe.data_quanta.filter",
+        "dataframe.data_quanta.limit",
+    ] {
+        let function = dataframe.function(name).expect("a fixture member");
+        text.push_str(&format!("use {name} = @{function}\n"));
+    }
+    text.push_str(
+        "main {\n  let row = [1, 2, 3]\n  let n = invoke dataframe.width(row)\n  let e = invoke dataframe.col(\"value\")\n  let name = invoke dataframe.expr.name(e)\n  let q = invoke dataframe.data_quanta.read_text(\"a b\")\n  let q2 = invoke dataframe.data_quanta.filter(q, e)\n  let q3 = invoke dataframe.data_quanta.limit(q2, 5)\n  return (n, name, q3.plan[1].step)\n}\n",
+    );
+    let document = Arc::new(parse_document(&text).expect("a canonical kernel document"));
+    lash_kernel_doc::validate_document(&document, held.functions().as_ref())
+        .expect("the parent admits it");
+
+    let program = lash_kernel_vm::Program {
+        release: lash_kernel_doc::heap::PageId([8; 32]),
+        document,
+        library: lash_kernel_vm::PreparedLibrary::new(worker),
+    };
+    let start = lash_kernel_vm::CellStart {
+        owner: lash_kernel_doc::heap::PageId([9; 32]),
+        target: lash_kernel_vm::Target::Main,
+        args: Vec::new(),
+        session: None,
+        modes: Default::default(),
+        host: Vec::new(),
+    };
+    let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
+        program,
+        BOUNDS,
+        start,
+        Box::<Pages>::default(),
+    )
+    .expect("the worker starts the run");
+    let end = loop {
+        match machine.run(&mut World, u64::MAX).expect("a slice") {
+            lash_kernel_vm::Step::Ended(end) => break end,
+            lash_kernel_vm::Step::Slice => {}
+            lash_kernel_vm::Step::Parked(park) => panic!("the document never waits: {park:?}"),
+        }
+    };
+    let lash_kernel_vm::End::Finished(done) = end else {
+        panic!("the run finishes: {end:?}");
+    };
+    assert_eq!(
+        done.result,
+        Datum::Tuple(vec![
+            Datum::Int(Integer::from(3)),
+            Datum::Text("value".into()),
+            Datum::Text("limit".into()),
+        ])
+    );
+}
+
+/// The fixture's `dataframe.width`, natively: a row's length.
+struct Width;
+
+impl lash_kernel_doc::NativeFunction for Width {
+    fn call(
+        &self,
+        call: lash_kernel_doc::NativeCall<'_, '_>,
+    ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+        let refused = || lash_kernel_doc::NativeError::Refused {
+            kind: "type_error",
+            message: "a row is a list".into(),
+        };
+        let row = call.args.get(0).ok_or_else(refused)?;
+        let length = call.args.sequence(row)?.ok_or_else(refused)?.len();
+        let length = i64::try_from(length).map_err(|_| refused())?;
+        Ok(call.new.integer(lash_kernel_doc::Integer::from(length)))
+    }
+}
+
+const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
+    memory_meter: lash_kernel_vm::MemoryMeter::On,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 10_000_000,
+    memory: 64 << 20,
+    call_depth: 100,
+    live_tasks: 100,
+    requests_per_park: 100,
+    join_members: 100,
+};
+
+struct World;
+
+impl lash_kernel_vm::Host for World {
+    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
+        lash_kernel_doc::Timestamp {
+            nanoseconds: 0.into(),
+        }
+    }
+    fn random(&mut self) -> u64 {
+        0
+    }
+    fn read(
+        &mut self,
+        _: &lash_kernel_doc::Handle,
+        _: &lash_kernel_doc::Datum,
+    ) -> Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum> {
+        unreachable!("the document reads nothing")
+    }
+    fn print(&mut self, _: &lash_kernel_doc::Datum) {}
+    fn cancel_requested(&mut self) -> bool {
+        false
+    }
+}
+
+/// Pages held in memory, each by its content's digest.
+#[derive(Default)]
+struct Pages {
+    pages: BTreeMap<lash_kernel_doc::heap::PageId, lash_kernel_state::paged::PageAnswer>,
+}
+
+impl lash_kernel_state::paged::PageSource for Pages {
+    fn read(
+        &mut self,
+        pages: &[lash_kernel_doc::heap::PageRef],
+    ) -> Result<
+        Vec<Result<lash_kernel_state::paged::PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+        lash_kernel_doc::heap::HeapFault,
+    > {
+        Ok(pages
+            .iter()
+            .map(|page| {
+                self.pages
+                    .get(&page.id)
+                    .cloned()
+                    .ok_or(lash_kernel_doc::heap::HeapFault::Missing { page: page.id })
+            })
+            .collect())
+    }
+    fn seal(
+        &mut self,
+        body: lash_kernel_state::paged::PageBody,
+    ) -> Result<lash_kernel_doc::heap::PageRef, lash_kernel_doc::heap::HeapFault> {
+        let mut tokens = body.kind.0.to_be_bytes().to_vec();
+        tokens.extend_from_slice(&body.tokens);
+        let page = lash_kernel_doc::heap::PageRef {
+            id: lash_kernel_doc::heap::PageId(lash_kernel_doc::heap_values::key_digest(&tokens)),
+            grant: lash_kernel_doc::heap::PageGrant::NONE,
+        };
+        self.pages.insert(
+            page.id,
+            lash_kernel_state::paged::PageAnswer {
+                page,
+                kind: body.kind,
+                tokens: body.tokens.into(),
+                children: body.children,
+            },
+        );
+        Ok(page)
+    }
 }
 
 /// Per-thread user instructions, excluding the kernel and hypervisor.
