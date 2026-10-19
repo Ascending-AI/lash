@@ -142,7 +142,14 @@ def generate(
     generators: list[Path] | None = None,
     generated: Path | None = None,
     output: Path | None = None,
+    registered: tuple[str, ...] | None = None,
 ) -> int:
+    """Reconcile the host tree with the documents the generators emit.
+
+    Documents no generator emits are obsolete, so the generators must be
+    exactly the registered set: anything else is refused before a generator
+    runs or a file changes. `registered` names a synthetic set for fixtures.
+    """
     output = OUTPUT if output is None else output
     if generated is not None:
         documents = rendered_documents([
@@ -157,6 +164,23 @@ def generate(
     else:
         if not generators:
             raise ValueError("a generator or generated documents are required")
+        if registered is None:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from host_schema_generators import GENERATORS
+
+            registered = tuple(generator.binary for generator in GENERATORS)
+        supplied = sorted(generator.name for generator in generators)
+        if supplied != sorted(registered):
+            missing = sorted(set(registered) - set(supplied))
+            unexpected = sorted(set(supplied) - set(registered))
+            duplicated = sorted({name for name in supplied if supplied.count(name) > 1})
+            print(
+                "host schema generators must be exactly the registered set "
+                "(scripts/host_schema_generators.py); "
+                f"missing {missing}, unexpected {unexpected}, duplicated {duplicated}",
+                file=sys.stderr,
+            )
+            return 2
         payload: list[dict[str, object]] = []
         for generator in generators:
             completed = subprocess.run(

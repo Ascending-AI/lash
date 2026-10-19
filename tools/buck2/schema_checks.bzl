@@ -16,18 +16,20 @@ def _action_env():
 
 def _schema_documents_impl(ctx):
     documents = ctx.actions.declare_output(ctx.label.name + ".documents", dir = True)
-    command = ["/usr/bin/python3", ctx.attrs.script]
+    # The catalog is the module the script admits its generator set from.
+    command = cmd_args(["/usr/bin/python3", ctx.attrs.script], hidden = ctx.attrs.catalog)
     # The generator's own executable, not its run launcher: the script runs
     # it directly, and generators spawn no VM workers.
     for generator in ctx.attrs.generators:
-        command.extend(["--generator", generator[DefaultInfo].default_outputs[0]])
-    command.extend(["--output", documents.as_output()])
+        command.add(["--generator", generator[DefaultInfo].default_outputs[0]])
+    command.add(["--output", documents.as_output()])
     ctx.actions.run(command, env = _action_env(), category = "schema_generate")
     return [DefaultInfo(default_output = documents)]
 
 _schema_documents = rule(
     impl = _schema_documents_impl,
     attrs = {
+        "catalog": attrs.source(),
         "generators": attrs.list(attrs.dep(providers = [RunInfo])),
         "script": attrs.source(),
     },

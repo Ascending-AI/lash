@@ -27,14 +27,13 @@ build_dir="$(mktemp -d)"
 trap 'rm -rf -- "$build_dir"' EXIT
 # Cargo reports the actual executable rather than assuming a target directory
 # or profile. Do not send compiler diagnostics into the generator's JSON.
-# The same generators as the root BUCK's `host_schema_documents`.
-generators=(
-  "lash-internal-trace trace_schema_generator"
-  "lash-internal-core-execution process_event_schema_generator"
-  "lash-kernel-doc kernel_schema_generator"
-  "lash-kernel-edit kernel_edit_schema_generator"
-  "lash-kernel-view kernel_view_schema_generator"
-)
+# The registered generators, the same list the root BUCK's
+# `host_schema_documents` is emitted from.
+mapfile -t generators < <(python3 scripts/host_schema_generators.py)
+(( ${#generators[@]} )) || {
+  echo 'check-schema-contracts: no registered host schema generators' >&2
+  exit 1
+}
 if [[ "$context" == untrusted ]]; then
   build_args=()
   for generator in "${generators[@]}"; do

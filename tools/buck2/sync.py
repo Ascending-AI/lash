@@ -1090,6 +1090,14 @@ def main_test_inventory(inventory: dict, outputs: dict[pathlib.Path, str]) -> No
     inventory["main_test_replacements"] = dict(sorted(replacements.items()))
 
 
+def host_schema_generator_labels() -> str:
+    """The registered host contract generators, as a Starlark list."""
+    sys.path.append(str(ROOT / "scripts"))
+    from host_schema_generators import GENERATORS
+
+    return generate_model.string_list([generator.label for generator in GENERATORS])
+
+
 def root_buck(inventory: dict) -> str:
     def suite(name: str, labels: list[str]) -> str:
         return (
@@ -1242,16 +1250,8 @@ export_file(
 
 schema_documents(
     name = "host_schema_documents",
-    generators = [
-        "//crates/lash-trace:trace_schema_generator__bin",
-        "//crates/lash-vm-client:worker_wire_schema_generator__bin",
-        "//crates/lash-core-execution:process_event_schema_generator__bin",
-        "//crates/lash-core:process_workflow_schema_generator__bin",
-        "//crates/lash-kernel-doc:kernel_schema_generator__bin",
-        "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
-        "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
-        "//crates/lash-postgres-store:host_config_schema_generator__bin",
-    ],
+    generators = ''' + host_schema_generator_labels() + ''',
+    catalog = "scripts/host_schema_generators.py",
     script = "scripts/generate-workflow-schemas.py",
 )
 

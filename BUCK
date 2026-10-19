@@ -5704,6 +5704,7 @@ schema_documents(
         "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
         "//crates/lash-postgres-store:host_config_schema_generator__bin",
     ],
+    catalog = "scripts/host_schema_generators.py",
     script = "scripts/generate-workflow-schemas.py",
 )
 

@@ -18,6 +18,10 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
+# A synthetic generator set: fixtures name the one stand-in they run.
+FIXTURE = ("generator",)
+
+
 class GenerateWorkflowSchemasTests(unittest.TestCase):
     def setUp(self) -> None:
         # Generation also writes crate-local host contracts. Keep every
@@ -53,7 +57,7 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                     MODULE.subprocess, "run", return_value=completed
                 ),
             ):
-                self.assertEqual(MODULE.generate(False, [Path("generator")]), 0)
+                self.assertEqual(MODULE.generate(False, [Path("generator")], registered=FIXTURE), 0)
                 generated = output / "workflow/v7.schema.json"
                 self.assertTrue(generated.is_file())
                 for relative in [
@@ -70,12 +74,12 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                             else:
                                 crate_copy.write_text(contents, encoding="utf-8")
                             with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
-                                self.assertEqual(MODULE.generate(True, [Path("generator")]), 1)
+                                self.assertEqual(MODULE.generate(True, [Path("generator")], registered=FIXTURE), 1)
                             self.assertIn(str(crate_copy), errors.getvalue())
                             crate_copy.write_text(expected, encoding="utf-8")
                 generated.write_text("drift\n", encoding="utf-8")
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()):
-                    self.assertEqual(MODULE.generate(True, [Path("generator")]), 1)
+                    self.assertEqual(MODULE.generate(True, [Path("generator")], registered=FIXTURE), 1)
 
 
     def test_generated_documents_detect_missing_changed_and_obsolete_files(self) -> None:
@@ -170,14 +174,20 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                         self.assertIn("v1.d.ts differs", errors.getvalue())
 
     def test_generator_failure_does_not_write_a_receipt(self) -> None:
+        sys.path.insert(0, str(SCRIPT.parent))
+        from host_schema_generators import GENERATORS
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            generator = root / "generator"
-            generator.write_text("#!/bin/sh\necho generator-failed >&2\nexit 7\n")
-            generator.chmod(0o755)
+            arguments = []
+            for registered in GENERATORS:
+                generator = root / registered.binary
+                generator.write_text("#!/bin/sh\necho generator-failed >&2\nexit 7\n")
+                generator.chmod(0o755)
+                arguments.extend(["--generator", str(generator)])
             stamp = root / "stamp"
             result = subprocess.run(
-                [sys.executable, str(SCRIPT), "--check", "--generator", str(generator),
+                [sys.executable, str(SCRIPT), "--check", *arguments,
                  "--output", str(root / "out"), "--stamp", str(stamp)],
                 capture_output=True, text=True,
             )

@@ -19,14 +19,9 @@ import sys
 
 import release_baseline as baseline
 from fixture_regenerators import discover
+from host_schema_generators import GENERATORS
 
-SCHEMA_GENERATORS = [
-    "//crates/lash-trace:trace_schema_generator__bin",
-    "//crates/lash-core-execution:process_event_schema_generator__bin",
-    "//crates/lash-kernel-doc:kernel_schema_generator__bin",
-    "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
-    "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
-]
+SCHEMA_GENERATORS = [generator.label for generator in GENERATORS]
 
 
 def plan(repo: Path):
