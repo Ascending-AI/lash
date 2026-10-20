@@ -377,7 +377,7 @@ impl lash_core_store::store::FleetFormatStore for crate::SqliteStore {
 
     fn plugin_writers(&self) -> lash_core_store::store::PluginWriterRangesFuture<'_> {
         Box::pin(async move {
-            self.conn
+            self.read_connection()
                 .read(|tx| read_plugin_writers(tx))
                 .await
                 .map_err(crate::sqlite_error)

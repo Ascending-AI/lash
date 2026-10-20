@@ -464,17 +464,18 @@ impl lash_execution_contracts::backend::StoreSet for SqliteStoreSet {
         &self,
         kind: lash_core_store::store::ObligationKind,
     ) -> Arc<dyn lash_core_store::store::ObligationLedger> {
-        let conn = self.inner.process_env_store.conn.clone();
         match kind {
-            lash_core_store::store::ObligationKind::ArtifactCleanup => Arc::new(
-                crate::obligation_ledger::SqliteArtifactCleanupLedger::new(conn),
-            ),
+            lash_core_store::store::ObligationKind::ArtifactCleanup => {
+                Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
+                    &self.inner.process_env_store,
+                ))
+            }
         }
     }
 
     fn artifact_cleanup(&self) -> Arc<dyn lash_core_store::store::ArtifactCleanupLedger> {
         Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
-            self.inner.process_env_store.conn.clone(),
+            &self.inner.process_env_store,
         ))
     }
 }

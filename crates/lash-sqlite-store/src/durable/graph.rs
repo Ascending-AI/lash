@@ -56,14 +56,15 @@ use crate::conn::{FencedTx, TxOutcome, cached_execute};
 /// The graph tables and the root catalog, created after every table the
 /// catalog names.
 pub(crate) const TABLES: &str = "
--- One row per child of an installed graph node: exactly its envelope's child
--- table. A parent's edges go with it; a child cannot go while an edge names it.
+-- One row per child of an installed graph node, keyed by the child: the
+-- reverse of its envelope's child table. The parent's own bytes hold the
+-- forward direction, so its peel reads its children there and deletes their
+-- edges (FIG-6939); a child cannot go while an edge names it.
 CREATE TABLE IF NOT EXISTS blob_edges (
-    parent_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
+    parent_hash TEXT NOT NULL,
     child_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
-    PRIMARY KEY (parent_hash, child_hash)
-);
-CREATE INDEX IF NOT EXISTS blob_edges_child ON blob_edges (child_hash, parent_hash);
+    PRIMARY KEY (child_hash, parent_hash)
+) WITHOUT ROWID;
 
 -- An execution's admitted effect, by its canonical binary identity, to its
 -- Admission node, while a live kernel or a released member needs the lookup.
@@ -199,22 +200,9 @@ lash_store_sql::statements! {
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT value ->> 0, value ->> 1 FROM json_each(?1)";
 
-        /// Deletable parents in JSON `?1` and their children, before the
-        /// delete takes their edges. Retained parents contribute no rows;
-        /// a deletable leaf contributes its parent with a NULL child.
-        peel_edges = "SELECT candidate.hash, edge.child_hash FROM blobs AS candidate
-             LEFT JOIN blob_edges AS edge ON edge.parent_hash = candidate.hash
-             WHERE candidate.hash IN (SELECT value FROM json_each(?1))
-               AND NOT EXISTS (
-                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM blob_edges AS incoming WHERE incoming.child_hash = candidate.hash
-               )";
-
         /// One level of a peel: delete every blob in JSON `?1` no root names
-        /// and no edge reaches, and return each one deleted. Its edges go
-        /// with it.
+        /// and no edge reaches, and return each one deleted with its bytes
+        /// and encoding, which name the children its edges reach.
         peel_orphans = "DELETE FROM blobs AS candidate
              WHERE candidate.hash IN (SELECT value FROM json_each(?1))
                AND NOT EXISTS (
@@ -223,7 +211,18 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
                )
-             RETURNING hash";
+             RETURNING hash, content, encoding";
+
+        /// Delete the edges of JSON `?1`, `[child, parent]` digest pairs:
+        /// the edges of peeled parents.
+        delete_edges = "DELETE FROM blob_edges
+             WHERE (child_hash, parent_hash) IN (SELECT value ->> 0, value ->> 1 FROM json_each(?1))";
+
+        /// Delete every edge of parent `?1` by a scan, returning each child
+        /// it reached: the edges of a peeled parent whose bytes no longer
+        /// name its children.
+        delete_parent_edges = "DELETE FROM blob_edges WHERE parent_hash = ?1
+             RETURNING child_hash";
     }
 }
 
@@ -843,35 +842,68 @@ pub(super) fn peel_level(
     tx: &Connection,
     frontier: &BTreeSet<String>,
 ) -> rusqlite::Result<(usize, BTreeSet<String>)> {
-    let list = json_array(frontier);
-    let mut edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    {
-        let mut statement = tx.prepare_cached(SQL.sqlite.peel_edges.sql())?;
-        let mut rows = statement.query([&list])?;
-        while let Some(row) = rows.next()? {
-            let children = edges.entry(row.get(0)?).or_default();
-            if let Some(child) = row.get::<_, Option<String>>(1)? {
-                children.push(child);
-            }
-        }
-    }
-    if edges.is_empty() {
-        return Ok((0, BTreeSet::new()));
-    }
-    // Delete exactly the parents selected before this level changes any
-    // edges. A frontier may contain both a parent and its child: the child
-    // becomes deletable only after the parent goes, on the next level.
-    let list = json_array(&edges.keys().collect::<Vec<_>>());
+    // One statement deletes the level's deletable nodes before any of
+    // their edges goes. A frontier may contain both a parent and its child:
+    // the child becomes deletable only after the parent's edge goes, on the
+    // next level.
     let gone = tx
         .prepare_cached(SQL.sqlite.peel_orphans.sql())?
-        .query_map([&list], |row| row.get::<_, String>(0))?
+        .query_map([json_array(frontier)], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let children = gone
-        .iter()
-        .filter_map(|hash| edges.remove(hash))
-        .flatten()
-        .collect();
+    let mut children = BTreeSet::new();
+    let mut edges = Vec::new();
+    for (parent, bytes, encoding) in &gone {
+        match stored_children(parent, bytes, *encoding) {
+            Some(reached) => {
+                for child in reached {
+                    edges.push([child.clone(), parent.clone()]);
+                    children.insert(child);
+                }
+            }
+            // Bytes that no longer decode cannot name the children: their
+            // edges are found by the parent instead.
+            None => children.extend(
+                tx.prepare_cached(SQL.sqlite.delete_parent_edges.sql())?
+                    .query_map([parent], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            ),
+        }
+    }
+    if !edges.is_empty() {
+        cached_execute(tx, SQL.sqlite.delete_edges.sql(), [json_array(&edges)])?;
+    }
     Ok((gone.len(), children))
+}
+
+/// The children a stored node's edges reach: its envelope's child table, as
+/// [`install`] recorded them, and none for an opaque blob. `None` when the
+/// bytes are not the node they are stored under, whose edges then no longer
+/// follow from them.
+fn stored_children(hash: &str, bytes: &[u8], encoding: i64) -> Option<BTreeSet<String>> {
+    match encoding_of(encoding).ok()? {
+        BlobEncoding::Opaque => Some(BTreeSet::new()),
+        BlobEncoding::Graph => {
+            let envelope = check_envelope(
+                bytes,
+                NodeId::from_hex(hash)?,
+                &lash_durable::domain::graph::OWNER_READ_LIMITS,
+            )
+            .ok()?;
+            Some(
+                envelope
+                    .children
+                    .iter()
+                    .map(|child| child.to_hex())
+                    .collect(),
+            )
+        }
+    }
 }
 
 /// Moves what `retired` recorded to retirement holds, before its

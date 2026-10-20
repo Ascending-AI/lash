@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS model_call_pins (
     attempt INTEGER NOT NULL CHECK (attempt > 0), answered INTEGER NOT NULL CHECK (answered IN (0, 1)),
     enclosing_owner TEXT, enclosing_run INTEGER, enclosing_call TEXT,
     PRIMARY KEY (session_id, run, call), UNIQUE (session_id, run, call_id)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS model_call_records (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS model_call_records (
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (session_id, run, call),
     UNIQUE (session_id, run, call_id)
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON model_call_records(record_ref);
 ";
 pub(super) static SQL: LazyLock<ModelCallStatements> =

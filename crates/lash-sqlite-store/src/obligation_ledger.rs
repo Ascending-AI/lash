@@ -562,12 +562,19 @@ pub(crate) fn end_execution_tx(
 #[derive(Clone)]
 pub(crate) struct SqliteArtifactCleanupLedger {
     ledger: SqliteObligationLedger,
+    readers: crate::conn::ReadPool,
 }
 
 impl SqliteArtifactCleanupLedger {
-    pub(crate) fn new(conn: SqliteConnection) -> Self {
+    /// The ledger over `store`'s database: writes on its writer, plan reads
+    /// on its readers.
+    pub(crate) fn new(store: &crate::SqliteStore) -> Self {
         Self {
-            ledger: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, conn),
+            ledger: SqliteObligationLedger::new(
+                ObligationKind::ArtifactCleanup,
+                store.conn.clone(),
+            ),
+            readers: store.readers.clone(),
         }
     }
 }
@@ -666,8 +673,8 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         use rusqlite::OptionalExtension;
         let id = id.as_str().to_owned();
         let row = self
-            .ledger
-            .conn
+            .readers
+            .next()
             .call(move |conn| {
                 conn.prepare_cached(CLEANUPS.select_by_id.sql())
                     .and_then(|mut statement| {

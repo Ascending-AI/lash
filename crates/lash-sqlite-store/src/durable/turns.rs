@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS turn_phases (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
         AND (phase = 'model') = (model_stream_from IS NOT NULL))
-);
+) WITHOUT ROWID;
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
 -- entry (values address and metadata, JSON) and its values, dropped with the

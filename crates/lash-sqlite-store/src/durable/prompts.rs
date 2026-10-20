@@ -36,11 +36,13 @@ lash_store_sql::statements! {
         held_texts = "SELECT hash FROM prompt_texts
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
-        /// Store each `[hash, text]` pair of the JSON array `?1`, returning
-        /// each address stored. The caller binds only addresses it found
-        /// unstored under the one writer, so every pair is a new row.
-        insert_texts = "INSERT INTO prompt_texts (hash, text)
-             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+        /// Store each `[hash, text]` leaf and `[hash, text, children]`
+        /// index node of the JSON array `?1`, returning each address
+        /// stored. The caller binds only addresses it found unstored under
+        /// the one writer, so every element is a new row.
+        insert_texts = "INSERT INTO prompt_texts (hash, text, children)
+             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+                    json_extract(value, '$[2]')
                FROM json_each(?1)
              RETURNING hash";
 
@@ -55,17 +57,24 @@ lash_store_sql::statements! {
              SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
                FROM json_each(?1)";
 
-        /// Outgoing edges of one reclamation level, including every parent
-        /// in the JSON array `?1` in the same read.
-        read_index_edges = "SELECT parent, child FROM prompt_text_edges
-             WHERE parent IN (SELECT value FROM json_each(?1)) ORDER BY parent, child";
+        /// Delete the edges of JSON `?1`, `[child, parent]` pairs: the
+        /// edges of reclaimed parents.
+        delete_index_edges = "DELETE FROM prompt_text_edges
+             WHERE (child, parent) IN (SELECT value ->> 0, value ->> 1 FROM json_each(?1))";
 
         /// Stored texts in caller order, including repeated addresses and
         /// omitting missing ones, just like individual lookups.
-        read_texts = "SELECT wanted.key, stored.hash, stored.text, edge.child
+        read_texts = "SELECT stored.hash, stored.text, stored.children
              FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = wanted.value
-             LEFT JOIN prompt_text_edges AS edge ON edge.parent = stored.hash
-             ORDER BY wanted.key, edge.child";
+             ORDER BY wanted.key";
+
+        /// The texts call `?3` of owner `?2` roots, each with its part.
+        read_roots = "SELECT part, hash FROM prompt_snapshot_texts
+             WHERE session_id = ?1 AND owner = ?2 AND call = ?3";
+
+        /// The stored children of every text in the JSON array `?1`.
+        read_text_children = "SELECT hash, children FROM prompt_texts
+             WHERE hash IN (SELECT value FROM json_each(?1))";
 
         /// Whether calls eligible for settlement hold a snapshot.
         settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
@@ -107,7 +116,7 @@ lash_store_sql::statements! {
                )";
 
         /// Reclaim every text in the JSON array `?1` no root references any
-        /// more.
+        /// more, returning each with its children.
         reclaim_texts = "DELETE FROM prompt_texts AS stored
              WHERE stored.hash IN (SELECT value FROM json_each(?1))
                AND NOT EXISTS (
@@ -116,7 +125,7 @@ lash_store_sql::statements! {
                    SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
                ) AND NOT EXISTS (
                    SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
-               ) RETURNING hash";
+               ) RETURNING hash, children";
     }
 }
 
@@ -127,8 +136,10 @@ static SQLITE_SQL: LazyLock<SqlitePromptStatements> =
 /// keyed by its owner (`turn:<run>` or `owned:<scope>`) and its call there
 /// (FIG-5259), holding its snapshot and, until the call settles, its request
 /// (FIG-5946); `prompt_texts`: section text and body chunks stored once by
-/// content address; `prompt_snapshot_texts`: each root part's edge to every
-/// text it references.
+/// content address, an index node with its children; `prompt_snapshot_texts`:
+/// each root part's edge to every text it references; `prompt_text_edges`:
+/// each index node's children keyed by the child, so a text a parent still
+/// names is never reclaimed (FIG-6939).
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS prompt_snapshots (
     session_id TEXT NOT NULL,
@@ -148,7 +159,10 @@ CREATE INDEX IF NOT EXISTS idx_prompt_snapshots_settled
 
 CREATE TABLE IF NOT EXISTS prompt_texts (
     hash TEXT PRIMARY KEY,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    -- An index node's children, a JSON array in address order; NULL for a
+    -- leaf. The forward direction of its edges.
+    children TEXT
 );
 
 CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
@@ -162,20 +176,19 @@ CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
     FOREIGN KEY (session_id, owner, call)
         REFERENCES prompt_snapshots (session_id, owner, call),
     FOREIGN KEY (hash) REFERENCES prompt_texts (hash)
-);
+) WITHOUT ROWID;
 
 CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_hash ON prompt_snapshot_texts (hash);
 
 CREATE TABLE IF NOT EXISTS prompt_text_edges (
-    parent TEXT NOT NULL REFERENCES prompt_texts(hash) ON DELETE CASCADE,
+    parent TEXT NOT NULL,
     child TEXT NOT NULL REFERENCES prompt_texts(hash),
-    PRIMARY KEY (parent, child)
-);
-CREATE INDEX IF NOT EXISTS idx_prompt_text_edges_child ON prompt_text_edges(child);
+    PRIMARY KEY (child, parent)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS prompt_prefixes (
     session_id TEXT PRIMARY KEY,
     hash TEXT NOT NULL REFERENCES prompt_texts(hash)
-);
+) WITHOUT ROWID;
 ";
 
 fn call_params(call: &PromptCallKey) -> (String, String, String) {
@@ -249,7 +262,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             if !unheld.is_empty() {
                 let bodies: Vec<_> = unheld
                     .iter()
-                    .map(|(hash, text)| (*hash, &*text.text))
+                    .map(|(hash, text)| stored_text(hash, text))
                     .collect();
                 hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
                 let paths: BTreeSet<_> = unheld
@@ -439,33 +452,48 @@ fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()>
         if frontier.is_empty() {
             break;
         }
-        let list = encode(&frontier)?;
-        let mut children = index_edges(tx, &list)?;
-        let removed = hash_set(tx, SQLITE_SQL.reclaim_texts.sql(), [&list])?;
-        frontier = removed
-            .into_iter()
-            .filter_map(|hash| children.remove(&hash))
-            .flatten()
-            .collect();
+        // A reclaimed parent's edges go with it, which may leave its
+        // children unreferenced on the next level.
+        let reclaimed = tx
+            .prepare_cached(SQLITE_SQL.reclaim_texts.sql())?
+            .query_map([encode(&frontier)?], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut edges = Vec::new();
+        frontier = BTreeSet::new();
+        for (parent, children) in reclaimed {
+            for child in read_children(children.as_deref())? {
+                edges.push([child.clone(), parent.clone()]);
+                frontier.insert(child);
+            }
+        }
+        if !edges.is_empty() {
+            cached_execute(tx, SQLITE_SQL.delete_index_edges.sql(), [encode(&edges)?])?;
+        }
     }
     Ok(())
 }
 
-/// Read one batch's outgoing index edges in the existing child order.
-fn index_edges(
-    tx: &Connection,
-    list: &str,
-) -> rusqlite::Result<BTreeMap<String, BTreeSet<String>>> {
-    let mut children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut statement = tx.prepare_cached(SQLITE_SQL.read_index_edges.sql())?;
-    let edges = statement.query_map([list], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for edge in edges {
-        let (parent, child) = edge?;
-        children.entry(parent).or_default().insert(child);
+/// One text's `insert_texts` element: `[hash, text]` for a leaf, and
+/// `[hash, text, children]` for an index node, its children in address
+/// order as its row stores them.
+fn stored_text(hash: &str, text: &PromptText) -> serde_json::Value {
+    let children: BTreeSet<&str> = text.children.iter().map(String::as_str).collect();
+    if children.is_empty() {
+        serde_json::json!([hash, &*text.text])
+    } else {
+        serde_json::json!([hash, &*text.text, children])
     }
-    Ok(children)
+}
+
+/// The children a text's row stores.
+fn read_children(stored: Option<&str>) -> rusqlite::Result<Vec<String>> {
+    stored.map_or(Ok(Vec::new()), |children| {
+        serde_json::from_str(children).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, error.into())
+        })
+    })
 }
 
 /// A statement's JSON list argument.
@@ -507,20 +535,39 @@ pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<P
             DomainRefusal::PromptAuditExpired { call: call.clone() },
         )));
     }
-    let mut snapshot_texts = Vec::new();
-    let mut request_texts = Vec::new();
-    let mut statement = tx.prepare_cached(SQL.read_edges.sql())?;
-    let edges = statement.query_map(rusqlite::params![session, owner, ordinal], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for edge in edges {
-        let (part, hash) = edge?;
-        if part == REQUEST_PART {
-            request_texts.push(hash);
-        } else {
-            snapshot_texts.push(hash);
+    // The texts the call's roots reach under each part, walked level by
+    // level through the children each text stores.
+    let roots = tx
+        .prepare_cached(SQLITE_SQL.read_roots.sql())?
+        .query_map(rusqlite::params![session, owner, ordinal], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let closure_of = |part: &str| -> rusqlite::Result<Vec<String>> {
+        let mut reached = BTreeSet::new();
+        let mut level: BTreeSet<String> = roots
+            .iter()
+            .filter(|(root_part, _)| root_part == part)
+            .map(|(_, hash)| hash.clone())
+            .collect();
+        while !level.is_empty() {
+            let stored = tx
+                .prepare_cached(SQLITE_SQL.read_text_children.sql())?
+                .query_map([encode(&level)?], |row| row.get::<_, Option<String>>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            reached.extend(std::mem::take(&mut level));
+            for children in stored {
+                for child in read_children(children.as_deref())? {
+                    if !reached.contains(&child) {
+                        level.insert(child);
+                    }
+                }
+            }
         }
-    }
+        Ok(reached.into_iter().collect())
+    };
+    let request_texts = closure_of(REQUEST_PART)?;
+    let snapshot_texts = closure_of(SNAPSHOT_PART)?;
     Ok(Ok(Some(PromptSnapshotRow {
         call: call.clone(),
         snapshot,
@@ -537,30 +584,23 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
     }
     let list = encode(&hashes)?;
     let mut statement = tx.prepare_cached(SQLITE_SQL.read_texts.sql())?;
-    let found = statement.query_map([&list], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    })?;
-    let mut texts: Vec<PromptText> = Vec::new();
-    let mut previous = None;
-    for row in found {
-        let (index, hash, text, child) = row?;
-        if previous != Some(index) {
-            texts.push(PromptText {
+    let texts = statement
+        .query_map([&list], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .map(|row| {
+            let (hash, text, children) = row?;
+            Ok(PromptText {
                 hash,
                 text: text.into(),
-                children: Vec::new(),
-            });
-            previous = Some(index);
-        }
-        if let (Some(child), Some(text)) = (child, texts.last_mut()) {
-            text.children.push(child);
-        }
-    }
+                children: read_children(children.as_deref())?,
+            })
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(Ok(texts))
 }
 

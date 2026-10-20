@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS session_revisions (
     config_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     terminal_ordinal INTEGER CONSTRAINT ck_session_revisions_terminal_ordinal CHECK (terminal_ordinal > 0),
     PRIMARY KEY (session_id, head_revision)
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_session_revisions_leaf
     ON session_revisions(leaf_node_id);
 CREATE INDEX IF NOT EXISTS idx_session_revisions_checkpoint_ref
@@ -178,10 +178,7 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
 CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
     ON runtime_turn_commits(session_id, committed_at_ms, turn_id)
     WHERE failure_evidence;
-
-
-CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_change_seq
-    ON runtime_turn_commits(change_seq) WHERE outcome_code IS NOT NULL;
+-- The change feed pages by the unique change_seq's own index (FIG-6939).
 -- A session's committed turns in commit order (FIG-5297). One commit
 -- publishes each revision, so no two receipts of a session share one.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_turn_commits_session_revision
@@ -460,7 +457,7 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
-);
+) WITHOUT ROWID;
 
 -- Every ended referrer has a permanent publication fence.
 CREATE TABLE IF NOT EXISTS referrer_fences (
@@ -468,7 +465,7 @@ CREATE TABLE IF NOT EXISTS referrer_fences (
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (length(referrer_id) > 0),
     ended_at_ms   INTEGER NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
-);
+) WITHOUT ROWID;
 
 -- Adoption asks one question of the whole table: does any row for this digest
 -- carry upload evidence?

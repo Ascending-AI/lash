@@ -574,9 +574,10 @@ law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
 law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
-/// GRAPH-PEEL-WORK: retirement reads edges only from nodes it can delete.
-/// A pinned manifest and a subtree another parent reaches both stop the
-/// peel before their children; releasing the last references reclaims them.
+/// GRAPH-PEEL-WORK: retirement touches edges only of nodes it deletes, and
+/// reads their children from their own bytes (FIG-6939). A pinned manifest
+/// and a subtree another parent reaches both stop the peel before their
+/// children; releasing the last references reclaims them.
 #[tokio::test]
 async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     use lash_core_store::checkpoint_graph::{
@@ -662,17 +663,29 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     for leaf in &leaves {
         assert!(stored.contains(&leaf.to_hex()));
     }
-    let edge_rows: u64 = receipt
-        .shapes
-        .iter()
-        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("main.blob_edges"))
-        .map(|(_, shape)| shape.rows_returned)
-        .sum();
+    let edge_rows =
+        |verb: &str, rows: fn(&lash_core_ids::operational_metrics::sql::Shape) -> u64| -> u64 {
+            receipt
+                .shapes
+                .iter()
+                .filter(|(sql, _)| sql.starts_with(verb) && sql.contains("main.blob_edges"))
+                .map(|(_, shape)| rows(shape))
+                .sum()
+        };
     eprintln!(
         "GRAPH-PEEL SQL {}",
         serde_json::to_string(&receipt).unwrap()
     );
-    assert_eq!(edge_rows, 2, "retained descendants' edges are never read");
+    assert_eq!(
+        edge_rows("delete from main.blob_edges", |shape| shape.rows_affected),
+        2,
+        "only the deleted root's edges go"
+    );
+    assert_eq!(
+        edge_rows("select ", |shape| shape.rows_returned),
+        0,
+        "retained descendants' edges are never read"
+    );
 
     // Put a parent and its child in the same retirement frontier. The
     // child's edges must be read on the next level, after the parent goes.
@@ -703,6 +716,83 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
         tier.blobs().await,
         initial,
         "the last references reclaim the whole graph"
+    );
+}
+
+/// GRAPH-PEEL-EDGES (FIG-6939): a peeled node's edges go with it even when
+/// its bytes are no longer the node it is stored under, so a child it
+/// reached is reclaimed with it rather than held by an edge forever.
+#[tokio::test]
+async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    use lash_durable::domain::graph::ReleasePinWrite;
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+
+    let tier = tier(false).await;
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
+    let actor = ActorKey::session("sql-work-owner").unwrap();
+    let initial = tier.blobs().await;
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut encode = |tag: &str, children: &[NodeId]| {
+        let mut body = TokenWriter::new();
+        body.seq(children.len() as u64 + 1);
+        body.text(tag);
+        for child in children {
+            body.child(child.child_ref());
+        }
+        staging
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+            .unwrap()
+    };
+    let leaves: Vec<_> = (0..3)
+        .map(|index| encode(&format!("leaf-{index}"), &[]))
+        .collect();
+    let root = encode("changed root", &leaves);
+    let pin = |write| DomainWrite::ReleasePin(write);
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.stage(staging.into_nodes().into_values());
+    tx.write(pin(ReleasePinWrite::Install {
+        release: "changed".into(),
+        root,
+    }));
+    tier.store
+        .commit(tx, CommitLabel::new("peel.install"))
+        .await
+        .unwrap();
+    assert_eq!(tier.edges(&root).await.len(), leaves.len());
+    let (mut bytes, _) = tier.blob(&root.to_hex()).await.unwrap();
+    bytes.truncate(bytes.len() / 2);
+    tier.foreign(ForeignWrite::OverwriteBlob { node: root, bytes })
+        .await;
+
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.write(pin(ReleasePinWrite::Retire {
+        release: "changed".into(),
+        expected: root,
+    }));
+    tier.store
+        .commit(tx, CommitLabel::new("peel.retire"))
+        .await
+        .unwrap();
+    settle(&tier.store).await.unwrap();
+    assert!(
+        tier.edges(&root).await.is_empty(),
+        "the peeled root's edges went with it"
+    );
+    assert_eq!(
+        tier.blobs().await,
+        initial,
+        "the children it reached are reclaimed with it"
     );
 }
 

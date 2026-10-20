@@ -842,8 +842,9 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     );
 }
 
-/// PROMPT-RECLAIM-WORK: releasing an index reads its outgoing edges once
-/// per level, rather than once per node. A subtree another call roots stays
+/// PROMPT-RECLAIM-WORK: releasing an index deletes its outgoing edges once
+/// per level, rather than once per node, and reads none: each reclaimed text
+/// answers its own children (FIG-6939). A subtree another call roots stays
 /// stored until that call releases it.
 #[tokio::test]
 async fn prompt_reclamation_reads_one_edge_batch_per_level() {
@@ -917,7 +918,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
         .await
         .unwrap();
     let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
-    for (run, levels) in [("whole", 5), ("held", 4)] {
+    for (run, levels) in [("whole", 4), ("held", 3)] {
         let mut tx = store
             .begin(&actor, lash_durable::Epoch(identity.epoch))
             .await
@@ -933,12 +934,12 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
         )
         .await;
         answer.unwrap();
-        let edge_reads: u64 = receipt
+        // A level's reclaimed texts answer their own children; their
+        // edges go in one statement per level above the leaves.
+        let edge_batches: u64 = receipt
             .shapes
             .iter()
-            .filter(|(sql, _)| {
-                sql.starts_with("select child from") || sql.starts_with("select parent, child from")
-            })
+            .filter(|(sql, _)| sql.starts_with("delete from main.prompt_text_edges"))
             .map(|(_, shape)| shape.statements)
             .sum();
         eprintln!(
@@ -946,8 +947,15 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             serde_json::to_string(&receipt).unwrap()
         );
         assert_eq!(
-            edge_reads, levels,
-            "edge reads must follow levels, not nodes"
+            edge_batches, levels,
+            "edge deletes must follow levels, not nodes"
+        );
+        assert!(
+            !receipt
+                .shapes
+                .keys()
+                .any(|sql| sql.starts_with("select parent") || sql.starts_with("select child")),
+            "no level reads its edges"
         );
         let remaining: std::collections::BTreeSet<_> = store
             .prompt_texts(&hashes)

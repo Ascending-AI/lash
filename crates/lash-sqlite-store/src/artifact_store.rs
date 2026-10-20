@@ -581,8 +581,10 @@ impl SqliteStore {
         // The pointer, its edges and the body it names are one snapshot: a
         // release that reclaims the pointer and peels its body cannot land
         // between them.
+        // The read runs on a reader, never queued behind the writer's
+        // batches (FIG-6939).
         let resolved = self
-            .conn
+            .read_connection()
             .read(move |conn| {
                 let stored: Option<(String, Option<i64>)> = conn
                     .prepare_cached(artifact_sql().refs.select_body_ref.sql())
@@ -1087,7 +1089,7 @@ mod tests {
         }).await.expect("read edge and guard");
         assert_eq!((edges, obligations), (1, 1));
         use lash_core_store::store::ArtifactCleanupLedger as _;
-        let ledger = crate::obligation_ledger::SqliteArtifactCleanupLedger::new(store.conn.clone());
+        let ledger = crate::obligation_ledger::SqliteArtifactCleanupLedger::new(&store);
         ledger
             .arm_cleanup(
                 &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
