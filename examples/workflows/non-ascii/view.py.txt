@@ -1,10 +1,9 @@
 unit Function(Name("demo"))
 statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("größe"), value: Expr(Literal(Text("日本 🦀"))) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Act(ActExpr { kind: Call(Library(FunctionId(991c8bf00676509e4068578acdec2ab4176b10fc7b977adae1e9fb77db2afda2))), args: [Variable(Name("größe")), Variable(Name("name"))] })] })] }) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Call { function: FunctionId(ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/1/0 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
 action fn demo/1/0/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/1/0/0/0 library id=991c8bf00676509e4068578acdec2ab4176b10fc7b977adae1e9fb77db2afda2 name=py.add label="Python add"
 caption callable 0 block=fn demo "Grüße aus 日本 🦀"
 caption node 0 site=fn demo/0 "Pick the greeting: 日本 🦀"
-caption node 3 site=fn demo/1 "Echo the greeting with the name"
+caption node 2 site=fn demo/1 "Echo the greeting with the name"

@@ -109,6 +109,7 @@ struct Scope {
     /// Locals whose every definition is integer-producing. Boundness is
     /// checked separately at each read; these facts are never serialized.
     integer_locals: BTreeSet<String>,
+    sequence_locals: BTreeMap<String, Ty>,
     /// Names that hold a value at this point, one frame per kernel block
     /// open in this scope. A read of a name in none of them is checked.
     bound: Vec<BTreeSet<String>>,
@@ -314,6 +315,7 @@ pub(crate) fn lower_with_calls(
         excluded.extend(bindings.locals.iter().cloned());
     }
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
+    let sequence_locals = scope::sequence_locals(&module.body, &bindings, &excluded, true);
     let mut lowerer = Lowerer {
         source,
         calls,
@@ -328,6 +330,7 @@ pub(crate) fn lower_with_calls(
             kind: ScopeKind::Module,
             bindings,
             integer_locals,
+            sequence_locals,
             bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
             loops: 0,
@@ -754,7 +757,7 @@ impl Lowerer<'_> {
         }
     }
 
-    /// An integer fact applies only to a bound local of the current
+    /// An inferred type fact applies only to a bound local of the current
     /// scope. An enclosing scope may run differently when a closure is
     /// called, and a branch-local definition may not reach this read.
     fn type_of(&self, found: &Found, id: &str) -> Ty {
@@ -766,12 +769,21 @@ impl Lowerer<'_> {
         if annotated != Ty::Unknown {
             return annotated;
         }
+        self.local_type(found, id)
+    }
+
+    /// Facts proved from definitions, independently of annotations.
+    fn local_type(&self, found: &Found, id: &str) -> Ty {
         if let Some(scope) = found.scope
             && scope == self.scopes.len() - 1
-            && self.scopes[scope].integer_locals.contains(id)
             && self.is_bound(scope, id)
         {
-            return Ty::Int;
+            if self.scopes[scope].integer_locals.contains(id) {
+                return Ty::Int;
+            }
+            if let Some(ty) = self.scopes[scope].sequence_locals.get(id) {
+                return *ty;
+            }
         }
         Ty::Unknown
     }

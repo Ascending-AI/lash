@@ -1180,10 +1180,13 @@ impl Lowerer<'_> {
         excluded.extend(params.iter().cloned());
         let range_builtin = self.variable("range").is_none();
         let integer_locals = scope::integer_locals(suite, &bindings, &excluded, range_builtin);
+        let sequence_locals =
+            scope::sequence_locals(suite, &bindings, &excluded, self.variable("str").is_none());
         self.scopes.push(Scope {
             kind: ScopeKind::Function { is_async },
             bindings,
             integer_locals,
+            sequence_locals,
             bound: vec![params.iter().cloned().collect::<BTreeSet<String>>()],
             handlers: active.iter().cloned().map(Active::Passed).collect(),
             loops: 0,

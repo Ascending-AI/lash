@@ -12,8 +12,6 @@ use py.exc.name = @fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63
 use py.fail = @da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078
 use py.for_in.check = @9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830
 use py.for_in.open = @591cd7733b4de6a472d9070757c3477461ce2c01170971828c8ebd4eb4b07b6d
-use py.method.append = @603c88894aabeb7aa91aa3ca6cfca97449a63d5ee4abaa16b6fd30e76992d2b6
-use py.no_attribute = @f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c
 use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
 use py.type = @5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0
 use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
@@ -26,7 +24,7 @@ entry demo(items: Any) -> Any
 fn demo(items) {
   let out = []
   for item in items via (open py.for_in.open, check py.for_in.check) {
-    do invoke py.method.append(out, invoke py.reply(perform corpus.echo(item) as Json))
+    set out[list.len(out)] = invoke py.reply(perform corpus.echo(item) as Json)
   }
   return out
 }
@@ -35,4 +33,4 @@ main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=4 scopes=2 sites=8
+unit Function(Name("demo")): statements=4 scopes=2 sites=7

@@ -789,8 +789,31 @@ pub(super) fn execution_observation(
     bounds: Bounds,
     rebuild: bool,
 ) -> ExecutionObservation {
+    execution_observation_with_layout(program, bounds, rebuild, Default::default())
+}
+
+fn execution_observation_with_layout(
+    program: Program,
+    bounds: Bounds,
+    rebuild: bool,
+    layout: lash_kernel_vm::kernel_internals::Layout,
+) -> ExecutionObservation {
     let session = Session::default();
-    let mut machine = pages::start(program.clone(), bounds, &session);
+    let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
+        program.clone(),
+        bounds,
+        lash_kernel_vm::CellStart {
+            owner: pages::OWNER,
+            target: lash_kernel_vm::Target::Main,
+            args: Vec::new(),
+            session: session.root,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+        layout,
+        Box::new(session.source.clone()),
+    )
+    .unwrap();
     let mut host = Console::default();
     let mut requests = Vec::new();
     loop {
@@ -815,11 +838,12 @@ pub(super) fn execution_observation(
         }
         if rebuild {
             let sealed = machine.checkpoint().unwrap();
-            machine = KernelMachine::open(
+            machine = lash_kernel_vm::kernel_internals::open_with_layout(
                 program.clone(),
                 bounds,
-                &sealed.checkpoint(),
+                lash_kernel_state::kernel_internals::checkpoint_root(&sealed.checkpoint()),
                 Box::new(session.source.clone()),
+                layout,
             )
             .unwrap();
         }
@@ -1559,5 +1583,159 @@ fn python_awaits_add_no_turn() {
         let recorded = run(source, &[order.map(String::from).to_vec()]);
         assert_eq!(recorded.lines(), ["i", "p"], "{order:?}");
         assert_eq!(recorded.end, "ok");
+    }
+}
+
+/// FIG-6960 PB: closed list/text locals use kernel collection and text
+/// operations, with Python's result and argument-effect order intact.
+#[test]
+fn sequence_facts_lower_kernel_operations_and_preserve_effects() {
+    let source = r#"
+xs = []
+alias = xs
+text = ''
+for n in range(3):
+    part = 'row-' + str(n)
+    text = text + part
+    xs.append(part)
+print(text, '|'.join(xs))
+print(xs.append(alias.pop()))
+xs.append(await echo('last'))
+print(xs)
+"#;
+    let text = kernel_text(source);
+    assert!(!text.contains("py.method.append"), "{text}");
+    assert!(!text.contains("py.add"), "{text}");
+    assert!(!text.contains("invoke py.str("), "{text}");
+    assert!(text.contains("num.to_text"), "{text}");
+    assert!(text.contains("text.concat"), "{text}");
+    let direct = run(source, &[]);
+    let helpers = r#"
+def append_helper(receiver, value):
+    return receiver.append(value)
+def add_helper(left, right):
+    return left + right
+def str_helper(value):
+    return str(value)
+"#;
+    let fallback = source
+        .replace("'row-' + str(n)", "add_helper('row-', str_helper(n))")
+        .replace("text + part", "add_helper(text, part)")
+        .replace("xs.append(", "append_helper(xs, ");
+    let fallback = run(&format!("{helpers}\n{fallback}"), &[]);
+    assert_eq!(direct.lines(), fallback.lines());
+    assert_eq!(direct.end, fallback.end);
+    assert_eq!(
+        direct.epochs.iter().map(|e| &e.asked).collect::<Vec<_>>(),
+        fallback.epochs.iter().map(|e| &e.asked).collect::<Vec<_>>()
+    );
+}
+
+/// FIG-6960 PB: one incompatible definition anywhere, a capture, or an
+/// unbound read prevents a sequence fact. Existing helper errors survive.
+#[test]
+fn sequence_facts_reject_incompatible_or_unbound_definitions() {
+    for (source, helper, expected) in [
+        (
+            "x = []\nx.append(1)\nx = 1\ntry:\n    x.append(2)\nexcept AttributeError:\n    print('guarded')",
+            "py.method.append",
+            "guarded",
+        ),
+        (
+            "x = ''\nx = x + 'a'\nx = []\ntry:\n    x = x + 'b'\nexcept TypeError:\n    print('guarded')",
+            "py.add",
+            "guarded",
+        ),
+        (
+            "def f(flag):\n    if flag:\n        x = []\n    try:\n        x.append(1)\n    except UnboundLocalError:\n        print('unbound')\nf(False)",
+            "py.method.append",
+            "unbound",
+        ),
+        (
+            "def f(flag):\n    if flag:\n        x = ''\n    try:\n        x = x + 'a'\n    except UnboundLocalError:\n        print('unbound')\nf(False)",
+            "py.add",
+            "unbound",
+        ),
+        (
+            "x = []\ndef change():\n    global x\n    x = 1\nchange()\ntry:\n    x.append(1)\nexcept AttributeError:\n    print('guarded')",
+            "py.method.append",
+            "guarded",
+        ),
+        (
+            "def outer():\n    x = ''\n    def change():\n        nonlocal x\n        x = []\n    change()\n    try:\n        x = x + 'a'\n    except TypeError:\n        print('guarded')\nouter()",
+            "py.add",
+            "guarded",
+        ),
+        (
+            "def f():\n    def str(value):\n        return []\n    x = str(1)\n    x.append(2)\n    print(x)\nf()",
+            "py.method.append",
+            "[2]",
+        ),
+        (
+            "x = []\ny = x\nx = 1\ny.append(2)\nprint(y)",
+            "py.method.append",
+            "[2]",
+        ),
+    ] {
+        assert!(kernel_text(source).contains(helper), "{source}");
+        assert_eq!(
+            output(source),
+            (vec![expected.into()], "ok".into()),
+            "{source}"
+        );
+    }
+}
+
+/// FIG-6960 PB, PLAN-INDEP: the direct operations preserve results,
+/// effects and exact charge across regions, islands, slices and every bound.
+#[test]
+fn sequence_facts_agree_across_layouts_and_charge_bounds() {
+    use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
+    let source = r#"
+async def build():
+    parts = []
+    text = ''
+    for n in range(3):
+        part = 'λ' + str(n)
+        text += part
+        parts.append(part)
+    parts.append(await echo(text))
+    print(parts)
+await build()
+"#;
+    let lowered = lower(source).unwrap();
+    let registry = Arc::clone(installed().prepared.registry());
+    let program = |layout| Program {
+        release: pages::RELEASE,
+        document: Arc::clone(lowered.document.shared()),
+        library: prepare_with_layout(Arc::clone(&registry), layout),
+    };
+    let on = program(Layout(0));
+    let off = program(Layout(0).without_regions());
+    let reference =
+        execution_observation_with_layout(off.clone(), BOUNDS, false, Layout(0).without_regions());
+    assert_eq!(
+        execution_observation_with_layout(on.clone(), BOUNDS, false, Layout(0)),
+        reference
+    );
+    assert_eq!(
+        execution_observation_with_layout(on.clone(), BOUNDS, true, Layout(0)),
+        reference
+    );
+    for charge_limit in 0..=reference.charged {
+        let bounds = Bounds {
+            charge_limit,
+            ..BOUNDS
+        };
+        assert_eq!(
+            execution_observation_with_layout(on.clone(), bounds, false, Layout(0)),
+            execution_observation_with_layout(
+                off.clone(),
+                bounds,
+                false,
+                Layout(0).without_regions()
+            ),
+            "bound {charge_limit}"
+        );
     }
 }

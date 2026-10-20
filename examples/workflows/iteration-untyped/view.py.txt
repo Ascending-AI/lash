@@ -1,15 +1,14 @@
 unit Function(Name("demo"))
 statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("out"), value: Expr(List([])) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: FunctionId(591cd7733b4de6a472d9070757c3477461ce2c01170971828c8ebd4eb4b07b6d), next: None, item: None, check: Some(FunctionId(9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830)) }), body: [Do { value: Act(ActExpr { kind: Call(Library(FunctionId(603c88894aabeb7aa91aa3ca6cfca97449a63d5ee4abaa16b6fd30e76992d2b6))), args: [Variable(Name("out")), Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Variable(Name("item"))] })] })] }) }], else_block: [] }
-statement fn demo/1/1/0 ordinal=6 depth=1 block=fn demo/1/1 Do { value: Act(ActExpr { kind: Call(Library(FunctionId(603c88894aabeb7aa91aa3ca6cfca97449a63d5ee4abaa16b6fd30e76992d2b6))), args: [Variable(Name("out")), Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Variable(Name("item"))] })] })] }) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: FunctionId(591cd7733b4de6a472d9070757c3477461ce2c01170971828c8ebd4eb4b07b6d), next: None, item: None, check: Some(FunctionId(9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830)) }), body: [Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Variable(Name("item"))] })] })), order: ValueFirst }], else_block: [] }
+statement fn demo/1/1/0 ordinal=6 depth=1 block=fn demo/1/1 Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Variable(Name("item"))] })] })), order: ValueFirst }
 statement fn demo/2 ordinal=7 depth=0 block=fn demo Return { value: Variable(Name("out")) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/1/1 ordinal=5 depth=1 For
-action fn demo/1/1/0/0 library id=603c88894aabeb7aa91aa3ca6cfca97449a63d5ee4abaa16b6fd30e76992d2b6 name=py.method.append label="Python method append"
-action fn demo/1/1/0/0/1 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
-action fn demo/1/1/0/0/1/0 Some(Effect(QualifiedName("corpus.echo")))
+action fn demo/1/1/0/2 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
+action fn demo/1/1/0/2/0 Some(Effect(QualifiedName("corpus.echo")))
 caption callable 0 block=fn demo "Echo every item"
 caption node 0 site=fn demo/0 "Start an empty list of replies"
 caption node 1 site=fn demo/1 "Go through each item"
-caption node 4 site=fn demo/1/1/0 "Echo the item and keep the reply"
-caption node 5 site=fn demo/2 "Give back the replies"
+caption node 3 site=fn demo/1/1/0 "Echo the item and keep the reply"
+caption node 4 site=fn demo/2 "Give back the replies"

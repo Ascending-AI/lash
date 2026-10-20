@@ -26,6 +26,11 @@ pub(super) fn main() -> Result<(), String> {
         Ok("exact") | Err(_) => lash_kernel_vm::Charge::Exact,
         Ok(other) => return Err(format!("unknown charge policy: {other}")),
     };
+    let layout = match std::env::var("KERNEL_PERF_REGIONS").as_deref() {
+        Ok("off") => lash_kernel_vm::kernel_internals::Layout(0).without_regions(),
+        Ok("on") | Err(_) => lash_kernel_vm::kernel_internals::Layout(0),
+        Ok(other) => return Err(format!("unknown regions policy: {other}")),
+    };
     let bounds = Bounds {
         charge,
         ..benchmark_bounds()
@@ -69,12 +74,15 @@ pub(super) fn main() -> Result<(), String> {
     let program = Program {
         release: pages::RELEASE,
         document: Arc::clone(document.shared()),
-        library: PreparedLibrary::with_charge(registry, charge),
+        library: lash_kernel_vm::kernel_internals::in_charge(
+            &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
+            charge,
+        ),
     };
     let library_compile_ns = compile.elapsed().as_nanos();
     // Document compilation is lazy inside start, together with cell setup.
     let start_time = Instant::now();
-    let mut machine = KernelMachine::start(
+    let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
         program.clone(),
         bounds,
         CellStart {
@@ -85,6 +93,7 @@ pub(super) fn main() -> Result<(), String> {
             modes: lash_kernel_vm::EffectModes::recorded(),
             host: Vec::new(),
         },
+        layout,
         Box::new(pages::Source::default()),
     )
     .map_err(|error| error.to_string())?;
@@ -136,6 +145,7 @@ pub(super) fn main() -> Result<(), String> {
             "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
             "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
             "observer": "off",
+            "regions": if layout == lash_kernel_vm::kernel_internals::Layout(0) { "on" } else { "off" },
         })
     );
     Ok(())

@@ -1,8 +1,8 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry,
-    RecordType, Rhs, Signature, Stmt, Type,
+    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Member, Name, Place,
+    RecordEntry, RecordType, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
@@ -1124,6 +1124,18 @@ impl Lowerer<'_> {
                 call.range(),
             ));
         }
+        let list_local = matches!(attribute.value.as_ref(), PyExpr::Name(local)
+            if self.variable(local.id.as_str()).is_some_and(|found|
+                self.local_type(&found, local.id.as_str()) == Ty::List));
+        if name == "append" && receiver.ty == Ty::List && list_local {
+            let value = slots.remove(0).unwrap_or_else(absent);
+            let target = receiver.expr;
+            let end = self.native("list.len", vec![target.clone()])?;
+            // As in comprehension collection, evaluate the argument before
+            // reading the end: it may itself mutate the receiver or park.
+            self.store(Place::Member(Member::Index { target, index: end }), value);
+            return Ok(Operand::none());
+        }
         let mut all = vec![receiver];
         all.extend(slots.into_iter().map(|slot| slot.unwrap_or_else(absent)));
         self.invoke(&format!("py.method.{name}"), &all, method.result)
@@ -1220,6 +1232,10 @@ impl Lowerer<'_> {
                 return match operands.into_iter().next() {
                     None => Ok(Operand::text("")),
                     Some(value) if value.ty == Ty::Str => Ok(value),
+                    Some(value) if value.ty == Ty::Int => {
+                        let text = self.native("num.to_text", vec![value.expr])?;
+                        Ok(Operand::inline(text, Ty::Str))
+                    }
                     Some(value) => self.invoke("py.str", &[value], Ty::Str),
                 };
             }

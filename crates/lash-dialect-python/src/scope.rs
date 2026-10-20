@@ -504,13 +504,47 @@ pub(crate) fn integer_locals(
     excluded: &BTreeSet<String>,
     range_builtin: bool,
 ) -> BTreeSet<String> {
+    typed_locals(body, bindings, excluded, Ty::Int, range_builtin, false)
+}
+
+/// Closed list and text definitions use the same scope-wide fixpoint as
+/// integers. A shadowed `str` establishes no text fact, even if its name
+/// happens to match the builtin. Parameters, captures and restored cells
+/// are excluded by the caller, and reads still require definite boundness.
+pub(crate) fn sequence_locals(
+    body: &[Stmt],
+    bindings: &Bindings,
+    excluded: &BTreeSet<String>,
+    str_builtin: bool,
+) -> BTreeMap<String, Ty> {
+    [Ty::List, Ty::Str]
+        .into_iter()
+        .flat_map(|ty| {
+            typed_locals(body, bindings, excluded, ty, false, str_builtin)
+                .into_iter()
+                .map(move |name| (name, ty))
+        })
+        .collect()
+}
+
+fn typed_locals(
+    body: &[Stmt],
+    bindings: &Bindings,
+    excluded: &BTreeSet<String>,
+    ty: Ty,
+    range_builtin: bool,
+    str_builtin: bool,
+) -> BTreeSet<String> {
     let mut candidates: BTreeSet<String> = bindings.locals.difference(excluded).cloned().collect();
+    let str_builtin = str_builtin && !bindings.locals.contains("str");
     let range_builtin = range_builtin && !bindings.locals.contains("range");
     loop {
-        let mut proof = IntegerProof {
+        let mut proof = LocalProof {
             candidates: &candidates,
             rejected: BTreeSet::new(),
             range_builtin,
+            str_builtin,
+            ty,
         };
         proof.visit_body(body);
         let rejected = proof.rejected;
@@ -522,16 +556,18 @@ pub(crate) fn integer_locals(
     }
 }
 
-struct IntegerProof<'s> {
+struct LocalProof<'s> {
     candidates: &'s BTreeSet<String>,
     rejected: BTreeSet<String>,
     range_builtin: bool,
+    str_builtin: bool,
+    ty: Ty,
 }
 
-impl IntegerProof<'_> {
-    fn target(&mut self, target: &Expr, integer: bool) {
+impl LocalProof<'_> {
+    fn target(&mut self, target: &Expr, produces: bool) {
         match target {
-            Expr::Name(name) if !integer => {
+            Expr::Name(name) if !produces => {
                 self.rejected.insert(name.id.as_str().to_string());
             }
             Expr::Tuple(tuple) => tuple.elts.iter().for_each(|elt| self.target(elt, false)),
@@ -541,18 +577,50 @@ impl IntegerProof<'_> {
         }
     }
 
+    fn produces(&self, expr: &Expr) -> bool {
+        if let Expr::Name(name) = expr {
+            return self.candidates.contains(name.id.as_str());
+        }
+        if let Expr::If(branch) = expr {
+            return self.produces(&branch.body) && self.produces(&branch.orelse);
+        }
+        match self.ty {
+            Ty::Int => self.integer(expr),
+            Ty::List => {
+                matches!(expr, Expr::List(_) | Expr::ListComp(_) | Expr::Generator(_))
+                    || matches!(expr, Expr::BinOp(op) if op.op == ast::Operator::Add
+                    && self.produces(&op.left) && self.produces(&op.right))
+            }
+            Ty::Str => {
+                matches!(expr, Expr::StringLiteral(_) | Expr::FString(_))
+                    || matches!(expr, Expr::BinOp(op) if op.op == ast::Operator::Add
+                    && self.produces(&op.left) && self.produces(&op.right))
+                    || (self.str_builtin
+                        && matches!(expr, Expr::Call(call)
+                    if matches!(call.func.as_ref(), Expr::Name(name) if name.id.as_str() == "str")))
+            }
+            _ => unreachable!("only closed integer, list and text definitions are inferred"),
+        }
+    }
+
+    fn closed(&self, op: ast::Operator) -> bool {
+        match self.ty {
+            Ty::Int => integer_closed(op),
+            Ty::List | Ty::Str => op == ast::Operator::Add,
+            _ => false,
+        }
+    }
+
     fn integer(&self, expr: &Expr) -> bool {
         match expr {
             Expr::NumberLiteral(number) => matches!(number.value, ast::Number::Int(_)),
-            Expr::Name(name) => self.candidates.contains(name.id.as_str()),
             Expr::BinOp(op) => {
-                integer_closed(op.op) && self.integer(&op.left) && self.integer(&op.right)
+                integer_closed(op.op) && self.produces(&op.left) && self.produces(&op.right)
             }
             Expr::UnaryOp(op) => {
                 matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                    && self.integer(&op.operand)
+                    && self.produces(&op.operand)
             }
-            Expr::If(branch) => self.integer(&branch.body) && self.integer(&branch.orelse),
             // Booleans participate in Python integer arithmetic, but a bool
             // value is not a kernel integer. Keep its Python coercion helper.
             // Powers may produce floats (negative exponents); calls and
@@ -592,28 +660,29 @@ impl<'a> Visitor<'a> for MentionedNames<'_> {
     }
 }
 
-impl<'a> Visitor<'a> for IntegerProof<'_> {
+impl<'a> Visitor<'a> for LocalProof<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::Assign(assign) => {
-                let integer = self.integer(&assign.value);
+                let produces = self.produces(&assign.value);
                 for target in &assign.targets {
-                    self.target(target, integer);
+                    self.target(target, produces);
                 }
             }
             Stmt::AnnAssign(assign) => {
                 if let Some(value) = &assign.value {
-                    self.target(&assign.target, self.integer(value));
+                    self.target(&assign.target, self.produces(value));
                 }
             }
             Stmt::AugAssign(assign) => self.target(
                 &assign.target,
-                integer_closed(assign.op)
-                    && self.integer(&assign.target)
-                    && self.integer(&assign.value),
+                self.closed(assign.op)
+                    && self.produces(&assign.target)
+                    && self.produces(&assign.value),
             ),
             Stmt::For(for_loop) => {
-                let integer = self.range_builtin
+                let integer = self.ty == Ty::Int
+                    && self.range_builtin
                     && matches!(for_loop.iter.as_ref(), Expr::Call(call)
                     if matches!(call.func.as_ref(), Expr::Name(name) if name.id.as_str() == "range"));
                 self.target(&for_loop.target, integer);
