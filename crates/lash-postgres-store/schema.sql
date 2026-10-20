@@ -938,8 +938,9 @@ CREATE TABLE IF NOT EXISTS lash_package_definitions (
 CREATE TABLE IF NOT EXISTS lash_package_labels (
     artifact TEXT NOT NULL,
     labels TEXT NOT NULL,
+    labels_digest BYTEA NOT NULL CHECK (octet_length(labels_digest) = 32),
     sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_labels_sequence UNIQUE,
-    PRIMARY KEY (artifact, labels)
+    PRIMARY KEY (artifact, labels_digest)
 );
 
 -- Every operation a stored package declares internal, by effect name and

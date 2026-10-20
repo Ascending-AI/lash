@@ -87,7 +87,11 @@ pub(super) fn install(
         cached_execute(
             tx,
             SQL.label_put.sql(),
-            rusqlite::params![artifact.artifact.digest.to_string(), artifact.labels],
+            rusqlite::params![
+                artifact.artifact.digest.to_string(),
+                artifact.labels,
+                artifact.labels_digest().as_slice()
+            ],
         )?;
     }
     for set in sets {

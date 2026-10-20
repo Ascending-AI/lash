@@ -94,11 +94,11 @@ crate::statements! {
         internal_paths = "SELECT path FROM package_internal_operations WHERE operation = ?1
              ORDER BY path";
 
-        /// Append labels `?2` of artifact `?1` at the next label sequence;
-        /// nothing when the artifact has those labels.
-        label_put = "INSERT INTO package_labels (artifact, labels, sequence)
-             SELECT ?1, ?2, COALESCE(MAX(sequence), 0) + 1 FROM package_labels WHERE TRUE
-             ON CONFLICT (artifact, labels) DO NOTHING";
+        /// Append labels `?2` of artifact `?1`, keyed by their fixed-width
+        /// digest `?3`, at the next label sequence; nothing when recorded.
+        label_put = "INSERT INTO package_labels (artifact, labels, labels_digest, sequence)
+             SELECT ?1, ?2, ?3, COALESCE(MAX(sequence), 0) + 1 FROM package_labels WHERE TRUE
+             ON CONFLICT (artifact, labels_digest) DO NOTHING";
 
         /// Every labels of artifact `?1`, in install order.
         labels_of = "SELECT labels FROM package_labels WHERE artifact = ?1 ORDER BY sequence";

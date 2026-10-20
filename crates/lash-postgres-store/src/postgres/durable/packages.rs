@@ -73,7 +73,7 @@ pub(super) async fn install(
     crate::observed_sql::query(POSTGRES.lock.sql())
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
-        .map_err(sqlx_failure)?;
+        .map_err(install_failure)?;
     for artifact in artifacts {
         crate::observed_sql::query(SQL.artifact_put.sql())
             .bind(artifact.artifact.digest.to_string())
@@ -81,14 +81,14 @@ pub(super) async fn install(
             .bind(artifact.header.as_str())
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
-            .map_err(sqlx_failure)?;
+            .map_err(install_failure)?;
         for function in &artifact.definitions {
             crate::observed_sql::query(SQL.definition_put.sql())
                 .bind(function.to_string())
                 .bind(artifact.artifact.path.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
-                .map_err(sqlx_failure)?;
+                .map_err(install_failure)?;
         }
         for operation in &artifact.internal {
             crate::observed_sql::query(SQL.internal_put.sql())
@@ -96,14 +96,15 @@ pub(super) async fn install(
                 .bind(artifact.artifact.path.as_str())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
-                .map_err(sqlx_failure)?;
+                .map_err(install_failure)?;
         }
         crate::observed_sql::query(SQL.label_put.sql())
             .bind(artifact.artifact.digest.to_string())
             .bind(artifact.labels.as_str())
+            .bind(artifact.labels_digest().as_slice())
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
-            .map_err(sqlx_failure)?;
+            .map_err(install_failure)?;
     }
     for set in sets {
         for member in &set.members {
@@ -111,7 +112,7 @@ pub(super) async fn install(
                 .bind(member.digest.to_string())
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
-                .map_err(sqlx_failure)?;
+                .map_err(install_failure)?;
             if known.is_none() {
                 return Err(lash_durable::packages::unknown_member(set, member));
             }
@@ -125,7 +126,7 @@ pub(super) async fn install(
             ))
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
-            .map_err(sqlx_failure)?;
+            .map_err(install_failure)?;
         if installed.is_some() {
             for member in &set.members {
                 crate::observed_sql::query(SQL.member_put.sql())
@@ -133,11 +134,27 @@ pub(super) async fn install(
                     .bind(member.digest.to_string())
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
-                    .map_err(sqlx_failure)?;
+                    .map_err(install_failure)?;
             }
         }
     }
     Ok(())
+}
+
+/// A permanent SQL refusal during install cannot clear by retrying startup.
+/// Keep its SQLSTATE intact for the host watching node_stopped(). Connection
+/// loss, contention and other transient failures retain their retry policy.
+fn install_failure(error: sqlx::Error) -> DurableError {
+    if let sqlx::Error::Database(database) = &error
+        && let Some(code) = database.code()
+        && matches!(code.get(..2), Some("22" | "23" | "42" | "54" | "0A"))
+    {
+        return DurableError::PackageInstallRefused {
+            sqlstate: code.into_owned(),
+            message: database.message().to_owned(),
+        };
+    }
+    sqlx_failure(error)
 }
 
 /// Every stored artifact and set.

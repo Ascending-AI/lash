@@ -74,9 +74,18 @@ pub struct ArtifactInstall {
     /// The operations it declares internal, by effect name: the index of
     /// who may perform them records them under its path.
     pub internal: BTreeSet<EffectName>,
-    /// Its release and display labels, as JSON: no digest covers them, so
-    /// the store appends each install's beside the artifact.
+    /// Its release and display labels, as JSON: they are outside the artifact's
+    /// content identity, so the store appends each install's beside it.
     pub labels: String,
+}
+
+impl ArtifactInstall {
+    /// The fixed-width index key for this install's label payload. Labels can
+    /// exceed a database's index-row bound; their bytes remain stored whole.
+    #[must_use]
+    pub fn labels_digest(&self) -> [u8; 32] {
+        *blake3::hash(self.labels.as_bytes()).as_bytes()
+    }
 }
 
 /// One set as a host installs it: its digest, its members, the bytes of

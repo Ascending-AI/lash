@@ -288,8 +288,9 @@ CREATE TABLE IF NOT EXISTS package_definitions (
 CREATE TABLE IF NOT EXISTS package_labels (
     artifact TEXT NOT NULL,
     labels TEXT NOT NULL,
+    labels_digest BLOB NOT NULL CHECK (length(labels_digest) = 32),
     sequence INTEGER NOT NULL CONSTRAINT uq_package_labels_sequence UNIQUE,
-    PRIMARY KEY (artifact, labels)
+    PRIMARY KEY (artifact, labels_digest)
 );
 
 -- Every operation a stored package declares internal, by effect name and

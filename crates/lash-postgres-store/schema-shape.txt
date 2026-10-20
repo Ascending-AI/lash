@@ -283,9 +283,10 @@ table lash_package_internal_operations
 table lash_package_labels
   column artifact text not-null
   column labels text not-null
+  column labels_digest bytea not-null
   column sequence bigint not-null
   unique (sequence)
-  primary-key (artifact, labels)
+  primary-key (artifact, labels_digest)
 table lash_package_set_members
   column artifact text not-null
   column set_digest text not-null

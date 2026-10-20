@@ -340,7 +340,10 @@ impl LashCore {
     /// §3); `None` when the core runs no node. A node stops when the host
     /// shuts the core down or drains it, and on its own when its lease is
     /// lost (another node reaped it, or a newer boot of the same owner
-    /// replaced it) or the store refused it for good. A node that went
+    /// replaced it) or the store refused it for good. A permanent package
+    /// installation refusal ends startup with `DurableError::PackageInstallRefused`,
+    /// preserving the SQLSTATE; hosts can watch this alongside send outcomes.
+    /// A node that went
     /// unrenewed past `self_stop_after` does not stop: it serves again as a
     /// new boot. A core whose node stopped on its own still admits work,
     /// which other nodes serve; a host that wants this process to serve
