@@ -945,7 +945,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn build_lifecycle_core(&self) -> lash::LashCore {
+    async fn build_lifecycle_core(&self) -> lash::LashCore {
         let transport = Arc::new(
             lash_provider_fixtures::provider::ScriptedLlmHttpTransport::from_scripts([])
                 .expect("empty provider script queue"),
@@ -956,7 +956,7 @@ impl BackendRunner {
                 &transport,
             )
             .expect("build differential lifecycle provider");
-        lash::LashCore::standard_builder(self.lifecycle_backend.clone())
+        let core = lash::LashCore::standard_builder(self.lifecycle_backend.clone())
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -967,7 +967,17 @@ impl BackendRunner {
                 lash::persistence::LeaseOwnerId::new("cross-backend-differential-test"),
                 lash::persistence::LeaseIncarnationId::new("cross-backend-differential-test-boot"),
             ))
-            .expect("build differential lifecycle core")
+            .expect("build differential lifecycle core");
+        // Node startup installs permanent, host-pin-owned package definitions.
+        // Finish that fixture setup before the next operation's residue digest:
+        // a refused session open must be compared against an installed host.
+        self.lifecycle_backend
+            .packages()
+            .expect("the standard core registers its workers' packages")
+            .hold(&self.lifecycle_backend)
+            .await
+            .expect("install the lifecycle core's package definitions");
+        core
     }
     /// Deliver every due artifact cleanup until none is due. A delete arms
     /// its session's cleanup, which a core's recovery slot otherwise delivers
@@ -1305,7 +1315,7 @@ impl BackendRunner {
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
                 self.settle_artifact_cleanups().await;
-                self.lifecycle_core = Some(self.build_lifecycle_core());
+                self.lifecycle_core = Some(self.build_lifecycle_core().await);
                 Ok(None)
             }
             StoreOperation::AttemptAdmission => {
@@ -1642,8 +1652,7 @@ async fn runners_for_case(
     runners_for_case_with_clock(
         case,
         sqlite_root,
-        postgres,
-        postgres_database_url,
+        Some((postgres, postgres_database_url)),
         run_nonce,
         Arc::new(DifferentialClock),
     )
@@ -1657,8 +1666,7 @@ async fn runners_for_case(
 async fn runners_for_case_with_clock(
     case: CaseName,
     sqlite_root: &Path,
-    postgres: &PostgresStorage,
-    postgres_database_url: &str,
+    postgres: Option<(&PostgresStorage, &str)>,
     run_nonce: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<BackendRunner> {
@@ -1735,45 +1743,10 @@ async fn runners_for_case_with_clock(
     );
     let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn DeploymentStore>;
 
-    let postgres_factory = Arc::new(
-        postgres
-            .session_store_factory()
-            .with_clock(Arc::clone(&clock)),
-    );
-    let postgres_store = admit_test_session(postgres_factory.clone(), &create_request)
-        .await
-        .expect("create Postgres differential store");
-    assert_eq!(
-        postgres_store
-            .load_session_meta(&session_id)
-            .await
-            .expect("read admitted metadata"),
-        Some(expected_meta.clone())
-    );
-    let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
-
     let memory_lifecycle: lash::Backend =
         lash_conformance::backend_over(sqlite_memory_stores.clone());
     let sqlite_lifecycle: lash::Backend = lash_conformance::backend_over(sqlite_backend);
-    // The durable engine reads the differential clock, as SQLite's does,
-    // rather than the database's: a live core's node heartbeat then rewrites
-    // the instant it holds instead of moving a store-wide row under a
-    // refused step (FIG-6275).
-    let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(Arc::new(
-        lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
-            postgres,
-            lash_sqlite_store::SqliteStoreSet::open(
-                (sqlite_case_root.join("postgres-attachments")).join("attachments.db"),
-                lash_sqlite_store::SqliteSynchronous::Normal,
-            )
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
-            Arc::clone(&clock),
-        ),
-    ));
-
-    vec![
+    let mut runners = vec![
         BackendRunner {
             name: "sqlite-memory",
             session_id: session_id.clone(),
@@ -1809,7 +1782,7 @@ async fn runners_for_case_with_clock(
                 store: Some(sqlite_store),
             },
             reopen: BackendReopen::Sqlite {
-                root: sqlite_case_root,
+                root: sqlite_case_root.clone(),
             },
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),
@@ -1822,31 +1795,70 @@ async fn runners_for_case_with_clock(
             expected_execution_state: None,
             surface: SurfaceScratch::default(),
         },
-        BackendRunner {
-            name: "postgres",
-            session_id: session_id.clone(),
-            store: Some(Arc::clone(&postgres_store)),
-            factory: Some(postgres_factory_dyn),
-            raw_reader: RawDurableReader::Postgres {
-                pool: postgres.pool().clone(),
-                session_id,
-                store: Some(postgres_store),
-            },
-            reopen: BackendReopen::Postgres {
-                database_url: postgres_database_url.to_string(),
-            },
-            clock,
-            handles: BTreeMap::new(),
-            lifecycle_backend: postgres_lifecycle,
-            lifecycle_core: None,
-            reopened_postgres_pool: None,
-            current_frame_node_id: None,
-            current_leaf_node_id: None,
-            checkpoint_component_refs: None,
-            expected_execution_state: None,
-            surface: SurfaceScratch::default(),
+    ];
+    let Some((postgres, postgres_database_url)) = postgres else {
+        return runners;
+    };
+    let postgres_factory = Arc::new(
+        postgres
+            .session_store_factory()
+            .with_clock(Arc::clone(&clock)),
+    );
+    let postgres_store = admit_test_session(postgres_factory.clone(), &create_request)
+        .await
+        .expect("create Postgres differential store");
+    assert_eq!(
+        postgres_store
+            .load_session_meta(&session_id)
+            .await
+            .expect("read admitted metadata"),
+        Some(expected_meta.clone())
+    );
+    let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
+
+    // The durable engine reads the differential clock, as SQLite's does,
+    // rather than the database's: a live core's node heartbeat then rewrites
+    // the instant it holds instead of moving a store-wide row under a
+    // refused step (FIG-6275).
+    let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(Arc::new(
+        lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
+            postgres,
+            lash_sqlite_store::SqliteStoreSet::open(
+                (sqlite_case_root.join("postgres-attachments")).join("attachments.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
+            Arc::clone(&clock),
+        ),
+    ));
+
+    runners.push(BackendRunner {
+        name: "postgres",
+        session_id: session_id.clone(),
+        store: Some(Arc::clone(&postgres_store)),
+        factory: Some(postgres_factory_dyn),
+        raw_reader: RawDurableReader::Postgres {
+            pool: postgres.pool().clone(),
+            session_id,
+            store: Some(postgres_store),
         },
-    ]
+        reopen: BackendReopen::Postgres {
+            database_url: postgres_database_url.to_string(),
+        },
+        clock,
+        handles: BTreeMap::new(),
+        lifecycle_backend: postgres_lifecycle,
+        lifecycle_core: None,
+        reopened_postgres_pool: None,
+        current_frame_node_id: None,
+        current_leaf_node_id: None,
+        checkpoint_component_refs: None,
+        expected_execution_state: None,
+        surface: SurfaceScratch::default(),
+    });
+    runners
 }
 
 /// Two registrar mints that hand out the same ids in the same order, one per
