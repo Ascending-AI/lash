@@ -79,6 +79,54 @@ impl DurableStore for ObservedStore {
             .await
     }
 
+    async fn package_surface(
+        &self,
+        digest: &lash_durable::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        self.observe("package_surface", self.inner.package_surface(digest))
+            .await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[lash_durable::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.observe("package_paths", self.inner.package_paths(functions))
+            .await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[lash_durable::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::EffectName,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.observe(
+            "internal_operations",
+            self.inner.internal_operations(operations),
+        )
+        .await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[lash_durable::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
+    {
+        self.observe("package_labels", self.inner.package_labels(artifacts))
+            .await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.observe("owned", self.inner.owned(node)).await
     }

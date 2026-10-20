@@ -148,6 +148,7 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
             decodes: vec![formats()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: i64::try_from(lease.ttl.as_millis()).expect("ttl fits"),
         })
         .await

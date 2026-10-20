@@ -217,6 +217,7 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
             decodes: vec![FormatSet::new("pages-formats")],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60_000,
         })
         .await

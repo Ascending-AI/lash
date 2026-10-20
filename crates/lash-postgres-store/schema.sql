@@ -892,7 +892,10 @@ CREATE TABLE IF NOT EXISTS lash_nodes (
     formats_json TEXT NOT NULL,
     registered_at_ms BIGINT NOT NULL,
     heartbeat_expires_at_ms BIGINT NOT NULL,
-    draining BOOLEAN NOT NULL DEFAULT FALSE
+    draining BOOLEAN NOT NULL DEFAULT FALSE,
+    -- What the node offers running code, its own package set among it
+    -- (FIG-6991), as JSON: gone with the row.
+    capabilities_json TEXT NOT NULL
 );
 
 -- An installed package artifact (FIG-6918), keyed by its digest, with the
@@ -906,16 +909,45 @@ CREATE TABLE IF NOT EXISTS lash_package_artifacts (
 );
 
 -- An installed package set, keyed by its digest, at the store's install
--- sequence: the only key behind "newest first".
+-- sequence: the only key behind "newest first". Its surface snapshot and the
+-- JSON of what running its code requires are written once (FIG-6991).
 CREATE TABLE IF NOT EXISTS lash_package_sets (
     digest TEXT PRIMARY KEY,
-    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_sets_sequence UNIQUE
+    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_sets_sequence UNIQUE,
+    surface BYTEA NOT NULL,
+    requirements_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lash_package_set_members (
     set_digest TEXT NOT NULL REFERENCES lash_package_sets (digest),
     artifact TEXT NOT NULL REFERENCES lash_package_artifacts (artifact),
     PRIMARY KEY (set_digest, artifact)
+);
+
+-- Every definition of a stored package, helpers included, by identity and
+-- path (FIG-6991): written only by an install, never deleted. Membership is
+-- the authority to perform the package's internal operations.
+CREATE TABLE IF NOT EXISTS lash_package_definitions (
+    function TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY (function, path)
+);
+
+-- Each distinct labels an install wrote for an artifact, in install order:
+-- append-only, so releases of identical content keep their labels.
+CREATE TABLE IF NOT EXISTS lash_package_labels (
+    artifact TEXT NOT NULL,
+    labels TEXT NOT NULL,
+    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_labels_sequence UNIQUE,
+    PRIMARY KEY (artifact, labels)
+);
+
+-- Every operation a stored package declares internal, by effect name and
+-- the package's path: written only by an install, never deleted.
+CREATE TABLE IF NOT EXISTS lash_package_internal_operations (
+    operation TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY (operation, path)
 );
 
 -- The artifacts a live node holds, gone with its row.

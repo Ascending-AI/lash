@@ -300,6 +300,7 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
         decodes: backend.formats().session_decodes(),
         serves,
         held: Default::default(),
+        capabilities: Default::default(),
         ttl_millis: 1,
         expires_at: DurableInstant(0),
     };

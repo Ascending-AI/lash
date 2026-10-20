@@ -65,7 +65,7 @@ impl HostTriggers {
             .cell_packages()
             .await
             .map_err(|error| error.to_string())?;
-        let definition = definition(&value, packages)?;
+        let definition = definition(&value, packages.clone())?;
         let (pin, state, definition) = self
             .insert_pending(call_id, owner, &input, &definition, packages)
             .map_err(|error| error.to_string())?;
@@ -161,11 +161,12 @@ impl HostTriggers {
             .map_err(|error| error.to_string())?;
         let function: Value = serde_json::from_str(&function).map_err(|error| error.to_string())?;
         let value = checked_function(&function)?;
-        let packages = lash::package::CellPackages(
-            packages
-                .parse()
-                .map_err(|error: lash::package::InvalidDigest| error.to_string())?,
-        );
+        let packages: lash::package::PackageSetDigest = packages
+            .parse()
+            .map_err(|error: lash::package::InvalidDigest| error.to_string())?;
+        let held = lash::package::lash_packages().map_err(|error| error.to_string())?;
+        let packages = lash::package::CellPackages::held(&held, &packages)
+            .ok_or_else(|| format!("subscription {id}'s package set {packages} is not held"))?;
         let environment = delivered_process_environment().map_err(|error| error.to_string())?;
         let outcome = core
             .host_artifacts()

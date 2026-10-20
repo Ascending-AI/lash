@@ -252,9 +252,11 @@ fn lower() -> EncodedPayload {
         .clone(),
         bindings: BTreeSet::new(),
         functions: BTreeMap::new(),
-        packages: lash_vm_releases::lash_packages()
-            .expect("the parent's packages")
-            .own(),
+        packages: lash_vm_client::service::SurfaceRef::held(
+            lash_vm_releases::lash_packages()
+                .expect("the parent's packages")
+                .own(),
+        ),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))
 }

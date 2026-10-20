@@ -264,13 +264,10 @@ impl Activation for ProcessActivation {
         exit
     }
     /// The package code the backend's node holds (FIG-6918).
-    async fn hold(
-        &self,
-    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
-    {
+    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
         match self.backend.packages() {
             Some(packages) => packages.hold(&self.backend).await,
-            None => Ok(std::collections::BTreeSet::new()),
+            None => Ok(lash_durable::NodeHolding::default()),
         }
     }
 }

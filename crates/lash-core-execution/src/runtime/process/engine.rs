@@ -508,7 +508,7 @@ impl ProcessEngineRegistry {
         };
         let digest = provider
             .definition_packages(payload)?
-            .unwrap_or(provider.initial_packages()?);
+            .unwrap_or(provider.initial_packages()?.digest());
         let view = provider.package_view(digest)?;
         let roots = view.namespace_roots();
         Ok(env.with_package_roots(roots))

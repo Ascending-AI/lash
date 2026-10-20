@@ -84,6 +84,7 @@ async fn register(durable: &Arc<dyn DurableStore>, node: &str) -> NodeLease {
             decodes: vec![FormatSet::new(SESSION_ACTOR_FORMATS)],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60_000,
         })
         .await

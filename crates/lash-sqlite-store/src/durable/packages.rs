@@ -44,8 +44,9 @@ pub(super) fn live_nodes(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -69,6 +70,25 @@ pub(super) fn install(
                 artifact.header
             ],
         )?;
+        for function in &artifact.definitions {
+            cached_execute(
+                tx,
+                SQL.definition_put.sql(),
+                rusqlite::params![function.to_string(), artifact.artifact.path],
+            )?;
+        }
+        for operation in &artifact.internal {
+            cached_execute(
+                tx,
+                SQL.internal_put.sql(),
+                rusqlite::params![operation.as_str(), artifact.artifact.path],
+            )?;
+        }
+        cached_execute(
+            tx,
+            SQL.label_put.sql(),
+            rusqlite::params![artifact.artifact.digest.to_string(), artifact.labels],
+        )?;
     }
     for set in sets {
         for member in &set.members {
@@ -81,9 +101,13 @@ pub(super) fn install(
             }
         }
         let digest = set.digest.to_string();
+        let requirements = lash_durable::packages::encode_requirements(&set.requirements);
         let installed = tx
             .prepare_cached(SQL.set_put.sql())?
-            .query_row([digest.as_str()], |_| Ok(()))
+            .query_row(
+                rusqlite::params![digest.as_str(), set.surface, requirements],
+                |_| Ok(()),
+            )
             .optional()?;
         if installed.is_some() {
             for member in &set.members {
@@ -118,8 +142,65 @@ pub(super) fn catalog(tx: &Connection) -> rusqlite::Result<Result<PackageCatalog
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(lash_durable::packages::catalog_of(artifacts, members))
+}
+
+/// One of the indexes installs write by key and package path.
+#[derive(Clone, Copy)]
+pub(super) enum Index {
+    Definitions,
+    InternalOperations,
+}
+
+/// The package paths `index` records for each of `keys`; a key it records
+/// none for is absent.
+pub(super) fn paths<K: Ord + std::fmt::Display>(
+    tx: &Connection,
+    index: Index,
+    keys: Vec<K>,
+) -> rusqlite::Result<std::collections::BTreeMap<K, BTreeSet<String>>> {
+    let sql = match index {
+        Index::Definitions => SQL.definition_paths.sql(),
+        Index::InternalOperations => SQL.internal_paths.sql(),
+    };
+    let mut found = std::collections::BTreeMap::new();
+    for key in keys {
+        let paths = tx
+            .prepare_cached(sql)?
+            .query_map([key.to_string()], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+        if !paths.is_empty() {
+            found.insert(key, paths);
+        }
+    }
+    Ok(found)
+}
+
+/// Every labels each of `artifacts` was installed with, in install order.
+pub(super) fn labels(
+    tx: &Connection,
+    artifacts: &[lash_durable::ArtifactDigest],
+) -> rusqlite::Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>> {
+    let mut found = std::collections::BTreeMap::new();
+    for artifact in artifacts {
+        let labels = tx
+            .prepare_cached(SQL.labels_of.sql())?
+            .query_map([artifact.to_string()], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !labels.is_empty() {
+            found.insert(*artifact, labels);
+        }
+    }
+    Ok(found)
+}
+
+/// The surface snapshot stored for the set `digest`.
+pub(super) fn surface(tx: &Connection, digest: &str) -> rusqlite::Result<Option<Vec<u8>>> {
+    tx.prepare_cached(SQL.surface.sql())?
+        .query_row([digest], |row| row.get::<_, Vec<u8>>(0))
+        .optional()
 }

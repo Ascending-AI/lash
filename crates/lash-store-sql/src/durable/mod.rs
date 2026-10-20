@@ -57,10 +57,12 @@ crate::statements! {
     /// `nodes` statements both backends issue verbatim.
     pub struct NodeStatements @ "durable_node" {
         /// Register boot `?2` of node `?1`, decoding the format sets in JSON
-        /// array `?3`, at `?4` with its lease expiring at `?5`.
+        /// array `?3` and offering the capabilities in JSON `?6`, at `?4`
+        /// with its lease expiring at `?5`.
         insert = "INSERT INTO nodes
-                 (node_id, boot_id, formats_json, registered_at_ms, heartbeat_expires_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5)";
+                 (node_id, boot_id, formats_json, registered_at_ms, heartbeat_expires_at_ms,
+                  capabilities_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
         /// Delete every boot of node `?1`, returning each.
         delete_boots = "DELETE FROM nodes WHERE node_id = ?1 RETURNING boot_id";

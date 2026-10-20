@@ -731,10 +731,7 @@ impl lash_durable::runner::Activation for MeasuredActivation {
         self.window.within(self.inner.activate(owned)).await
     }
 
-    async fn hold(
-        &self,
-    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
-    {
+    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
         self.inner.hold().await
     }
 }

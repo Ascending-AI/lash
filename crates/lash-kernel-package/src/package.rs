@@ -85,10 +85,20 @@ pub enum Origin {
 /// Labels for a package's members and, for lash's packages, whose
 /// definitions back no member, for its definitions. Display data never
 /// enters the digest.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageDisplay {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub members: BTreeMap<MemberPath, MemberDisplay>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub definitions: BTreeMap<FunctionName, MemberDisplay>,
+}
+
+impl PackageDisplay {
+    /// Whether it labels nothing.
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty() && self.definitions.is_empty()
+    }
 }
 
 /// A package's code: its definitions in the order they register.

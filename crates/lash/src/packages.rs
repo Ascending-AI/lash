@@ -1,28 +1,35 @@
-//! What package code a node holds, and which package set its cells are
-//! written under (FIG-6918).
+//! What package code a node holds, and which package surface its cells
+//! are written under (FIG-6918, FIG-6991).
 //!
 //! A host registers its packages once ([`HeldPackages`]): its own set, and
 //! the retained sets of earlier installs it still holds. Before its node
-//! starts, [`NodeHold`] installs every artifact and set in the store, keeps
-//! each retained artifact a dependent still lists an identity of
-//! (RETAIN-SURVEY), and advertises the artifacts it holds: its own set's
-//! and the retained ones. "Node N holds set S" is derived from that, S's
-//! members being among N's, and no list of sets is stored.
+//! starts, [`NodeHold`] installs every artifact and set in the store, each
+//! set with its surface snapshot and requirements and every definition of
+//! it as a stored kind-14 node, keeps each retained artifact a dependent
+//! still lists an identity of (RETAIN-SURVEY), and advertises the
+//! artifacts it holds, what it offers running code and its own set.
+//! Snapshots and the definitions they name are never deleted: an install
+//! writes them once and nothing else writes or removes them.
 //!
 //! [`FleetPackages`] is the fleet gate (FLEET-SET): a cell is written under
 //! the first candidate set every live serving node holds, its own set
 //! first, then the others it wholly holds, newest first by the store's
 //! install sequence. A serving node is one that decodes this build's
 //! session set or a session set it carries forward, so a node serving only
-//! carried sessions counts. The choice may fall back to an older set.
+//! carried sessions counts. The choice may fall back to an older set. The
+//! gate reads the chosen set's surface as any node reads a stored one: a
+//! held set's from its own registration, another's from the store.
+//! [`promoted`] is the selector it switches to with requirements-based
+//! claims (FIG-6993): the newest live serving node's own surface whose
+//! requirements every live serving node meets.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
 use lash_core::durable_port::packages::{ArtifactInstall, SetInstall};
 use lash_core::durable_port::{
-    DurableError, FormatSet, HeldArtifact, NodeCapability, PackageCatalog, PackageSetDigest,
-    StoreFailure, StoreFailureKind,
+    DurableError, FormatSet, HeldArtifact, NodeCapabilities, NodeCapability, NodeHolding,
+    PackageCatalog, PackageSetDigest, StoreFailure, StoreFailureKind, StoredSet,
 };
 use lash_kernel_package::{ArtifactKey, HeldPackages, PackageSet};
 
@@ -39,7 +46,9 @@ fn members(set: &PackageSet) -> BTreeSet<HeldArtifact> {
 }
 
 /// The rows a node of `packages` installs before it serves: every artifact
-/// it holds, by key with its header, and every set they make up.
+/// it holds, by key with its header, its definitions and the operations it
+/// declares internal, and every set they make up, with its surface and
+/// requirements.
 pub fn install_rows(packages: &HeldPackages) -> (Vec<ArtifactInstall>, Vec<SetInstall>) {
     let artifacts = packages
         .artifacts()
@@ -47,17 +56,101 @@ pub fn install_rows(packages: &HeldPackages) -> (Vec<ArtifactInstall>, Vec<SetIn
         .map(|(key, package)| ArtifactInstall {
             artifact: held_artifact(key),
             header: serde_json::to_string(&package.header()).unwrap_or_default(),
+            definitions: package.code().ids().iter().copied().collect(),
+            internal: package
+                .exports()
+                .iter()
+                .filter_map(|(segment, export)| match export {
+                    lash_kernel_package::Export::Operation(operation)
+                        if operation.visibility == lash_kernel_package::Visibility::Internal =>
+                    {
+                        Some(
+                            lash_kernel_package::QualifiedOperation {
+                                package: package.path().clone(),
+                                name: segment.clone(),
+                            }
+                            .effect_name(),
+                        )
+                    }
+                    _ => None,
+                })
+                .collect(),
+            labels: lash_kernel_package::PackageLabels {
+                release: package.release().to_owned(),
+                display: package.display().clone(),
+            }
+            .encode(),
         })
         .collect();
     let sets = packages
         .sets()
         .iter()
-        .map(|(digest, set)| SetInstall {
-            digest: *digest,
-            members: members(set),
+        .filter_map(|(digest, set)| {
+            let surface = packages.surface(digest)?;
+            Some(SetInstall {
+                digest: *digest,
+                members: members(set),
+                surface: surface.encode(),
+                requirements: surface.requirements().clone(),
+            })
         })
         .collect();
     (artifacts, sets)
+}
+
+/// The referrer that holds a stored surface's definitions: one pin per set,
+/// named by its digest and never released, so the definitions a surface
+/// names stay stored as long as the surface does, which is always.
+fn surface_pin(packages: &PackageSetDigest) -> lash_core::ReferrerClaim {
+    // A pin spells a v4 UUID: the digest's first 16 bytes with the
+    // version and variant bits set.
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&packages.as_bytes()[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    lash_core::HostArtifactPin::try_from(format!("host-pin:v1:{hex}"))
+        .ok()
+        .and_then(|pin| {
+            lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(pin)).ok()
+        })
+        .unwrap_or_else(|| unreachable!("a digest's hex is a pin"))
+}
+
+/// Stores every definition of each of `packages`' sets the store does not
+/// hold yet as its kind-14 node, under the set's pin: what a node that does
+/// not hold a set's artifacts reads its code from. A set's row is written
+/// after its definitions, so a stored set's definitions are stored.
+async fn hold_definitions(
+    backend: &crate::Backend,
+    packages: &HeldPackages,
+    catalog: &PackageCatalog,
+) -> Result<(), DurableError> {
+    let documents = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts());
+    for (digest, set) in packages.sets() {
+        if catalog.sets.iter().any(|stored| stored.digest == *digest) {
+            continue;
+        }
+        let definitions: Vec<_> = set
+            .keys()
+            .filter_map(|key| packages.artifacts().get(&key))
+            .flat_map(|package| package.code().ids().iter().copied())
+            .filter_map(|function| {
+                let registered = packages.functions().get(&function)?;
+                Some((function, registered.image()))
+            })
+            .collect();
+        documents
+            .hold_definitions(&surface_pin(digest), &definitions)
+            .await
+            .map_err(|error| {
+                DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Unavailable,
+                    message: format!("package set {digest}'s definitions are not stored: {error}"),
+                })
+            })?;
+    }
+    Ok(())
 }
 
 /// The artifacts of `packages`' own set: what a node holding no retained
@@ -75,11 +168,13 @@ pub fn own_artifacts(packages: &HeldPackages) -> BTreeSet<HeldArtifact> {
 pub(crate) struct NodeHold {
     packages: Arc<HeldPackages>,
     advertised: RwLock<Option<BTreeSet<HeldArtifact>>>,
+    capabilities: NodeCapabilities,
 }
 
 impl NodeHold {
     pub(crate) fn new(packages: Arc<HeldPackages>) -> Self {
         Self {
+            capabilities: lash_kernel_package::node_capabilities(&packages),
             packages,
             advertised: RwLock::new(None),
         }
@@ -242,9 +337,14 @@ impl lash_execution_contracts::backend::NodePackages for NodeHold {
             Arc::clone(&self.packages),
         ))
     }
+    fn packages(&self) -> &Arc<HeldPackages> {
+        &self.packages
+    }
 
-    async fn hold(&self, backend: &crate::Backend) -> Result<BTreeSet<HeldArtifact>, DurableError> {
+    async fn hold(&self, backend: &crate::Backend) -> Result<NodeHolding, DurableError> {
         let (artifacts, sets) = install_rows(&self.packages);
+        let catalog = backend.durable().package_catalog().await?;
+        hold_definitions(backend, &self.packages, &catalog).await?;
         backend
             .durable()
             .install_packages(&artifacts, &sets)
@@ -272,7 +372,10 @@ impl lash_execution_contracts::backend::NodePackages for NodeHold {
             .advertised
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(held.clone());
-        Ok(held)
+        Ok(NodeHolding {
+            held,
+            capabilities: self.capabilities.clone(),
+        })
     }
 }
 
@@ -304,11 +407,48 @@ pub(crate) fn fleet_package_set(
         .map(|(digest, _)| *digest)
 }
 
-/// The package set a node of `backend` writes a cell under: the fleet gate.
+/// PROMOTE-BY-CAPABILITY, the selector the fleet gate switches to with
+/// requirements-based claims (FIG-6993): of the stored sets that are the own set of
+/// `writer`, the node writing the cell, or of some node of `serving`, the
+/// newest by install sequence whose requirements `writer` and every node of
+/// `serving` meet; `None` when there is none.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "pk-claims (FIG-6993) wires it into the gate")
+)]
+pub(crate) fn promoted<'a>(
+    stored: &'a [StoredSet],
+    serving: &[&NodeCapability],
+    writer: (&NodeCapabilities, PackageSetDigest),
+) -> Option<&'a StoredSet> {
+    let (writer, own) = writer;
+    stored
+        .iter()
+        .filter(|set| {
+            set.digest == own
+                || serving
+                    .iter()
+                    .any(|node| node.capabilities.surface == Some(set.digest))
+        })
+        .filter(|set| {
+            set.requirements.met_by(writer)
+                && serving
+                    .iter()
+                    .all(|node| set.requirements.met_by(&node.capabilities))
+        })
+        .max_by_key(|set| set.sequence)
+}
+
+/// The package surface a node of `backend` writes a cell under: the fleet
+/// gate. Stored surfaces it does not hold are read once each, with the
+/// definitions they name that it lacks: both are immutable.
 #[cfg(feature = "codemode")]
 pub(crate) struct FleetPackages {
     backend: crate::Backend,
     hold: Arc<dyn lash_execution_contracts::backend::NodePackages>,
+    stored: std::sync::Mutex<
+        std::collections::BTreeMap<PackageSetDigest, lash_execution_contracts::CellPackages>,
+    >,
 }
 
 #[cfg(feature = "codemode")]
@@ -317,7 +457,81 @@ impl FleetPackages {
         backend: crate::Backend,
         hold: Arc<dyn lash_execution_contracts::backend::NodePackages>,
     ) -> Self {
-        Self { backend, hold }
+        Self {
+            backend,
+            hold,
+            stored: std::sync::Mutex::default(),
+        }
+    }
+
+    /// The surface of `packages`: the node's own registration of it when it
+    /// holds the set, else the stored surface over the node's registry and
+    /// the stored definitions it lacks.
+    async fn surface(
+        &self,
+        packages: PackageSetDigest,
+    ) -> Result<lash_execution_contracts::CellPackages, String> {
+        let held = self.hold.packages();
+        if let Some(cell) = lash_execution_contracts::CellPackages::held(held, &packages) {
+            return Ok(cell);
+        }
+        if let Some(cell) = self
+            .stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&packages)
+        {
+            return Ok(cell.clone());
+        }
+        let bytes = self
+            .backend
+            .durable()
+            .package_surface(&packages)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("package set {packages} has no stored surface"))?;
+        let surface = lash_kernel_package::SurfaceSnapshot::decode(packages, &bytes)
+            .map_err(|refusal| refusal.to_string())?;
+        let artifacts: Vec<_> = surface
+            .packages()
+            .map(lash_kernel_package::SnapshotPackage::digest)
+            .collect();
+        let labels = self
+            .backend
+            .durable()
+            .package_labels(&artifacts)
+            .await
+            .map_err(|error| error.to_string())?;
+        // An artifact's newest install's labels: the release it was last
+        // installed as.
+        let surface = surface.with_labels(|artifact| {
+            labels
+                .get(artifact)
+                .and_then(|labels| labels.last())
+                .and_then(|text| lash_kernel_package::PackageLabels::decode(text).ok())
+        });
+        let missing: Vec<_> = surface
+            .functions()
+            .into_iter()
+            .filter(|function| held.functions().get(function).is_none())
+            .collect();
+        let stored = lash_vm_runtime::KernelDocuments::new(self.backend.module_artifacts())
+            .stored_functions(missing)
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|unretained| {
+                format!("package set {packages}'s definitions: {unretained:?}")
+            })?;
+        let catalog = held
+            .catalog_with(&stored)
+            .map_err(|refusal| refusal.to_string())?;
+        let cell =
+            lash_execution_contracts::CellPackages::stored(Arc::new(surface), catalog, stored);
+        self.stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(packages, cell.clone());
+        Ok(cell)
     }
 }
 
@@ -357,13 +571,15 @@ impl lash_execution_contracts::PackageGate for FleetPackages {
             chosen = ?chosen.map(|digest| digest.short()),
             "package set fleet gate"
         );
-        chosen
-            .map(lash_execution_contracts::CellPackages)
-            .ok_or_else(|| {
-                packages_unavailable(
-                    "no package set is held by every live node serving these sessions",
-                )
-            })
+        let chosen = chosen.ok_or_else(|| {
+            packages_unavailable("no package set is held by every live node serving these sessions")
+        })?;
+        self.surface(chosen).await.map_err(|message| {
+            tracing::warn!(%message, "stored package surface unavailable; lowering deferred");
+            packages_unavailable(format!(
+                "the stored package surface {chosen} is unavailable: {message}"
+            ))
+        })
     }
 }
 

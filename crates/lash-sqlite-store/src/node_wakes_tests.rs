@@ -306,7 +306,7 @@ fn swept() -> lash_protocol_types::attachment::AttachmentId {
 /// Facts observed at the production runner's node-wake boundary.
 #[derive(Debug)]
 enum WakeEvidence {
-    Listening(NodeLease),
+    Listening(Box<NodeLease>),
     Watched(Vec<BootLiveness>),
     Woke(Vec<ActorKey>),
     Dropped(Vec<ActorKey>),
@@ -360,7 +360,9 @@ impl NodeWakes for ObservedWakes {
 
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         let inner = self.inner.listen(lease).await?;
-        let _ = self.evidence.send(WakeEvidence::Listening(lease.clone()));
+        let _ = self
+            .evidence
+            .send(WakeEvidence::Listening(Box::new(lease.clone())));
         Ok(Box::new(ObservedFeed {
             inner,
             evidence: self.evidence.clone(),
@@ -862,6 +864,7 @@ async fn run_grouped_child(cut: &str, database: &Path) {
             decodes: vec![formats()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await
@@ -1054,6 +1057,7 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
             decodes: vec![formats()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

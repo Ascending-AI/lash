@@ -225,7 +225,13 @@ requirement with `operation_contract_changed`; parked adoption refuses
 `state_not_carried`.
 
 Install retained artifacts one deploy before writing with the new set.
-Rolling back to a build that lacks an identity can strand its runs. Retire
+Each node writes its sets into the store when it starts: the surface
+snapshot, execution requirements, every definition and the release
+labels. These are never deleted and outlive the installing node. A set
+whose code is all body-backed can therefore be read and lowered by nodes
+of any build. A set that adds a native-only function needs that native on
+every node that runs it. Rolling back to a build that lacks an identity or
+a native can strand its runs. Retire
 an artifact only after surveying all dependents. The
 [host-package guide](../host-packages.md) covers identities, runner contracts,
 storage and explicit adoption.

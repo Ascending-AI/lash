@@ -229,6 +229,12 @@ law!(
     |store, _advance| { laws::a_node_claims_only_actors_whose_package_set_it_holds(store) }
 );
 law!(
+    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
+    |store, _advance| {
+        laws::a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(store)
+    }
+);
+law!(
     a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds,
     |store, _advance| {
         laws::a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds(store)
@@ -301,6 +307,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await
@@ -469,6 +476,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await
@@ -629,6 +637,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

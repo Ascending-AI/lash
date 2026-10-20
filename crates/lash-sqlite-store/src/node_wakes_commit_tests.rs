@@ -29,6 +29,7 @@ async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
             decodes: vec![formats()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await
@@ -137,7 +138,7 @@ async fn listened(evidence: &mut mpsc::UnboundedReceiver<WakeEvidence>) -> NodeL
     else {
         unreachable!("the predicate selects a listening lease");
     };
-    lease
+    *lease
 }
 
 pub(super) async fn one_claim_per_readied_actor() {
@@ -228,6 +229,7 @@ pub(super) async fn lost_hint_reaches_the_claim_poll() {
             decodes: vec![formats()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

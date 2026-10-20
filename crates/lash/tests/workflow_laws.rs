@@ -1816,7 +1816,10 @@ fn workflow_import_future_is_send() {
                 lash::workflow::document::SourceLanguage::Python,
                 "async def main():\n    return None\n",
                 environment,
-                lash::package::CellPackages(lash::package::lash_packages().unwrap().own()),
+                {
+                    let held = lash::package::lash_packages().unwrap();
+                    lash::package::CellPackages::held(&held, &held.own()).unwrap()
+                },
                 Some(lash::dialect::workflow::WorkflowSourceLimits {
                     max_bytes: 1024,
                     max_nesting: 16,

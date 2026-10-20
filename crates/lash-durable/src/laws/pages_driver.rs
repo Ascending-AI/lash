@@ -763,6 +763,40 @@ impl DurableStore for Retiring {
         self.inner.package_catalog().await
     }
 
+    async fn package_surface(
+        &self,
+        digest: &crate::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        self.inner.package_surface(digest).await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[crate::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<crate::packages::FunctionId, std::collections::BTreeSet<String>>,
+        DurableError,
+    > {
+        self.inner.package_paths(functions).await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[crate::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<crate::packages::EffectName, std::collections::BTreeSet<String>>,
+        DurableError,
+    > {
+        self.inner.internal_operations(operations).await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[crate::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<crate::ArtifactDigest, Vec<String>>, DurableError> {
+        self.inner.package_labels(artifacts).await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.inner.owned(node).await
     }

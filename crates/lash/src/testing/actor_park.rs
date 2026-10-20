@@ -89,6 +89,7 @@ async fn park(
             decodes: Vec::new(),
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: backend.config().lease().ttl_millis(),
         })
         .await?;

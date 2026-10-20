@@ -119,8 +119,8 @@ fn conf_native_six_packages_and_dataframe() {
     let mut witnesses = vec![];
     for package in held.view(&held.own()).unwrap().packages() {
         owners.insert(package.path().to_string());
-        for id in package.code().ids() {
-            let function = registry.get(id).unwrap();
+        for id in package.ids() {
+            let function = registry.get(&id).unwrap();
             let definition = function.definition();
             match &definition.implementation {
                 Implementation::Native => {
@@ -152,7 +152,7 @@ fn conf_native_six_packages_and_dataframe() {
                     function.name()
                 );
                 let witness = Witness {
-                    function: *id,
+                    function: id,
                     law: Law::Native,
                     case: close(case(function.name(), document), &registry),
                 };

@@ -53,6 +53,7 @@ async fn world() -> World {
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

@@ -12,6 +12,7 @@
 //! It depends on no other lash crate.
 
 mod ast;
+mod capabilities;
 mod caption;
 mod correspondence;
 mod declarations;
@@ -91,6 +92,7 @@ pub use ast::{
     JoinMode, Literal, MapEntry, Member, Node, NodeMut, Place, ProjectionRead, Protocol,
     RecordEntry, Rhs, Site, Stmt, TryStmt, Unit, each_closure_mut,
 };
+pub use capabilities::{ExecutionRequirements, NodeCapabilities};
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
     DecodeError, Document, EncodeError, Entry, KERNEL_VERSION, MAX_NESTING_DEPTH, Manifest,

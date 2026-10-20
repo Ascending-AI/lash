@@ -253,6 +253,7 @@ table lash_node_artifacts
   foreign-key (node_id) references lash_nodes (node_id) on delete cascade
 table lash_nodes
   column boot_id text not-null
+  column capabilities_json text not-null
   column draining boolean not-null default
   column formats_json text not-null
   column heartbeat_expires_at_ms bigint not-null
@@ -271,6 +272,20 @@ table lash_package_artifacts
   column path text not-null
   unique (path, ordinal)
   primary-key (artifact)
+table lash_package_definitions
+  column function text not-null
+  column path text not-null
+  primary-key (function, path)
+table lash_package_internal_operations
+  column operation text not-null
+  column path text not-null
+  primary-key (operation, path)
+table lash_package_labels
+  column artifact text not-null
+  column labels text not-null
+  column sequence bigint not-null
+  unique (sequence)
+  primary-key (artifact, labels)
 table lash_package_set_members
   column artifact text not-null
   column set_digest text not-null
@@ -279,7 +294,9 @@ table lash_package_set_members
   foreign-key (set_digest) references lash_package_sets (digest) on delete no action
 table lash_package_sets
   column digest text not-null
+  column requirements_json text not-null
   column sequence bigint not-null
+  column surface bytea not-null
   unique (sequence)
   primary-key (digest)
 table lash_parent_end_plans

@@ -71,7 +71,7 @@ pub(crate) struct ImportedTwin {
 impl ImportedTwin {
     pub(crate) fn origin(&self) -> crate::Origin {
         crate::Origin::Imported {
-            packages: self.packages,
+            packages: self.packages.clone(),
             dialect: self.dialect,
             text: self.source.into(),
             map: self.map.clone(),

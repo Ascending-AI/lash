@@ -741,14 +741,14 @@ async fn fifty_reads_commit_what_one_read_does_on_sqlite_memory() {
     );
 }
 
-/// What a probe node serving `serves` reads as the session's claim
+/// What a probe node serving `serves` and holding `holding` reads as the session's claim
 /// requirements when it claims it; `None` when it cannot claim it. A
 /// claimed session is released ready, untouched.
 async fn probe(
     database: &Arc<dyn DurableStore>,
     decodes: Vec<lash_durable::FormatSet>,
     serves: Vec<String>,
-    held: std::collections::BTreeSet<lash_durable::HeldArtifact>,
+    holding: lash_durable::NodeHolding,
 ) -> Option<Vec<String>> {
     use lash_durable::{NodeId, NodeSpec, Release};
     let node = database
@@ -756,7 +756,8 @@ async fn probe(
             node: NodeId::new("cell-read-probe"),
             decodes,
             serves,
-            held,
+            held: holding.held,
+            capabilities: holding.capabilities,
             ttl_millis: 15_000,
         })
         .await
@@ -836,7 +837,7 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
     nodes.kill("a");
     nodes.quiesce().await;
     let backend = turn.backend();
-    let held = backend
+    let holding = backend
         .packages()
         .expect("the executing nodes' installed packages")
         .hold(&backend)
@@ -850,11 +851,11 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
         .cloned()
         .collect();
     assert_eq!(
-        probe(&database, decodes.clone(), without, held.clone()).await,
+        probe(&database, decodes.clone(), without, holding.clone()).await,
         None,
         "a node that does not serve the reader does not claim the cell that plans reads"
     );
-    let requires = probe(&database, decodes, serves, held)
+    let requires = probe(&database, decodes, serves, holding)
         .await
         .expect("a node that serves the reader claims the cell");
     assert!(

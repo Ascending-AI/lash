@@ -111,29 +111,22 @@ pub(super) async fn link_cell(
     if services.packages.is_some() {
         snapshots.stamp_parks_with(packages.digest());
     }
-    let held = packages::held(services).map_err(host_failure)?;
-    state
-        .relink(packages.digest(), &held)
-        .await
-        .map_err(|error| match error {
-            session::RelinkError::NotHeld(not_held) => lash_core::CellFailure::new(
-                lash_core::CellFailureKind::PackagesNotHeld {
-                    packages: not_held.packages,
-                },
-                format!("this cell's package set {} is not held", not_held.packages),
-            )
-            .into(),
-            other => host_failure(format!(
-                "the session's saved functions are not relinked: {other}"
-            )),
-        })?;
-    let package_view = packages::prepare(&held, packages, &mut boundary)?;
-    let runner_view = held
-        .view(&held.own())
-        .map_err(|error| host_failure(error.to_string()))?;
+    // Every carried saved function is relinked by name to the cell's
+    // surface, or dropped naming it (RELINK-CLOSURE): what the cell lowers
+    // and what it calls of the session come from the one surface
+    // (CURRENT-RELEASE).
+    state.relink(&packages).await.map_err(|error| {
+        host_failure(format!(
+            "the session's saved functions are not relinked: {error}"
+        ))
+    })?;
+    let package_view = packages::prepare(&packages, &mut boundary);
+    // On a path a package of the cell's surface owns, the package's
+    // declared contract is authoritative: a tool that does not serve it is
+    // refused (PKG-RUNNER).
     for tool in ctx.tool_catalog().entries() {
         let effect = tool.manifest.operation.effect_name();
-        if let Some(owner) = lash_vm_runtime::owned_operation(&runner_view, &effect) {
+        if let Some(owner) = lash_vm_runtime::owned_operation(&package_view, &effect) {
             lash_execution_contracts::process::check_runner(
                 &effect,
                 &owner,
@@ -161,7 +154,7 @@ pub(super) async fn link_cell(
                     bindings: names.clone(),
                     functions: state.lowering_functions(),
                     operations: boundary.operations().clone(),
-                    packages: packages.digest(),
+                    packages: crate::plugin::package_wire(&packages),
                 })
                 .await;
             let calls = match calls {
@@ -238,7 +231,7 @@ pub(super) async fn link_cell(
                     operations,
                     bindings: names,
                     functions: state.lowering_functions(),
-                    packages: packages.digest(),
+                    packages: crate::plugin::package_wire(&packages),
                 })
                 .await
         }
@@ -292,7 +285,7 @@ pub(super) async fn link_cell(
     let document =
         IdentifiedDocument::decode(&document, lash_kernel_doc::KernelDataLimits::standard())
             .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
-    packages::admit(&document, &boundary, &held)?;
+    packages::admit(&document, &boundary, &packages)?;
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),

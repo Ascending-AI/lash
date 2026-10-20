@@ -582,6 +582,7 @@ mod commit_cut_laws {
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         };
         let a = store.register_node(&spec).await.unwrap();

@@ -362,7 +362,8 @@ pub trait ProcessDocumentProvider: Send + Sync {
         &self,
         payload: &serde_json::Value,
     ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, crate::PluginError>;
-    fn initial_packages(&self) -> Result<lash_kernel_doc::PackageSetDigest, crate::PluginError>;
+    /// The producer's own package set, over its registry.
+    fn initial_packages(&self) -> Result<crate::CellPackages, crate::PluginError>;
     /// Resolve the definition's selected surface snapshot.
     fn package_view(
         &self,

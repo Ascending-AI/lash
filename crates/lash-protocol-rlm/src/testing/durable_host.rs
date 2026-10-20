@@ -98,6 +98,8 @@ impl DurableHost {
         let set = SetInstall {
             digest: packages,
             members: BTreeSet::from([artifact.clone()]),
+            surface: Vec::new(),
+            requirements: Default::default(),
         };
         Self::open_on(
             admitted,
@@ -122,6 +124,9 @@ impl DurableHost {
             .map(|artifact| ArtifactInstall {
                 artifact: artifact.clone(),
                 header: "{}".to_owned(),
+                definitions: BTreeSet::new(),
+                internal: BTreeSet::new(),
+                labels: "{}".to_owned(),
             })
             .collect();
         backend
@@ -355,6 +360,7 @@ async fn register(
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
             held: held.clone(),
+            capabilities: Default::default(),
             ttl_millis: 600_000,
         })
         .await

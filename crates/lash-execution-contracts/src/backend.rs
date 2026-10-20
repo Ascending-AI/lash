@@ -136,10 +136,11 @@ struct BackendInner {
 /// The package code a node of this build holds (FIG-6918, S1-F2). Before
 /// the node starts it installs its artifacts and sets in the store, keeps
 /// each retained artifact a dependent still lists an identity of
-/// (RETAIN-SURVEY), and advertises what it holds: a node claims an actor
-/// only when it holds the set the actor's code was linked under
-/// (CLAIM-HOLDS), and a cell is written under a set only when every live
-/// serving node holds it (FLEET-SET).
+/// (RETAIN-SURVEY), and advertises what it holds and what it offers
+/// running code: a node claims an actor only when it holds the set the
+/// actor's code was linked under (CLAIM-HOLDS), and a set's surface is
+/// promoted to new cells only once every live serving node meets its
+/// requirements (FIG-6991).
 #[async_trait::async_trait]
 pub trait NodePackages: Send + Sync {
     /// Candidate surface sets from this node's existing registration.
@@ -152,9 +153,13 @@ pub trait NodePackages: Send + Sync {
     )>;
     /// The declared surface for a new Standard catalog.
     fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>;
+    /// The package code the node holds: its registration of every
+    /// definition, over which it reads a stored surface it does not hold.
+    fn packages(&self) -> &Arc<lash_kernel_package::HeldPackages>;
 
-    /// Installs the node's artifacts and sets in `backend`'s store, surveys
-    /// what its dependents list, and answers the artifacts the node holds.
+    /// Installs the node's artifacts and sets, each set with its surface,
+    /// in `backend`'s store, surveys what its dependents list, and answers
+    /// the artifacts the node holds and what it offers running code.
     ///
     /// # Errors
     ///
@@ -164,7 +169,7 @@ pub trait NodePackages: Send + Sync {
     async fn hold(
         &self,
         backend: &Backend,
-    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>;
+    ) -> Result<lash_durable::NodeHolding, lash_durable::DurableError>;
 }
 
 impl Backend {

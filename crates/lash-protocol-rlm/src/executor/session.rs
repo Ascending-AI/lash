@@ -131,8 +131,6 @@ struct Pending {
 /// Why a cell's saved functions could not be relinked to its package set.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RelinkError {
-    #[error(transparent)]
-    NotHeld(lash_kernel_package::SetNotHeld),
     #[error("the cell's package set does not assemble: {0}")]
     Library(String),
     #[error(transparent)]
@@ -562,8 +560,7 @@ impl CodeModeExecutionState {
     }
 
     /// Relinks every carried saved function by name to `packages`, the
-    /// package set the cell runs on (K-LIB-009, RELINK-CLOSURE), as `held`
-    /// shows it. Each relinked function is re-saved with its new
+    /// package surface the cell runs on (K-LIB-009, RELINK-CLOSURE). Each relinked function is re-saved with its new
     /// execution closure, which the capture that names it stages. One the
     /// set does not serve is dropped with its binding and listed as not
     /// carried, naming it and the callee. The session then records
@@ -572,19 +569,18 @@ impl CodeModeExecutionState {
     ///
     /// # Errors
     ///
-    /// A set `held` does not hold, a library that does not assemble, and
-    /// the pages' faults.
+    /// A library that does not assemble, and the pages' faults.
     pub(super) async fn relink(
         &mut self,
-        packages: lash_kernel_doc::PackageSetDigest,
-        held: &lash_kernel_package::HeldPackages,
+        cell: &crate::plugin::CellPackages,
     ) -> Result<(), RelinkError> {
+        let packages = cell.digest();
         if self.current.linked == Some(packages) {
             return Ok(());
         }
-        let view = held.view(&packages).map_err(RelinkError::NotHeld)?;
+        let view = cell.view();
         let library = view
-            .library(held.functions())
+            .library(view.catalog())
             .map_err(|error| RelinkError::Library(error.to_string()))?;
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
@@ -596,7 +592,7 @@ impl CodeModeExecutionState {
                 Ok(relinked) => {
                     let closure = lash_vm_broker::kernel::closure::derive(
                         relinked.document.manifest.functions.keys().copied(),
-                        held.functions(),
+                        view.catalog(),
                         lash_vm_broker::kernel::closure::Natives::Declared,
                     )
                     .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
@@ -1039,7 +1035,7 @@ impl CodeModeExecutionState {
 
     /// The package set the session's latest prompt showed.
     pub(crate) fn shown_packages(&self) -> Option<crate::plugin::CellPackages> {
-        self.shown
+        self.shown.clone()
     }
 
     /// Notes that a park of this state's cell stamped the session with

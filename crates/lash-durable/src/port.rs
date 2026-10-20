@@ -6,7 +6,9 @@ use crate::formats::FormatSet;
 use crate::ids::{
     ActorKey, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
 };
-use crate::packages::{ArtifactInstall, HeldArtifact, NodeCapability, PackageCatalog, SetInstall};
+use crate::packages::{
+    ArtifactInstall, HeldArtifact, NodeCapability, PackageCatalog, PackageSetDigest, SetInstall,
+};
 use crate::tx::{ActorTx, MailTx};
 
 /// An actor's scheduling state.
@@ -81,6 +83,9 @@ pub struct NodeSpec {
     /// code is linked under a set only when it holds every member
     /// (CLAIM-HOLDS).
     pub held: std::collections::BTreeSet<HeldArtifact>,
+    /// What this node offers running code, advertised while its lease is
+    /// live (FIG-6991).
+    pub capabilities: crate::NodeCapabilities,
     /// How long one heartbeat keeps the lease, in milliseconds. Hosts take
     /// it from a validated [`LeaseConfig`](crate::LeaseConfig).
     pub ttl_millis: i64,
@@ -97,6 +102,8 @@ pub struct NodeLease {
     pub serves: Vec<String>,
     /// The package artifacts it holds.
     pub held: std::collections::BTreeSet<HeldArtifact>,
+    /// What it offers running code.
+    pub capabilities: crate::NodeCapabilities,
     /// How long one heartbeat keeps the lease, in milliseconds.
     pub ttl_millis: i64,
     /// When the lease expires unless renewed, as of the registration.
@@ -405,17 +412,18 @@ pub trait DurableStore: DurableReads {
     /// holds no live lease.
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError>;
 
-    /// Each live node's format sets and held package artifacts, one entry
-    /// per node, by node id: what the fleet-format gate
-    /// ([`fleet_writable`](crate::fleet_writable)) and the package-set gate
-    /// read.
+    /// Each live node's format sets, held package artifacts and
+    /// capabilities, one entry per node, by node id: what the fleet-format
+    /// gate ([`fleet_writable`](crate::fleet_writable)) and the package-set
+    /// gate read.
     async fn live_nodes(&self) -> Result<Vec<NodeCapability>, DurableError>;
 
     /// Install `artifacts` and `sets` in one transaction. An artifact or set
-    /// already stored is kept as it is; a new artifact takes the next
-    /// ordinal on its package line, and a new set the next install
-    /// sequence. A set naming an artifact neither stored nor installed here
-    /// is refused, and nothing is written.
+    /// already stored is kept as it is, its surface and requirements
+    /// included; a new artifact takes the next ordinal on its package line,
+    /// and a new set the next install sequence. A set naming an artifact
+    /// neither stored nor installed here is refused, and nothing is
+    /// written.
     async fn install_packages(
         &self,
         artifacts: &[ArtifactInstall],
@@ -425,6 +433,45 @@ pub trait DurableStore: DurableReads {
     /// Every stored artifact, by line and ordinal, and every stored set, by
     /// install sequence, oldest first.
     async fn package_catalog(&self) -> Result<PackageCatalog, DurableError>;
+
+    /// The surface snapshot bytes stored for the set `digest`, as its first
+    /// install wrote them; `None` for a set the store does not hold.
+    async fn package_surface(
+        &self,
+        digest: &PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError>;
+
+    /// The paths of the stored packages among whose definitions each of
+    /// `functions` is, helpers included: the membership index installs
+    /// write and nothing else does (FIG-6991). A function no stored package
+    /// defines is absent.
+    async fn package_paths(
+        &self,
+        functions: &[lash_kernel_doc::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<lash_kernel_doc::FunctionId, std::collections::BTreeSet<String>>,
+        DurableError,
+    >;
+
+    /// The labels each install of each of `artifacts` wrote, as JSON, in
+    /// install order and each once: an artifact two releases of identical
+    /// content installed has both. An artifact no install wrote is absent.
+    async fn package_labels(
+        &self,
+        artifacts: &[crate::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<crate::ArtifactDigest, Vec<String>>, DurableError>;
+
+    /// The paths of the stored packages that declare each of `operations`
+    /// internal: what, with [`Self::package_paths`], says whether a stored
+    /// definition may perform it. An operation no stored package declares
+    /// internal is absent.
+    async fn internal_operations(
+        &self,
+        operations: &[lash_kernel_doc::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<lash_kernel_doc::EffectName, std::collections::BTreeSet<String>>,
+        DurableError,
+    >;
 
     /// The actors `node`'s boot owns now, with their current epochs, read
     /// unfenced. Each answers [`ClaimCause::Adopted`].

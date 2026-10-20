@@ -22,7 +22,8 @@ lash_store_sql::statements! {
     struct PostgresPackageStatements @ "durable_packages_postgres" {
         /// Serialize installs: a concurrent install would take the same
         /// next ordinal or install sequence. Readers are not blocked.
-        lock = "LOCK TABLE package_sets, package_artifacts IN SHARE ROW EXCLUSIVE MODE";
+        lock = "LOCK TABLE package_sets, package_artifacts, package_labels
+             IN SHARE ROW EXCLUSIVE MODE";
     }
 }
 
@@ -53,7 +54,7 @@ pub(super) async fn live_nodes(
     tx: &mut PgConnection,
     now: DurableInstant,
 ) -> Result<Vec<NodeCapability>, DurableError> {
-    let rows: Vec<(String, String, Option<String>, Option<String>)> =
+    let rows: Vec<lash_durable::packages::NodeRow> =
         crate::observed_sql::query_as(SQL.live_nodes.sql())
             .bind(now.0)
             .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -81,6 +82,28 @@ pub(super) async fn install(
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
+        for function in &artifact.definitions {
+            crate::observed_sql::query(SQL.definition_put.sql())
+                .bind(function.to_string())
+                .bind(artifact.artifact.path.as_str())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+        }
+        for operation in &artifact.internal {
+            crate::observed_sql::query(SQL.internal_put.sql())
+                .bind(operation.as_str())
+                .bind(artifact.artifact.path.as_str())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+        }
+        crate::observed_sql::query(SQL.label_put.sql())
+            .bind(artifact.artifact.digest.to_string())
+            .bind(artifact.labels.as_str())
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
     }
     for set in sets {
         for member in &set.members {
@@ -96,6 +119,10 @@ pub(super) async fn install(
         let digest = set.digest.to_string();
         let installed = crate::observed_sql::query(SQL.set_put.sql())
             .bind(digest.as_str())
+            .bind(set.surface.as_slice())
+            .bind(lash_durable::packages::encode_requirements(
+                &set.requirements,
+            ))
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
@@ -119,9 +146,73 @@ pub(super) async fn catalog(tx: &mut PgConnection) -> Result<PackageCatalog, Dur
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let members: Vec<(String, i64, String, String)> = crate::observed_sql::query_as(SQL.sets.sql())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let members: Vec<(String, i64, String, String, String)> =
+        crate::observed_sql::query_as(SQL.sets.sql())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
     lash_durable::packages::catalog_of(artifacts, members)
+}
+
+/// One of the indexes installs write by key and package path.
+#[derive(Clone, Copy)]
+pub(super) enum Index {
+    Definitions,
+    InternalOperations,
+}
+
+/// The package paths `index` records for each of `keys`; a key it records
+/// none for is absent.
+pub(super) async fn paths<K: Ord + Clone + std::fmt::Display + Send + Sync>(
+    tx: &mut PgConnection,
+    index: Index,
+    keys: &[K],
+) -> Result<std::collections::BTreeMap<K, BTreeSet<String>>, DurableError> {
+    let sql = match index {
+        Index::Definitions => SQL.definition_paths.sql(),
+        Index::InternalOperations => SQL.internal_paths.sql(),
+    };
+    let mut found = std::collections::BTreeMap::new();
+    for key in keys {
+        let paths: Vec<String> = crate::observed_sql::query_scalar(sql)
+            .bind(key.to_string())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+        if !paths.is_empty() {
+            found.insert(key.clone(), paths.into_iter().collect());
+        }
+    }
+    Ok(found)
+}
+
+/// Every labels each of `artifacts` was installed with, in install order.
+pub(super) async fn labels(
+    tx: &mut PgConnection,
+    artifacts: &[lash_durable::ArtifactDigest],
+) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError> {
+    let mut found = std::collections::BTreeMap::new();
+    for artifact in artifacts {
+        let labels: Vec<String> = crate::observed_sql::query_scalar(SQL.labels_of.sql())
+            .bind(artifact.to_string())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+        if !labels.is_empty() {
+            found.insert(*artifact, labels);
+        }
+    }
+    Ok(found)
+}
+
+/// The surface snapshot stored for the set `digest`.
+pub(super) async fn surface(
+    tx: &mut PgConnection,
+    digest: &str,
+) -> Result<Option<Vec<u8>>, DurableError> {
+    crate::observed_sql::query_scalar(SQL.surface.sql())
+        .bind(digest)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)
 }

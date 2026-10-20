@@ -19,6 +19,17 @@ fn member(name: &str) -> MemberPath {
     }
 }
 
+/// The packages of `held`'s own set, the kernel first.
+fn own_packages(held: &HeldPackages) -> Vec<Package> {
+    let view = held.view(&held.own()).unwrap();
+    let mut packages: Vec<Package> = view
+        .packages()
+        .map(|package| held.artifacts()[&package.key()].as_ref().clone())
+        .collect();
+    packages.sort_by_key(|package| package.path().to_string() != "kernel");
+    packages
+}
+
 fn comparison_package(name: &str, title: &str, kernel: &Package) -> Package {
     let package = Package::build(
         name,
@@ -90,11 +101,11 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
         built_view.title(&lash_kernel_doc::FunctionId::from_bytes([0; 32]), &removed),
         removed.as_str()
     );
-    let kernel = built_view.package(&path("kernel")).unwrap();
-    let mut packages: Vec<_> = built_view.packages().cloned().collect();
+    let mut packages = own_packages(&built);
+    let kernel = packages[0].clone();
     packages.extend([
-        comparison_package("demo", "Compare items", kernel),
-        comparison_package("other", "Compare values", kernel),
+        comparison_package("demo", "Compare items", &kernel),
+        comparison_package("other", "Compare values", &kernel),
     ]);
     let held = HeldPackages::install(packages).unwrap();
     let selected = held.view(&held.own()).unwrap();
@@ -120,9 +131,8 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
 fn comparisons_come_from_the_supplied_package_set() {
     let built = lash_vm_releases::lash_packages().unwrap();
     let built_view = built.view(&built.own()).unwrap();
-    let kernel = built_view.package(&path("kernel")).unwrap();
-    let package = comparison_package("demo", "Compare items", kernel);
-    let mut packages: Vec<_> = built_view.packages().cloned().collect();
+    let mut packages = own_packages(&built);
+    let package = comparison_package("demo", "Compare items", &packages[0]);
     packages.push(package);
     let held = HeldPackages::install(packages).unwrap();
     let selected = held.view(&held.own()).unwrap();

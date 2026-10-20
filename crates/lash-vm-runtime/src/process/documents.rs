@@ -399,6 +399,82 @@ impl KernelDocuments {
             .await?)
     }
 
+    /// Holds each of `definitions`, a library function's identity with its
+    /// token body, under `claim`, storing the ones nothing holds yet: what a
+    /// node's install writes for the sets whose surfaces it stores, so a
+    /// node that does not hold a set's artifacts reads its code
+    /// ([`Self::stored_functions`], FIG-6991).
+    ///
+    /// # Errors
+    ///
+    /// The store's; a fenced referrer is the store's `ReferrerEnded`.
+    pub async fn hold_definitions(
+        &self,
+        claim: &ReferrerClaim,
+        definitions: &[(FunctionId, Arc<[u8]>)],
+    ) -> Result<(), DocumentStoreError> {
+        const BATCH: usize = 256;
+        let names: Vec<(ArtifactName, &Arc<[u8]>)> = definitions
+            .iter()
+            .map(|(function, image)| (function_artifact(function), image))
+            .collect();
+        for batch in names.chunks(BATCH) {
+            let holds: Vec<ModuleArtifactHold<'_>> = batch
+                .iter()
+                .map(|(name, image)| ModuleArtifactHold::Acquire {
+                    module_ref: &name.artifact_ref,
+                    body: ModuleArtifactBody::HelperDefinition(image),
+                })
+                .collect();
+            self.store.hold_module_artifacts(claim, &holds).await?;
+        }
+        Ok(())
+    }
+
+    /// The definition of each of `functions`, read back under its identity
+    /// and checked to be it, whichever document or install stored it.
+    ///
+    /// # Errors
+    ///
+    /// The store's failure to answer.
+    pub async fn stored_functions(
+        &self,
+        functions: impl IntoIterator<Item = FunctionId>,
+    ) -> Result<
+        Result<std::collections::BTreeMap<FunctionId, Arc<FunctionDefinition>>, Unretained>,
+        DocumentStoreError,
+    > {
+        let mut read = std::collections::BTreeMap::new();
+        for function in functions {
+            let artifact = function_artifact(&function);
+            let Some(bytes) = self
+                .store
+                .get_module_artifact(&artifact.artifact_ref)
+                .await?
+            else {
+                return Ok(Err(Unretained::Missing { artifact }));
+            };
+            let definition = match decode_body::<FunctionDefinition>(&bytes) {
+                Ok(definition) => definition,
+                Err(error) => {
+                    return Ok(Err(Unretained::Corrupt {
+                        artifact,
+                        message: error.to_string(),
+                    }));
+                }
+            };
+            let identity = definition.identity();
+            if identity != function {
+                return Ok(Err(Unretained::Corrupt {
+                    artifact,
+                    message: format!("the stored definition is {identity}"),
+                }));
+            }
+            read.insert(function, Arc::new(definition));
+        }
+        Ok(Ok(read))
+    }
+
     /// The declarations `document` was stored with, each read back under
     /// its identity and checked against it.
     ///

@@ -242,7 +242,10 @@ CREATE TABLE IF NOT EXISTS nodes (
     formats_json TEXT NOT NULL,
     registered_at_ms INTEGER NOT NULL,
     heartbeat_expires_at_ms INTEGER NOT NULL,
-    draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1))
+    draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1)),
+    -- What the node offers running code, its own package set among it
+    -- (FIG-6991), as JSON: gone with the row.
+    capabilities_json TEXT NOT NULL
 );
 
 -- An installed package artifact (FIG-6918), keyed by its digest, with the
@@ -256,16 +259,45 @@ CREATE TABLE IF NOT EXISTS package_artifacts (
 );
 
 -- An installed package set, keyed by its digest, at the store's install
--- sequence: the only key behind newest first.
+-- sequence: the only key behind newest first. Its surface snapshot and the
+-- JSON of what running its code requires are written once (FIG-6991).
 CREATE TABLE IF NOT EXISTS package_sets (
     digest TEXT PRIMARY KEY,
-    sequence INTEGER NOT NULL CONSTRAINT uq_package_sets_sequence UNIQUE
+    sequence INTEGER NOT NULL CONSTRAINT uq_package_sets_sequence UNIQUE,
+    surface BLOB NOT NULL,
+    requirements_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS package_set_members (
     set_digest TEXT NOT NULL REFERENCES package_sets (digest),
     artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
     PRIMARY KEY (set_digest, artifact)
+);
+
+-- Every definition of a stored package, helpers included, by identity and
+-- path (FIG-6991): written only by an install, never deleted. Membership is
+-- the authority to perform the package's internal operations.
+CREATE TABLE IF NOT EXISTS package_definitions (
+    function TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY (function, path)
+);
+
+-- Each distinct labels an install wrote for an artifact, in install order:
+-- append-only, so releases of identical content keep their labels.
+CREATE TABLE IF NOT EXISTS package_labels (
+    artifact TEXT NOT NULL,
+    labels TEXT NOT NULL,
+    sequence INTEGER NOT NULL CONSTRAINT uq_package_labels_sequence UNIQUE,
+    PRIMARY KEY (artifact, labels)
+);
+
+-- Every operation a stored package declares internal, by effect name and
+-- the package's path: written only by an install, never deleted.
+CREATE TABLE IF NOT EXISTS package_internal_operations (
+    operation TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY (operation, path)
 );
 
 -- The artifacts a live node holds, gone with its row.
@@ -1121,6 +1153,7 @@ impl DurableStore for SqliteDurableStore {
             boot: BootId::new(uuid::Uuid::new_v4().to_string()),
         };
         let formats = formats_json(&spec.decodes);
+        let capabilities = lash_durable::packages::encode_capabilities(&spec.capabilities);
         let spec = spec.clone();
         let answer = self
             .write(CommitLabel::NODE_REGISTER, move |tx, now| {
@@ -1146,7 +1179,8 @@ impl DurableStore for SqliteDurableStore {
                         lease_owner.boot.as_str(),
                         formats,
                         now.0,
-                        expires_at.0
+                        expires_at.0,
+                        capabilities
                     ],
                 )?;
                 packages::hold(tx, lease_owner.node.as_str(), &spec.held)?;
@@ -1155,6 +1189,7 @@ impl DurableStore for SqliteDurableStore {
                     decodes: spec.decodes,
                     serves: spec.serves.clone(),
                     held: spec.held.clone(),
+                    capabilities: spec.capabilities.clone(),
                     ttl_millis: spec.ttl_millis,
                     expires_at,
                 })
@@ -1361,6 +1396,57 @@ impl DurableStore for SqliteDurableStore {
 
     async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
         self.read(packages::catalog).await
+    }
+
+    async fn package_surface(
+        &self,
+        digest: &lash_durable::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        let digest = digest.to_string();
+        self.read(move |tx| packages::surface(tx, &digest).map(Ok))
+            .await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[lash_durable::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        let functions = functions.to_vec();
+        self.read(move |tx| packages::paths(tx, packages::Index::Definitions, functions).map(Ok))
+            .await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[lash_durable::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
+    {
+        let artifacts = artifacts.to_vec();
+        self.read(move |tx| packages::labels(tx, &artifacts).map(Ok))
+            .await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[lash_durable::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::EffectName,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        let operations = operations.to_vec();
+        self.read(move |tx| {
+            packages::paths(tx, packages::Index::InternalOperations, operations).map(Ok)
+        })
+        .await
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {

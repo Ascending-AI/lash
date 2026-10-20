@@ -375,32 +375,21 @@ impl SessionDialect {
                 .await
                 .map_err(|error| SessionError::Plugin(error.into())),
             None => lash_vm_runtime::lash_packages()
-                .map(|held| crate::plugin::CellPackages(held.own()))
-                .map_err(|error| SessionError::Protocol(error.to_string())),
+                .map_err(|error| SessionError::Protocol(error.to_string()))
+                .and_then(|held| {
+                    crate::plugin::CellPackages::held(&held, &held.own()).ok_or_else(|| {
+                        SessionError::Protocol("lash's packages lack their own set".to_owned())
+                    })
+                }),
         }
     }
 
-    /// The code exports of `packages`, the round's package set, in the
+    /// The code exports of `packages`, the round's package surface, in the
     /// session's dialect's spelling (§2.3, P3): `None` when the set
     /// exports no code.
-    ///
-    /// # Errors
-    ///
-    /// This node holds no library, or does not hold `packages`.
-    pub(crate) fn package_surface(
-        &self,
-        packages: crate::plugin::CellPackages,
-    ) -> Result<Option<String>, SessionError> {
-        let held = self
-            .services
-            .kernel
-            .packages()
-            .map_err(SessionError::Protocol)?;
-        let view = held
-            .view(&packages.digest())
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let surface = crate::package_surface::render(&view, self.language().spelling());
-        Ok((!surface.is_empty()).then_some(surface))
+    pub(crate) fn package_surface(&self, packages: &crate::plugin::CellPackages) -> Option<String> {
+        let surface = crate::package_surface::render(&packages.view(), self.language().spelling());
+        (!surface.is_empty()).then_some(surface)
     }
 
     pub(crate) fn read_only_variables_prompt(

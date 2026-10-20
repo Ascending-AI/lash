@@ -17,12 +17,12 @@ fn main() -> ExitCode {
         .view(&held.own())
         .unwrap_or_else(|error| panic!("{error}"));
     if let Some(selector) = &selector {
-        let exists =
-            view.packages().any(|package| {
-                package.code().ids().iter().enumerate().any(|(at, id)| {
-                    package.code().name(at) == selector || id.to_string() == *selector
-                })
-            });
+        let exists = view.packages().any(|package| {
+            package
+                .functions()
+                .iter()
+                .any(|(name, id)| name.as_str() == selector || id.to_string() == *selector)
+        });
         if !exists {
             eprintln!("unknown package definition: {selector}");
             return ExitCode::from(2);

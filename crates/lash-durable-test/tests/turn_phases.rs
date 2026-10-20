@@ -2190,6 +2190,7 @@ async fn claim_and_admit(
             decodes: vec![snapshot.formats.clone()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

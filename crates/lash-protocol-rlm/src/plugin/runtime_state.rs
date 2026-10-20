@@ -86,7 +86,7 @@ impl RlmRuntimeState {
         // The gate is asked once per round: the prompt shows the packages
         // of its answer, and the round's cell is written under it (P3).
         let packages = self.dialect.round_packages().await?;
-        let package_surface = self.dialect.package_surface(packages)?;
+        let package_surface = self.dialect.package_surface(&packages);
         let mut execution = self.execution.lock().await;
         execution.shows_packages(packages);
         let (bound_variables, globals, inferred_names) = execution

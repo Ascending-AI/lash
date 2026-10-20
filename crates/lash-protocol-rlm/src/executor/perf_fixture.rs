@@ -300,6 +300,7 @@ impl CodeModeCheckpointPerfPublisher {
                 decodes: vec![FormatSet::new(FORMATS)],
                 serves: Vec::new(),
                 held: Default::default(),
+                capabilities: Default::default(),
                 ttl_millis: 600_000,
             })
             .await

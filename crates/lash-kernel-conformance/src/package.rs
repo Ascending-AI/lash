@@ -73,8 +73,8 @@ impl<'a> Kit<'a> {
             .map(|w| w.function)
             .collect();
         for package in self.view.packages() {
-            for function in package.code().ids() {
-                let Some(registered) = self.installed.registry().get(function) else {
+            for function in package.ids() {
+                let Some(registered) = self.installed.registry().get(&function) else {
                     return Err(HarnessError(format!(
                         "{}: definition @{function} is not installed",
                         package.path()
@@ -82,7 +82,7 @@ impl<'a> Kit<'a> {
                 };
                 if registered.has_body()
                     && registered.states_native()
-                    && !covered.contains(function)
+                    && !covered.contains(&function)
                 {
                     return Err(HarnessError(format!(
                         "CONF-NATIVE {} {} lacks a witness",
@@ -104,7 +104,7 @@ impl<'a> Kit<'a> {
         let owner = self
             .view
             .packages()
-            .find(|package| package.code().ids().contains(&witness.function))
+            .find(|package| package.ids().any(|function| function == witness.function))
             .ok_or_else(|| {
                 HarnessError(format!(
                     "{}: witness names a function outside the package view",

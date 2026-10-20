@@ -164,27 +164,75 @@ impl Embedding {
         Some(dialect.front_end.lower(source, environment, mode))
     }
 
-    /// The namespaces `operations` compose with the package set
-    /// `packages`, under the roots its packages and this embedding's
+    /// The names and surface a writer of `packages` resolves against: a
+    /// held set's, or a stored surface's, sent whole with the definitions
+    /// it names that the embedding does not hold (FIG-6991).
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::PackagesNotHeld`] for a held set the embedding does not
+    /// hold, or a stored surface naming a definition neither held nor sent;
+    /// [`EmbedError::Registry`] for a surface or definition that does not
+    /// read as what it claims to be.
+    pub(crate) fn surface(
+        &self,
+        packages: &lash_vm_client::service::SurfaceRef,
+    ) -> Result<Surface<'_>, EmbedError> {
+        let Some(stored) = &packages.stored else {
+            return Ok(Surface::Held {
+                library: self.library_of(&packages.digest)?,
+                view: self.held.view(&packages.digest).map_err(|refusal| {
+                    EmbedError::PackagesNotHeld {
+                        packages: refusal.packages,
+                    }
+                })?,
+            });
+        };
+        let refused = |message: String| EmbedError::Registry(message);
+        let surface =
+            lash_kernel_package::SurfaceSnapshot::decode(packages.digest, &stored.surface)
+                .map_err(|refusal| refused(refusal.to_string()))?;
+        let mut library = lash_kernel_package::PackageView::new(&surface, &self.written)
+            .library(&self.written)
+            .map_err(|error| refused(error.to_string()))?;
+        let mut missing = surface.functions();
+        missing.retain(|function| self.written.get(function).is_none());
+        for image in &stored.definitions {
+            let definition: lash_kernel_doc::FunctionDefinition =
+                lash_kernel_doc::graph_tokens::decode_body(image)
+                    .map_err(|error| refused(error.to_string()))?;
+            if !missing.remove(&definition.identity()) {
+                return Err(refused(format!(
+                    "a stored definition {} the surface does not need was sent",
+                    definition.identity()
+                )));
+            }
+            library
+                .insert(definition)
+                .map_err(|error| refused(error.to_string()))?;
+        }
+        if !missing.is_empty() {
+            return Err(EmbedError::PackagesNotHeld {
+                packages: packages.digest,
+            });
+        }
+        Ok(Surface::Stored(Box::new(StoredNames { surface, library })))
+    }
+
+    /// The namespaces `operations` compose with the package surface
+    /// `surface`, under the roots its packages and this embedding's
     /// installed dialects reserve: what a cell, a workflow import and
     /// discovery all resolve through (P3).
     ///
     /// # Errors
     ///
-    /// [`Namespaces::PackagesNotHeld`] for a set the embedding does not
-    /// hold, and [`Namespaces::Refused`] naming both sides of a refused
-    /// composition.
+    /// [`Namespaces::Refused`] naming both sides of a refused composition.
     pub(crate) fn namespaces(
         &self,
         operations: lash_kernel_dialect::Operations,
-        packages: &PackageSetDigest,
+        surface: &Surface<'_>,
     ) -> Result<lash_kernel_dialect::Namespaces, Namespaces> {
-        let view = self
-            .held
-            .view(packages)
-            .map_err(|refusal| Namespaces::PackagesNotHeld {
-                packages: refusal.packages,
-            })?;
+        let view = surface.view(&self.written);
         let reserves = |root: &str| {
             self.dialects
                 .values()
@@ -204,11 +252,44 @@ impl Embedding {
 /// Why an embedding composed no namespaces for a cell.
 #[derive(Debug)]
 pub(crate) enum Namespaces {
-    /// The cell's package set is not one the embedding holds.
-    PackagesNotHeld {
-        packages: PackageSetDigest,
-    },
     Refused(lash_kernel_dialect::NamespaceRefusal),
+}
+
+/// The names and surface one writer resolves against.
+pub(crate) enum Surface<'a> {
+    /// A set the embedding holds.
+    Held {
+        library: &'a NamedLibrary,
+        view: lash_kernel_package::PackageView<'a>,
+    },
+    /// A stored surface the embedding does not hold.
+    Stored(Box<StoredNames>),
+}
+
+/// A stored surface and its names: the held functions it names by
+/// identity, and those sent with it.
+pub(crate) struct StoredNames {
+    surface: lash_kernel_package::SurfaceSnapshot,
+    library: NamedLibrary,
+}
+
+impl Surface<'_> {
+    pub(crate) fn library(&self) -> &NamedLibrary {
+        match self {
+            Self::Held { library, .. } => library,
+            Self::Stored(stored) => &stored.library,
+        }
+    }
+
+    pub(crate) fn view<'b>(
+        &'b self,
+        catalog: &'b Arc<FunctionRegistry>,
+    ) -> lash_kernel_package::PackageView<'b> {
+        match self {
+            Self::Held { view, .. } => *view,
+            Self::Stored(stored) => lash_kernel_package::PackageView::new(&stored.surface, catalog),
+        }
+    }
 }
 
 /// A worker's configuration while it is assembled: the natives the host

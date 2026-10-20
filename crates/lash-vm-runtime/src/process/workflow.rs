@@ -191,15 +191,22 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
 
     fn initial_packages(
         &self,
-    ) -> Result<lash_kernel_doc::PackageSetDigest, lash_execution_contracts::PluginError> {
-        self.engine
+    ) -> Result<lash_execution_contracts::CellPackages, lash_execution_contracts::PluginError> {
+        let held = self
+            .engine
             .workers
             .config()
             .packages
             .clone()
             .map_or_else(lash_vm_releases::lash_packages, Ok)
-            .map(|held| held.own())
-            .map_err(|error| lash_execution_contracts::PluginError::Registration(error.to_string()))
+            .map_err(|error| {
+                lash_execution_contracts::PluginError::Registration(error.to_string())
+            })?;
+        lash_execution_contracts::CellPackages::held(&held, &held.own()).ok_or_else(|| {
+            lash_execution_contracts::PluginError::Registration(
+                "the producer's packages lack their own set".into(),
+            )
+        })
     }
 
     fn package_view(

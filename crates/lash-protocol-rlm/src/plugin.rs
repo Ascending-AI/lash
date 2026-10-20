@@ -32,8 +32,8 @@ pub use config_types::{
     MemoryLimiter, MemoryMeter,
 };
 pub use factory::RlmProtocolPluginFactory;
-pub(crate) use packages::OneSet;
 pub use packages::{CellPackages, PackageGate};
+pub(crate) use packages::{OneSet, wire as package_wire};
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;

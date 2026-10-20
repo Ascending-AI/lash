@@ -217,6 +217,7 @@ async fn claimed_requirements(
             decodes: backend.formats().decodes(),
             serves,
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await
@@ -514,6 +515,7 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
             decodes: backend.formats().decodes(),
             serves: old_serves,
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

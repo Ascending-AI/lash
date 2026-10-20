@@ -1,5 +1,8 @@
 //! FLEET-SET and RETAIN-SURVEY (FIG-6918) over two lines of host packages:
-//! `p`, whose body calls `q.v`, built over `q@1` and again over `q@2`.
+//! `p`, whose body calls `q.v`, built over `q@1` and again over `q@2`; and
+//! PROMOTE-BY-CAPABILITY (FIG-6991), the selector the gate switches to with
+//! requirements-based claims, over `q`'s releases; and the stored surface a
+//! node that does not hold a set reads it from.
 
 use futures_util::StreamExt;
 use std::collections::BTreeSet;
@@ -9,7 +12,9 @@ use lash_core::durable_port::{FormatSet, HeldArtifact, NodeCapability, PackageSe
 use lash_kernel_package::{HeldPackages, Package, PackageSet, PackageSources};
 use lash_vm_runtime::{RetainDependent, RetainSurvey};
 
-use super::{NodeHold, fleet_package_set, held_artifact, members, serving};
+use super::{
+    FleetPackages, NodeHold, fleet_package_set, held_artifact, members, promoted, serving,
+};
 
 fn q(value: i64) -> Package {
     let kernel =
@@ -89,6 +94,7 @@ fn node(decodes: &[&FormatSet], held: BTreeSet<HeldArtifact>) -> NodeCapability 
     NodeCapability {
         decodes: decodes.iter().map(|set| (*set).clone()).collect(),
         held,
+        capabilities: Default::default(),
     }
 }
 
@@ -102,6 +108,7 @@ fn stored(sets: &[(PackageSetDigest, BTreeSet<HeldArtifact>, u64)]) -> super::Pa
                     digest: *digest,
                     members: members.clone(),
                     sequence: *sequence,
+                    requirements: Default::default(),
                 },
             )
             .collect(),
@@ -277,7 +284,6 @@ fn an_artifact_is_retained_exactly_while_a_dependent_lists_it() {
 #[tokio::test]
 async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() {
     use lash_core::durable_port::{NodeId, NodeSpec};
-    use lash_execution_contracts::CellPackages;
     use lash_execution_contracts::PackageGate as _;
     let package = |release: &str| {
         Package::build("dataframe", release, &PackageSources {
@@ -362,6 +368,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
             decodes: vec![backend.formats().session().clone()],
             serves: vec![],
             held: super::own_artifacts(&old_held),
+            capabilities: Default::default(),
             ttl_millis: 60_000,
         })
         .await
@@ -485,7 +492,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
         .writable()
         .await
         .unwrap();
-    assert_eq!(chosen, CellPackages(pin));
+    assert_eq!(chosen.digest(), pin);
     let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(4))
         .component(TOOLS, &())
         .link_tool(
@@ -500,7 +507,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
             lash_kernel_doc::SourceLanguage::TypeScript,
             "export async function flow() { return await dataframe.execute(); }",
             &env,
-            chosen,
+            chosen.clone(),
             None,
         )
         .await
@@ -534,7 +541,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
                 &document,
                 &lash_kernel_doc::Name::new("flow"),
                 &env,
-                packages,
+                packages.clone(),
                 None,
             )
             .await
@@ -720,4 +727,250 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
         );
     }
     core.shutdown().await.unwrap();
+}
+
+/// One node of each of `releases`' builds: its own set holding that release
+/// of `q`, as the store keeps it at `sequence`, and the node as the gate
+/// reads it live.
+fn build(release: Package, sequence: u64) -> (lash_core::durable_port::StoredSet, NodeCapability) {
+    let held = HeldPackages::install([release]).expect("a node's packages");
+    let surface = held.surface(&held.own()).expect("its own surface");
+    let stored = lash_core::durable_port::StoredSet {
+        digest: held.own(),
+        members: members(&held.sets()[&held.own()]),
+        sequence,
+        requirements: surface.requirements().clone(),
+    };
+    let live = NodeCapability {
+        decodes: Vec::new(),
+        held: BTreeSet::new(),
+        capabilities: lash_kernel_package::node_capabilities(&held),
+    };
+    (stored, live)
+}
+
+/// `q@value` with a native-only `q.fast`: what a release adding a native
+/// requires of every node.
+fn q_with_native(value: i64) -> Package {
+    let kernel = format!(
+        "function q.v() -> Int\nkernel 1\ncharge 1\nbody {{\n  return {value}\n}}\n\nfunction q.fast() -> Int\nkernel 1\ncharge 1\nnative\n"
+    );
+    Package::build(
+        "q",
+        &format!("{value}.0.0"),
+        &PackageSources {
+            kernel: &kernel,
+            surface: "function v() -> Int = q.v\nfunction fast() -> Int = q.fast\n",
+            labels: "v\tvalue\nfast\tfast\n",
+        },
+        &[],
+    )
+    .expect("q builds")
+}
+
+/// PROMOTE-BY-CAPABILITY: the candidates are the own surfaces of the
+/// writer and of the live serving nodes, and the newest by install
+/// sequence whose requirements every one of them meets is chosen. A
+/// release changing only a body is chosen as soon as one node of it is
+/// live, on every node; once its nodes stop it is no candidate, and the
+/// older surface is chosen again. A release adding a native-only function
+/// waits until no live node lacks the native.
+#[test]
+fn the_newest_live_surface_every_serving_node_can_run_is_promoted() {
+    let (a, a_node) = build(q(1), 1);
+    let (b, b_node) = build(q(2), 2);
+    let (c, c_node) = build(q_with_native(3), 3);
+    assert_eq!(
+        a.requirements, b.requirements,
+        "a body-only release requires what its predecessor did"
+    );
+    assert!(
+        !c.requirements.met_by(&a_node.capabilities),
+        "a node of A lacks C's native"
+    );
+    let stored = [a.clone(), b.clone(), c.clone()];
+    let a_writes = |serving: &[&NodeCapability]| {
+        promoted(&stored, serving, (&a_node.capabilities, a.digest)).map(|set| set.digest)
+    };
+
+    assert_eq!(
+        a_writes(&[&a_node]),
+        Some(a.digest),
+        "a fleet of A alone writes under A, though B and C are stored"
+    );
+    assert_eq!(
+        a_writes(&[&a_node, &b_node]),
+        Some(b.digest),
+        "a body-only release is promoted on A's node once B's is live"
+    );
+    assert_eq!(
+        promoted(
+            &stored,
+            &[&a_node, &b_node],
+            (&b_node.capabilities, b.digest)
+        )
+        .map(|set| set.digest),
+        Some(b.digest),
+        "B's node writes under B too"
+    );
+    assert_eq!(
+        a_writes(&[&a_node]),
+        Some(a.digest),
+        "once B's nodes stop, the fleet rolls back to A"
+    );
+    assert_eq!(
+        a_writes(&[&a_node, &c_node]),
+        Some(a.digest),
+        "a new native waits while A's node lacks it"
+    );
+    assert_eq!(
+        promoted(
+            &stored,
+            &[&a_node, &c_node],
+            (&c_node.capabilities, c.digest)
+        )
+        .map(|set| set.digest),
+        Some(a.digest),
+        "C's node writes under A while A's node is live"
+    );
+    assert_eq!(
+        promoted(&stored, &[&c_node], (&c_node.capabilities, c.digest)).map(|set| set.digest),
+        Some(c.digest),
+        "once every live node has the native, C is promoted"
+    );
+}
+
+/// `q@2` whose `q.v` calls the helper `q.base`, no member of its surface,
+/// with a new member `q.twice`.
+fn q_with_helper() -> Package {
+    Package::build(
+        "q",
+        "2.0.0",
+        &PackageSources {
+            kernel: "use q.base\n\nfunction q.base() -> Int\nkernel 1\ncharge 1\nbody {\n  return 2\n}\n\nfunction q.v() -> Int\nkernel 1\ncharge 2\nbody {\n  let value = invoke q.base()\n  return value\n}\n\nfunction q.twice() -> Int\nkernel 1\ncharge 2\nbody {\n  return 4\n}\n",
+            surface: "function v() -> Int = q.v\nfunction twice() -> Int = q.twice\n",
+            labels: "v\tvalue\ntwice\ttwice\n",
+        },
+        &[],
+    )
+    .expect("q builds")
+}
+
+/// INSTALL-STORES-CODE: the installer of a set stores its surface, every
+/// definition (helpers included), the index of which packages declare each
+/// definition, and its artifacts' labels. None of it is the installer
+/// node's: once that node stops and the store collects, a node that does
+/// not hold the set's artifacts reads the whole surface and its code from
+/// the store.
+#[tokio::test]
+async fn a_stored_set_outlives_its_installer_and_collection() {
+    use lash_core::durable_port::NodeSpec;
+    use lash_core::durable_port::domain::pages::{PageStore as _, RetirementBudget};
+
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores.clone());
+    let b = Arc::new(HeldPackages::install([q_with_helper()]).expect("B"));
+    let installer = NodeHold::new(Arc::clone(&b));
+    let holding = lash_execution_contracts::backend::NodePackages::hold(&installer, &backend)
+        .await
+        .expect("B installs");
+    let durable = backend.durable();
+    let lease = durable
+        .register_node(&NodeSpec {
+            node: lash_core::durable_port::NodeId::new("installer"),
+            decodes: Vec::new(),
+            serves: Vec::new(),
+            held: holding.held,
+            capabilities: holding.capabilities,
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("the installer serves");
+    durable
+        .release_node(&lease)
+        .await
+        .expect("the installer stops");
+    let pages = stores.durable_store();
+    while {
+        let step = pages
+            .retire_step(RetirementBudget { nodes: 1024 })
+            .await
+            .expect("a retirement step");
+        step.holds_advanced != 0 || step.nodes_deleted != 0
+    } {}
+    stores
+        .session_store_factory()
+        .gc_unreachable()
+        .await
+        .expect("the collection completes");
+    assert!(
+        durable.live_nodes().await.expect("live nodes").is_empty(),
+        "the installer's advertisement ended with it"
+    );
+
+    let digest = b.own();
+    let surface = b.surface(&digest).expect("B's surface");
+    let q_path =
+        lash_kernel_package::PackagePath::new(lash_kernel_package::Segment::new("q").expect("q"));
+    let definitions = surface
+        .package_definitions(&q_path)
+        .expect("q's definitions")
+        .clone();
+    let helper = b
+        .functions()
+        .iter()
+        .find(|(_, function)| function.name() == "q.base")
+        .map(|(id, _)| *id)
+        .expect("the helper");
+    assert!(
+        definitions.contains(&helper),
+        "the snapshot lists the helper"
+    );
+    let paths = durable
+        .package_paths(&definitions.iter().copied().collect::<Vec<_>>())
+        .await
+        .expect("the membership index");
+    assert_eq!(
+        paths,
+        definitions
+            .iter()
+            .map(|function| (*function, BTreeSet::from(["q".to_owned()])))
+            .collect(),
+        "every definition of B, the helper included, is indexed to q"
+    );
+    let artifact = surface.package(&q_path).expect("q").digest();
+    let labels = durable.package_labels(&[artifact]).await.expect("labels");
+    assert_eq!(
+        labels[&artifact]
+            .iter()
+            .map(|text| lash_kernel_package::PackageLabels::decode(text)
+                .expect("labels")
+                .release)
+            .collect::<Vec<_>>(),
+        ["2.0.0"],
+        "B's labels"
+    );
+
+    let a = Arc::new(HeldPackages::install([q(1)]).expect("A"));
+    let reader = FleetPackages::new(backend.clone(), Arc::new(NodeHold::new(a)));
+    let cell = reader.surface(digest).await.expect("B's stored surface");
+    assert_eq!(cell.digest(), digest);
+    assert_eq!(
+        cell.stored_definitions()
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        definitions,
+        "the reader holds none of B's code and reads all of it"
+    );
+    let view = cell.view();
+    let twice = view
+        .packages()
+        .find_map(|package| package.function("q.twice"))
+        .expect("B's new member");
+    assert!(
+        view.catalog().get(&twice).is_some(),
+        "the new member's code"
+    );
+    assert!(view.catalog().get(&helper).is_some(), "the helper's code");
 }

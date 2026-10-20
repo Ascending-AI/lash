@@ -167,8 +167,7 @@ fn pkg_shape_a_stale_value_names_both_artifacts_by_label() {
         assert_eq!(stale.built, older.function("dataframe.make_expr"));
         assert_eq!(stale.at, "self.name");
 
-        let current = fixture.held.view(&fixture.held.own()).unwrap();
-        let own = current.set().clone();
+        let own = fixture.held.sets()[&fixture.held.own()].clone();
         let retained = PackageSet::new([&older_kernel, &older]).unwrap();
         let artifacts: Vec<Arc<Package>> = fixture
             .held
@@ -245,12 +244,7 @@ fn pkg_shape_a_constructor_two_releases_share_names_both() {
         ),
     ));
     let stale = StaleValue::of(&error).expect("a stale value's data");
-    let own = fixture
-        .held
-        .view(&fixture.held.own())
-        .unwrap()
-        .set()
-        .clone();
+    let own = fixture.held.sets()[&fixture.held.own()].clone();
     let sets = [
         own.clone(),
         PackageSet::new([&other_kernel, &sharing]).unwrap(),

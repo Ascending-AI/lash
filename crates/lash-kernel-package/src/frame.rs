@@ -193,14 +193,13 @@ impl HeldPackages {
         if !sets.contains_key(&holdings.own) {
             return Err(PackageRefusal::OwnNotHeld);
         }
-        let (index, backing) = crate::held::member_index(&artifacts);
+        let surfaces = crate::held::surfaces(&artifacts, &sets, &functions);
         Ok(Self {
             artifacts,
             sets,
             own: holdings.own,
+            surfaces,
             functions,
-            index,
-            backing,
             frame,
             live_frame: OnceLock::from(bytes),
         })

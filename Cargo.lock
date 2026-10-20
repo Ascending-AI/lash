@@ -2517,6 +2517,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-migrate",
+ "lash-kernel-package",
  "rmp-serde",
  "schemars",
  "serde",

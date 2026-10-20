@@ -91,7 +91,7 @@ impl Module {
                     &self.document,
                     &Name::new(entry),
                     &self.environment,
-                    self.packages,
+                    self.packages.clone(),
                     None,
                 )
                 .await

@@ -39,16 +39,37 @@ fn typescript_services() -> super::CellServices {
     )
 }
 
-/// FIG-6124, S1-F1: a worker's missing package set reaches the cell's host
-/// result as data naming the set, including after the result crosses its
-/// serialized boundary.
+/// FIG-6124, S1-F1: a worker sent a stored surface without a definition it
+/// names that it does not hold refuses the set, and the refusal reaches the
+/// cell's host result as data naming the set, including after the result
+/// crosses its serialized boundary.
 #[tokio::test]
 async fn a_worker_package_set_refusal_keeps_the_set_typed() {
-    let unheld = lash_kernel_doc::PackageSetDigest::from_bytes([9; 32]);
+    let lash: Vec<_> = lash_vm_runtime::lash_packages()
+        .expect("lash's packages")
+        .artifacts()
+        .values()
+        .map(|package| package.as_ref().clone())
+        .collect();
+    let kernel = lash
+        .iter()
+        .find(|package| package.path().to_string() == "kernel")
+        .expect("the kernel package")
+        .clone();
+    let other =
+        lash_kernel_package::HeldPackages::install(lash.into_iter().chain([
+            lash_kernel_package::testing::dataframe(&kernel).expect("the fixture builds"),
+        ]))
+        .expect("another node's packages");
+    let unheld = other.own();
+    let surface = Arc::clone(other.surface(&unheld).expect("its own surface"));
+    let catalog = Arc::clone(other.functions());
     let host = open_host().await;
     let mut state = typescript_state();
     let mut services = typescript_services();
-    services.packages = Some(Arc::new(crate::plugin::OneSet(crate::CellPackages(unheld))));
+    services.packages = Some(Arc::new(crate::plugin::OneSet(
+        crate::CellPackages::stored(surface, catalog, std::collections::BTreeMap::new()),
+    )));
     let response = run_cell(
         &mut state,
         cell_context(

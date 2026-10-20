@@ -525,6 +525,7 @@ async fn admit_composed_inputs(
             decodes: vec![snapshot.formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

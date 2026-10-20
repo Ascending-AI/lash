@@ -1,14 +1,17 @@
-//! The package laws (FIG-6918, S1-F2): what a store keeps of package
-//! artifacts and sets, what a node advertises it holds, and CLAIM-HOLDS.
+//! The package laws (FIG-6918, S1-F2, FIG-6991): what a store keeps of
+//! package artifacts and sets and their surfaces, what a node advertises
+//! it holds and offers, and CLAIM-HOLDS.
 
 use std::collections::BTreeSet;
 
 use super::{LawBroken, LawOutcome};
 use crate::domain::CANCEL_MAIL;
 use crate::packages::{ArtifactInstall, HeldArtifact, SetInstall, held_sets};
+use crate::packages::{EffectName, FunctionId};
 use crate::{
-    ActorKey, ArtifactDigest, ClaimPurpose, CommitLabel, DurableError, DurableStore, FormatSet,
-    MailKind, MailTx, NodeId, NodeLease, NodeSpec, PackageSetDigest, Release,
+    ActorKey, ArtifactDigest, ClaimPurpose, CommitLabel, DurableError, DurableStore,
+    ExecutionRequirements, FormatSet, MailKind, MailTx, NodeCapabilities, NodeId, NodeLease,
+    NodeSpec, PackageSetDigest, Release,
 };
 
 fn artifact(path: &str, byte: u8) -> HeldArtifact {
@@ -22,6 +25,9 @@ fn install(artifact: &HeldArtifact) -> ArtifactInstall {
     ArtifactInstall {
         artifact: artifact.clone(),
         header: format!("{{\"path\":\"{}\"}}", artifact.path),
+        definitions: BTreeSet::new(),
+        internal: BTreeSet::new(),
+        labels: format!("{{\"release\":\"{}\"}}", artifact.path),
     }
 }
 
@@ -29,7 +35,152 @@ fn set(byte: u8, members: &[&HeldArtifact]) -> SetInstall {
     SetInstall {
         digest: PackageSetDigest::from_bytes([byte; 32]),
         members: members.iter().map(|member| (*member).clone()).collect(),
+        surface: vec![byte],
+        requirements: ExecutionRequirements::default(),
     }
+}
+
+fn function(byte: u8) -> FunctionId {
+    FunctionId::from_bytes([byte; 32])
+}
+
+/// PROMOTE-BY-CAPABILITY's store facts (FIG-6991): a set's surface and
+/// requirements are what its first install wrote, and a later install of
+/// the set, with other bytes, changes neither. The definition index answers
+/// every package path a stored definition is one of, helpers included, and
+/// the internal index every path that declares an operation internal;
+/// neither answers what no install wrote. An artifact keeps the labels of
+/// every install, in install order and each once, though its content and
+/// so its set are one. A live node's capabilities, its own set among them,
+/// are what it registered, and are gone with its lease.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    let lib = artifact("lib", 41);
+    let mut first = ArtifactInstall {
+        definitions: [function(1), function(2)].into_iter().collect(),
+        internal: [EffectName::new("lib.explain").map_err(|error| LawBroken(error.to_string()))?]
+            .into_iter()
+            .collect(),
+        ..install(&lib)
+    };
+    let requirements = ExecutionRequirements {
+        natives: [function(2)].into_iter().collect(),
+        kernels: [1].into_iter().collect(),
+        ..ExecutionRequirements::default()
+    };
+    let mut stored = set(42, &[&lib]);
+    stored.surface = b"the first surface".to_vec();
+    stored.requirements = requirements.clone();
+    store
+        .install_packages(std::slice::from_ref(&first), std::slice::from_ref(&stored))
+        .await?;
+    let mut again = stored.clone();
+    again.surface = b"another surface".to_vec();
+    again.requirements = ExecutionRequirements::default();
+    let first_labels = first.labels.clone();
+    first.definitions.insert(function(3));
+    first.labels = "{\"release\":\"1.0.1\"}".to_owned();
+    store
+        .install_packages(std::slice::from_ref(&first), &[again])
+        .await?;
+    store
+        .install_packages(std::slice::from_ref(&first), &[])
+        .await?;
+    let labels = store
+        .package_labels(&[lib.digest, artifact("none", 45).digest])
+        .await?;
+    let expected: std::collections::BTreeMap<ArtifactDigest, Vec<String>> =
+        [(lib.digest, vec![first_labels, first.labels.clone()])].into();
+    super::ensure!(labels == expected, "the stored labels are {labels:?}");
+    let surface = store.package_surface(&stored.digest).await?;
+    super::ensure!(
+        surface.as_deref() == Some(&b"the first surface"[..]),
+        "the stored surface is {surface:?}"
+    );
+    let absent = store
+        .package_surface(&PackageSetDigest::from_bytes([43; 32]))
+        .await?;
+    super::ensure!(
+        absent.is_none(),
+        "an uninstalled set's surface is {absent:?}"
+    );
+    let catalog = store.package_catalog().await?;
+    let kept: Vec<&ExecutionRequirements> = catalog
+        .sets
+        .iter()
+        .filter(|set| set.digest == stored.digest)
+        .map(|set| &set.requirements)
+        .collect();
+    super::ensure!(
+        kept == vec![&requirements],
+        "the stored requirements are {kept:?}"
+    );
+    let other = ArtifactInstall {
+        definitions: [function(1)].into_iter().collect(),
+        ..install(&artifact("other", 44))
+    };
+    store.install_packages(&[other], &[]).await?;
+    let paths = store
+        .package_paths(&[function(1), function(3), function(9)])
+        .await?;
+    let expected: std::collections::BTreeMap<FunctionId, BTreeSet<String>> = [
+        (function(1), ["lib".to_owned(), "other".to_owned()].into()),
+        (function(3), ["lib".to_owned()].into()),
+    ]
+    .into();
+    super::ensure!(paths == expected, "the definition index answered {paths:?}");
+    let explain = EffectName::new("lib.explain").map_err(|error| LawBroken(error.to_string()))?;
+    let run = EffectName::new("lib.run").map_err(|error| LawBroken(error.to_string()))?;
+    let internal = store.internal_operations(&[explain.clone(), run]).await?;
+    let expected: std::collections::BTreeMap<EffectName, BTreeSet<String>> =
+        [(explain, ["lib".to_owned()].into())].into();
+    super::ensure!(
+        internal == expected,
+        "the internal index answered {internal:?}"
+    );
+
+    let capabilities = NodeCapabilities {
+        natives: [function(2)].into_iter().collect(),
+        kernels: [1].into_iter().collect(),
+        providers: ["tools.law".to_owned()].into_iter().collect(),
+        codecs: [("tools.law".to_owned(), 2)].into_iter().collect(),
+        surface: Some(stored.digest),
+    };
+    let lease = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("offers"),
+            decodes: vec![FormatSet::new("law:packages")],
+            serves: Vec::new(),
+            held: [lib].into_iter().collect(),
+            capabilities: capabilities.clone(),
+            ttl_millis: 15_000,
+        })
+        .await?;
+    let live = store.live_nodes().await?;
+    let advertised: Vec<&NodeCapabilities> = live.iter().map(|node| &node.capabilities).collect();
+    super::ensure!(
+        advertised == vec![&capabilities],
+        "the live node advertises {advertised:?}"
+    );
+    super::ensure!(
+        requirements.met_by(&live[0].capabilities),
+        "the node does not meet the requirements it offers"
+    );
+    store.release_node(&lease).await?;
+    let live = store.live_nodes().await?;
+    super::ensure!(
+        live.is_empty(),
+        "a released node still advertises {:?}",
+        live.iter()
+            .map(|node| &node.capabilities)
+            .collect::<Vec<_>>()
+    );
+    Ok(())
 }
 
 async fn node(
@@ -43,6 +194,7 @@ async fn node(
             decodes: vec![FormatSet::new("law:packages")],
             serves: Vec::new(),
             held: held.iter().map(|artifact| (*artifact).clone()).collect(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await?)

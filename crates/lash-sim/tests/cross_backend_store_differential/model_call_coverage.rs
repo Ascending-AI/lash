@@ -128,6 +128,7 @@ impl ModelLedger {
                 decodes: vec![formats],
                 serves: Vec::new(),
                 held: Default::default(),
+                capabilities: Default::default(),
                 ttl_millis: 60_000,
             })
             .await

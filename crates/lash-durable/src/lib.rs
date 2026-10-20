@@ -73,7 +73,8 @@ pub use ids::{
 };
 pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 pub use packages::{
-    ArtifactDigest, HeldArtifact, NodeCapability, PackageCatalog, PackageSetDigest, StoredSet,
+    ArtifactDigest, ExecutionRequirements, HeldArtifact, NodeCapabilities, NodeCapability,
+    NodeHolding, PackageCatalog, PackageSetDigest, StoredSet,
 };
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,

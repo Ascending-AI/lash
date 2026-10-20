@@ -284,6 +284,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
             decodes: vec![row.formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

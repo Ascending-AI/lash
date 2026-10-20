@@ -948,6 +948,7 @@ impl DurableStore for PostgresDurableStore {
                 };
                 let formats: Vec<&str> = spec.decodes.iter().map(FormatSet::as_str).collect();
                 let formats = serde_json::Value::from(formats).to_string();
+                let capabilities = lash_durable::packages::encode_capabilities(&spec.capabilities);
                 let (mut tx, now) = self.open(CommitLabel::NODE_REGISTER).await?;
                 let outcome = async {
                     let boots: Vec<String> =
@@ -970,6 +971,7 @@ impl DurableStore for PostgresDurableStore {
                         .bind(&formats)
                         .bind(now.0)
                         .bind(expires_at.0)
+                        .bind(&capabilities)
                         .execute(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(sqlx_failure)?;
@@ -979,6 +981,7 @@ impl DurableStore for PostgresDurableStore {
                         decodes: spec.decodes.clone(),
                         serves: spec.serves.clone(),
                         held: spec.held.clone(),
+                        capabilities: spec.capabilities.clone(),
                         ttl_millis: spec.ttl_millis,
                         expires_at,
                     })
@@ -1241,6 +1244,68 @@ impl DurableStore for PostgresDurableStore {
         self.within(CommitCapacity::Work, async {
             let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
             packages::catalog(&mut connection).await
+        })
+        .await
+    }
+
+    async fn package_surface(
+        &self,
+        digest: &lash_durable::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::surface(&mut connection, &digest.to_string()).await
+        })
+        .await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[lash_durable::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::paths(&mut connection, packages::Index::Definitions, functions).await
+        })
+        .await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[lash_durable::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
+    {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::labels(&mut connection, artifacts).await
+        })
+        .await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[lash_durable::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::EffectName,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::paths(
+                &mut connection,
+                packages::Index::InternalOperations,
+                operations,
+            )
+            .await
         })
         .await
     }

@@ -513,6 +513,7 @@ async fn unserved_law(
             decodes: formats.clone(),
             serves: vec![token.clone()],
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60000,
         })
         .await?;
@@ -537,6 +538,7 @@ async fn unserved_law(
             decodes: formats,
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60000,
         })
         .await?;

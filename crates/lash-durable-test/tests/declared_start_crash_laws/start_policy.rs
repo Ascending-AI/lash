@@ -126,10 +126,7 @@ impl Activation for Switch {
         }
     }
 
-    async fn hold(
-        &self,
-    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
-    {
+    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
         if self.switched.load(Ordering::SeqCst) {
             self.later.hold().await
         } else {

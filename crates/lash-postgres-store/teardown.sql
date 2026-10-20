@@ -118,6 +118,12 @@ DROP TABLE IF EXISTS lash_package_sets CASCADE;
 
 DROP TABLE IF EXISTS lash_package_set_members CASCADE;
 
+DROP TABLE IF EXISTS lash_package_definitions CASCADE;
+
+DROP TABLE IF EXISTS lash_package_labels CASCADE;
+
+DROP TABLE IF EXISTS lash_package_internal_operations CASCADE;
+
 DROP TABLE IF EXISTS lash_node_artifacts CASCADE;
 
 DROP TABLE IF EXISTS lash_actors CASCADE;

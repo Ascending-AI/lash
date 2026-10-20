@@ -258,6 +258,35 @@ Select packages before starting or cloning the worker service.
 argument. Use `HeldPackages::new` when reconstructing own and retained sets
 from stored rows.
 
+A node installs its sets into the store when it starts. For each set, the
+store keeps its surface snapshot under the `PackageSetDigest`: every
+package's exports (errors, types, member conventions and operation
+declarations included), roots, origin, dependency closure and definition
+identities, helpers included. With the snapshot it keeps what running the
+set requires: its native-only functions and kernel versions. Every
+definition is stored as a kind-14 node under a host pin for the set. The
+definitions are written before the set's row, so any set a node can read
+already has all its code stored. The store also indexes which packages
+declare each definition and each internal operation. Release labels are
+kept per artifact and appended on each install, so a second release with
+identical content keeps both labels. Install is the only writer of
+snapshots, their definitions, labels and the index, and none of them is
+ever deleted. So a node that does not hold a set's artifacts still reads
+its whole surface and code from the store after the installer has
+stopped.
+
+Each serving node advertises its capabilities for as long as it is live:
+its native implementations, kernel versions, registered provider keys,
+readable codec versions and its own set's digest. It advertises no
+credentials or grants.
+
+Prefer body-backed functions for portable packages: any node can run them
+from the stored definitions. A native-only function runs only on a node
+whose build supplies its implementation. For deploys it behaves like a
+tool runner: a set that adds one becomes writable only once every live
+node has the native, and rolling back to a build without it can strand
+runs that need it.
+
 Lash's `kernel`, `typescript`, `python`, `regex.ecma`, `date.ecma` and
 `url.whatwg` libraries use this same install path. They export no operations.
 The language packages have no user surface: dialect lowering calls their
@@ -285,8 +314,8 @@ cell execute two artifacts of the same package.
 set every live serving node holds, considering the node's own set first,
 then retained sets in store install order, newest first. The result is the
 cell's `CellPackages`, passed to lowering, namespace resolution, discovery
-and workflow import. Each reader uses
-`HeldPackages::view` for that same digest. A node's own set is only a gate
+and workflow import. Each reader takes that set's surface snapshot: the
+node's own when it holds the set, else the stored one. A node's own set is only a gate
 candidate. The gate may fall back to an older set during a rollback.
 
 ## Parked runs, publication and adoption
@@ -403,8 +432,8 @@ facts and what model-facing guidance to supply.
 
 | Stored fact | Responsibility |
 | --- | --- |
-| Package artifacts and exact dependency keys | Lash stores artifacts by `(path, digest)`; release labels and per-line ordinals support listings. Keep artifacts reachable while dependents remain. |
-| Package sets | Lash stores each member map under its computed digest and assigns install order. Node advertisements list held artifacts; holding a set is derived from them. |
+| Package artifacts and exact dependency keys | Lash stores artifacts by `(path, digest)`. Each install appends its release labels, and per-line ordinals support listings. Keep artifacts reachable while dependents remain. |
+| Package sets | Lash stores each member map, surface snapshot and execution requirements under the set's computed digest, with every definition, and assigns install order. Snapshots and their definitions are never deleted. Node advertisements list held artifacts and the node's capabilities; holding a set is derived from them. |
 | Workflow documents and execution closures | Preserve the document's exact identities and its referrer's retention. Parked state remains opaque to the host. |
 | Operation links and committed outcomes | Lash records the chosen provider, policy and codec payload before a park. Supply a runner that can read its retained payload. |
 | Session bindings and saved functions | Lash retains data and saved function documents with frozen captures, including functions nested in carried data. |

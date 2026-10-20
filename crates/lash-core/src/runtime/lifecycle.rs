@@ -489,7 +489,7 @@ impl LashRuntime {
                 let mut selected = None;
                 for kind in host.core.process_engines.engine_kinds() {
                     if let Some(provider) = host.core.process_engines.document_provider(&kind) {
-                        let packages = provider.initial_packages()?;
+                        let packages = provider.initial_packages()?.digest();
                         if let Some((previous, _)) = &selected
                             && *previous != packages
                         {

@@ -184,6 +184,7 @@ pub async fn owner_commit(stores: &dyn StoreSet) -> crate::facade_support::sql::
             decodes: vec![formats.clone()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

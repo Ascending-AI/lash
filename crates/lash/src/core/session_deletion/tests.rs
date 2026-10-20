@@ -251,6 +251,47 @@ impl DurableStore for CloseDuringRead {
         self.inner.package_catalog().await
     }
 
+    async fn package_surface(
+        &self,
+        digest: &lash_durable::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        self.inner.package_surface(digest).await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[lash_durable::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.inner.package_paths(functions).await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[lash_durable::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::EffectName,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.inner.internal_operations(operations).await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[lash_durable::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
+    {
+        self.inner.package_labels(artifacts).await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.inner.owned(node).await
     }
@@ -345,6 +386,7 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
             decodes: vec![formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60_000,
         })
         .await

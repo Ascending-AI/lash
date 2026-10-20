@@ -315,9 +315,7 @@ impl HostArtifacts {
                     "this core has no package producer".into(),
                 )
             })?;
-        Ok(lash_execution_contracts::CellPackages(
-            provider.initial_packages()?,
-        ))
+        Ok(provider.initial_packages()?)
     }
 
     /// Every dialect lowers a module under one workflow contract
@@ -346,7 +344,7 @@ impl HostArtifacts {
         packages: lash_execution_contracts::CellPackages,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self.import_context(environment, packages).await? {
+        let checked = match self.import_context(environment, packages.clone()).await? {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };

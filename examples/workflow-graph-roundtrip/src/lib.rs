@@ -399,7 +399,7 @@ impl AppState {
             _ => None,
         };
         let existing_packages = match &origin {
-            Origin::Imported { packages, .. } => Some(*packages),
+            Origin::Imported { packages, .. } => Some(packages.clone()),
             Origin::Edited { .. } | Origin::Read { .. } => self.current().package_set,
             Origin::Document => None,
         };
@@ -407,7 +407,7 @@ impl AppState {
             Some(packages) => Ok(packages),
             None => self.core.host_artifacts().cell_packages().await,
         };
-        let packages = selected.as_ref().ok().copied();
+        let packages = selected.as_ref().ok().cloned();
         let publication = match selected {
             Ok(packages) => runtime::publish(&self.core, &draft, &entry, packages, source).await,
             Err(error) => Err(runtime::RunError::Lash(error)),

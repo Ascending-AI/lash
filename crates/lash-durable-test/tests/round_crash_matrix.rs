@@ -1256,6 +1256,7 @@ async fn settled_payload_reuse() {
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

@@ -292,6 +292,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
             decodes: vec![snapshot.formats],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

@@ -641,9 +641,11 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         .clone(),
         bindings: Default::default(),
         functions: Default::default(),
-        packages: lash_vm_releases::lash_packages()
-            .expect("the parent's packages")
-            .own(),
+        packages: lash_vm_client::service::SurfaceRef::held(
+            lash_vm_releases::lash_packages()
+                .expect("the parent's packages")
+                .own(),
+        ),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -761,9 +763,11 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
         .clone(),
         bindings: Default::default(),
         functions: Default::default(),
-        packages: lash_vm_releases::lash_packages()
-            .expect("the parent's packages")
-            .own(),
+        packages: lash_vm_client::service::SurfaceRef::held(
+            lash_vm_releases::lash_packages()
+                .expect("the parent's packages")
+                .own(),
+        ),
     };
     let mut worker = checkout(&pool);
     let response = worker

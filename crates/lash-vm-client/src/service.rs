@@ -27,8 +27,8 @@ pub enum Request {
         /// The operations the cell is offered.
         #[serde(with = "lash_kernel_dialect::operation_keys")]
         operations: lash_kernel_dialect::Operations,
-        /// The package set whose names the source resolves against.
-        packages: PackageSetDigest,
+        /// The package surface whose names the source resolves against.
+        packages: SurfaceRef,
     },
     /// Lower `source`, written in `dialect`, to a kernel document against
     /// the operations the host offers and the session bindings in scope.
@@ -44,10 +44,10 @@ pub enum Request {
         /// The functions the session holds: the document declares the
         /// ones the source names.
         functions: BTreeMap<Name, LowerFunction>,
-        /// The package set whose names the source resolves against: the
-        /// cell's, the first candidate every live serving node holds
-        /// (FIG-6918).
-        packages: PackageSetDigest,
+        /// The package surface whose names the source resolves against:
+        /// the cell's, the newest stored one every live serving node meets
+        /// the requirements of (FIG-6991).
+        packages: SurfaceRef,
     },
     /// Lower a host-authored workflow module in the worker, in the dialect
     /// of `language`, under the shared workflow contract. Without `limits`
@@ -81,6 +81,53 @@ pub enum Request {
         base: Vec<u8>,
         limits: lash_kernel_dialect::GeneratedSourceLimits,
     },
+}
+
+/// The package surface a source resolves against: a set the worker holds,
+/// by its digest, or a stored surface the worker's packages do not hold,
+/// sent whole with the definitions it names that they lack (FIG-6991).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SurfaceRef {
+    pub digest: PackageSetDigest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored: Option<StoredSurface>,
+}
+
+/// A stored surface as it crosses to a worker: its stored bytes, and the
+/// token body of each definition it names that the worker does not hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredSurface {
+    #[serde(with = "serde_bytes")]
+    pub surface: Vec<u8>,
+    pub definitions: Vec<serde_bytes::ByteBuf>,
+}
+
+impl StoredSurface {
+    /// The stored `surface` bytes, with the token body of each definition
+    /// the worker does not hold.
+    #[must_use]
+    pub fn new(surface: Vec<u8>, definitions: impl IntoIterator<Item = Vec<u8>>) -> Self {
+        Self {
+            surface,
+            definitions: definitions
+                .into_iter()
+                .map(serde_bytes::ByteBuf::from)
+                .collect(),
+        }
+    }
+}
+
+impl SurfaceRef {
+    /// The held set `digest`.
+    #[must_use]
+    pub fn held(digest: PackageSetDigest) -> Self {
+        Self {
+            digest,
+            stored: None,
+        }
+    }
 }
 
 /// A saved function as lowering reads it: its code and what it requires.

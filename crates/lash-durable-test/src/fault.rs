@@ -763,6 +763,47 @@ impl DurableStore for FaultStore {
         self.read(self.inner.package_catalog()).await
     }
 
+    async fn package_surface(
+        &self,
+        digest: &lash_durable::PackageSetDigest,
+    ) -> Result<Option<Vec<u8>>, DurableError> {
+        self.read(self.inner.package_surface(digest)).await
+    }
+
+    async fn package_paths(
+        &self,
+        functions: &[lash_durable::packages::FunctionId],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.read(self.inner.package_paths(functions)).await
+    }
+
+    async fn internal_operations(
+        &self,
+        operations: &[lash_durable::packages::EffectName],
+    ) -> Result<
+        std::collections::BTreeMap<
+            lash_durable::packages::EffectName,
+            std::collections::BTreeSet<String>,
+        >,
+        DurableError,
+    > {
+        self.read(self.inner.internal_operations(operations)).await
+    }
+
+    async fn package_labels(
+        &self,
+        artifacts: &[lash_durable::ArtifactDigest],
+    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
+    {
+        self.read(self.inner.package_labels(artifacts)).await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.read(self.inner.owned(node)).await
     }
@@ -1049,6 +1090,7 @@ mod tests {
                 decodes: vec![lash_durable::FormatSet::new(FORMATS)],
                 serves: Vec::new(),
                 held: Default::default(),
+                capabilities: Default::default(),
                 ttl_millis: 15_000,
             }
         }

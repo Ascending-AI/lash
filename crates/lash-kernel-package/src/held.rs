@@ -12,7 +12,10 @@ use lash_kernel_doc::{
     FunctionId, FunctionName, FunctionRegistry, NativeFunction, PackageSetDigest,
 };
 
-use crate::{ArtifactKey, Origin, Package, PackageRefusal, PackageSet, Root};
+use crate::{
+    ArtifactKey, Origin, Package, PackageRefusal, PackageSet, Root, SnapshotPackage,
+    SurfaceSnapshot,
+};
 
 /// The artifacts a node holds, registered once by its host and read by
 /// the parent's admission and every worker (V1).
@@ -21,10 +24,8 @@ pub struct HeldPackages {
     pub(crate) artifacts: BTreeMap<ArtifactKey, Arc<Package>>,
     pub(crate) sets: BTreeMap<PackageSetDigest, PackageSet>,
     pub(crate) own: PackageSetDigest,
-    /// Every member each function backs, across the held artifacts.
-    pub(crate) index: BTreeMap<FunctionId, Vec<(PackagePath, MemberPath)>>,
-    /// The same, with the artifact that declares each member.
-    pub(crate) backing: BTreeMap<FunctionId, Vec<(ArtifactKey, MemberPath)>>,
+    /// Each held set's surface, as the node stores it at install.
+    pub(crate) surfaces: BTreeMap<PackageSetDigest, Arc<SurfaceSnapshot>>,
     /// Every artifact's code as declarations, each function once for every
     /// kernel version the build interprets.
     pub(crate) functions: Arc<FunctionRegistry>,
@@ -81,7 +82,6 @@ impl HeldPackages {
             set.check_closed(|key| artifacts.get(key).map(AsRef::as_ref))?;
         }
         check_reserved_roots(artifacts.values().map(AsRef::as_ref))?;
-        let (index, backing) = member_index(&artifacts);
         let mut written = FunctionRegistry::declarations();
         for package in registration_order(&artifacts) {
             package
@@ -95,12 +95,12 @@ impl HeldPackages {
         let (functions, roots) =
             interpreted(written).map_err(|message| PackageRefusal::Interpretation { message })?;
         let functions = Arc::new(functions);
+        let surfaces = surfaces(&artifacts, &sets, &functions);
         let mut held = Self {
             artifacts,
             sets,
             own,
-            index,
-            backing,
+            surfaces,
             functions,
             frame: Arc::from([]),
             live_frame: OnceLock::new(),
@@ -130,22 +130,47 @@ impl HeldPackages {
     ///
     /// [`SetNotHeld`].
     pub fn view(&self, packages: &PackageSetDigest) -> Result<PackageView<'_>, SetNotHeld> {
-        let set = self.sets.get(packages).ok_or(SetNotHeld {
+        let surface = self.surface(packages).ok_or(SetNotHeld {
             packages: *packages,
         })?;
-        Ok(PackageView { held: self, set })
+        Ok(PackageView::new(surface, &self.functions))
     }
 
-    /// Every member `function` backs, across the held artifacts, sorted
-    /// and once each. A definition that backs none has none.
-    pub fn member_index(&self, function: &FunctionId) -> &[(PackagePath, MemberPath)] {
-        self.index.get(function).map_or(&[], Vec::as_slice)
+    /// The surface of the held set `packages`: what the node stores for it
+    /// at install.
+    pub fn surface(&self, packages: &PackageSetDigest) -> Option<&Arc<SurfaceSnapshot>> {
+        self.surfaces.get(packages)
     }
 
     /// Every held artifact's code as declarations: what a parent links,
     /// admits and migrates documents against.
     pub fn functions(&self) -> &Arc<FunctionRegistry> {
         &self.functions
+    }
+
+    /// The node's registry with `stored` registered over it: the
+    /// definitions a stored surface names that the node does not hold, read
+    /// back from the store, each checked against what it calls and
+    /// registered after it (FIG-6991). What a writer of a cell under that
+    /// surface reads it over.
+    ///
+    /// # Errors
+    ///
+    /// [`PackageRefusal::Registry`] for a definition the registry refuses.
+    pub fn catalog_with(
+        &self,
+        stored: &BTreeMap<FunctionId, Arc<lash_kernel_doc::FunctionDefinition>>,
+    ) -> Result<Arc<FunctionRegistry>, PackageRefusal> {
+        let mut registry = FunctionRegistry::clone(&self.functions);
+        crate::Code::defined(
+            stored
+                .iter()
+                .map(|(function, definition)| (*function, Arc::clone(definition)))
+                .collect(),
+        )
+        .register_into(&mut registry, &|_| None)
+        .map_err(|message| PackageRefusal::StoredDefinition { message })?;
+        Ok(Arc::new(registry))
     }
 
     /// The roots lash's held packages list: no host package path meets one.
@@ -186,47 +211,52 @@ impl HeldPackages {
 }
 
 /// One set's packages, as lowering, relink, prompts, namespace composition
-/// and owned-path authority read them (P3).
+/// and owned-path authority read them (P3): the set's surface snapshot over
+/// a catalog that holds every definition it names.
 #[derive(Clone, Copy, Debug)]
 pub struct PackageView<'a> {
-    held: &'a HeldPackages,
-    set: &'a PackageSet,
+    surface: &'a SurfaceSnapshot,
+    catalog: &'a Arc<FunctionRegistry>,
 }
 
 impl<'a> PackageView<'a> {
-    pub fn digest(&self) -> PackageSetDigest {
-        self.set.digest()
+    /// `surface` read over `catalog`, which holds every definition it
+    /// names: a held set's over the node's registry, a stored one's over
+    /// that registry and the definitions the store holds for it.
+    pub fn new(surface: &'a SurfaceSnapshot, catalog: &'a Arc<FunctionRegistry>) -> Self {
+        Self { surface, catalog }
     }
 
-    pub fn set(&self) -> &'a PackageSet {
-        self.set
+    pub fn digest(&self) -> PackageSetDigest {
+        self.surface.digest()
+    }
+
+    pub fn surface(&self) -> &'a SurfaceSnapshot {
+        self.surface
     }
 
     /// The set's packages, in path order.
-    pub fn packages(&self) -> impl Iterator<Item = &'a Package> + 'a {
-        let held = self.held;
-        self.set
-            .keys()
-            .filter_map(move |key| held.artifacts.get(&key).map(AsRef::as_ref))
+    pub fn packages(&self) -> impl Iterator<Item = &'a SnapshotPackage> + 'a {
+        self.surface.packages()
     }
 
     /// Every definition of the set's packages, by name with its identity:
     /// the one name table relink and lowering resolve the cell's library
-    /// references in. A retained artifact of another set is never in it.
+    /// references in. A definition of another set is never in it.
     pub fn definitions(&self) -> impl Iterator<Item = (&'a str, FunctionId)> + 'a {
         self.packages().flat_map(|package| {
-            let code = package.code();
-            code.ids()
+            package
+                .functions()
                 .iter()
-                .enumerate()
-                .map(move |(at, function)| (code.name(at), *function))
+                .map(|(name, function)| (name.as_str(), *function))
         })
     }
 
-    /// Every held function by identity, the set's and the retained ones:
-    /// the catalog a document written under any held set is read in.
+    /// Every function the catalog holds by identity: the set's, and every
+    /// other the node holds, so a document written under another set reads
+    /// as written.
     pub fn catalog(&self) -> &'a Arc<FunctionRegistry> {
-        &self.held.functions
+        self.catalog
     }
 
     /// The set's functions by name over `registry`'s by identity: what a
@@ -240,25 +270,15 @@ impl<'a> PackageView<'a> {
         &self,
         registry: &FunctionRegistry,
     ) -> Result<lash_kernel_dialect::NamedLibrary, lash_kernel_dialect::LibraryError> {
-        let functions: BTreeSet<FunctionId> = self
-            .packages()
-            .flat_map(|package| package.code().ids().iter().copied())
-            .collect();
+        let functions = self.surface.functions();
         lash_kernel_dialect::NamedLibrary::resolving(registry, |function| {
             functions.contains(function)
         })
     }
 
     /// The set's package at `path`.
-    pub fn package(&self, path: &PackagePath) -> Option<&'a Package> {
-        let digest = self.set.members().get(path)?;
-        self.held
-            .artifacts
-            .get(&ArtifactKey {
-                path: path.clone(),
-                digest: *digest,
-            })
-            .map(AsRef::as_ref)
+    pub fn package(&self, path: &PackagePath) -> Option<&'a SnapshotPackage> {
+        self.surface.package(path)
     }
 
     /// The operation `operation` names, when the set's package at its path
@@ -276,17 +296,7 @@ impl<'a> PackageView<'a> {
 
     /// Every member of the set's packages `function` backs.
     pub fn members(&self, function: &FunctionId) -> Vec<(PackagePath, MemberPath)> {
-        let mut members: Vec<_> = self
-            .held
-            .backing
-            .get(function)
-            .into_iter()
-            .flatten()
-            .filter(|(key, _)| self.set.holds(key))
-            .map(|(key, member)| (key.path.clone(), member.clone()))
-            .collect();
-        members.dedup();
-        members
+        self.surface.members(function).to_vec()
     }
 
     /// The label of `member` of the set's package at `path`.
@@ -297,17 +307,15 @@ impl<'a> PackageView<'a> {
     /// The label of `function`: its first member's, else its defining
     /// package's label of its definition.
     pub fn display_for_function(&self, function: &FunctionId) -> Option<&'a MemberDisplay> {
-        if let Some((path, member)) = self.members(function).first() {
+        if let Some((path, member)) = self.surface.members(function).first() {
             return self.display(path, member);
         }
         self.packages().find_map(|package| {
-            let at = package.code().ids().iter().position(|id| id == function)?;
-            package
-                .display()
-                .definitions
+            let (name, _) = package
+                .functions()
                 .iter()
-                .find(|(name, _)| name.as_str() == package.code().name(at))
-                .map(|(_, label)| label)
+                .find(|(_, defined)| defined == function)?;
+            package.display().definitions.get(name)
         })
     }
 
@@ -332,7 +340,7 @@ impl ExportView for PackageView<'_> {
     fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
         self.package(path)
             .filter(|package| package.origin() == Origin::Host)
-            .map(Package::exports)
+            .map(SnapshotPackage::exports)
     }
 
     fn paths(&self) -> Vec<PackagePath> {
@@ -344,47 +352,31 @@ impl ExportView for PackageView<'_> {
 
     fn reserves(&self, root: &str) -> Option<String> {
         let path = PackagePath::parse(root).ok()?;
-        reserved(self.packages())
-            .into_iter()
-            .find(|(reserved, _)| reserved.meets(&path))
-            .map(|(reserved, package)| {
-                format!("the root `{reserved}` of lash's package `{package}`")
+        self.packages()
+            .filter(|package| package.origin() == Origin::Lash)
+            .find_map(|package| {
+                let reserved = package.roots().iter().find(|root| root.meets(&path))?;
+                Some(format!(
+                    "the root `{reserved}` of lash's package `{}`",
+                    package.path()
+                ))
             })
     }
 }
 
-/// The member index: every member each function backs, by the artifact
-/// declaring it.
-#[allow(clippy::type_complexity)]
-pub(crate) fn member_index(
+/// Each of `sets`' surface, over `registry`, which holds their code.
+pub(crate) fn surfaces(
     artifacts: &BTreeMap<ArtifactKey, Arc<Package>>,
-) -> (
-    BTreeMap<FunctionId, Vec<(PackagePath, MemberPath)>>,
-    BTreeMap<FunctionId, Vec<(ArtifactKey, MemberPath)>>,
-) {
-    let mut backing: BTreeMap<FunctionId, Vec<(ArtifactKey, MemberPath)>> = BTreeMap::new();
-    for (key, package) in artifacts {
-        for (member, definition) in crate::members(package) {
-            if let Some(function) = package.function(definition.as_str()) {
-                backing
-                    .entry(function)
-                    .or_default()
-                    .push((key.clone(), member));
-            }
-        }
-    }
-    let mut index = BTreeMap::new();
-    for (function, members) in &mut backing {
-        members.sort();
-        let mut paths: Vec<(PackagePath, MemberPath)> = members
-            .iter()
-            .map(|(key, member)| (key.path.clone(), member.clone()))
-            .collect();
-        paths.sort();
-        paths.dedup();
-        index.insert(*function, paths);
-    }
-    (index, backing)
+    sets: &BTreeMap<PackageSetDigest, PackageSet>,
+    registry: &FunctionRegistry,
+) -> BTreeMap<PackageSetDigest, Arc<SurfaceSnapshot>> {
+    sets.iter()
+        .map(|(digest, set)| {
+            let surface =
+                SurfaceSnapshot::of(set, |key| artifacts.get(key).map(AsRef::as_ref), registry);
+            (*digest, Arc::new(surface))
+        })
+        .collect()
 }
 
 /// Every root a lash package lists, with that package.
@@ -505,7 +497,7 @@ impl ExportView for SharedPackageView {
             .ok()?
             .package(path)
             .filter(|package| package.origin() == Origin::Host)
-            .map(Package::exports)
+            .map(crate::SnapshotPackage::exports)
     }
     fn reserves(&self, root: &str) -> Option<String> {
         self.held.view(&self.digest).ok()?.reserves(root)

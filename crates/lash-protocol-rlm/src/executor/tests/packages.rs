@@ -20,15 +20,35 @@ use crate::CellDialect;
 use crate::plugin::runtime_state::RlmRuntimeState;
 use crate::testing::{DurableHost, cell_context, cell_services, run_cell};
 
-/// A gate a law moves between sets, as a fleet's would.
-struct Switch(Mutex<PackageSetDigest>);
+/// A gate a law moves between surfaces, as a fleet's would: `held`'s sets,
+/// or a stored surface it does not hold.
+struct Switch(Arc<HeldPackages>, Mutex<crate::CellPackages>);
+
+impl Switch {
+    fn new(held: &Arc<HeldPackages>, set: PackageSetDigest) -> Self {
+        Self(Arc::clone(held), Mutex::new(held_cell(held, set)))
+    }
+
+    /// Answers `held`'s set `set` from now on.
+    fn answer(&self, set: PackageSetDigest) {
+        self.answer_with(held_cell(&self.0, set));
+    }
+
+    fn answer_with(&self, cell: crate::CellPackages) {
+        *self.1.lock().expect("the gate") = cell;
+    }
+}
+
+fn held_cell(held: &HeldPackages, set: PackageSetDigest) -> crate::CellPackages {
+    crate::CellPackages::held(held, &set).expect("a held set")
+}
 
 #[async_trait::async_trait]
 impl crate::plugin::PackageGate for Switch {
     async fn writable(
         &self,
     ) -> Result<crate::CellPackages, lash_core::RuntimeEffectControllerError> {
-        Ok(crate::CellPackages(*self.0.lock().expect("the gate")))
+        Ok(self.1.lock().expect("the gate").clone())
     }
 }
 
@@ -143,6 +163,53 @@ fn r2_resigned(lash: &[Arc<Package>]) -> Package {
     )
 }
 
+/// R2 whose `col` charges more, with a new member `same`.
+fn r2_grown(lash: &[Arc<Package>]) -> Package {
+    dataframe(
+        lash,
+        "0.4.0",
+        &[(
+            "function dataframe.col(name: Text) -> expr\nkernel 1\ncharge 4",
+            "function dataframe.same(n: Int) -> Int\nkernel 1\ncharge 1\nbody {\n  return n\n}\n\nfunction dataframe.col(name: Text) -> expr\nkernel 1\ncharge 5",
+        )],
+        &[(
+            "function width(row: List(Any)) -> Int = dataframe.width\n",
+            "function width(row: List(Any)) -> Int = dataframe.width\nfunction same(n: Int) -> Int = dataframe.same\n",
+        )],
+    )
+}
+
+/// The surface `installer` holds as `set`, as a node holding `node`'s
+/// packages reads it from the store: the snapshot's bytes and its
+/// artifacts' labels, over `node`'s registry with the definitions it
+/// lacks.
+fn stored_cell(
+    node: &HeldPackages,
+    installer: &HeldPackages,
+    set: PackageSetDigest,
+) -> crate::CellPackages {
+    let installed = installer.surface(&set).expect("the installer's surface");
+    let surface = lash_kernel_package::SurfaceSnapshot::decode(set, &installed.encode())
+        .expect("the stored bytes")
+        .with_labels(|artifact| {
+            installed
+                .packages()
+                .find(|package| package.digest() == *artifact)
+                .map(|package| package.labels().clone())
+        });
+    let stored: std::collections::BTreeMap<_, _> = surface
+        .functions()
+        .into_iter()
+        .filter(|function| node.functions().get(function).is_none())
+        .map(|function| {
+            let registered = installer.functions().get(&function).expect("installed");
+            (function, Arc::clone(registered.definition()))
+        })
+        .collect();
+    let catalog = node.catalog_with(&stored).expect("the node's catalog");
+    crate::CellPackages::stored(Arc::new(surface), catalog, stored)
+}
+
 /// `q@value`, whose `f` answers `value`.
 fn q(lash: &[Arc<Package>], value: &str) -> Package {
     Package::build(
@@ -223,7 +290,7 @@ impl Session {
         held: &Arc<HeldPackages>,
         first: PackageSetDigest,
     ) -> Self {
-        let gate = Arc::new(Switch(Mutex::new(first)));
+        let gate = Arc::new(Switch::new(held, first));
         let services = node(&dialect, held, &gate);
         Self {
             state: crate::testing::session_state(&dialect),
@@ -251,7 +318,17 @@ impl Session {
     }
 
     async fn cell_under(&mut self, set: PackageSetDigest, code: &str) -> lash_core::ExecResponse {
-        *self.gate.0.lock().expect("the gate") = set;
+        let cell = held_cell(&self.held, set);
+        self.cell_with(cell, code).await
+    }
+
+    /// A cell the gate writes under `cell`.
+    async fn cell_with(
+        &mut self,
+        cell: crate::CellPackages,
+        code: &str,
+    ) -> lash_core::ExecResponse {
+        self.gate.answer_with(cell);
         let key: &'static str = Box::leak(format!("exec-code:{}", self.cells).into_boxed_str());
         self.cells += 1;
         run_cell(
@@ -591,7 +668,7 @@ fn runtime_state(
 async fn a_round_cell_is_written_under_the_set_its_prompt_showed() {
     let lash = lash();
     let (held, sets) = hold(&lash, vec![vec![q(&lash, "1")], vec![q(&lash, "2")]]);
-    let gate = Arc::new(Switch(Mutex::new(sets[0])));
+    let gate = Arc::new(Switch::new(&held, sets[0]));
     let state = runtime_state(&held, Arc::clone(&gate) as _);
     let host = open_host().await;
     let render = crate::testing::recorded_test_render();
@@ -599,7 +676,7 @@ async fn a_round_cell_is_written_under_the_set_its_prompt_showed() {
         .into_iter()
         .enumerate()
     {
-        *gate.0.lock().expect("the gate") = shown;
+        gate.answer(shown);
         let facts = state
             .prompt_facts(Some(&render), None, true, None)
             .await
@@ -610,7 +687,7 @@ async fn a_round_cell_is_written_under_the_set_its_prompt_showed() {
             "{surface}"
         );
         // The fleet moves before the round's cell runs.
-        *gate.0.lock().expect("the gate") = moved_to;
+        gate.answer(moved_to);
         let key: &'static str = Box::leak(format!("exec-code:{round}").into_boxed_str());
         let ran = Box::pin(state.execute_code(
             cell_context(&host, SESSION, TURN, key, Arc::new(CellTools::default())),
@@ -716,9 +793,8 @@ async fn park_at_the_held_call(
 /// capture after it clears the stamp.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_parked_cell_keeps_its_session_stamped_with_its_set_across_a_reclaim() {
-    let own = lash_vm_runtime::lash_packages()
-        .expect("lash's packages")
-        .own();
+    let held = lash_vm_runtime::lash_packages().expect("lash's packages");
+    let own = held.own();
     let mut host = DurableHost::open_holding(
         lash_core::AdmittedScope::turn(
             lash_core::SessionId::from(SESSION),
@@ -731,7 +807,7 @@ async fn a_parked_cell_keeps_its_session_stamped_with_its_set_across_a_reclaim()
         &CellDialect::typescript(),
         lash_vm_client::service::Service::default(),
     );
-    services.packages = Some(Arc::new(Switch(Mutex::new(own))) as _);
+    services.packages = Some(Arc::new(Switch::new(&held, own)) as _);
     let tools = Arc::new(CellTools::default());
 
     // A first cell leaves the turn a working state to restore.
@@ -904,30 +980,35 @@ async fn a_package_value_holding_a_user_lambda_carries_and_crosses_in_the_next_c
     }
 }
 
-/// P3 / R3: a displayed snapshot stays authoritative even on a node that
-/// cannot serve it; asking the gate again could disclose newly public names.
+/// P3 / R3: a displayed snapshot stays authoritative even on a node whose
+/// worker cannot serve it; asking the gate again could disclose newly
+/// public names.
 #[tokio::test]
 async fn an_unavailable_shown_snapshot_is_refused_without_a_second_gate_answer() {
-    struct Counts(std::sync::atomic::AtomicUsize, PackageSetDigest);
+    struct Counts(std::sync::atomic::AtomicUsize, crate::CellPackages);
     #[async_trait::async_trait]
     impl crate::plugin::PackageGate for Counts {
         async fn writable(
             &self,
         ) -> Result<crate::CellPackages, lash_core::RuntimeEffectControllerError> {
             self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(crate::CellPackages(self.1))
+            Ok(self.1.clone())
         }
     }
     let held = lash_vm_runtime::lash_packages().unwrap();
-    let unavailable = PackageSetDigest::from_bytes([9; 32]);
-    let gate = Arc::new(Counts(std::sync::atomic::AtomicUsize::new(0), held.own()));
+    let own = crate::CellPackages::held(&held, &held.own()).expect("lash's own set");
+    let lash = lash();
+    let (other, sets) = hold(&lash, vec![vec![r1(&lash)]]);
+    // The worker holds lash's packages alone.
+    let unavailable = sets[0];
+    let gate = Arc::new(Counts(std::sync::atomic::AtomicUsize::new(0), own));
     let mut services = cell_services(
         &CellDialect::typescript(),
         lash_vm_client::service::Service::default(),
     );
     services.packages = Some(gate.clone());
     let mut state = crate::testing::session_state(&CellDialect::typescript());
-    state.shows_packages(crate::CellPackages(unavailable));
+    state.shows_packages(held_cell(&other, unavailable));
     let host = open_host().await;
     let response = run_cell(
         &mut state,
@@ -952,4 +1033,90 @@ async fn an_unavailable_shown_snapshot_is_refused_without_a_second_gate_answer()
         0,
         "the displayed snapshot is the round's only answer"
     );
+}
+
+/// SNAPSHOT-SERVING (FIG-6991): a node holding R1 alone writes cells
+/// under B, a set it does not hold, from B's stored surface and the
+/// definitions the store holds for it. The prompt shows B's packages under
+/// B's release, its new member `same` included; a function saved under R1
+/// relinks to B's `col`; and a cell naming `same`, which no document used
+/// before, lowers against B's names, where under R1 it is no name. Running
+/// B's code on the node is the loader's (FIG-6985).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_writes_cells_under_a_stored_surface_it_does_not_hold() {
+    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+    use lash_vm_client::service::{Request, Response};
+
+    let lash = lash();
+    let (a, a_sets) = hold(&lash, vec![vec![r1(&lash)]]);
+    let (b, b_sets) = hold(&lash, vec![vec![r2_grown(&lash)]]);
+    let r1 = a_sets[0];
+    let stored = stored_cell(&a, &b, b_sets[0]);
+    assert!(
+        !stored.stored_definitions().is_empty(),
+        "the node lacks B's code"
+    );
+    let shown =
+        crate::package_surface::render(&stored.view(), lash_kernel_dialect::Spelling::TypeScript);
+    for line in [
+        "#### `dataframe` (0.4.0)",
+        "`dataframe.same(n: Int) -> Int`",
+    ] {
+        assert!(shown.contains(line), "{line} in:\n{shown}");
+    }
+    let b_view = b.view(&b_sets[0]).expect("B");
+    let b_function = |name: &str| {
+        b_view
+            .definitions()
+            .find(|(defined, _)| *defined == name)
+            .map(|(_, function)| function)
+            .expect("B defines it")
+    };
+    let b_set: BTreeSet<FunctionId> = b_view.definitions().map(|(_, function)| function).collect();
+
+    let mut session = Session::open(&a, r1).await;
+    ok(&session
+        .cell_under(r1, "function keep(n) { return dataframe.col(n).name; }")
+        .await);
+    session.state.relink(&stored).await.expect("relinked");
+    let keep = session.listed("keep");
+    assert!(
+        keep.contains(&b_function("dataframe.col")),
+        "`keep` reaches B's col"
+    );
+    assert!(keep.is_subset(&b_set), "`keep` reaches B's set alone");
+
+    let workers = session
+        .services
+        .workers
+        .begin_execution(std::time::Duration::ZERO);
+    let lower = |packages: lash_vm_client::service::SurfaceRef| Request::Lower {
+        dialect: session.state.dialect().to_owned(),
+        source: "function fresh(n) { return dataframe.same(n); }".to_owned(),
+        operations: Default::default(),
+        bindings: session.state.names(),
+        functions: session.state.lowering_functions(),
+        packages,
+    };
+    let under_r1 = workers
+        .request_accounted(lower(lash_vm_client::service::SurfaceRef::held(r1)))
+        .await;
+    assert!(
+        !matches!(under_r1, Ok(Response::Lowered { .. })),
+        "under R1, `same` is no name: {under_r1:?}"
+    );
+    let Ok(Response::Lowered { document, .. }) = workers
+        .request_accounted(lower(crate::plugin::package_wire(&stored)))
+        .await
+    else {
+        panic!("the cell lowers under B's stored surface");
+    };
+    let document = lash_kernel_doc::IdentifiedDocument::decode(
+        &document,
+        lash_kernel_doc::KernelDataLimits::standard(),
+    )
+    .expect("a document");
+    let listed: BTreeSet<FunctionId> = document.manifest.functions.keys().copied().collect();
+    assert!(listed.contains(&b_function("dataframe.same")), "B's `same`");
+    assert!(listed.is_subset(&b_set), "the cell reaches B's set alone");
 }

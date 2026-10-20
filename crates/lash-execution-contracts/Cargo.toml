@@ -39,6 +39,7 @@ lash-core-effect = { workspace = true }
 lash-durable = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-package = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }

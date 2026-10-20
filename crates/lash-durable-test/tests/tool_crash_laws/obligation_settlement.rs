@@ -142,6 +142,7 @@ async fn probe(backend: &lash::Backend, name: &str, serves: Vec<String>) -> Opti
             decodes: backend.formats().session_decodes(),
             serves,
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 15_000,
         })
         .await

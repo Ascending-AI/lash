@@ -348,17 +348,19 @@ pub trait Activation: Send + Sync + 'static {
     async fn activate(&self, owned: Owned) -> Exit;
 
     /// The package code the node holds (FIG-6918): its activation installs
-    /// it in the store and answers the artifacts the node advertises before
-    /// it registers, so a node claims an actor only when it holds the set
-    /// the actor's code was linked under (CLAIM-HOLDS). An activation that
-    /// runs no package code holds none.
+    /// it in the store and answers the artifacts and capabilities the node
+    /// advertises before it registers, so a node claims an actor only when
+    /// it holds the set the actor's code was linked under (CLAIM-HOLDS), and
+    /// a set's surface is promoted only once every live serving node meets
+    /// its requirements (FIG-6991). An activation that runs no package code
+    /// holds none.
     ///
     /// # Errors
     ///
     /// The refusal that keeps the node from starting, such as
     /// [`DurableError::RetiredDependents`], or the store's.
-    async fn hold(&self) -> Result<std::collections::BTreeSet<crate::HeldArtifact>, DurableError> {
-        Ok(std::collections::BTreeSet::new())
+    async fn hold(&self) -> Result<crate::NodeHolding, DurableError> {
+        Ok(crate::NodeHolding::default())
     }
 }
 
@@ -708,7 +710,8 @@ impl Runner {
             node: self.config.node.clone(),
             decodes: self.config.decodes.clone(),
             serves: self.config.serves.clone(),
-            held,
+            held: held.held,
+            capabilities: held.capabilities,
             ttl_millis: self.config.lease.ttl_millis(),
         };
         let mut register_delay = settings.claim_backoff;

@@ -25,12 +25,15 @@ pub fn audit_metering(view: &PackageView<'_>, bounds: &LoopBounds) -> Result<usi
     let mut loops = 0;
     let mut missing = Vec::new();
     for package in view.packages() {
-        for at in 0..package.code().len() {
-            let definition = package.code().definition(at).map_err(HarnessError)?;
+        for function in package.ids() {
+            let definition = view
+                .catalog()
+                .get(&function)
+                .ok_or_else(|| HarnessError(format!("@{function} is not in the catalog")))?
+                .definition();
             let Some(body) = definition.body() else {
                 continue;
             };
-            let function = package.code().ids()[at];
             let mut pending = vec![(vec![], Node::Block(&body.block))];
             while let Some((path, node)) = pending.pop() {
                 if matches!(node, Node::Expr(Expr::Closure(_))) {

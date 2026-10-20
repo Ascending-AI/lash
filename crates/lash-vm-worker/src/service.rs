@@ -25,11 +25,11 @@ pub(crate) fn perform(
             operations,
             packages,
         } => {
-            let library = match library_of(embedding, &packages)? {
-                Ok(library) => library,
+            let surface = match surface_of(embedding, &packages)? {
+                Ok(surface) => surface,
                 Err(not_held) => return respond(&not_held),
             };
-            let namespaces = match embedding.namespaces(operations, &packages) {
+            let namespaces = match embedding.namespaces(operations, &surface) {
                 Ok(namespaces) => namespaces,
                 Err(refused) => return respond(&namespace_refused(refused)),
             };
@@ -37,7 +37,7 @@ pub(crate) fn perform(
                 None => Response::UnknownDialect { dialect },
                 Some(package) => match package.front_end.tool_calls(
                     &source,
-                    &lash_kernel_dialect::Environment::new(library, &namespaces),
+                    &lash_kernel_dialect::Environment::new(surface.library(), &namespaces),
                     lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
                         functions: &functions
@@ -47,11 +47,7 @@ pub(crate) fn perform(
                     },
                 ) {
                     Ok(calls) => {
-                        let view = embedding.packages().view(&packages).map_err(|_| {
-                            PoolError::breach(
-                                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
-                            )
-                        })?;
+                        let view = surface.view(embedding.packages().functions());
                         Response::ToolCalls(
                             calls
                                 .into_iter()
@@ -72,16 +68,16 @@ pub(crate) fn perform(
             bindings,
             functions,
             packages,
-        } => match (
-            library_of(embedding, &packages)?,
-            embedding.namespaces(operations, &packages),
-        ) {
-            (Err(not_held), _) => not_held,
-            (Ok(_), Err(refused)) => namespace_refused(refused),
-            (Ok(library), Ok(namespaces)) => match embedding.lower(
+        } => match surface_of(embedding, &packages)?.map(|surface| {
+            let namespaces = embedding.namespaces(operations, &surface);
+            (surface, namespaces)
+        }) {
+            Err(not_held) => not_held,
+            Ok((_, Err(refused))) => namespace_refused(refused),
+            Ok((surface, Ok(namespaces))) => match embedding.lower(
                 &dialect,
                 &source,
-                &lash_kernel_dialect::Environment::new(library, &namespaces),
+                &lash_kernel_dialect::Environment::new(surface.library(), &namespaces),
                 Mode::Cell(lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
                     functions: &functions
@@ -103,7 +99,7 @@ pub(crate) fn perform(
                                 lash_kernel_doc::KernelDataLimits::standard(),
                             );
                         }
-                        reached(&lowered.document, library, &namespaces)
+                        reached(&lowered.document, surface.library(), &namespaces)
                     },
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
@@ -125,15 +121,16 @@ pub(crate) fn perform(
             packages,
             limits,
         } => {
-            let library = match library_of(embedding, &packages)? {
-                Ok(library) => library,
+            let packages = lash_vm_client::service::SurfaceRef::held(packages);
+            let surface = match surface_of(embedding, &packages)? {
+                Ok(surface) => surface,
                 Err(not_held) => return respond(&not_held),
             };
-            let namespaces = match embedding.namespaces(operations, &packages) {
+            let namespaces = match embedding.namespaces(operations, &surface) {
                 Ok(namespaces) => namespaces,
                 Err(refused) => return respond(&namespace_refused(refused)),
             };
-            let environment = lash_kernel_dialect::Environment::new(library, &namespaces);
+            let environment = lash_kernel_dialect::Environment::new(surface.library(), &namespaces);
             match import_module(embedding, language, &source, &environment, limits) {
                 None => Response::UnknownDialect {
                     dialect: dialect_name(language).into(),
@@ -209,12 +206,7 @@ fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
 /// A namespace tree the offered operations could not compose, as the
 /// dialect refusal of the source lowered against it.
 fn namespace_refused(refused: crate::embedding::Namespaces) -> Response {
-    let refused = match refused {
-        crate::embedding::Namespaces::PackagesNotHeld { packages } => {
-            return Response::PackagesNotHeld { packages };
-        }
-        crate::embedding::Namespaces::Refused(refused) => refused,
-    };
+    let crate::embedding::Namespaces::Refused(refused) = refused;
     Response::DialectRefused(DialectRefusal {
         code: "NAMESPACE_REFUSED".to_owned(),
         message: refused.to_string(),
@@ -224,19 +216,19 @@ fn namespace_refused(refused: crate::embedding::Namespaces) -> Response {
     })
 }
 
-/// The names of the package set `packages`, or the answer that the worker
-/// does not hold it (FIG-6918).
+/// The names and surface of `packages`, or the answer that the worker
+/// neither holds it nor was sent what it lacks of it (FIG-6918, FIG-6991).
 ///
 /// # Errors
 ///
-/// A set the embedding holds whose names do not assemble: a defect of the
-/// build.
-fn library_of<'a>(
+/// A surface whose names do not assemble, or a stored one that does not
+/// read as what it claims to be.
+fn surface_of<'a>(
     embedding: &'a Embedding,
-    packages: &lash_kernel_doc::PackageSetDigest,
-) -> Result<Result<&'a lash_kernel_dialect::NamedLibrary, Response>, PoolError> {
-    match embedding.library_of(packages) {
-        Ok(library) => Ok(Ok(library)),
+    packages: &lash_vm_client::service::SurfaceRef,
+) -> Result<Result<crate::embedding::Surface<'a>, Response>, PoolError> {
+    match embedding.surface(packages) {
+        Ok(surface) => Ok(Ok(surface)),
         Err(crate::embedding::EmbedError::PackagesNotHeld { packages }) => {
             Ok(Err(Response::PackagesNotHeld { packages }))
         }
@@ -399,7 +391,7 @@ mod tests {
             operations: Default::default(),
             bindings: Default::default(),
             functions,
-            packages: embedding.packages().own(),
+            packages: lash_vm_client::service::SurfaceRef::held(embedding.packages().own()),
         };
         let encoded =
             EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
@@ -464,7 +456,7 @@ mod tests {
                 operations: Default::default(),
                 bindings: Default::default(),
                 functions: Default::default(),
-                packages: unheld,
+                packages: lash_vm_client::service::SurfaceRef::held(unheld),
             },
             Request::ToolCalls {
                 dialect: "typescript".to_owned(),
@@ -472,7 +464,7 @@ mod tests {
                 bindings: Default::default(),
                 functions: Default::default(),
                 operations: Default::default(),
-                packages: unheld,
+                packages: lash_vm_client::service::SurfaceRef::held(unheld),
             },
             Request::ImportWorkflow {
                 language: SourceLanguage::TypeScript,

@@ -20,6 +20,7 @@ mod refusal;
 mod set;
 mod shape;
 pub mod shipped_display;
+mod snapshot;
 mod stale;
 mod surface;
 pub use lash_helper_labels::{Comparison, LabelError, MemberDisplay};
@@ -43,15 +44,20 @@ pub use package::{ArtifactKey, Code, Origin, Package, PackageDisplay, PackageHea
 pub use refusal::{Declared, NameRole, PackageRefusal, SetHolds};
 pub use set::PackageSet;
 pub use shape::STALE_VALUE;
+pub use snapshot::{
+    PackageLabels, SnapshotPackage, SnapshotRefusal, SurfaceSnapshot, node_capabilities,
+};
 pub use stale::StaleValue;
 
 use lash_kernel_doc::FunctionName;
 
-/// Every member a package declares, with the definition that implements
-/// it.
-pub(crate) fn members(package: &Package) -> Vec<(MemberPath, &FunctionName)> {
+/// Every member a package's `exports` declare, with the definition that
+/// implements it.
+pub(crate) fn export_members(
+    exports: &std::collections::BTreeMap<Segment, Export>,
+) -> Vec<(MemberPath, &FunctionName)> {
     let mut members = Vec::new();
-    for (segment, export) in package.exports() {
+    for (segment, export) in exports {
         match export {
             Export::Function(member) => members.push((
                 MemberPath {

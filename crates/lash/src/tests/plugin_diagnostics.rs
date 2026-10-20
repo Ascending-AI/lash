@@ -54,6 +54,7 @@ async fn recorded_attribution_survives_removal() {
             decodes: vec![format.clone()],
             serves: Vec::new(),
             held: Default::default(),
+            capabilities: Default::default(),
             ttl_millis: 60000,
         })
         .await

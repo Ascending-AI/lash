@@ -95,18 +95,10 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    /// This host as a build that writes its cells under `packages`
-    /// (FIG-6918), whatever the fleet holds. The two-build laws run a node
-    /// of each build from one binary with it.
-    #[cfg(feature = "synthetic-next")]
-    #[must_use]
-    pub fn writing_packages(self, packages: lash_kernel_doc::PackageSetDigest) -> Self {
-        self.with_package_gate(Arc::new(super::OneSet(super::CellPackages(packages))))
-    }
-
-    /// Write this host's cells under the package set `gate` answers as each
-    /// is lowered: the first candidate every live serving node holds
-    /// (FIG-6918). A host whose fleet runs one build needs none.
+    /// Write this host's cells under the package surface `gate` answers as
+    /// each is lowered: the newest live serving node's own surface whose
+    /// requirements every live serving node meets (FIG-6991). A host whose
+    /// fleet runs one build needs none.
     #[must_use]
     pub fn with_package_gate(mut self, gate: Arc<dyn super::PackageGate>) -> Self {
         self.gate = Some(gate);
@@ -349,11 +341,20 @@ impl PluginFactory for RlmProtocolPluginFactory {
                         ),
                         packages: Some(match &self.gate {
                             Some(gate) => Arc::clone(gate),
-                            None => Arc::new(super::OneSet(super::CellPackages(
-                                self.packages()
-                                    .map_err(|error| PluginError::Session(error.to_string()))?
-                                    .own(),
-                            ))),
+                            None => {
+                                let held = self
+                                    .packages()
+                                    .map_err(|error| PluginError::Session(error.to_string()))?;
+                                Arc::new(super::OneSet(
+                                    super::CellPackages::held(&held, &held.own()).ok_or_else(
+                                        || {
+                                            PluginError::Session(
+                                                "the node does not hold its own set".to_owned(),
+                                            )
+                                        },
+                                    )?,
+                                ))
+                            }
                         }),
                     };
                     let dialect = Arc::new(SessionDialect::new(dialect, services));

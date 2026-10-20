@@ -161,6 +161,10 @@ pub enum PackageRefusal {
         package: PackagePath,
         message: String,
     },
+    /// A definition a stored surface names, read back from the store, that
+    /// the node's registry refuses (FIG-6991).
+    #[error("a stored package definition is refused: {message}")]
+    StoredDefinition { message: String },
     /// The held code could not be redeclared for a successor kernel
     /// version the build interprets: a defect of the build.
     #[error("the held code does not redeclare for a successor kernel version: {message}")]
