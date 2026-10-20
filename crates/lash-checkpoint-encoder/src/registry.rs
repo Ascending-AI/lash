@@ -145,6 +145,7 @@ registry! {
     CONFIG_VALUE = 43, "ConfigValue", Enveloped, Node, Stores;
     MODEL_CALL_FACT = 44, "ModelCallFact", Enveloped, Node, Host;
     TURN_TRANSCRIPT = 45, "TurnTranscript", Enveloped, Node, Integrator;
+    MODEL_REQUEST_FRAME = 46, "ModelRequestFrame", Enveloped, Node, Integrator;
 }
 
 registry! {

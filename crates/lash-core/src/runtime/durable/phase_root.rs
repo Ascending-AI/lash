@@ -1,6 +1,6 @@
 //! A turn phase's checkpoint as checkpoint graph nodes (FIG-5887 §3): a
-//! PhaseRoot (kind 33) over the TurnContent (kind 39) its machine
-//! checkpoint names.
+//! PhaseRoot (kind 33) over the TurnContent (kind 39) and
+//! ModelRequestFrame (kind 46) its machine checkpoint names.
 //!
 //! The machine's checkpoint is bounded state; the transcript it would
 //! otherwise copy is content the checkpoint names by digest, in chains whose
@@ -9,7 +9,7 @@
 //! checkpoint needs. A phase stages only the blobs its machine's checkpoint
 //! added (FIG-5955): the others an earlier phase of the turn stored, and the
 //! root requires them by the node the machine was told each is stored as.
-//! The root's checkpoint text is the phase's JSON without its content. The
+//! The root holds checkpoint text with its window pin as a separate structured field. The
 //! run's resolved shape rides beside it as configuration graph nodes shared
 //! with retained revisions; its tool surface is a TurnContent node. The
 //! first phase that holds them stages them (FIG-6021, FIG-6599).
@@ -27,7 +27,7 @@ use super::run_config::{RecordedRunConfig, RunConfigStored};
 use super::session::PhaseCheckpoint;
 use crate::HostTurnProtocol;
 
-/// The phase's checkpoint without its content, as the root's text holds it.
+/// The phase's checkpoint without its content.
 #[derive(serde::Serialize)]
 struct PhaseText<'a> {
     checkpoint: &'a TurnCheckpoint<HostTurnProtocol>,
@@ -41,7 +41,7 @@ struct PhaseText<'a> {
     cell: &'a Option<super::session::CellStart>,
 }
 
-/// The root's text read back.
+/// The root's checkpoint data read back.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PhaseRead {
@@ -67,6 +67,150 @@ impl TokenCodec for ContentText {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         Ok(Self(input.text()?.to_owned()))
     }
+}
+
+/// Kind 46: a request's changing scope over its immutable configuration.
+/// The config is a TurnContent whose text is shared across sends; neither
+/// the scope nor the checkpoint's content digest is part of that child.
+/// The wrapper keeps its explicit reference intact when the graph decoder
+/// expands references to placed text leaves.
+struct ModelRequestFrame {
+    config: NodeId,
+    scope: serde_json::Value,
+}
+
+impl TokenCodec for ModelRequestFrame {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.config.encode(out);
+        self.scope.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            config: NodeId::decode(input)?,
+            scope: serde_json::Value::decode(input)?,
+        })
+    }
+}
+
+fn stage_request(staging: &mut GraphStaging, text: &str) -> Result<NodeId, String> {
+    let mut config: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let scope = config
+        .as_object_mut()
+        .and_then(|config| config.remove("scope"))
+        .ok_or_else(|| "the checkpoint's model request has no scope".to_owned())?;
+    let config = staging
+        .encode_value(NodeKind::TURN_CONTENT, &ContentText(config.to_string()))
+        .map_err(|e| e.to_string())?;
+    staging
+        .encode_value(
+            NodeKind::MODEL_REQUEST_FRAME,
+            &ModelRequestFrame { config, scope },
+        )
+        .map_err(|e| e.to_string())
+}
+
+fn load_content(
+    decoder: &mut GraphDecoder<'_>,
+    parent: NodeId,
+    node: NodeId,
+) -> Result<String, String> {
+    let kind = decoder
+        .child_kind(
+            parent,
+            node,
+            &[NodeKind::TURN_CONTENT, NodeKind::MODEL_REQUEST_FRAME],
+        )
+        .map_err(|e| e.to_string())?;
+    if kind == NodeKind::TURN_CONTENT {
+        return decoder
+            .decode::<ContentText>(node, kind)
+            .map(|text| text.0)
+            .map_err(|e| e.to_string());
+    }
+    let frame: ModelRequestFrame = decoder.decode(node, kind).map_err(|e| e.to_string())?;
+    decoder
+        .child_kind(node, frame.config, &[NodeKind::TURN_CONTENT])
+        .map_err(|e| e.to_string())?;
+    let ContentText(text) = decoder
+        .decode(frame.config, NodeKind::TURN_CONTENT)
+        .map_err(|e| e.to_string())?;
+    let mut config: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if serde_json::to_string(&config).map_err(|e| e.to_string())? != text {
+        return Err("the request config is not canonical JSON".to_owned());
+    }
+    let fields = config
+        .as_object_mut()
+        .ok_or_else(|| "the request config is not an object".to_owned())?;
+    if fields.insert("scope".to_owned(), frame.scope).is_some() {
+        return Err("the request config holds its changing scope".to_owned());
+    }
+    // Re-serialize through the owning type, preserving the machine's exact
+    // canonical field order and bytes, which insert_stored checks by digest.
+    let request: crate::llm::types::LlmRequest =
+        serde_json::from_value(config.clone()).map_err(|e| e.to_string())?;
+    if serde_json::to_value(&request).map_err(|e| e.to_string())? != config {
+        return Err("the model request is not canonical".to_owned());
+    }
+    serde_json::to_string(&request).map_err(|e| e.to_string())
+}
+
+/// The host owns the opaque sans-io pin's spelling. At the graph boundary
+/// it is a SessionHeadRef, never JSON escaped inside a JSON string.
+fn structure_window_pin(
+    value: &mut serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    let Some(window) = value
+        .pointer_mut("/checkpoint/window")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(None);
+    };
+    let pin = window
+        .remove("pin")
+        .ok_or_else(|| "the checkpoint window has no pin".to_owned())?;
+    let head: crate::store::SessionHeadRef = serde_json::from_str(
+        pin.as_str()
+            .ok_or_else(|| "the window pin is not text".to_owned())?,
+    )
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(head)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+fn checkpoint_value(
+    mut value: serde_json::Value,
+    pin: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let window = value
+        .pointer_mut("/checkpoint/window")
+        .and_then(serde_json::Value::as_object_mut);
+    match (window, pin) {
+        (Some(window), Some(pin)) => {
+            if window.contains_key("pin") {
+                return Err("the checkpoint text embeds its window pin".to_owned());
+            }
+            let head: crate::store::SessionHeadRef =
+                serde_json::from_value(pin).map_err(|e| e.to_string())?;
+            window.insert(
+                "pin".to_owned(),
+                serde_json::Value::String(serde_json::to_string(&head).map_err(|e| e.to_string())?),
+            );
+        }
+        (None, None) => {}
+        _ => return Err("the checkpoint window and its structured pin disagree".to_owned()),
+    }
+    Ok(value)
+}
+
+fn read_checkpoint(text: &str, pin: Option<serde_json::Value>) -> Result<PhaseRead, String> {
+    let value = serde_json::from_str(text)
+        .map_err(|e| format!("the turn checkpoint does not decode: {e}"))?;
+    serde_json::from_value(checkpoint_value(value, pin)?)
+        .map_err(|e| format!("the turn checkpoint does not decode: {e}"))
 }
 
 /// A phase checkpoint staged as nodes, for the transaction that advances
@@ -103,8 +247,9 @@ impl PhaseStored {
 }
 
 impl StagedPhase {
-    /// Stages `checkpoint`: a TurnContent node per content blob it holds
-    /// and the PhaseRoot over them and over `held`, the blobs an earlier
+    /// Stages `checkpoint`: a ModelRequestFrame for its request and a
+    /// TurnContent per other content blob, with the PhaseRoot over them
+    /// and over `held`, the blobs an earlier
     /// phase stored, by their nodes.
     ///
     /// # Errors
@@ -121,7 +266,7 @@ impl StagedPhase {
             .as_ref()
             .map(|config| config.stage(&mut staging))
             .transpose()?;
-        let text = serde_json::to_string(&PhaseText {
+        let mut value = serde_json::to_value(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
             delivered: &checkpoint.delivered,
             before_turn: &checkpoint.before_turn,
@@ -129,14 +274,24 @@ impl StagedPhase {
             cell: &checkpoint.cell,
         })
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
+        let window_pin = structure_window_pin(&mut value)?;
+        let request = checkpoint
+            .saved
+            .checkpoint
+            .pending_request()
+            .map(|(request, _, _)| request);
         let mut content = Vec::new();
         let mut stored = Vec::new();
         for (digest, bytes) in checkpoint.saved.content.iter() {
             let text = std::str::from_utf8(bytes)
                 .map_err(|error| format!("turn content {digest} is not text: {error}"))?;
-            let node = staging
-                .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.to_owned()))
-                .map_err(|error| refused(error.into()))?;
+            let node = if Some(digest) == request {
+                stage_request(&mut staging, text)?
+            } else {
+                staging
+                    .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.to_owned()))
+                    .map_err(|error| refused(error.into()))?
+            };
             content.push((digest.as_str().to_owned(), node));
             stored.push((digest.clone(), CheckpointContentPin::new(node.0)));
         }
@@ -148,7 +303,8 @@ impl StagedPhase {
             .encode_value(
                 NodeKind::PHASE_ROOT,
                 &PhaseRootBody {
-                    checkpoint: text,
+                    checkpoint: value.to_string(),
+                    window_pin,
                     content,
                     run: config.as_ref().map(|config| config.run),
                     surface: config.as_ref().and_then(|config| config.surface),
@@ -204,7 +360,14 @@ pub(super) fn restaged_text(
     let mut body: PhaseRootBody = decoder
         .decode(root, NodeKind::PHASE_ROOT)
         .map_err(|error| error.to_string())?;
-    body.checkpoint = edit(&body.checkpoint);
+    let logical = checkpoint_value(
+        serde_json::from_str(&body.checkpoint).map_err(|error| error.to_string())?,
+        body.window_pin,
+    )?;
+    let mut value =
+        serde_json::from_str(&edit(&logical.to_string())).map_err(|error| error.to_string())?;
+    body.window_pin = structure_window_pin(&mut value)?;
+    body.checkpoint = value.to_string();
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     let root = staging
         .encode_value(NodeKind::PHASE_ROOT, &body)
@@ -237,15 +400,11 @@ pub(super) fn load(
     let mut decoder = GraphDecoder::new(source, limits);
     let text = |error: GraphRefusal| error.to_string();
     let body: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).map_err(text)?;
-    let read: PhaseRead = serde_json::from_str(&body.checkpoint)
-        .map_err(|error| format!("the turn checkpoint does not decode: {error}"))?;
+    let read = read_checkpoint(&body.checkpoint, body.window_pin)?;
     let mut content = TurnCheckpointContent::default();
     let mut stored = Vec::new();
     for (digest, node) in body.content {
-        decoder
-            .child_kind(root, node, &[NodeKind::TURN_CONTENT])
-            .map_err(text)?;
-        let ContentText(blob) = decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
+        let blob = load_content(&mut decoder, root, node)?;
         let digest = CheckpointContentRef::stored(digest);
         content
             .insert_stored(digest.clone(), blob.into_bytes())
@@ -372,4 +531,57 @@ async fn read_phase(
         })
     })?;
     Ok(Some(phase))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PHASE-PIN-STRUCTURE: the stored pin is fields, and a graph read
+    /// returns exactly the host's original opaque spelling to the machine.
+    #[test]
+    fn phase_window_pins_are_structured_fields_and_read_back_identically() {
+        let head = crate::store::SessionHeadRef {
+            generation: 0,
+            revision: 17,
+            leaf: None,
+            checkpoint: None,
+        };
+        let original = serde_json::json!({"checkpoint": {"window": {
+            "pin": serde_json::to_string(&head).unwrap(), "messages": 3, "events": 2
+        }}});
+        let mut structured = original.clone();
+        let window_pin = structure_window_pin(&mut structured).unwrap();
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let root = staging
+            .encode_value(
+                NodeKind::PHASE_ROOT,
+                &PhaseRootBody {
+                    checkpoint: structured.to_string(),
+                    window_pin,
+                    content: Vec::new(),
+                    run: None,
+                    surface: None,
+                },
+            )
+            .unwrap();
+        let mut decoder = GraphDecoder::new(
+            &staging,
+            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20),
+        );
+        let stored: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).unwrap();
+        assert_eq!(
+            stored.window_pin,
+            Some(serde_json::to_value(&head).unwrap())
+        );
+        let value: serde_json::Value = serde_json::from_str(&stored.checkpoint).unwrap();
+        assert!(
+            value.pointer("/checkpoint/window/pin").is_none(),
+            "the text contains no escaped pin"
+        );
+        assert_eq!(
+            checkpoint_value(value, stored.window_pin).unwrap(),
+            original
+        );
+    }
 }

@@ -159,17 +159,18 @@ discriminator! {
     ExecStatus { Parked = 0, Ended = 1 }
 }
 
-/// Kind 33: a turn phase's checkpoint root. Its checkpoint text is the
-/// phase's JSON without its content, which it names by digest, each a
-/// TurnContent node, ascending; its run's recorded configuration is the
-/// shared ConfigValue graph of its resolved shape and the TurnContent node
+/// Kind 33: a turn phase's checkpoint root. Its checkpoint text excludes
+/// its structured window pin and its content, which it names by digest, each a
+/// TurnContent or ModelRequestFrame node, ascending. Its recorded run is
+/// the shared ConfigValue graph of its resolved shape and the TurnContent node
 /// of its installed tool surface.
-/// The integrator owns the text. A phase root owes nothing: the receipt of
-/// a model call whose derivation is owed is its own root
+/// The integrator owns the checkpoint data. A phase root owes nothing:
+/// the receipt of a model call whose derivation is owed is its own root
 /// (`turn_phases.answer_ref`), never a field of the phase's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhaseRoot {
     pub checkpoint: String,
+    pub window_pin: Option<serde_json::Value>,
     pub content: Vec<(String, NodeId)>,
     pub run: Option<NodeId>,
     pub surface: Option<NodeId>,
@@ -195,8 +196,9 @@ fn decode_node_ref(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenE
 
 impl TokenCodec for PhaseRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(5);
         out.text(&self.checkpoint);
+        self.window_pin.encode(out);
         out.seq(self.content.len() as u64);
         for (digest, node) in &self.content {
             out.seq(2);
@@ -208,8 +210,9 @@ impl TokenCodec for PhaseRoot {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        input.expect_struct(5)?;
         let checkpoint = input.text()?.to_owned();
+        let window_pin = Option::decode(input)?;
         let count = input.seq()?;
         let mut content = Vec::new();
         for _ in 0..count {
@@ -221,6 +224,7 @@ impl TokenCodec for PhaseRoot {
         let surface = decode_node_ref(input)?;
         Ok(Self {
             checkpoint,
+            window_pin,
             content,
             run,
             surface,

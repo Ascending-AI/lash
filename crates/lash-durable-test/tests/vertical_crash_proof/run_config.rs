@@ -563,6 +563,7 @@ fn root_spec() -> lash::SessionSpec {
 /// One law's store, clock and backend: a deployment creates the session and
 /// sends its one input, and nodes run it.
 struct Harness {
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     clock: Arc<SimClock>,
     database: Arc<dyn DurableStore>,
     backend: Backend,
@@ -576,7 +577,8 @@ impl Harness {
         Self {
             clock,
             database,
-            backend: shipped_backend(stores),
+            backend: shipped_backend(stores.clone()),
+            stores,
         }
     }
 
@@ -1518,4 +1520,282 @@ async fn a_replayed_sync_after_a_committed_response_installs_the_recorded_surfac
         );
     }
     assert_eq!(*law.ran.lock_recover(), [STABLE_TOOL]);
+}
+
+/// REQUEST-CONFIG-SHARING (FIG-6956): distinct sends retain one copy of
+/// their unchanged request configuration, while both read the same model,
+/// instructions and tool surface through the production graph reader.
+#[tokio::test]
+async fn two_sends_store_the_same_request_config_once_on_sqlite_memory() {
+    // The fast latency fixture's actual declared surface: tool schema
+    // bytes make the whole-checkpoint token expansion cross 4 KiB.
+    #[derive(serde::Deserialize)]
+    struct ToolSurface {
+        name: String,
+        description: String,
+        input_schema: serde_json::Value,
+        output_schema: serde_json::Value,
+    }
+    let surface: Vec<ToolSurface> = serde_json::from_str(r#"[
+  {
+    "name": "benchmark_async",
+    "description": "Return asynchronously through the host AwaitEvent completion path.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "value": {}
+      },
+      "required": [
+        "value",
+        "mode",
+        "delay_ms"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "benchmark_echo",
+    "description": "Return the input payload with a tiny async yield for runtime profiling.",
+    "input_schema": {
+      "additionalProperties": true,
+      "properties": {
+        "ordinal": {
+          "type": "integer"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ordinal": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {}
+      },
+      "required": [
+        "value",
+        "ordinal"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "benchmark_slow",
+    "description": "Sleep briefly before returning; used to profile process handle cancellation and await paths.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {}
+      },
+      "required": [
+        "value",
+        "delay_ms"
+      ],
+      "type": "object"
+    }
+  }
+]"#).expect("recorded fast-fixture surface");
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let tools = Arc::new(StaticToolProvider::new(
+        surface
+            .into_iter()
+            .map(|tool| {
+                lash_core::ToolDefinition::raw(
+                    tool.name.as_str(),
+                    tool.name.as_str(),
+                    tool.description,
+                    tool.input_schema,
+                    tool.output_schema,
+                )
+                .expect("the fixture's validated schemas")
+                .with_execution(std::time::Duration::from_secs(120))
+            })
+            .collect(),
+        SurfaceBodies(Arc::clone(&ran)),
+    ));
+
+    let scenario = Harness::new().await;
+    let observed = Arc::new(Observed::default());
+    let core = Deployment {
+        backend: &scenario.backend,
+        definition: None,
+        host: HostPluginFactory::default(),
+        models: &[MODEL],
+        answer: Arc::new(|request, _| text(request, "answered")),
+        observed: &observed,
+        tools: vec![tools],
+        boot: "request-config-sharing",
+    }
+    .core();
+    let host = core
+        .session(session())
+        .create(lash::SessionCreation::root(root_spec()))
+        .await
+        .expect("the session starts");
+    for (index, id) in ["config-first-send", "config-second-send"]
+        .into_iter()
+        .enumerate()
+    {
+        host.send(lash::TurnInput::text(id))
+            .id(TurnId::try_from(id.to_owned()).expect("send id"))
+            .await
+            .expect("the send is accepted");
+        // Commit the frame without sending it. A fresh activation must
+        // read its full graph and re-deliver exactly the recorded request.
+        let script = Script::new();
+        // FAST-PHASE-ROOT: this small toolless turn needs no structure
+        // stream. Expanding all checkpoint keys into tokens exceeded the
+        // 4 KiB root bound and added a stream and block on every send.
+        script.observe_commits(Arc::new(|_, tx| {
+            for node in tx.graph().values() {
+                let envelope = node.envelope().expect("the staged envelope");
+                if envelope.kind == lash_core_store::checkpoint_graph::NodeKind::PHASE_ROOT {
+                    let (variant, _) = envelope.reader().sum().expect("root body form");
+                    assert_eq!(
+                        variant, 0,
+                        "a small send's phase root fits without a structure stream"
+                    );
+                }
+            }
+        }));
+        script.cut_on("a", CommitLabel::MODEL_START, 1, Fault::CommitThenAbort);
+        scenario.cut(&core, script).await;
+        let nodes = nodes(
+            &scenario.database,
+            &scenario.clock,
+            &scenario.backend,
+            &core,
+            Script::new(),
+        );
+        nodes.start("b");
+        step_until(
+            &nodes,
+            &scenario.clock,
+            "the config-sharing send",
+            || async {
+                let state = scenario
+                    .database
+                    .actor(&actor())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .state;
+                if state == ActorState::Parked {
+                    let durable = core.session(session()).durable().await.unwrap();
+                    panic!(
+                        "config-sharing restore parked: {:?}",
+                        durable.park_reason().await.unwrap()
+                    );
+                }
+                observed.requests.lock_recover().len() == index + 1 && state == ActorState::Idle
+            },
+        )
+        .await;
+        nodes.kill("b");
+        nodes.quiesce().await;
+    }
+    {
+        let requests = observed.requests.lock_recover();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].model, requests[1].model);
+        assert_eq!(requests[0].tool_specs, requests[1].tool_specs);
+    }
+    assert_eq!(
+        observed.host_sections(),
+        ["audience= facts=", "audience= facts="]
+    );
+    // Count the content text, whether inline or placed in a text leaf.
+    // The transcript and recorded surface have no model field.
+    let content_kind = lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT.0;
+    let text_kind = lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF.0;
+    let rows = lash_sqlite_store::testing::read_rows_for_testing(
+        &scenario.stores,
+        &format!(
+            r#"SELECT count(*) AS config_blobs FROM blobs WHERE encoding = 1
+         AND hex(substr(content, 5, 1)) IN ('{content_kind:02X}', '{text_kind:02X}')
+         AND instr(content, CAST('"model":' AS BLOB)) > 0"#
+        ),
+    )
+    .expect("count stored request configurations");
+    assert_eq!(
+        rows[0][0].1,
+        serde_json::json!(1),
+        "unchanged request config is one stored blob across sends"
+    );
+    assert!(ran.lock_recover().is_empty(), "the sends call no tool");
+    drop(host);
+    core.shutdown().await.expect("the core stops");
 }

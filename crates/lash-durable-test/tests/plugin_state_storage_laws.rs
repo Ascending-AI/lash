@@ -1303,8 +1303,12 @@ fn staged_content(label: CommitLabel, tx: &lash_durable::ActorTx) -> StagedConte
     let mut pending: Vec<_> = graph
         .values()
         .filter(|node| {
-            node.envelope()
-                .is_ok_and(|envelope| envelope.kind == NodeKind::TURN_CONTENT)
+            node.envelope().is_ok_and(|envelope| {
+                matches!(
+                    envelope.kind,
+                    NodeKind::TURN_CONTENT | NodeKind::MODEL_REQUEST_FRAME
+                )
+            })
         })
         .map(|node| node.id)
         .collect();
