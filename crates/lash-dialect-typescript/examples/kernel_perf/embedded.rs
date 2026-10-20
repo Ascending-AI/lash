@@ -39,9 +39,9 @@ pub(super) fn main() -> Result<(), String> {
     let mut source = std::fs::read_to_string(&file).map_err(|error| error.to_string())?;
     // Only the result boundary differs from the CLI engines' print(result).
     source.push_str(if python {
-        "\nawait finish(result)\n"
+        "\nawait perf.finish(result)\n"
     } else {
-        "\nawait finish(result);\n"
+        "\nawait perf.finish(result);\n"
     });
     let frame = std::env::var_os("KERNEL_PERF_FRAME")
         .map(|path| {
@@ -75,7 +75,7 @@ pub(super) fn main() -> Result<(), String> {
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
-        EffectName::new("finish").expect("tool name"),
+        EffectName::new("perf.finish").expect("tool name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
     let environment_namespaces =

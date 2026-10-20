@@ -110,7 +110,7 @@ TS source. Both adapters use file execution, without type checking or JIT warmup
 The maintained corpus is the paired `.ts` and `.py` files in
 `scripts/perf/kernel/embedded/`. Each body leaves `result`. The CLI adapter adds
 `console.log(JSON.stringify(result))` or `print(result)`. Lash adds one
-`await finish(result)` boundary, using the existing instrument's scripted host.
+`await perf.finish(result)` boundary, using the existing instrument's scripted host.
 It converts the resulting Datum to the same JSON value domain after the run
 window. That boundary's fixed cost remains in Lash's run and cold counts.
 

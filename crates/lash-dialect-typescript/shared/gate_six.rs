@@ -30,12 +30,12 @@ for (const item of items) {
   total = total + item.weight;
   if (item.active) { labels.push(`${item.label}:${item.weight}`); }
 }
-const lookup = echo(labels.join(","));
-const stats = echo({ total: total, count: items.length, seen: history.length, index_count: indexes.length });
+const lookup = perf.echo(labels.join(","));
+const stats = perf.echo({ total: total, count: items.length, seen: history.length, index_count: indexes.length });
 const fanout = await Promise.all([lookup, stats]);
 const lookupValue = fanout[0];
 const statsValue = fanout[1];
-await finish(`user=${ctx.user};attempt=${ctx.attempt};active=${lookupValue};total=${statsValue.total};count=${statsValue.count};seen=${statsValue.seen};indexes=${statsValue.index_count}`);
+await perf.finish(`user=${ctx.user};attempt=${ctx.attempt};active=${lookupValue};total=${statsValue.total};count=${statsValue.count};seen=${statsValue.seen};indexes=${statsValue.index_count}`);
 "#)),
         ("language_host_environment", format!("{CONTEXT}{}", r#"
 const source = history.join(",");
@@ -52,13 +52,13 @@ const comparisons = [count === 3, count !== 4, count < 4, count <= 3, count > 2,
 const choice = logic ? "yes" : "no";
 const jsonText = "{\"attempt\":" + String(ctx.attempt) + ",\"ok\":true}";
 const parsed = JSON.parse(jsonText);
-const positionalResults = await Promise.all([echo(`left:${tokens[0]}`), echo(tokens[1]), echo(tokens.length)]);
+const positionalResults = await Promise.all([perf.echo(`left:${tokens[0]}`), perf.echo(tokens[1]), perf.echo(tokens.length)]);
 const positional = [positionalResults[0], positionalResults[1], positionalResults[2]];
-const namedResults = await Promise.all([echo(source), echo(`${trimmedUser}:${count}`)]);
+const namedResults = await Promise.all([perf.echo(source), perf.echo(`${trimmedUser}:${count}`)]);
 const named = { lookup: namedResults[0], summary: namedResults[1] };
-const handle = echo("awaited");
+const handle = perf.echo("awaited");
 const awaited = await handle;
-const direct = await echo(trimmedUser);
+const direct = await perf.echo(trimmedUser);
 console.log(direct);
 tokens.push("delta");
 const state = { tags: tokens, counts: {}, kept: [], predicates: predicates, comparisons: comparisons, numeric: numeric, parsed: parsed, line_matches: lineMatches };
@@ -72,23 +72,23 @@ for (const token of Object.keys(state.counts)) {
   state.kept.push(token);
 }
 const validated = { user: direct, choice: choice, tags: state.tags, counts: state.counts, kept: state.kept, maybe: null };
-await finish({ direct: direct, awaited: awaited, positional: positional, lookup: named.lookup, summary: named.summary, values: Object.values(state.counts), beta_index: betaIndex, line_matches: lineMatches, first_two: state.tags.slice(0, 2), validated: validated, stringified: JSON.stringify(validated) });
+await perf.finish({ direct: direct, awaited: awaited, positional: positional, lookup: named.lookup, summary: named.summary, values: Object.values(state.counts), beta_index: betaIndex, line_matches: lineMatches, first_two: state.tags.slice(0, 2), validated: validated, stringified: JSON.stringify(validated) });
 "#)),
         ("async_await", r#"
-const handles = [echo("alpha"), echo("beta"), echo("gamma")];
+const handles = [perf.echo("alpha"), perf.echo("beta"), perf.echo("gamma")];
 const results = await Promise.all(handles);
-await finish([results[0], results[1], results[2]].join(","));
+await perf.finish([results[0], results[1], results[2]].join(","));
 "#.to_string()),
         ("direct_unwrap", r#"
-const first = await echo("alpha");
-const second = await echo(`${first}:beta`);
-const third = await echo([first, second].join(","));
-await finish(third);
+const first = await perf.echo("alpha");
+const second = await perf.echo(`${first}:beta`);
+const third = await perf.echo([first, second].join(","));
+await perf.finish(third);
 "#.to_string()),
         ("general_fanout", r#"
 const seed = ["alpha", "beta", "gamma"];
-const results = await Promise.all([echo(`${seed[0]}:${seed.length}`), echo(`${seed[1]}:${seed.length}`)]);
-await finish(`${results[0]}|${results[1]}`);
+const results = await Promise.all([perf.echo(`${seed[0]}:${seed.length}`), perf.echo(`${seed[1]}:${seed.length}`)]);
+await perf.finish(`${results[0]}|${results[1]}`);
 "#.to_string()),
         ("loop_control", r#"
 let outer: number | string = "restored";
@@ -101,7 +101,7 @@ for (let i = 0; i < 128; i++) {
   if (i % 3 === 0) { continue; }
   kept = kept + 1;
 }
-await finish({ kept: kept, skipped: skipped, outer: outer });
+await perf.finish({ kept: kept, skipped: skipped, outer: outer });
 "#.to_string()),
         ("indexed_assignment", r#"
 const groups = ["alpha", "beta", "alpha", "gamma", "beta", "alpha", "delta", "gamma"];
@@ -111,7 +111,7 @@ const state = { groups: { alpha: { count: 0 }, beta: { count: 0 }, gamma: { coun
 for (const group of Object.keys(counts)) { state.groups[group].count = counts[group]; }
 const summary: string[] = [];
 for (const group of Object.keys(counts)) { summary.push(`${group}:${state.groups[group].count}`); }
-await finish({ counts: counts, state: state, summary: summary.join(",") });
+await perf.finish({ counts: counts, state: state, summary: summary.join(",") });
 "#.to_string()),
         ("projected_values", format!("{PROJECTED}{}", r#"
 const history = [{ role: "user", content: "alpha request" }, { role: "assistant", content: "beta response" }, { role: "tool", content: "gamma observation" }];
@@ -124,7 +124,7 @@ const secondMatches = second.content.split("\n").filter((line) => line.includes(
 let bodyTruthy = false;
 if (docs.body) { bodyTruthy = true; }
 console.log(docs.body);
-await finish({ history_len: history.length, first_role: first.role, first_content: first.content, second_content: second.content, doc_title: docs.title, doc_summary: docs.summary, body_head: bodyHead, body_match_index: bodyMatchIndex, body_matches: bodyMatches, second_matches: secondMatches, body_truthy: bodyTruthy, body_text: docs.body });
+await perf.finish({ history_len: history.length, first_role: first.role, first_content: first.content, second_content: second.content, doc_title: docs.title, doc_summary: docs.summary, body_head: bodyHead, body_match_index: bodyMatchIndex, body_matches: bodyMatches, second_matches: secondMatches, body_truthy: bodyTruthy, body_text: docs.body });
 "#)),
         ("large_data", r#"
 const groups = {};
@@ -139,7 +139,7 @@ for (let item = 0; item < 512; item++) {
 }
 const lines: string[] = [];
 for (const key of Object.keys(groups)) { lines.push(`${key}:${groups[key]}`); }
-await finish({ count: 512, total: total, groups: groups, evens: evens.length, odds: odds.length, summary: lines.join("|") });
+await perf.finish({ count: 512, total: total, groups: groups, evens: evens.length, odds: odds.length, summary: lines.join("|") });
 "#.to_string()),
         ("cache_pressure", format!("{CONTEXT}{}", r#"
 const seed = { user: ctx.user, attempt: ctx.attempt, history_len: history.length, labels: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"] };
@@ -156,12 +156,12 @@ const r3 = { name: "r3", value: a3, next: a4 };
 const r4 = { name: "r4", value: a4, next: a5 };
 const r5 = { name: "r5", value: a5, next: a0 };
 const validated = [r0, r1, r2, r3, r4, r5];
-await finish([validated[0].value, validated[1].value, validated[2].value, validated[3].value, validated[4].value, validated[5].value].join("|"));
+await perf.finish([validated[0].value, validated[1].value, validated[2].value, validated[3].value, validated[4].value, validated[5].value].join("|"));
 "#)),
         ("projected_operations", format!("{PROJECTED}{}", r#"
 const pushed = proj.items.slice(0);
 pushed.push("epsilon");
-await finish({ len: proj.items.length, empty: proj.items.length === 0, keys: Object.keys(proj.record), values: Object.values(proj.record), contains: proj.items.includes("beta"), starts: proj.text.startsWith("alpha"), ends: proj.text.endsWith("delta"), split_count: proj.text.split(" ").length, join: proj.items.join(","), trim: proj.padded.trim(), slice_text: proj.text.slice(6, 10), slice_list: proj.items.slice(1, 3), pushed: pushed, as_int: Math.trunc(Number(proj.number)), as_float: Number(proj.number), parsed: JSON.parse(proj.json), first: proj.items[0], field: proj.record.topic });
+await perf.finish({ len: proj.items.length, empty: proj.items.length === 0, keys: Object.keys(proj.record), values: Object.values(proj.record), contains: proj.items.includes("beta"), starts: proj.text.startsWith("alpha"), ends: proj.text.endsWith("delta"), split_count: proj.text.split(" ").length, join: proj.items.join(","), trim: proj.padded.trim(), slice_text: proj.text.slice(6, 10), slice_list: proj.items.slice(1, 3), pushed: pushed, as_int: Math.trunc(Number(proj.number)), as_float: Number(proj.number), parsed: JSON.parse(proj.json), first: proj.items[0], field: proj.record.topic });
 "#)),
         ("type_system_stress", format!("{CONTEXT}{}", r#"
 type Meta = { source: string; attempt: number; tags: string[] };
@@ -171,18 +171,18 @@ for (let i = 0; i < 64; i++) {
   const raw: Item = { id: i, title: `item-${i}`, score: i / 2, active: i % 2 === 0, meta: { source: ctx.user, attempt: ctx.attempt, tags: ["alpha", "beta", "gamma"] }, maybe: i % 3 === 0 ? null : `v${i}` };
   items.push(raw);
 }
-await finish({ count: items.length, first: items[0].title, last: items[63].title, tags: items[1].meta.tags.join(",") });
+await perf.finish({ count: items.length, first: items[0].title, last: items[63].title, tags: items[1].meta.tags.join(",") });
 "#)),
         ("wrapped_error_paths", r#"
 let missingOk = true;
 let missingError = false;
-try { await boom("unknown tool missing_tool"); } catch (error) { missingOk = false; missingError = String(error.message).includes("unknown tool"); }
+try { await perf.boom("unknown tool missing_tool"); } catch (error) { missingOk = false; missingError = String(error.message).includes("unknown tool"); }
 let boomOk = true;
 let boomError = false;
-try { await boom("explicit failure"); } catch (error) { boomOk = false; boomError = String(error.message).includes("explicit failure"); }
-const ok = await echo("still-running");
+try { await perf.boom("explicit failure"); } catch (error) { boomOk = false; boomError = String(error.message).includes("explicit failure"); }
+const ok = await perf.echo("still-running");
 const probe = await jobs.run({ target: "check Cargo.lock" });
-await finish({ missing_ok: missingOk, missing_error: missingError, boom_ok: boomOk, boom_error: boomError, ok_value: ok, probe_exit: probe.exit_code, probe_done: probe.done });
+await perf.finish({ missing_ok: missingOk, missing_error: missingError, boom_ok: boomOk, boom_error: boomError, ok_value: ok, probe_exit: probe.exit_code, probe_done: probe.done });
 "#.to_string()),
         ("tool_control_host_environment", tool_control()),
         ("snapshot_projected_state", r#"
@@ -191,14 +191,14 @@ const head = snap.projected.body.slice(0, 16);
 const materialized = String(snap.projected.body);
 const nestedHead = snap.mixed.nested.projected_title;
 snap.mixed.count = snap.mixed.count + 1;
-await finish({ id: snap.id, normal_title: snap.normal.title, head: head, materialized_len: materialized.length, nested_head: nestedHead, count: snap.mixed.count, tags: snap.normal.tags.join(",") });
+await perf.finish({ id: snap.id, normal_title: snap.normal.title, head: head, materialized_len: materialized.length, nested_head: nestedHead, count: snap.mixed.count, tags: snap.normal.tags.join(",") });
 "#.to_string()),
         ("continue_as_seed_host_environment", format!("{CONTEXT}{PROJECTED}{}", r#"
-const agent = spawn_child({ task: "inspect carry-forward", capability: "explore" });
+const agent = perf.spawnChild({ task: "inspect carry-forward", capability: "explore" });
 const handles = await processes.list({});
-const frame = await continue_as({ task: "continue from compact state", seed: { projected_problem: proj.text, nested_projected: { body: proj.json }, computed_summary: `${ctx.user}:${history.length}`, live_agent: handles[0], started_agent: "agent" } });
+const frame = await perf.continueAs({ task: "continue from compact state", seed: { projected_problem: proj.text, nested_projected: { body: proj.json }, computed_summary: `${ctx.user}:${history.length}`, live_agent: handles[0], started_agent: "agent" } });
 await agent;
-await finish({ frame_key: frame.frame_key, task: frame.task, seed_keys: frame.seed_keys, projected_count: frame.projected_count, global_count: frame.global_count });
+await perf.finish({ frame_key: frame.frame_key, task: frame.task, seed_keys: frame.seed_keys, projected_count: frame.projected_count, global_count: frame.global_count });
 "#)),
         ("syntax_text_host_environment", r#"
 const patch = "*** Begin Patch\n*** Update File: crates/lash-vm/src/lib.rs\n@@\n-old\n+new\n\\n { braces stay raw }\n*** End Patch";
@@ -206,7 +206,7 @@ const script = "python3 - <<'PY'\nprint(\"\"\"double quotes are preserved\"\"\")
 const plain = "first\n\"quoted\"\nsecond";
 "bare expression branch";
 const pieces = [patch.length, patch.includes("*** Begin Patch"), script.startsWith("python3"), script.trim().endsWith("PY"), plain.split("\n").length, plain.slice(0, 5)];
-await finish({ patch_head: patch.slice(0, 15), script_head: script.slice(0, 7), plain_lines: plain.split("\n").length, pieces: pieces });
+await perf.finish({ patch_head: patch.slice(0, 15), script_head: script.slice(0, 7), plain_lines: plain.split("\n").length, pieces: pieces });
 "#.to_string()),
         ("integer_range_host_environment", r#"
 const items: number[] = [];
@@ -222,23 +222,23 @@ for (let i = 0; i < items.length; i += stride) { starts.push(i); windows.push(it
 const text = "alpha beta gamma beta delta";
 const firstBeta = text.indexOf("beta");
 const secondBeta = text.indexOf("beta", firstBeta + 1);
-await finish({ count: items.length, first: items[0], last: items[items.length - 1], forward: forward, backward: backward, stride: stride, starts: starts, windows: windows, mid: items.slice(2, -2), head: text.slice(0, 5), tail: text.slice(-5), first_beta: firstBeta, second_beta: secondBeta, ceil_neg: Math.ceil(-10 / 3), floor_neg: Math.floor(-10 / 3) });
+await perf.finish({ count: items.length, first: items[0], last: items[items.length - 1], forward: forward, backward: backward, stride: stride, starts: starts, windows: windows, mid: items.slice(2, -2), head: text.slice(0, 5), tail: text.slice(-5), first_beta: firstBeta, second_beta: secondBeta, ceil_neg: Math.ceil(-10 / 3), floor_neg: Math.floor(-10 / 3) });
 "#.to_string()),
         ("fanout_expression_host_environment", format!("{CONTEXT}{}", r#"
-const left = await echo("left");
-const right = await echo("right");
+const left = await perf.echo("left");
+const right = await perf.echo("right");
 const computed = history.length + 39;
 const discarded = ["branch_a", 40 + 2, history.length];
-const batchedResults = await Promise.all([echo(left), echo(right)]);
+const batchedResults = await Promise.all([perf.echo(left), perf.echo(right)]);
 const batched = { first: batchedResults[0], second: batchedResults[1], computed: computed };
-await finish({ left: left, right: right, computed: computed, discarded: discarded, first: batched.first, second: batched.second, batched_computed: batched.computed });
+await perf.finish({ left: left, right: right, computed: computed, discarded: discarded, first: batched.first, second: batched.second, batched_computed: batched.computed });
 "#)),
         ("image_host_environment", r#"
 const img = { type: "image", id: "img-1", media_type: "image/png", label: "chart.png", size: 1234, width: 640, height: 480 };
 const descriptor = JSON.stringify(img);
 const metadata = { id: img.id, label: img.label, size: img.size, width: img.width, height: img.height };
 console.log(img);
-await finish({ metadata: metadata, descriptor_has_type: descriptor.includes("\"type\":\"image\""), descriptor_has_id: descriptor.includes("\"id\":\"img-1\""), dims: `${img.width}x${img.height}`, size_bucket: Math.floor(img.size / 100) });
+await perf.finish({ metadata: metadata, descriptor_has_type: descriptor.includes("\"type\":\"image\""), descriptor_has_id: descriptor.includes("\"id\":\"img-1\""), dims: `${img.width}x${img.height}`, size_bucket: Math.floor(img.size / 100) });
 "#.to_string()),
         ("heap_list_iteration", r#"
 const rows: number[] = [];
@@ -246,7 +246,7 @@ for (let n = 0; n < 2000; n++) { rows.push(n); }
 let total = 0;
 let seen = 0;
 for (const row of rows) { total = total + row; seen = seen + 1; }
-await finish({ total: total, seen: seen });
+await perf.finish({ total: total, seen: seen });
 "#.to_string()),
         ("heap_nested_loop", r#"
 const rows: number[][] = [];
@@ -255,7 +255,7 @@ for (let n = 0; n < 60; n++) {
   rows.push([n, n + 1]);
   for (const row of rows) { checksum = checksum + row[0]; }
 }
-await finish({ checksum: checksum, rows: rows.length });
+await perf.finish({ checksum: checksum, rows: rows.length });
 "#.to_string()),
         ("heap_allocation_churn", r#"
 type Scratch = { index: number; pair: number[]; label: string };
@@ -264,7 +264,7 @@ for (let n = 0; n < 400; n++) {
   const scratch: Scratch = { index: n, pair: [n, n + 1], label: `row-${n}` };
   if (n % 40 === 0) { kept.push(scratch); }
 }
-await finish({ kept: kept.length });
+await perf.finish({ kept: kept.length });
 "#.to_string()),
         ("heap_deep_chain_mutation", r#"
 const tree = { level: { rows: [[0], [1], [2]], counters: { c: 0 } } };
@@ -272,7 +272,7 @@ for (let n = 0; n < 150; n++) {
   tree.level.rows[n % 3] = [n];
   tree.level.counters["c"] = (tree.level.counters["c"] || 0) + 1;
 }
-await finish({ counter: tree.level.counters["c"], first: tree.level.rows[0] });
+await perf.finish({ counter: tree.level.counters["c"], first: tree.level.rows[0] });
 "#.to_string()),
         ("heap_comprehension_build", r#"
 const source: number[] = [];
@@ -280,13 +280,13 @@ for (let n = 0; n < 800; n++) { source.push(n); }
 const doubled = source.map((item: number) => item + item);
 const tagged: number[][] = [];
 for (const item of source) { if (item % 7 === 0) { tagged.push([item]); } }
-await finish({ doubled: doubled.length, tagged: tagged.length, last: doubled[doubled.length - 1] });
+await perf.finish({ doubled: doubled.length, tagged: tagged.length, last: doubled[doubled.length - 1] });
 "#.to_string()),
         ("heap_variable_concat", r#"
 const other = [1, 2];
 const acc: number[] = [];
 for (let n = 0; n < 300; n++) { for (const x of other) { acc.push(x); } }
-await finish({ total: acc.length, head: acc[0] });
+await perf.finish({ total: acc.length, head: acc[0] });
 "#.to_string()),
         // The costliest model-written cell the code mode standard instruction
         // budget was measured over (`InstructionBound::standard`).
@@ -296,7 +296,7 @@ for (let i = 0; i < 3000; i++) {
   rows.push({ index: i, text: "a row the cell prints and finishes with" });
 }
 console.log(rows);
-await finish({ rows });
+await perf.finish({ rows });
 "#.to_string()),
     ];
     programs.push(("heap_shallow_chain_mutation", chain(6)));
@@ -307,13 +307,13 @@ await finish({ rows });
 /// The production RLM scenario, which is also M9's `production_rlm`.
 fn tool_control() -> String {
     r#"
-const first = spawn_child({ task: "inspect auth", capability: "explore" });
-const second = spawn_child({ task: "inspect api", capability: "explore" });
-const llm = query_llm({ prompt: "summarize benchmark", model: "gpt-5.4-mini" });
-const probe = echo("app log");
+const first = perf.spawnChild({ task: "inspect auth", capability: "explore" });
+const second = perf.spawnChild({ task: "inspect api", capability: "explore" });
+const llm = perf.queryLlm({ prompt: "summarize benchmark", model: "gpt-5.4-mini" });
+const probe = perf.echo("app log");
 const handles = await processes.list({});
 const results = await Promise.all([first, second, llm, probe]);
-await finish({ first: results[0].claim, second: results[1].claim, llm: results[2].text, probe: results[3], tools: handles.length });
+await perf.finish({ first: results[0].claim, second: results[1].claim, llm: results[2].text, probe: results[3], tools: handles.length });
 "#
     .to_string()
 }
@@ -332,7 +332,7 @@ fn chain(depth: usize) -> String {
     let half = ".next".repeat(depth / 2);
     let rest = ".next".repeat(depth - depth / 2);
     source.push_str(&format!(
-        "const tree = t0;\nfor (let n = 0; n < 150; n++) {{ const middle = tree{half}; middle{rest}.leaf = [n]; }}\nconst end = tree{half};\nawait finish({{ leaf: end{rest}.leaf }});\n"
+        "const tree = t0;\nfor (let n = 0; n < 150; n++) {{ const middle = tree{half}; middle{rest}.leaf = [n]; }}\nconst end = tree{half};\nawait perf.finish({{ leaf: end{rest}.leaf }});\n"
     ));
     source
 }
@@ -340,12 +340,12 @@ fn chain(depth: usize) -> String {
 /// Every tool the programs call, each taking one argument.
 pub(crate) fn effects() -> BTreeMap<EffectName, Signature> {
     [
-        "echo",
-        "boom",
-        "finish",
-        "spawn_child",
-        "query_llm",
-        "continue_as",
+        "perf.echo",
+        "perf.boom",
+        "perf.finish",
+        "perf.spawn_child",
+        "perf.query_llm",
+        "perf.continue_as",
         "processes.list",
         "jobs.run",
     ]
@@ -382,7 +382,7 @@ fn text(value: &str) -> Datum {
 /// The scripted answer to one tool call.
 pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
     match effect {
-        "boom" => Outcome::Failed(ErrorDatum {
+        "perf.boom" => Outcome::Failed(ErrorDatum {
             kind: "boom".to_string(),
             message: match &argument {
                 Datum::Text(message) => message.clone(),
@@ -390,7 +390,7 @@ pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
             },
             data: Datum::Null,
         }),
-        "spawn_child" => {
+        "perf.spawn_child" => {
             let task = match field(&argument, "task") {
                 Some(Datum::Text(task)) => task.clone(),
                 _ => String::new(),
@@ -400,7 +400,7 @@ pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
                 Datum::Text(format!("done:{task}")),
             )]))
         }
-        "query_llm" => Outcome::Completed(Datum::Record(vec![
+        "perf.query_llm" => Outcome::Completed(Datum::Record(vec![
             ("text".to_string(), text("benchmark summary")),
             ("tokens".to_string(), Datum::Float(Float::new(42.0))),
         ])),
@@ -409,7 +409,7 @@ pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
             ("exit_code".to_string(), Datum::Float(Float::new(0.0))),
             ("done".to_string(), Datum::Bool(true)),
         ])),
-        "continue_as" => {
+        "perf.continue_as" => {
             let seed_keys = match field(&argument, "seed") {
                 Some(Datum::Record(fields)) => fields.iter().map(|(key, _)| text(key)).collect(),
                 _ => Vec::new(),
@@ -425,7 +425,7 @@ pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
                 ("global_count".to_string(), Datum::Float(Float::new(3.0))),
             ]))
         }
-        "finish" => Outcome::Completed(Datum::Null),
+        "perf.finish" => Outcome::Completed(Datum::Null),
         _ => Outcome::Completed(argument),
     }
 }

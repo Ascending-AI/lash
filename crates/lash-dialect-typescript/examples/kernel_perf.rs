@@ -182,7 +182,7 @@ fn deliver_all(machine: &mut KernelMachine, requests: Vec<Request>) -> Option<Da
             Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
             Request::Effect(effect) => {
                 let argument = effect.args.into_iter().next().unwrap_or(Datum::Null);
-                if effect.effect.as_str() == "finish" {
+                if effect.effect.as_str() == "perf.finish" {
                     finished = Some(argument.clone());
                 }
                 (effect.wait, answer(effect.effect.as_str(), argument))
@@ -479,7 +479,7 @@ fn main() -> Result<(), String> {
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
-        EffectName::new("finish").expect("a tool's name"),
+        EffectName::new("perf.finish").expect("a tool's name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
     let environment_namespaces =
@@ -1137,7 +1137,7 @@ fn host_json_probe() -> Result<(), String> {
         if selected.as_ref().is_some_and(|v| v != name && v != "all") {
             continue;
         }
-        let code = format!("const result = await echo(null); {tail}");
+        let code = format!("const result = await perf.echo(null); {tail}");
         let lowered = lash_dialect_typescript::lower(
             &code,
             &env,
