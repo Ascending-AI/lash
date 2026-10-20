@@ -1,4 +1,5 @@
-//! Laws of namespace composition and resolution: OP-NAME and NS-COMPOSE.
+//! Laws of namespace composition and resolution: OP-NAME, NS-COMPOSE and
+//! PKG-NAMESPACE.
 
 use std::collections::BTreeMap;
 
@@ -6,7 +7,8 @@ use lash_kernel_doc::{EffectName, FunctionName, Signature, Type};
 
 use crate::{
     Export, ExportView, Member, NamespaceRefusal, Namespaces, Offered, Operations, PackagePath,
-    QualifiedOperation, Reserving, Resolution, Segment, Spelling, spell_operation,
+    QualifiedOperation, Reserving, Resolution, Segment, Spelling, TypeMember, ValueType,
+    spell_operation,
 };
 
 /// Code packages, by path.
@@ -177,4 +179,64 @@ fn disjoint_packages_merge_and_a_taken_root_is_refused_naming_both() {
         );
     }
     Namespaces::build(&view, operations(&["tools.search"])).expect("`tools` is accepted");
+}
+
+/// PKG-NAMESPACE (FIG-6920): only the package path is spelled as path
+/// segments. A value type after it resolves by its type-name spelling, and
+/// only by it, and a static under it by its member spelling, in each
+/// dialect.
+#[test]
+fn a_value_type_and_its_static_resolve_by_their_own_spellings() {
+    let read_text = Member {
+        definition: FunctionName::new("dataframe.data_quanta.read_text").expect("a function name"),
+        signature: signature(),
+        asynchronous: false,
+        rest: false,
+    };
+    let view = Packages(BTreeMap::from([(
+        PackagePath::parse("dataframe").expect("a path"),
+        BTreeMap::from([(
+            Segment::new("data_quanta").expect("a segment"),
+            Export::Type(ValueType {
+                representation: Type::Any,
+                members: BTreeMap::from([(
+                    Segment::new("read_text").expect("a segment"),
+                    TypeMember::Static(read_text.clone()),
+                )]),
+            }),
+        )]),
+    )]));
+    let namespaces = Namespaces::build(&view, Operations::new()).expect("one package");
+    for (spelling, ty, member) in [
+        (Spelling::TypeScript, "DataQuanta", "readText"),
+        (Spelling::Python, "DataQuanta", "read_text"),
+    ] {
+        assert!(
+            matches!(
+                namespaces.resolve(&["dataframe", ty], spelling),
+                Resolution::Export { segment, member: None, .. } if segment.as_str() == "data_quanta"
+            ),
+            "{ty}"
+        );
+        assert!(
+            matches!(
+                namespaces.resolve(&["dataframe", ty, member], spelling),
+                Resolution::Export { member: Some((_, TypeMember::Static(found))), .. } if *found == read_text
+            ),
+            "{ty}.{member}"
+        );
+    }
+    // A type is written as a type name, and a package path as segments.
+    for written in [
+        &["dataframe", "dataQuanta"][..],
+        &["Dataframe", "DataQuanta"],
+    ] {
+        assert!(
+            matches!(
+                namespaces.resolve(written, Spelling::TypeScript),
+                Resolution::Unknown
+            ),
+            "{written:?}"
+        );
+    }
 }

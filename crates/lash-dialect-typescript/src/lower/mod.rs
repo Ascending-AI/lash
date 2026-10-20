@@ -32,6 +32,7 @@ pub(crate) use calls::{printed_source_reference, tool_calls};
 mod expressions;
 mod functions;
 mod lazy;
+mod packages;
 mod patterns;
 mod positional;
 mod primitive_methods;
@@ -540,6 +541,7 @@ pub(crate) fn lower(
                     )
                 })
                 .collect(),
+            crate::types::Packages::of(environment.namespaces),
         ),
         narrowed: Vec::new(),
         paths: Vec::new(),

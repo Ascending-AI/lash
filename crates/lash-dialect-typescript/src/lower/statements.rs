@@ -384,7 +384,14 @@ impl Lowerer<'_> {
             }
             Some(init) => match &declaration.pattern {
                 ast::Pattern::Ident(name, _) => self.named_expression(init, name)?,
-                _ => self.lower_expr(init)?,
+                pattern => {
+                    if let Some(bound) =
+                        self.destructure_package(pattern, init, super::patterns::Mode::Declared)
+                    {
+                        return bound;
+                    }
+                    self.lower_expr(init)?
+                }
             },
             None if kind == VarKind::Var => {
                 // `var x;` makes `x` exist and assigns nothing.

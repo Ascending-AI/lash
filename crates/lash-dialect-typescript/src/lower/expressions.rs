@@ -355,6 +355,9 @@ impl Lowerer<'_> {
                 ..Operand::variable(kernel, self.type_of_binding(name))
             });
         }
+        if let Some(read) = self.read_package(&ast::Expr::Ident(name.to_owned(), span), span) {
+            return read;
+        }
         match name {
             "undefined" => return Ok(Operand::undefined()),
             "NaN" => return Ok(Operand::number(f64::NAN)),
@@ -576,6 +579,11 @@ impl Lowerer<'_> {
         right: &ast::Expr,
         operand_spans: Option<[SourceSpan; 2]>,
     ) -> Lowering<Operand> {
+        if op == BinaryOp::InstanceOf
+            && let Some(tested) = self.instance_of_package(left, right)
+        {
+            return tested;
+        }
         if op == BinaryOp::InstanceOf {
             let test = match right {
                 ast::Expr::Ident(class, _) if !self.is_bound(class) => {

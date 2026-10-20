@@ -14,6 +14,7 @@
 
 mod diagnostic;
 mod dialect;
+pub mod dispatch;
 mod exports;
 mod imperative;
 mod library;

@@ -1,0 +1,221 @@
+kernel 1
+numbers float
+effect dataframe.explain(plan: Any) -> Text contract "dataframe.explain/1"
+effect dataframe.run(plan: Any) -> List(Any) contract "dataframe.run/1"
+use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
+use dataframe.__built = @73a0f5d77c35a7c915693b66b6a17ef85d2d9a549b7b43c36f0d9acc95b05b80
+use dataframe.col = @a43b5d3c0b070c1ab17b58b7d177b38640865a6a0d03c51b7131431b72fc2fde
+use dataframe.count = @d15ac5de13f9358486b3e38e58b23d2c4fee56011314495034f2648a3bb239cf
+use dataframe.data_quanta.check_shape = @ad1968cef1eaa4f43ada6d5707a49aeb3624b159442c3bdb46c21be5d72e3387
+use dataframe.data_quanta.collect_rows = @89253e4efbc198e8bedee607745bcb1efc09bbc9b9bafbf2a531d20dad95f9f0
+use dataframe.data_quanta.explain = @e2725967ec88c9e9f9a8d17a74248de654edfc7b6b3c7b41f781a54cf2281164
+use dataframe.data_quanta.filter = @d8c4b606551b16352fc73f9eeaa110a0d0291498badd817051b6c8ebd401aed9
+use dataframe.data_quanta.flat_map = @378462f96c3a71ca5c8c22bf42bc1a4929bb29330e8357d9ca4d1d0328e519ed
+use dataframe.data_quanta.limit = @64fe3708a2225814bf16fbe8f393a846b7fd248a13493096fa6fb9724d193ebd
+use dataframe.data_quanta.read_text = @b4121b88a9b7088580d57b32c1ef1c7a0a9f5e65ef3cb726299bce3f7f97b6d4
+use dataframe.data_quanta.reduce_by_key = @3b37ccc0b49b429d7ebfa8ea907bae77c6c2dd903320a717d9e36d4ff5468a7d
+use dataframe.data_quanta.sort = @60ddc70d39cf948af9f2eb65ad58aae5c7df0eab09433a6d5f86ce68b340ad4d
+use dataframe.data_quanta.then = @d80ed081c36e7d537594a8f424352099058f30730bd71287a6ca72b067f72a73
+use dataframe.expr.alias = @1edd56cdbbb0e95bc547bcd4cda5b9bf43bd5b87aa70469ab473a6ad12384a50
+use dataframe.expr.check_shape = @1b18efe6b66dfc51c689921996dc904eb2394ac8398049b7d44403258da2fe8f
+use dataframe.expr.neq = @7563fb10c05ef1215e5b74264ceed8a4368d0bca04155faa95e9b45def1b08ad
+use dataframe.expr.sort = @7d5aa06d4ee020eeda6cd4a687863631334b0d018415f0025c99d6f4d1269d83
+use dataframe.lit = @c6108282bad47bc93f44479015231ceaab2ebcf9c84a775e1cc81a4e0328fddd
+use dataframe.make_expr = @911844b3a7d6dffc69f6c24b0eaa7ba22039def741d119fca61aa45f7c302b45
+use dataframe.make_quanta = @1607f871fd7c143d21aa1d60c808b00fb0f342e0251a310adc867fe84274a0d8
+use date.ecma.format = @c6a7adc42030625a48d7f0b4786f2d0c81c0bd606025ddc6aa3db070f1af59a5
+use date.ecma.milliseconds = @4e37fb0d2d080825d24b72657395057af874886c27e5f9791756c8dacb629f8b
+use deref = @12677ad7e3e9aab3865fdbd2799e5c17d9d207b757de5a56c60b6911444f3207
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use float.parse = @a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae
+use float.to_int = @4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f
+use format.decimal_parts = @deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0
+use int.rem_floor = @5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671
+use int.to_text = @6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.concat = @3da975dd77f0c49e6cc2b4066a44091d1807247dfe97e1f524a79709ad92f9f5
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use num.abs = @5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a
+use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
+use num.floor = @245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d
+use num.is_finite = @2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3
+use num.is_nan = @0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6
+use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
+use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
+use num.min = @e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758
+use num.mul = @7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d
+use num.neg = @56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9
+use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
+use num.to_float = @d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df
+use num.to_int = @602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea
+use num.trunc = @f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035
+use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
+use record.get = @c8cd42a6c8b72c445a4630822f01c7f7bb67060b28aaaf1e5141f326765448b8
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use record.len = @5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba
+use regex.ecma.compile_check = @b05d2c1636a924dc98a95e0f4d8cd889f9fd1c3e003cf6d8b16fc0ec34a9db0c
+use regex.ecma.split = @f7136168adc5e679059cd1f9a48f3e78e126cde0932ac0201193c8c3b2c9be18
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use text.compare = @1ffde9482105d0066232a037f8056c41e232602059aa8e67197725d81b83062c
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.ends_with = @ffe8ac95125db709bb5e1963e5c401aa12fa80c3e1bd541e1544afd7e3131adf
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
+use text.lower_u17_0_0 = @bdbb1f114c807cbc58923711d0ac8e83e42afa20b0d2e5de58d50de54bc8d276
+use text.repeat = @ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a
+use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
+use text.split = @acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a
+use text.trim_set = @c537e7becf15c5a8ed7eaf812dc12d1be6cbb96e70749784528179c2784724e5
+use text.utf16_find = @3b3bc1d5b628bc3fb3e0558144151d085120a0d173e1932ffa98423cbbb0db76
+use text.utf16_get = @682fa4fa6329e4f79afcd5bd4bbeb448c772ca482988723a6c48977c973e444d
+use text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18
+use text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409
+use ts.array.integer = @73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd
+use ts.array.is = @5519731ddb6c9d2183742b87ee54c7244f9e08d2f4557c9f7a3513595ed71db7
+use ts.array.iterator = @b5f05ef1f29c86076d4656b638bf3e655d864c3bcb4806bc93317577dea0a067
+use ts.array.length = @6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3
+use ts.array.push = @60baf67ff5985e6ffdd2ef1e7d7074f69e8740a1547e22aad6f7ef2710393543
+use ts.array.set = @602ffad7d6d33801fbd946942cd3190c20b9c185a1ef515406b69dacb3c3e763
+use ts.array.values = @6c01f1345e7c2191e51375ed87ea093f36198cb3184fa02afae2d52e5cda272f
+use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
+use ts.callable = @7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22
+use ts.exotic.error_name = @20e317af56efb787751e8ab38f9d4f87fc2145f101665e9e0a82afb11a636b3c
+use ts.exotic.get = @78ae6ffa834fd4134c731c03e9b32908e03fac336f98213bece8c6e223253b88
+use ts.exotic.iterate = @690182cf08e5924b669d1ea7c32d0fc1f17dc7fb8384ead9df28de52e0dfe9f1
+use ts.exotic.set = @280d01caa6371cecaac5f9c70d17f653af5bf162012429fc657611440e942a9e
+use ts.exotic.to_primitive = @5f26f14804bc9ee15bbf1e6ada733414c3a2fb387ba4acc671c10e8f75aa50e8
+use ts.for_of.item = @9ca984cf92050630538b9cce7f1d1e121c03a9f071916630311c72ba43304ed4
+use ts.for_of.next = @b01e9bc78562470d442df6a60d4cdbf11011107ae94c38fa3a3aefcc5d4e7667
+use ts.for_of.open = @bbaefd37def780c42cde803bf34f059bda815042c4c951c055b00e55763f2061
+use ts.get = @6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324
+use ts.hole_value = @a5e96b5c94e54ba44f74acb077f7c16258ab243ea1df7931ae5f3edb69731eda
+use ts.is_nullish = @d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329
+use ts.is_primitive = @3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230
+use ts.iterate = @2b13f4f8d1eb10f312ed2cbe665b0207adf83f053b8574e39b4362d82032356d
+use ts.list_index = @54dfeddf2cdae29653d493078bbdd0e86fd6e7cb67068eac8b64a3dd5af4c817
+use ts.map.value = @3b2ee022ee040a49d72d15e26389d4ba272fc9bea81b3a8905d739a43a95cdd7
+use ts.member.push = @748b27d81d114f5857a10aa8b4a4de2733b2c89c6691423ba927449056799994
+use ts.number.digit = @4a65f8097abc850ff87a2d2f08438bd602b3b51601d2c94adec2d09331836400
+use ts.number.layout = @b65fabffb79156c07512dac571905bdd69ee745f43b11f459cd8c9532d556369
+use ts.number.parse = @5bdc442e52a107615a23256bf77b48e631d67534564ce1b066348f1d219e6ad9
+use ts.number.parse_decimal = @485ed82cdabbacc595702b5b52055b798f96d6c8dcaba52e723c4da99f00f2a4
+use ts.number.parse_int = @3849314fcefb23b8a9c499f62aabfd6e57105165d50eaa7a728b7704fab849cd
+use ts.number.parts = @837280875267b97dfe4d629a8cd1d67d60ccfc0d543f2a6514987ba17856477b
+use ts.number.to_string = @43247079116a53762b67e1adf9544aa048fac344f9605578010ed35243a83992
+use ts.number_index = @410e5d470cbf6542e202284c3b45ca02da9f1ee32f5d5eff5892c59fdb8843c0
+use ts.pad = @e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1
+use ts.primitive_to_number = @e3f5ecc4293cdbcf0996708034c6c8db4dcc7cc8c8ff730e6fe472078484bc39
+use ts.primitive_to_string = @183bb1ba4d4e942766ce640b2bb78ac02e9dbda5c2f98aee87db7ac92a650d66
+use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
+use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
+use ts.read = @05d5bb4bce967d57bd643ad0db44d51b11e4ebf6f0b51a0cf90c5555c7ac0a91
+use ts.receiver = @9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42
+use ts.regexp.create = @f43a47a9d0e5018232cea8d5aca40db224ca8b5691a20f414a5dbd21443b7fdf
+use ts.regexp.escaped_source = @ec4fee5a46bb2d63665dd02de716b63bf630c4877fc96abc3b23525960656a0f
+use ts.regexp.is = @5d2ea7ac8a98e247840be4d85839cd888f518350b1312e3279e899e733aa6804
+use ts.regexp.native_split = @b532e50f30a41f7682d647b1932bb2bdaef9a5be9f81e4f9a58178dd54b9dbf4
+use ts.regexp.spell = @17105be7ba3a8330dee6f0c09c5d302249850963f4312c7c272341d89c731bb9
+use ts.require_object_coercible = @33d2a40640d18d9a713c21ec7d7bc9c43e3a49608d0d66e863324b0373d4cb8f
+use ts.set = @a620f4af917b9bbee6d6cadbc581865974d78b95cd56088886b934379b726147
+use ts.string.integer = @846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1
+use ts.string.receiver = @86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf
+use ts.string.slice_units = @c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261
+use ts.string.split = @8b0589ab77854f09f4f484708eee10a62098dfd2dea775d4b29b743803bc3396
+use ts.string.split_generic = @5553d9b9cada0cd2046e534aefb8e60eed954fdb77cfd60f6b761c15b1dfc9b0
+use ts.string.toLowerCase = @e73bb3d774eb6d7cb538cd35c80f18d82b89c0a9b29708f2929ddc0c6f3de428
+use ts.string.trim_value = @2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a
+use ts.string.uint32 = @6378a04c0d90d1cd241e1cb2463712c3757bd12ddb8eedcdf2036a3ac280d2c5
+use ts.to_boolean = @b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a
+use ts.to_number = @a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f
+use ts.to_primitive = @04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da
+use ts.to_property_key = @802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a
+use ts.to_string = @df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d
+use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
+use typescript.__built = @1d6f2e35f350bcc4ac16259ff3456882dcb0aa00f7a589c1b7936fd40e1cfc32
+use url.whatwg.update = @e3e02cac4e1b599d28a1399772b941bebfd04763829c89040acc3ce49d37f40a
+entry wordcount(text: Text) -> Any ts_direct(ts.await)
+
+fn wordcount(text) {
+  let col = ("ts.function", "", "col", 1.0, fn(this2, args2) {
+    let t1 = invoke ts.pad(args2, 1.0)
+    return invoke dataframe.col(t1[0.0])
+  }, {})
+  let lit = ("ts.function", "", "lit", 0.0, fn(this3, args3) {
+    let t4 = invoke ts.pad(args3, 1.0)
+    return invoke dataframe.lit(t4[0.0])
+  }, {})
+  let count = ("ts.function", "", "count", 0.0, fn(this4, args4) {
+    return invoke dataframe.count()
+  }, {})
+  let viaExprs = let(t53 = let(t42 = let(t32 = let(t22 = let(t9 = invoke dataframe.data_quanta.read_text(text), let(t17 = ("ts.function", "", "", 1.0, fn(this5, args5) start(line: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
+    let t10 = if(num.lt(list.len(args5), 1.0), invoke ts.pad(args5, 1.0), args5)
+    let line = t10[0.0]
+    do text.len(line)
+    let t13 = invoke ts.string.toLowerCase(line, [])
+    do text.len(t13)
+    let t15 = ["\\W+", ""]
+    return invoke ts.string.split(t13, [invoke ts.regexp.create(absent, t15)])
+  }, {}), let(t18 = {output: "utf8"}, let(t19 = t17[4.0], let(t21 = fn(arg1) start(value: Any) -> Any bare direct {
+    return let(t20 = t19, apply t20(absent, [arg1]))
+  }, invoke dataframe.data_quanta.flat_map(t9, t21, t18)))))), let(t31 = let(t26 = let(t23 = col, let(t24 = ["value"], let(t25 = t23[4.0], apply t25(absent, t24)))), let(t30 = let(t27 = lit, let(t28 = [""], let(t29 = t27[4.0], apply t29(absent, t28)))), invoke dataframe.expr.neq(t26, t30))), invoke dataframe.data_quanta.filter(t22, t31))), let(t40 = [let(t33 = col, let(t34 = ["value"], let(t35 = t33[4.0], apply t35(absent, t34))))], let(t41 = [let(t39 = let(t36 = count, let(t37 = [], let(t38 = t36[4.0], apply t38(absent, t37)))), invoke dataframe.expr.alias(t39, "n"))], invoke dataframe.data_quanta.reduce_by_key(t32, t40, t41)))), let(t51 = let(t46 = let(t43 = col, let(t44 = ["n"], let(t45 = t43[4.0], apply t45(absent, t44)))), let(t47 = {ascending: false}, invoke dataframe.expr.sort(t46, t47))), let(t52 = let(t48 = col, let(t49 = ["value"], let(t50 = t48[4.0], apply t50(absent, t49)))), invoke dataframe.data_quanta.sort(t42, [t51, t52])))), invoke dataframe.data_quanta.limit(t53, 5))
+  let lines = []
+  for t55 in await(invoke dataframe.data_quanta.collect_rows(viaExprs)) via ts.await via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
+    let t56 = invoke ts.array.iterator(t55)
+    let t57 = ts.callable(ts.get(t56, "next"))
+    let t58 = false
+    let t59 = absent
+    if t58 {} else {
+      let t60 = apply t57(t56, [])
+      set t58 = ts.to_boolean(ts.get(t60, "done"))
+      if t58 {} else {
+        set t59 = ts.get(t60, "value")
+      }
+    }
+    let word = t59
+    let t61 = absent
+    if t58 {} else {
+      let t62 = apply t57(t56, [])
+      set t58 = ts.to_boolean(ts.get(t62, "done"))
+      if t58 {} else {
+        set t61 = ts.get(t62, "value")
+      }
+    }
+    let n = t61
+    let t63 = same(kind(lines), "list")
+    if t63 {} else {
+      if invoke ts.array.is(lines) {} else {
+        throw error.new("type_error", "expected an array", null)
+      }
+    }
+    let t64 = absent
+    if t63 {
+      set lines[list.len(lines)] = text.join([ts.to_string(word), " ", ts.to_string(n)], "")
+      set t64 = absent
+    } else {
+      let t66 = invoke ts.member.push(lines)
+      set t64 = let(t67 = t66, let(t68 = [text.join([ts.to_string(word), " ", ts.to_string(n)], "")], let(t69 = ts.callable(t67), apply t69(lines, t68))))
+    }
+  }
+  let t70 = same(kind(lines), "list")
+  if t70 {} else {
+    if invoke ts.array.is(lines) {} else {
+      throw error.new("type_error", "expected an array", null)
+    }
+  }
+  let t71 = absent
+  if t70 {
+    set lines[list.len(lines)] = ts.to_string(await(invoke dataframe.data_quanta.explain(viaExprs)) via ts.await)
+    set t71 = absent
+  } else {
+    let t73 = invoke ts.member.push(lines)
+    set t71 = let(t74 = t73, let(t75 = [ts.to_string(await(invoke dataframe.data_quanta.explain(viaExprs)) via ts.await)], let(t76 = ts.callable(t74), apply t76(lines, t75))))
+  }
+  return lines via ts.promise.adopt
+}
+
+main {
+  let wordcount = &wordcount
+}

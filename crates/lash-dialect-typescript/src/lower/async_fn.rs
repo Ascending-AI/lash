@@ -126,7 +126,16 @@ impl Lowerer<'_> {
             }
             return Ok(result);
         }
-        let value = self.lower_expr(value)?;
+        let value = match value {
+            // An awaited call: an asynchronous package member gives its
+            // result where it stands.
+            ast::Expr::Call {
+                callee,
+                args,
+                span: call_span,
+            } => self.expression_block(|this| this.call(callee, args, *call_span, false, true))?,
+            value => self.lower_expr(value)?,
+        };
         let policy = self.function("ts.await")?;
         let awaited = self.action(ActKind::Await(policy), vec![value.expr()], Ty::Unknown);
         self.await_process(awaited, span)

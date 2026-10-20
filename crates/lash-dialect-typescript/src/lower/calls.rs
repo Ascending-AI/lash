@@ -829,6 +829,9 @@ impl Lowerer<'_> {
         {
             return result;
         }
+        if let Some(read) = self.read_package(whole, Some(span)) {
+            return read;
+        }
         let object = self.lower_expr(object)?;
         let (buf, key) = self.aside(|this| this.lower_key(property))?;
         let object = if buf.is_empty() {
@@ -837,6 +840,19 @@ impl Lowerer<'_> {
             self.pin(object)
         };
         self.append(buf);
+        if let Key::Static(name) = &key {
+            if let Ty::Package(brand) = &object.ty {
+                let brand = brand.clone();
+                return self.read_typed_member(&object, &brand, name);
+            }
+            if matches!(object.ty, Ty::Unknown | Ty::Union(_)) {
+                let targets = self.selectable(name, false);
+                if !targets.is_empty() || self.seals() {
+                    let object = self.pin(object);
+                    return self.select_read(&object, name, &targets);
+                }
+            }
+        }
         self.get_member(&object, &key)
     }
 
@@ -863,7 +879,7 @@ impl Lowerer<'_> {
     /// be a function's token is made callable by `ts.callable`; a function
     /// declaration nothing assigns to always holds its token, whose closure
     /// is called directly.
-    fn apply(
+    pub(super) fn apply(
         &mut self,
         function: Operand,
         this: Operand,
@@ -918,15 +934,19 @@ impl Lowerer<'_> {
         span: SourceSpan,
         discard_result: bool,
     ) -> Lowering<Operand> {
-        self.expression_block(|this| this.call(callee, args, span, discard_result))
+        self.expression_block(|this| this.call(callee, args, span, discard_result, false))
     }
 
-    fn call(
+    /// A call. `awaited` is whether an `await` stands right before it: an
+    /// asynchronous package member then gives its result rather than a
+    /// promise.
+    pub(super) fn call(
         &mut self,
         callee: &ast::Expr,
         args: &[ast::CallArg],
         span: SourceSpan,
         discard_result: bool,
+        awaited: bool,
     ) -> Lowering<Operand> {
         if let ast::Expr::Member {
             object,
@@ -955,6 +975,9 @@ impl Lowerer<'_> {
         }
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
+        }
+        if let Some(called) = self.call_package(callee, args, awaited) {
+            return called;
         }
         self.operation_refusal(callee, span)?;
         if let Some(refused) = self.reflective_call(callee, args) {
@@ -1074,6 +1097,18 @@ impl Lowerer<'_> {
                     object.ty = ty.clone();
                 }
                 let key = self.lower_key(property)?;
+                if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
+                    let brand = brand.clone();
+                    return self.call_typed_member(&object, &brand, name, args, awaited);
+                }
+                if let Key::Static(name) = &key
+                    && matches!(object.ty, Ty::Unknown | Ty::Union(_))
+                {
+                    let targets = self.selectable(name, true);
+                    if !targets.is_empty() || self.seals() {
+                        return self.select_call(&object, name, &targets, args, awaited);
+                    }
+                }
                 if let Key::Static(name) = &key
                     && let Some(called) =
                         self.call_declared(&object, name, args, discard_result, proven.is_some())?
@@ -1378,6 +1413,21 @@ impl Lowerer<'_> {
         constructor: &str,
         args: &[ast::CallArg],
     ) -> Lowering<Operand> {
+        if let Some((root, _)) = constructor.split_once('.')
+            && !self.is_bound(root)
+            && self.namespaces.is_root(root)
+        {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::NewUnsupported,
+                format!(
+                    "`new {constructor}` is not in the TypeScript dialect: a package value is built by its type's static"
+                ),
+                format!(
+                    "call the static the prompt lists under `{constructor}`, such as `await {constructor}.create()`"
+                ),
+                self.span,
+            ));
+        }
         let function = (!self.is_bound(constructor))
             .then(|| self.table.constructors.get(constructor).copied())
             .flatten();

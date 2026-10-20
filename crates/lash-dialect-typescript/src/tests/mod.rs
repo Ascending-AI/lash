@@ -23,6 +23,7 @@ mod module;
 mod naming;
 mod operands;
 mod package;
+mod package_members;
 mod pages;
 mod positional;
 mod printer;

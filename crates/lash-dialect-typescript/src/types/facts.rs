@@ -68,6 +68,10 @@ enum Source<'a> {
     Compound(BinaryOp, &'a Expr),
     /// One element of an iterated value.
     ElementOf(&'a Expr),
+    /// The property `.1` of the namespace `.0` stands for, bound by name
+    /// (`const { col } = dataframe`): a package member's function value
+    /// when `.0` is a package path.
+    PackageMember(&'a Expr, &'a str),
 }
 
 /// One binding, with every declaration and assignment of it.
@@ -136,6 +140,8 @@ pub(crate) struct Facts {
     direct_calls: HashSet<String>,
     /// Declared results of tools whose root no source or session binding shadows.
     effect_results: BTreeMap<String, Ty>,
+    /// What the packages in view declare their members give.
+    packages: super::packages::Packages,
 }
 
 impl Facts {
@@ -146,13 +152,21 @@ impl Facts {
         session: &BTreeSet<Name>,
         terminal: &BTreeSet<String>,
         effects: &BTreeMap<String, &Signature>,
+        packages: super::packages::Packages,
     ) -> Self {
         let mut collector = Collector::default();
         collector.scopes.push(HashMap::new());
         collector.declare_vars(&program.statements);
         collector.declare_block(&program.statements);
         collector.statements(&program.statements);
-        let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
+        let mut aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
+        // A package's value type is named by its dotted path, which no
+        // local alias can spell.
+        aliases.extend(
+            packages
+                .types()
+                .map(|(name, ty)| (name.clone(), ty.clone())),
+        );
         for (binding, entry) in collector.bindings.iter().enumerate() {
             if entry.session_scope && session.contains(&Name::new(entry.name.as_str())) {
                 collector.plain.session(binding);
@@ -196,6 +210,7 @@ impl Facts {
                 .collect(),
             narrowable: HashSet::new(),
             aliases,
+            packages,
         };
         let mut settled = false;
         for _ in 0..MAX_ROUNDS {
@@ -320,10 +335,44 @@ impl Facts {
                     binary_result(*op, &self.types[binding], &self.type_of(value))
                 }
                 Source::ElementOf(iterated) => self.type_of(iterated).element(),
+                Source::PackageMember(namespace, name) => effect_path(namespace)
+                    .filter(|path| {
+                        path.split('.').next().is_some_and(|root| {
+                            self.packages.is_root(root) && !self.named.contains(root)
+                        })
+                    })
+                    .and_then(|path| self.packages.call(&format!("{path}.{name}")))
+                    .map_or(Ty::Unknown, |gives| {
+                        Ty::Function(Box::new(gives.called(false)))
+                    }),
             };
             ty = ty.join(&part);
         }
         ty
+    }
+
+    /// What a call of `callee` gives when it calls a package member: a
+    /// function or static by its path, whose root the source does not bind,
+    /// or a method of a value whose package type is known.
+    fn package_call(&self, callee: &Expr) -> Option<&super::packages::Gives> {
+        if let Expr::Member {
+            object,
+            property: MemberProperty::Field(name),
+            ..
+        } = callee
+            && let Ty::Package(brand) = self.type_of(object)
+        {
+            return match self.packages.member(&brand, name) {
+                Some((super::packages::MemberKind::Method, gives)) => Some(gives),
+                _ => None,
+            };
+        }
+        let path = effect_path(callee)?;
+        let root = path.split('.').next()?;
+        if !self.packages.is_root(root) || self.named.contains(root) {
+            return None;
+        }
+        self.packages.call(&path)
     }
 
     /// The type of an expression's value, read off its shape. It agrees
@@ -374,6 +423,9 @@ impl Facts {
             // is no function token.
             Expr::Function(function) if function.is_async && function.is_arrow => Ty::Unknown,
             Expr::Function(function) => self.function(function.return_ty.as_ref()),
+            Expr::Call { callee, .. } if self.package_call(callee).is_some() => self
+                .package_call(callee)
+                .map_or(Ty::Unknown, |gives| gives.called(false)),
             Expr::Call { callee, .. } => match callee.as_ref() {
                 Expr::Member {
                     object,
@@ -400,6 +452,14 @@ impl Facts {
                 object, property, ..
             } => {
                 let object = self.type_of(object);
+                if let (Ty::Package(brand), MemberProperty::Field(name)) = (&object, property) {
+                    return match self.packages.member(brand, name) {
+                        Some((super::packages::MemberKind::Property, gives)) => {
+                            gives.result.clone()
+                        }
+                        _ => Ty::Unknown,
+                    };
+                }
                 match property {
                     MemberProperty::Field(name) => object.property(name),
                     MemberProperty::Index(index) => match (&object, self.type_of(index)) {
@@ -412,6 +472,9 @@ impl Facts {
             Expr::Array(_) => Ty::Array,
             Expr::Object(_) => Ty::Object,
             Expr::Await { value, .. } => match value.as_ref() {
+                Expr::Call { callee, .. } if self.package_call(callee).is_some() => self
+                    .package_call(callee)
+                    .map_or(Ty::Unknown, |gives| gives.called(true)),
                 Expr::Call { callee, .. } => effect_path(callee)
                     .and_then(|path| self.effect_results.get(&path).cloned())
                     .unwrap_or(Ty::Unknown),
@@ -624,6 +687,35 @@ impl<'a> Collector<'a> {
 
     /// A pattern that is one name takes `source`; any other is opaque.
     fn bound(&mut self, pattern: &'a Pattern, role: Role, source: Source<'a>) {
+        match (pattern, &source) {
+            (
+                Pattern::Object {
+                    properties,
+                    rest: None,
+                },
+                Source::Value(namespace),
+            ) if effect_path(namespace).is_some() => {
+                // Each name bound from a static path, which may be a
+                // package's namespace.
+                self.plain.escape(namespace);
+                for property in properties {
+                    match (&property.key, &property.value) {
+                        (PropertyKey::Static(key), Pattern::Ident(name, None)) => {
+                            self.name(name, role, Source::PackageMember(namespace, key));
+                        }
+                        (key, value) => {
+                            if let PropertyKey::Computed(key) = key {
+                                self.plain.escape(key);
+                                self.expr(key);
+                            }
+                            self.pattern(value, role);
+                        }
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
         match pattern {
             Pattern::Ident(name, None) => self.name(name, role, source),
             _ => {

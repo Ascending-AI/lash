@@ -31,10 +31,12 @@ use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
 mod facts;
 mod narrow;
+mod packages;
 mod plain;
 
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
+pub(crate) use packages::{Gives, Packages};
 pub(crate) use plain::PlainRecord;
 
 /// The array methods whose result is a new kernel list whatever array they
@@ -73,6 +75,11 @@ pub(crate) enum Ty {
     Function(Box<Ty>),
     /// One of several types, none of them unknown and none a union.
     Union(Vec<Ty>),
+    /// A package value of this brand, as a package member's declared
+    /// result or an annotation names it: a static receiver, whose members
+    /// are its type's. Boxed: every operand holds a type, and lowering
+    /// recurses through frames full of operands.
+    Package(Box<lash_kernel_dialect::dispatch::Brand>),
     /// No value yet: where the inference of a binding's type starts. It is
     /// never the type of an operand.
     Never,
@@ -148,6 +155,9 @@ impl Ty {
     /// (`K-EFF-005`). An `Int` is a number that may be an integer; a bare
     /// number is a float, by the policy of every TypeScript document.
     pub(crate) fn decoded(stated: &Type) -> Self {
+        if let Some(brand) = lash_kernel_dialect::dispatch::Brand::of_type(stated) {
+            return Self::Package(Box::new(brand));
+        }
         match stated {
             Type::Null => Self::Null,
             Type::Absent => Self::Undefined,

@@ -70,6 +70,13 @@ pub enum DiagnosticCode {
     OperationShadowed,
     /// An operation written in another dialect's spelling.
     OperationSpelling,
+    /// A package, a nested namespace, a value type or an error used as a
+    /// value: none is one.
+    PackageNamespaceValue,
+    /// An operation read as a value rather than called.
+    OperationValue,
+    /// A member a package or a package value type does not declare.
+    PackageMemberUnknown,
     /// Printed helper identities and declarations require their base document.
     PrintedSourceNeedsBase,
     AssignConst,
@@ -158,6 +165,9 @@ impl DiagnosticCode {
         Self::UnknownBinding,
         Self::OperationShadowed,
         Self::OperationSpelling,
+        Self::PackageNamespaceValue,
+        Self::OperationValue,
+        Self::PackageMemberUnknown,
         Self::PrintedSourceNeedsBase,
         Self::AssignConst,
         Self::SavedFunctionUnusable,
@@ -235,7 +245,7 @@ impl DiagnosticCode {
             }
             Self::JsxUnsupported => "build strings or plain objects instead of JSX elements",
             Self::ImportExportUnsupported => {
-                "a cell is not a module: reference the bound variables and host tools already in scope"
+                "packages are already in scope by name: write `dataframe.col(...)`, or bind a short name with `const { col } = dataframe`"
             }
             Self::UsingUnsupported => "release the resource explicitly in a `finally` block",
             Self::NewUnsupported => {
@@ -307,6 +317,12 @@ impl DiagnosticCode {
                 "use `typescript::read(source, base)` with the document the source was printed from"
             }
             Self::ReservedIdentifier => "choose a different name",
+            Self::PackageNamespaceValue => {
+                "write the member's full path, `dataframe.col(...)`, or bind a code member by name: `const { col } = dataframe`"
+            }
+            Self::OperationValue => {
+                "call the operation where its result is needed: `await inbox.sendItem({ ... })`"
+            }
             Self::ShadowsBuiltin => {
                 "rename the binding and its references, preserving the built-in name"
             }
@@ -393,6 +409,8 @@ impl DiagnosticCode {
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
             | Self::ShadowsBuiltin
+            | Self::PackageNamespaceValue
+            | Self::OperationValue
  => CodeClassification::AlwaysRefusal,
 
             // Both families, decided per site.
@@ -411,6 +429,7 @@ impl DiagnosticCode {
             | Self::UnknownBinding
             | Self::OperationShadowed
             | Self::OperationSpelling
+            | Self::PackageMemberUnknown
             | Self::AssignConst
             | Self::AwaitRequired
             | Self::ReturnOutsideFunction
@@ -488,6 +507,9 @@ impl DiagnosticCode {
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::OperationShadowed => "TS_OPERATION_SHADOWED",
             Self::OperationSpelling => "TS_OPERATION_SPELLING",
+            Self::PackageNamespaceValue => "TS_PACKAGE_NAMESPACE_VALUE",
+            Self::OperationValue => "TS_OPERATION_VALUE",
+            Self::PackageMemberUnknown => "TS_PACKAGE_MEMBER_UNKNOWN",
             Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
@@ -1007,6 +1029,8 @@ mod tests {
             (SourceTooLarge, "const invoice = 1;"),
             (ReservedIdentifier, "const invoice = 1; invoice;"),
             (ShadowsBuiltin, "const URL_ = 1; URL_;"),
+            (PackageNamespaceValue, "await host.echo(1);"),
+            (OperationValue, "await host.echo(1);"),
         ];
         for code in DiagnosticCode::ALL {
             if code.accepted_idiom().is_some() {

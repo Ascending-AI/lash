@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_helper_labels::MemberDisplay;
-use lash_kernel_dialect::{Export, MemberPath, OperationExport, PackagePath, QualifiedOperation};
+use lash_kernel_dialect::{
+    Export, ExportView, MemberPath, OperationExport, PackagePath, QualifiedOperation, Segment,
+};
 use lash_kernel_doc::{
     FunctionId, FunctionName, FunctionRegistry, NativeFunction, PackageSetDigest,
 };
@@ -275,6 +277,34 @@ impl<'a> PackageView<'a> {
     pub fn title<'b>(&'b self, function: &FunctionId, name: &'b FunctionName) -> &'b str {
         self.display_for_function(function)
             .map_or_else(|| name.as_str(), |display| display.title.as_str())
+    }
+}
+
+/// The set's host packages and their code exports, as namespace
+/// composition and member dispatch read them. lash's own packages export
+/// nothing and take no namespace: their roots are reserved instead.
+impl ExportView for PackageView<'_> {
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+        self.package(path)
+            .filter(|package| package.origin() == Origin::Host)
+            .map(Package::exports)
+    }
+
+    fn paths(&self) -> Vec<PackagePath> {
+        self.packages()
+            .filter(|package| package.origin() == Origin::Host)
+            .map(|package| package.path().clone())
+            .collect()
+    }
+
+    fn reserves(&self, root: &str) -> Option<String> {
+        let path = PackagePath::parse(root).ok()?;
+        reserved(self.packages())
+            .into_iter()
+            .find(|(reserved, _)| reserved.meets(&path))
+            .map(|(reserved, package)| {
+                format!("the root `{reserved}` of lash's package `{package}`")
+            })
     }
 }
 

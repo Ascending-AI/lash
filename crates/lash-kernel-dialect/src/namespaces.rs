@@ -222,6 +222,14 @@ pub struct Namespaces {
     nodes: BTreeSet<Vec<Segment>>,
 }
 
+/// The spelling kind an export is written in.
+fn spelled_as(export: &Export) -> SpellKind {
+    match export {
+        Export::Type(_) | Export::Error => SpellKind::TypeName,
+        Export::Operation(_) | Export::Function(_) => SpellKind::Member,
+    }
+}
+
 fn dotted<'a>(segments: impl IntoIterator<Item = &'a Segment>) -> String {
     segments
         .into_iter()
@@ -386,20 +394,20 @@ impl Namespaces {
     /// What `written`, a dotted path in `spelling`, names.
     #[must_use]
     pub fn resolve(&self, written: &[&str], spelling: Spelling) -> Resolution<'_> {
-        let Some(package) = written
-            .iter()
-            .map(|segment| spelling.unspell(SpellKind::PathSegment, segment))
-            .collect::<Option<Vec<_>>>()
-        else {
-            return self
-                .resolve_operation(written, spelling)
-                .unwrap_or(Resolution::Unknown);
-        };
         if let Some(resolved) = self.resolve_operation(written, spelling) {
             return resolved;
         }
+        // Only the package path is spelled as path segments: an export
+        // or a member after it is spelled by its own kind (`DataQuanta`).
+        let segments = written
+            .iter()
+            .map(|segment| spelling.unspell(SpellKind::PathSegment, segment))
+            .collect::<Vec<_>>();
         for end in 1..written.len() {
-            let Ok(path) = PackagePath::try_from(package[..end].to_vec()) else {
+            let Some(package) = segments[..end].iter().cloned().collect::<Option<Vec<_>>>() else {
+                break;
+            };
+            let Ok(path) = PackagePath::try_from(package) else {
                 continue;
             };
             let Some(exports) = self.code.get(&path) else {
@@ -410,10 +418,13 @@ impl Namespaces {
                 .get_key_value(&path)
                 .unwrap_or_else(|| unreachable!("the path was just found"));
             let rest = &written[end..];
+            // An export is written in its own kind's spelling only: a
+            // function as a member, a type or an error as a type name.
             let found = [SpellKind::Member, SpellKind::TypeName]
                 .into_iter()
-                .filter_map(|kind| spelling.unspell(kind, rest[0]))
-                .find_map(|segment| exports.get_key_value(&segment));
+                .filter_map(|kind| Some((kind, spelling.unspell(kind, rest[0])?)))
+                .filter_map(|(kind, segment)| Some((kind, exports.get_key_value(&segment)?)))
+                .find_map(|(kind, found)| (spelled_as(found.1) == kind).then_some(found));
             let Some((segment, export)) = found else {
                 continue;
             };
@@ -437,10 +448,10 @@ impl Namespaces {
                 member,
             };
         }
-        if self.nodes.contains(&package) {
-            return Resolution::Namespace;
+        match segments.into_iter().collect::<Option<Vec<_>>>() {
+            Some(package) if self.nodes.contains(&package) => Resolution::Namespace,
+            _ => Resolution::Unknown,
         }
-        Resolution::Unknown
     }
 
     fn resolve_operation(&self, written: &[&str], spelling: Spelling) -> Option<Resolution<'_>> {
@@ -494,5 +505,17 @@ impl Namespaces {
     #[must_use]
     pub fn is_root(&self, root: &str) -> bool {
         Segment::new(root).is_ok_and(|root| self.nodes.contains(std::slice::from_ref(&root)))
+    }
+}
+
+/// The code packages the tree is composed from, as member dispatch reads
+/// them: a front end selects a value's member among these.
+impl ExportView for Namespaces {
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+        self.code.get(path)
+    }
+
+    fn paths(&self) -> Vec<PackagePath> {
+        self.code.keys().cloned().collect()
     }
 }
