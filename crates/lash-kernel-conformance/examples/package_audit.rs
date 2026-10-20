@@ -5,6 +5,9 @@
 #[path = "../src/package/fixtures.rs"]
 mod fixtures;
 
+#[path = "../src/package/loop_bounds.rs"]
+mod loop_bounds;
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -25,9 +28,19 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    match lash_kernel_conformance::package::audit_metering(&view, &Default::default()) {
+    let bounds = match loop_bounds::reviewed_bounds() {
+        Ok(bounds) => bounds,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match lash_kernel_conformance::package::audit_metering(&view, &bounds) {
         Ok(loops) => {
-            println!("CONF-METER: {loops} loops have declared continuation charges");
+            println!(
+                "CONF-METER: {loops} loops have declared continuation charges or reviewed size bounds ({} definitions)",
+                bounds.len()
+            );
             ExitCode::SUCCESS
         }
         Err(error) => {
