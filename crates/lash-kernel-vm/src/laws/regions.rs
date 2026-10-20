@@ -4,13 +4,16 @@
 //! summary, of the body's tree and of a `for`'s head; and it admits an
 //! island plan only as its stream's charge regions and occurrences state it.
 //! A closure an island calls keeps the code it found by its site, as the
-//! reference's call keeps it (FIG-6844).
+//! reference's call keeps it (FIG-6844). A loop region's guest calls
+//! resolve their callees once while nothing is freed, and again after a
+//! collection (FIG-6982).
 
-use super::embedder::{Embedder, int, result, run};
+use super::embedder::{Embedder, Setup, int, result, run};
 use crate::compile::expr::{self, Expr};
 use crate::compile::islands::{self, Kind};
 use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
 use crate::costs::Costs;
+use crate::paged::Machine as _;
 
 const LOOP: &str = "fn count(n) { let i = 0 let s = 0 \
                     while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\n\
@@ -302,4 +305,65 @@ fn a_closure_an_island_calls_finds_its_code_by_its_site_once() {
     // every later call, from the region and from inside the island, reads
     // the code the closure kept.
     assert_eq!(projected() - before, 2);
+}
+
+/// `COLLECTED` with each pass leaving `garbage`: a statement of the loop's
+/// body, before its guest call.
+fn collected(garbage: &str) -> String {
+    format!(
+        "fn count(n) {{ let echo = fn(v) {{ return v }} \
+         let tag = fn(v) {{ do apply echo(v) return 1 }} \
+         let i = 0 let s = 0 let t = [0] \
+         while num.lt(i, n) {{ {garbage} set s = num.add(s, apply tag(i)) set i = num.add(i, 1) }} \
+         return s }}\n\
+         main {{ let r = call count(3000) finish r }}"
+    )
+}
+
+/// The closures islands resolved, the scopes regions' guest calls opened,
+/// and the callees those calls resolved, on this thread so far.
+fn resolutions() -> [u64; 3] {
+    use crate::machine::islands::{GUESTS, RESOLVED, SCOPES};
+    [&RESOLVED, &SCOPES, &GUESTS].map(|count| count.with(std::cell::Cell::get))
+}
+
+/// What `run` resolved and opened while it ran.
+fn counted<T>(run: impl FnOnce() -> T) -> (T, [u64; 3]) {
+    let before = resolutions();
+    let ran = run();
+    let after = resolutions();
+    (ran, [0, 1, 2].map(|at| after[at] - before[at]))
+}
+
+#[test]
+fn a_collection_between_guest_calls_resolves_their_callees_again() {
+    // Nothing freed: the region's 3000 guest calls of `tag`, and its
+    // island's calls of `echo`, share one scope, each closure resolved
+    // once in it.
+    let ((end, _), [resolved, scopes, guests]) = counted(|| run(&collected("")));
+    assert_eq!(result(end), int(3000));
+    assert_eq!((resolved, scopes, guests), (2, 1, 1));
+    // Each pass leaves a list for a release to free: a release comes due
+    // between two guest calls and ends the batch at that statement
+    // boundary. The next batch's first guest call opens a scope afresh,
+    // and resolves `tag` again from the arena as the release left it;
+    // later calls in the batch find it. The run ends, and charges, as
+    // the reference's does.
+    let text = collected("set t = [i]");
+    let ((end, on), [_, scopes, guests]) = counted(|| run(&text));
+    assert!(scopes > 1, "releases end the batch between guest calls");
+    assert_eq!(
+        guests, scopes,
+        "each scope resolves the guest call's callee once"
+    );
+    let mut off = Embedder::with(
+        &text,
+        Setup {
+            layout: crate::compile::Layout(0).without_regions(),
+            ..Default::default()
+        },
+    );
+    let reference = off.run_to_end(&[]);
+    assert_eq!(on.machine.meters().charged, off.machine.meters().charged);
+    assert_eq!(result(end), result(reference));
 }

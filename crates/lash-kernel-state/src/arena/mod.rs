@@ -229,6 +229,9 @@ pub struct Arena {
     tokens: u64,
     /// Mutable objects the run created.
     allocations: u64,
+    /// Objects freed so far: a handle the machine kept outside the arena
+    /// still names what it named while this has not moved.
+    freed: u64,
     /// Values held by resident bodies, each body one more, long text and
     /// bytes one a [`VALUE_BYTES`]: what triggers a collection, and what
     /// the capacity meter counts (FIG-6791).
@@ -1191,6 +1194,13 @@ impl Arena {
         Ok(())
     }
 
+    /// How many objects the arena has freed: while it stays put, no handle
+    /// was freed, and none was given to another object.
+    #[inline(always)]
+    pub fn freed(&self) -> u64 {
+        self.freed
+    }
+
     /// Whether a release is due: enough objects wait on the zero-count
     /// list.
     #[inline]
@@ -1287,6 +1297,7 @@ impl Arena {
             }
         }
         self.objects.release(handle);
+        self.freed += 1;
     }
 
     /// Whether a cycle collection is due: resident values grew past the

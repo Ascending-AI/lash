@@ -48,6 +48,9 @@ enum Caller {
 enum Target<'c> {
     Declared(CodeId),
     Closure(ArenaHandle),
+    /// The closure a region's guest call of this occurrence calls,
+    /// resolved through the call's cache.
+    Guest(ArenaHandle, usize),
     /// The island plan of a closure's code, with its cells as the call
     /// read them.
     Code(u32, &'c [ArenaHandle]),
@@ -284,8 +287,10 @@ impl KernelMachine {
             Target::Code(plan, _) => Some(plan),
             // A closure's first call enters its island too: it finds its
             // code as the reference's call does, and keeps it.
-            Target::Closure(handle) => found_code(&mut self.arena.borrow_mut(), exe, handle)
-                .and_then(|code| exe.island_of(code)),
+            Target::Closure(handle) | Target::Guest(handle, _) => {
+                found_code(&mut self.arena.borrow_mut(), exe, handle)
+                    .and_then(|code| exe.island_of(code))
+            }
         };
         if plan.is_none() || !counted {
             return Ok(None);
@@ -406,6 +411,7 @@ impl KernelMachine {
             base: gate.base,
             call_depth: gate.call_depth,
         };
+        self.islands.open();
         let ran = enter(
             ground,
             &mut self.islands,
@@ -612,8 +618,9 @@ struct Ground<'a> {
     call_depth: u64,
 }
 
-/// Runs the call of `target` on `values` as an island in `scratch`,
-/// counting `occurrence` in `counters` when given, from the charge
+/// Runs the call of `target` on `values` as an island in `scratch`, in
+/// the resolution scope it holds open, counting `occurrence` in
+/// `counters` when given, from the charge
 /// `charged`, which it advances: first by the fixed events `before` its
 /// caller's statement charges ahead of the call, once the callee is known
 /// to have an island that takes these arguments. `None`: the island does
@@ -629,8 +636,6 @@ fn enter(
     before: &[Weight],
 ) -> Result<Option<Ran>, Halt> {
     let exe = ground.exe;
-    scratch.epoch = scratch.epoch.wrapping_add(1);
-    scratch.captured.clear();
     scratch.sessions.clear();
     let mut island = Island {
         exe,
@@ -664,7 +669,10 @@ fn enter(
     };
     let target = match target {
         Target::Declared(code) => island.declared(code),
-        Target::Closure(handle) => island.resolve_cold(None, handle),
+        Target::Closure(handle) => island
+            .resolve_cold(handle)
+            .and_then(|cached| island.callee(cached.plan, cached.captured)),
+        Target::Guest(handle, occurrence) => island.guest(occurrence, handle),
         Target::Code(plan, cells) => island.with_cells(plan, cells),
     };
     let Some(target) = target.filter(|target| {
@@ -727,7 +735,22 @@ pub(in crate::machine) struct RegionGuests<'a> {
     /// The frames an island that stopped left, innermost first.
     pub(in crate::machine) levels: Vec<Level>,
     pub(in crate::machine) halt: Option<Halt>,
+    /// The resolution scope the guest calls share, once one entered:
+    /// none before the first.
+    pub(in crate::machine) scope: Option<Scope>,
 }
+
+/// A resolution scope a region's guest calls share: the scope, and the
+/// objects the arena had freed when it opened.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::machine) struct Scope {
+    epoch: u32,
+    freed: u64,
+}
+
+/// The most captured values a region's shared scope keeps: past this, as
+/// when a call meets a new closure each time, its next call opens another.
+const SCOPE_CAPTURED: usize = 1 << 10;
 
 impl Guests for RegionGuests<'_> {
     fn call(
@@ -758,7 +781,7 @@ impl Guests for RegionGuests<'_> {
         }
         let target = match (call.callee, callee) {
             (Some(code), _) => Target::Declared(code),
-            (None, Some(Value::Closure(handle))) => Target::Closure(handle),
+            (None, Some(Value::Closure(handle))) => Target::Guest(handle, call.occurrence),
             _ => return None,
         };
         let counters = cx.counters.as_deref_mut()?;
@@ -767,15 +790,17 @@ impl Guests for RegionGuests<'_> {
         }
         // The island reads the bindings the region wrote as the region
         // left them: its writes so far are published first, in order.
-        let mut written: Vec<(u64, usize)> = cx
-            .sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, slot)| slot.written != 0)
-            .map(|(at, slot)| (slot.written, at))
-            .collect();
+        let written = &mut self.scratch.written;
+        written.clear();
+        written.extend(
+            cx.sessions
+                .iter()
+                .enumerate()
+                .filter(|(_, slot)| slot.written != 0)
+                .map(|(at, slot)| (slot.written, at)),
+        );
         written.sort_unstable();
-        for (_, at) in written {
+        for &(_, at) in &*written {
             let slot = &mut cx.sessions[at];
             if !slot
                 .value
@@ -787,6 +812,26 @@ impl Guests for RegionGuests<'_> {
                 return None;
             }
             slot.written = 0;
+        }
+        // The batch's guest calls share one resolution scope, as nothing
+        // frees a closure or writes a cell while a region runs: a
+        // collection ends the batch first. A scope is opened afresh when
+        // the arena freed an object or another entry opened one since,
+        // or its captured values grew past what it keeps.
+        let freed = cx.arena.freed();
+        if self.scope
+            != Some(Scope {
+                epoch: self.scratch.epoch,
+                freed,
+            })
+            || self.scratch.captured.len() > SCOPE_CAPTURED
+        {
+            #[cfg(test)]
+            super::SCOPES.with(|scopes| scopes.set(scopes.get() + 1));
+            self.scope = Some(Scope {
+                epoch: self.scratch.open(),
+                freed,
+            });
         }
         let ground = Ground {
             exe: self.exe,

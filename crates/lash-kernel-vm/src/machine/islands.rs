@@ -153,7 +153,8 @@ struct Callee<'e> {
     captured: u32,
 }
 
-/// A closure call site's cached callee, for one island entry.
+/// A closure call's cached callee, for one resolution scope
+/// ([`Scratch::open`]).
 #[derive(Clone, Copy)]
 struct Cached {
     epoch: u32,
@@ -174,13 +175,20 @@ pub(super) struct Scratch {
     /// Islands are held off until the step ends: a statement an island
     /// exited in runs on through the reference.
     held: bool,
+    /// The resolution scope open: what its entries' callees resolved to.
     epoch: u32,
+    /// The callee each island call site resolved, by its site.
     cached: Vec<Option<Cached>>,
+    /// The callee each region guest call resolved, by its occurrence.
+    guests: Vec<Option<Cached>>,
     /// The captured values and their cells, of each cached callee.
     captured: Vec<(Value, ArenaHandle)>,
     /// Each session binding read, by its name in the stream, at its
     /// resident value: nothing writes a binding while an island runs.
     sessions: Vec<(u32, Value)>,
+    /// The session bindings a region wrote before a guest call, by when
+    /// it wrote each, as they publish: reused from call to call.
+    written: Vec<(u64, usize)>,
     exit: Exit,
     /// The running slice's host observes no sites: callbacks a helper's
     /// plan applies may run as islands.
@@ -191,6 +199,19 @@ pub(super) struct Scratch {
 }
 
 impl Scratch {
+    /// Opens a resolution scope: no callee resolved before is found in
+    /// it, and the captured values it reads start afresh. Its entries
+    /// share what they resolve while no closure they resolved can be
+    /// freed and no cell they read written: an entry the machine makes
+    /// opens its own, and a region's guest calls share one while the
+    /// arena frees nothing (FIG-6982).
+    #[inline(always)]
+    fn open(&mut self) -> u32 {
+        self.epoch = self.epoch.wrapping_add(1);
+        self.captured.clear();
+        self.epoch
+    }
+
     /// Whether a callback's island left a statement to run on.
     #[inline(always)]
     pub(super) fn runs_on(&self) -> bool {
@@ -856,19 +877,45 @@ impl<'a> Island<'a> {
         let Value::Closure(handle) = callee else {
             return None;
         };
-        if let Some(Some(cached)) = self.scratch.cached.get(site as usize)
-            && cached.epoch == self.scratch.epoch
-            && cached.handle == handle
-        {
-            return self.callee(cached.plan, cached.captured);
-        }
-        self.resolve_cold(Some(site), handle)
+        let cached = match hit(
+            &self.scratch.cached,
+            site as usize,
+            self.scratch.epoch,
+            handle,
+        ) {
+            Some(cached) => cached,
+            None => {
+                let cached = self.resolve_cold(handle)?;
+                keep(&mut self.scratch.cached, site as usize, cached);
+                cached
+            }
+        };
+        self.callee(cached.plan, cached.captured)
     }
 
-    /// The island of the closure `handle`, cached for call site `site`
-    /// when one is given.
+    /// The island of the closure `handle` a region's guest call of
+    /// occurrence `occurrence` calls, through the call's cache.
+    #[inline(always)]
+    fn guest(&mut self, occurrence: usize, handle: ArenaHandle) -> Option<Callee<'a>> {
+        let cached = match hit(&self.scratch.guests, occurrence, self.scratch.epoch, handle) {
+            Some(cached) => cached,
+            None => {
+                #[cfg(test)]
+                GUESTS.with(|guests| guests.set(guests.get() + 1));
+                let cached = self.resolve_cold(handle)?;
+                keep(&mut self.scratch.guests, occurrence, cached);
+                cached
+            }
+        };
+        self.callee(cached.plan, cached.captured)
+    }
+
+    /// The island of the closure `handle`, resolved in the open scope:
+    /// its plan, and its captured values read from its cells.
     #[inline(never)]
-    fn resolve_cold(&mut self, site: Option<u32>, handle: ArenaHandle) -> Option<Callee<'a>> {
+    fn resolve_cold(&mut self, handle: ArenaHandle) -> Option<Cached> {
+        #[cfg(test)]
+        RESOLVED.with(|resolved| resolved.set(resolved.get() + 1));
         let plan = self
             .exe
             .island_of(found_code(self.arena, self.exe, handle)?)?;
@@ -880,19 +927,12 @@ impl<'a> Island<'a> {
             plan,
             cells,
         )?;
-        if let Some(site) = site {
-            let at = site as usize;
-            if self.scratch.cached.len() <= at {
-                self.scratch.cached.resize(at + 1, None);
-            }
-            self.scratch.cached[at] = Some(Cached {
-                epoch: self.scratch.epoch,
-                handle,
-                plan,
-                captured,
-            });
-        }
-        self.callee(plan, captured)
+        Some(Cached {
+            epoch: self.scratch.epoch,
+            handle,
+            plan,
+            captured,
+        })
     }
 
     /// The island plan `plan`, closed over the cells `cells`.
@@ -1022,6 +1062,38 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
         .fold(bit(result) << 3, |mask, (index, value)| {
             mask | (bit(value) << index)
         })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many closure callees islands resolved on this thread, rather
+    /// than finding them cached.
+    pub(crate) static RESOLVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// How many resolution scopes regions' guest calls opened on this
+    /// thread.
+    pub(crate) static SCOPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// How many callees regions' guest calls resolved on this thread,
+    /// rather than finding them cached.
+    pub(crate) static GUESTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The callee `cache` holds at `at`, when it was resolved in the scope
+/// `epoch` for the closure `handle`.
+#[inline(always)]
+fn hit(cache: &[Option<Cached>], at: usize, epoch: u32, handle: ArenaHandle) -> Option<Cached> {
+    match cache.get(at) {
+        Some(Some(cached)) if cached.epoch == epoch && cached.handle == handle => Some(*cached),
+        _ => None,
+    }
+}
+
+/// Keeps `cached` in `cache` at `at`.
+#[cold]
+fn keep(cache: &mut Vec<Option<Cached>>, at: usize, cached: Cached) {
+    if cache.len() <= at {
+        cache.resize(at + 1, None);
+    }
+    cache[at] = Some(cached);
 }
 
 /// Reads the cells `cells` of a callee of plan `plan` into the captured

@@ -322,6 +322,7 @@ impl KernelMachine {
             call_depth: u64::from(self.bounds.call_depth),
             levels: Vec::new(),
             halt: None,
+            scope: None,
         };
         let mut arena = self.arena.borrow_mut();
         let ceiling = if memory {
