@@ -36,10 +36,6 @@ crate::statements! {
                  AND (epoch = ?3 OR (epoch IS NULL AND ?3 IS NULL)) AND expires_at_ms > ?4
              RETURNING expires_at_ms";
 
-        /// Lease `?1` on root `?2`, unless it expired by `?3`.
-        lease_live = "SELECT root_ref FROM root_leases
-             WHERE lease_id = ?1 AND root_ref = ?2 AND expires_at_ms > ?3";
-
         /// End lease `?1`; answers the root it held.
         lease_release = "DELETE FROM root_leases WHERE lease_id = ?1 RETURNING root_ref";
 

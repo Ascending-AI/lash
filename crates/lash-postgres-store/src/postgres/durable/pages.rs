@@ -126,8 +126,23 @@ lash_store_sql::statements! {
         /// Actor `?1`'s epoch and state, share-locked: a lease's fence.
         actor_fence = "SELECT epoch, state FROM actors WHERE actor_key = ?1 FOR SHARE";
 
-        /// The bytes and encoding of every blob of `?1`.
-        pages = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::bytea[])";
+        /// Whether lease `?1` on root `?2` is live at `?3`, or at the
+        /// database's clock (`clock_timestamp()`, read once) when `?3` is
+        /// null, as one row with no hash; and only when it is, the hash,
+        /// bytes and encoding of every blob of `?4`. One statement, so one
+        /// snapshot answers the lease and its pages: a release or
+        /// retirement step committed meanwhile is seen whole or not at all.
+        leased_pages = "WITH clock AS MATERIALIZED (
+                 SELECT COALESCE(?3::bigint,
+                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT) AS now_ms),
+             lease AS MATERIALIZED (
+                 SELECT EXISTS (SELECT 1 FROM root_leases, clock
+                     WHERE lease_id = ?1 AND root_ref = ?2 AND expires_at_ms > clock.now_ms)
+                     AS live)
+             SELECT NULL::bytea, NULL::bytea, NULL::smallint, lease.live FROM lease
+             UNION ALL
+             SELECT blobs.hash, blobs.content, blobs.encoding, NULL FROM lease JOIN blobs
+                 ON lease.live AND blobs.hash = ANY(?4::bytea[])";
 
         /// Every stored blob of `?1` with its encoding, key-share locked
         /// in digest order: a candidate's children, held against a peel.
@@ -156,6 +171,15 @@ struct Sql {
     pages: PageStatements,
     postgres: PagePostgresStatements,
 }
+
+/// One row of [`PagePostgresStatements::leased_pages`]: the lease's row
+/// (no hash, its liveness) or a page's hash, bytes and encoding.
+type LeasedPageRow = (
+    Option<crate::keys::Key>,
+    Option<Vec<u8>>,
+    Option<i16>,
+    Option<bool>,
+);
 
 static SQL: LazyLock<Sql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
@@ -770,53 +794,60 @@ impl PageStore for PostgresDurableStore {
         pages: &[NodeId],
     ) -> Result<Vec<StoredPage>, DurableError> {
         let (id, root) = (lease.id, lease.root);
-        self.read(|connection| {
-            Box::pin(async move {
-                let mut snapshot = super::snapshot(connection).await?;
-                let now = self.instant_on(&mut snapshot).await?;
-                let live: Option<crate::keys::Key> =
-                    crate::observed_sql::query_scalar(SQL.pages.lease_live.sql())
+        let now = self.injected_instant().transpose()?.map(|now| now.0);
+        let wanted: Vec<String> = pages.iter().map(NodeId::to_hex).collect();
+        let rows: Vec<LeasedPageRow> = self
+            .read(|connection| {
+                let wanted = &wanted;
+                Box::pin(async move {
+                    crate::observed_sql::query_as(SQL.postgres.leased_pages.sql())
                         .bind(id.0.cast_signed())
                         .bind(crate::keys::key(root.to_hex()))
-                        .bind(now.0)
-                        .fetch_optional(crate::observed_sql::executor(&mut *snapshot))
+                        .bind(now)
+                        .bind(crate::keys::keys(wanted))
+                        .fetch_all(crate::observed_sql::executor(&mut **connection))
                         .await
-                        .map_err(sqlx_failure)?;
-                if live.is_none() {
-                    return Err(DurableError::Graph(GraphRefusal::LeaseLost));
-                }
-                let wanted: Vec<String> = pages.iter().map(NodeId::to_hex).collect();
-                let rows: Vec<(crate::keys::Key, Vec<u8>, i16)> =
-                    crate::observed_sql::query_as(SQL.postgres.pages.sql())
-                        .bind(crate::keys::keys(&wanted))
-                        .fetch_all(crate::observed_sql::executor(&mut *snapshot))
-                        .await
-                        .map_err(sqlx_failure)?;
-                snapshot.rollback().await.map_err(sqlx_failure)?;
-                let mut found = BTreeMap::new();
-                for (hash, bytes, encoding) in rows {
-                    let node = graph::node_of(&hash).map_err(DurableError::Graph)?;
-                    match graph::encoding_of(encoding).map_err(DurableError::Graph)? {
-                        BlobEncoding::Graph => {}
-                        BlobEncoding::Opaque => {
-                            return Err(DurableError::Graph(GraphRefusal::EncodingConflict(node)));
-                        }
-                    }
-                    found.insert(node, std::sync::Arc::<[u8]>::from(bytes));
-                }
-                pages
-                    .iter()
-                    .map(|page| match found.get(page) {
-                        Some(bytes) => Ok(StoredPage {
-                            id: *page,
-                            bytes: bytes.clone(),
-                        }),
-                        None => Err(DurableError::Graph(GraphRefusal::MissingNode(*page))),
-                    })
-                    .collect()
+                        .map_err(sqlx_failure)
+                })
             })
-        })
-        .await
+            .await?;
+        let mut live = None;
+        let mut returned = Vec::with_capacity(rows.len());
+        for (hash, bytes, encoding, status) in rows {
+            match (hash, bytes, encoding) {
+                (None, _, _) => live = status,
+                (Some(hash), Some(bytes), Some(encoding)) => returned.push((hash, bytes, encoding)),
+                (Some(hash), _, _) => return Err(super::corrupt("page row", &hash)),
+            }
+        }
+        // The lease answers first: a lost one refuses before any page is
+        // decoded or missed.
+        match live {
+            Some(true) => {}
+            Some(false) => return Err(DurableError::Graph(GraphRefusal::LeaseLost)),
+            None => return Err(super::corrupt("page read", "without its lease row")),
+        }
+        let mut found = BTreeMap::new();
+        for (hash, bytes, encoding) in returned {
+            let node = graph::node_of(&hash).map_err(DurableError::Graph)?;
+            match graph::encoding_of(encoding).map_err(DurableError::Graph)? {
+                BlobEncoding::Graph => {}
+                BlobEncoding::Opaque => {
+                    return Err(DurableError::Graph(GraphRefusal::EncodingConflict(node)));
+                }
+            }
+            found.insert(node, std::sync::Arc::<[u8]>::from(bytes));
+        }
+        pages
+            .iter()
+            .map(|page| match found.get(page) {
+                Some(bytes) => Ok(StoredPage {
+                    id: *page,
+                    bytes: bytes.clone(),
+                }),
+                None => Err(DurableError::Graph(GraphRefusal::MissingNode(*page))),
+            })
+            .collect()
     }
 
     async fn commit_candidate(

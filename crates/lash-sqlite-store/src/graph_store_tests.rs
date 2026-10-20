@@ -452,6 +452,8 @@ page_law!(an_ownership_transfer_fences_the_old_activation);
 page_law!(a_node_retires_sealed_pages_on_its_own);
 page_law!(backpressure_holds_claims_until_retirement_catches_up);
 page_law!(candidate_edge_pass_does_not_reread_fresh_bodies);
+page_law!(a_page_read_is_one_statement_that_answers_its_lease_first);
+page_law!(a_candidate_check_fetches_only_the_bytes_it_compares);
 
 /// D-RET: a node killed in a retirement batch, before and after its commit.
 mod a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free {

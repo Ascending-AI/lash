@@ -222,8 +222,11 @@ lash_store_sql::statements! {
 pub(super) const BLOB_BATCH_ROWS: usize = 32;
 
 /// SQLite's multi-row VALUES program yields through a coroutine for each
-/// body. Keep small
-/// installs on the one-row shape; only a large install amortizes that work.
+/// body. Keep small installs on the one-row shape; only a large install
+/// amortizes that work. Measured (FIG-7047): 32-row batches for small
+/// installs cost more VM steps (a 60-row install 4,391 to 5,073) though
+/// they saved 0.17% of a no-tool replay's user instructions, so the
+/// one-row shape stays until both agree.
 const SMALL_INSTALL_ROWS: usize = 64;
 
 struct Sql {

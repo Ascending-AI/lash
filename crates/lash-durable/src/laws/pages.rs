@@ -43,6 +43,8 @@ mod install;
 mod owners;
 #[path = "pages_races.rs"]
 mod races;
+#[path = "pages_reads.rs"]
+mod reads;
 pub use driver::{
     a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free,
     a_node_retires_sealed_pages_on_its_own, backpressure_holds_claims_until_retirement_catches_up,
@@ -56,6 +58,10 @@ pub use owners::{
     deleting_a_session_retires_its_heap_in_bounded_steps,
 };
 pub use races::{PageLockProbe, publications_and_retirement_on_two_nodes_never_deadlock};
+pub use reads::{
+    a_candidate_check_fetches_only_the_bytes_it_compares,
+    a_page_read_is_one_statement_that_answers_its_lease_first,
+};
 
 /// One dialect's page store and the raw access the laws need.
 #[async_trait::async_trait]

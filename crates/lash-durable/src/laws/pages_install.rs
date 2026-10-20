@@ -28,7 +28,11 @@ const FANOUT: usize = 64;
 
 /// A payload leaf of `tag` carrying about `len` bytes of text in inline
 /// tokens.
-fn sized_leaf(nodes: &mut BTreeMap<NodeId, EncodedNode>, tag: &str, len: usize) -> NodeId {
+pub(super) fn sized_leaf(
+    nodes: &mut BTreeMap<NodeId, EncodedNode>,
+    tag: &str,
+    len: usize,
+) -> NodeId {
     let chunk = "x".repeat(200);
     let parts = len.div_ceil(chunk.len());
     let mut out = TokenWriter::new();

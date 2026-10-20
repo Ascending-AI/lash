@@ -9,8 +9,8 @@
 //! behind the database's one writer: a retirement step never interleaves
 //! with an install, a lease or another step, so no lock order is needed
 //! here (PostgreSQL's is in its `durable/pages.rs`). A lease's fence is the
-//! actor row read under that writer. A page read is one read transaction
-//! that checks its lease and reads the bytes on one snapshot.
+//! actor row read under that writer. A page read is one statement that
+//! checks its lease and reads the bytes on one snapshot.
 //!
 //! # Retirement
 //!
@@ -72,9 +72,29 @@ lash_store_sql::statements! {
         leases_expired = "SELECT lease_id FROM root_leases WHERE expires_at_ms <= ?1
              ORDER BY expires_at_ms, lease_id LIMIT ?2";
 
-        /// The bytes and encoding of every blob of JSON `?1`.
-        pages = "SELECT hash, content, encoding FROM blobs
-             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
+        /// Whether lease `?1` on root `?2` is live at `?3`, as one row with
+        /// no hash; and only when it is, the hash, bytes and encoding of
+        /// every blob of JSON `?4`. One statement, so one snapshot answers
+        /// the lease and its pages: a release or retirement step committed
+        /// meanwhile is seen whole or not at all.
+        leased_pages = "WITH lease AS (
+                 SELECT EXISTS (SELECT 1 FROM root_leases
+                     WHERE lease_id = ?1 AND root_ref = ?2 AND expires_at_ms > ?3) AS live)
+             SELECT NULL, NULL, NULL, lease.live FROM lease
+             UNION ALL
+             SELECT blobs.hash, blobs.content, blobs.encoding, NULL FROM lease JOIN blobs
+                 ON lease.live AND blobs.hash IN (SELECT unhex(value) FROM json_each(?4))";
+
+        /// The encoding of every blob of JSON `?1`, a candidate batch's
+        /// named nodes, and the encoding and bytes of every blob of JSON
+        /// `?2`, the nodes it supplies: a named node is checked by its
+        /// encoding, a supplied one byte for byte. A batch names or
+        /// supplies each node once.
+        candidate_nodes = "SELECT hash, encoding, NULL FROM blobs
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))
+             UNION ALL
+             SELECT hash, encoding, content FROM blobs
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?2))";
 
         /// The encoding of every blob of JSON `?1`.
         encodings = "SELECT hash, encoding FROM blobs
@@ -202,8 +222,8 @@ pub(super) fn install_candidate(
 }
 
 /// One batch's nodes: each named node checked stored (a published root as
-/// a graph node), each supplied node compared with what is stored under
-/// its digest or inserted.
+/// a graph node) by its encoding alone, each supplied node compared with
+/// the bytes stored under its digest or inserted.
 fn install_nodes(
     tx: &Connection,
     batch: &[InstallEntry],
@@ -211,21 +231,23 @@ fn install_nodes(
 ) -> GraphAnswer<()> {
     let mut stored = std::collections::BTreeMap::new();
     {
-        let mut statement = tx.prepare_cached(SQL.sqlite.pages.sql())?;
-        let mut rows = statement.query([graph::digest_array(
-            batch
-                .iter()
-                .map(InstallEntry::id)
-                .collect::<Vec<_>>()
-                .iter(),
-        )])?;
+        let named = graph::digest_array(batch.iter().filter_map(|entry| match entry {
+            InstallEntry::Named { id, .. } => Some(id),
+            InstallEntry::Supplied(_) => None,
+        }));
+        let supplied = graph::digest_array(batch.iter().filter_map(|entry| match entry {
+            InstallEntry::Named { .. } => None,
+            InstallEntry::Supplied(node) => Some(&node.id),
+        }));
+        let mut statement = tx.prepare_cached(SQL.sqlite.candidate_nodes.sql())?;
+        let mut rows = statement.query([named, supplied])?;
         while let Some(row) = rows.next()? {
             let hash: String = crate::codec::hash_column(row, 0)?;
-            let encoding = match graph::encoding_of(row.get(2)?) {
+            let encoding = match graph::encoding_of(row.get(1)?) {
                 Ok(encoding) => encoding,
                 Err(refusal) => return Ok(Err(refusal)),
             };
-            stored.insert(hash, (encoding, row.get::<_, Vec<u8>>(1)?));
+            stored.insert(hash, (encoding, row.get::<_, Option<Vec<u8>>>(2)?));
         }
     }
     let mut fresh = Vec::new();
@@ -243,7 +265,7 @@ fn install_nodes(
                 if *encoding != BlobEncoding::Graph {
                     return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
                 }
-                if bytes[..] != node.bytes[..] {
+                if bytes.as_deref() != Some(&node.bytes[..]) {
                     return Ok(Err(GraphRefusal::ContentConflict(node.id)));
                 }
             }
@@ -589,39 +611,47 @@ impl PageStore for SqliteDurableStore {
         let (id, root) = (lease.id, lease.root);
         let pages = pages.to_vec();
         let now = self.instant()?;
-        self.read(move |tx| -> Answer<Vec<StoredPage>> {
-            let live = tx
-                .prepare_cached(SQL.pages.lease_live.sql())?
-                .query_row(
-                    rusqlite::params![id.0.cast_signed(), root.0.as_slice(), now.0],
-                    |_| Ok(()),
-                )
-                .optional()?;
-            if live.is_none() {
-                return Ok(Err(DurableError::Graph(GraphRefusal::LeaseLost)));
+        self.query(move |conn| -> Answer<Vec<StoredPage>> {
+            let mut live = None;
+            let mut returned = Vec::new();
+            {
+                let mut statement = conn.prepare_cached(SQL.sqlite.leased_pages.sql())?;
+                let mut rows = statement.query(rusqlite::params![
+                    id.0.cast_signed(),
+                    root.0.as_slice(),
+                    now.0,
+                    graph::digest_array(pages.iter()),
+                ])?;
+                while let Some(row) = rows.next()? {
+                    match crate::codec::optional_hash_column(row, 0)? {
+                        None => live = Some(row.get::<_, bool>(3)?),
+                        Some(hash) => {
+                            returned.push((hash, row.get::<_, i64>(2)?, row.get::<_, Vec<u8>>(1)?))
+                        }
+                    }
+                }
+            }
+            // The lease answers first: a lost one refuses before any page
+            // is decoded or missed.
+            match live {
+                Some(true) => {}
+                Some(false) => return Ok(Err(DurableError::Graph(GraphRefusal::LeaseLost))),
+                None => return Ok(Err(super::corrupt("page read", "without its lease row"))),
             }
             let mut found = std::collections::BTreeMap::new();
-            {
-                let mut statement = tx.prepare_cached(SQL.sqlite.pages.sql())?;
-                let mut rows = statement.query([graph::digest_array(pages.iter())])?;
-                while let Some(row) = rows.next()? {
-                    let hash: String = crate::codec::hash_column(row, 0)?;
-                    match graph::encoding_of(row.get(2)?) {
-                        Ok(BlobEncoding::Graph) => {}
-                        Ok(BlobEncoding::Opaque) => {
-                            let id = graph::node_of(&hash).map_err(DurableError::Graph);
-                            return Ok(Err(match id {
-                                Ok(id) => DurableError::Graph(GraphRefusal::EncodingConflict(id)),
-                                Err(error) => error,
-                            }));
-                        }
-                        Err(refusal) => return Ok(Err(DurableError::Graph(refusal))),
+            for (hash, encoding, bytes) in returned {
+                match graph::encoding_of(encoding) {
+                    Ok(BlobEncoding::Graph) => {}
+                    Ok(BlobEncoding::Opaque) => {
+                        let id = graph::node_of(&hash).map_err(DurableError::Graph);
+                        return Ok(Err(match id {
+                            Ok(id) => DurableError::Graph(GraphRefusal::EncodingConflict(id)),
+                            Err(error) => error,
+                        }));
                     }
-                    found.insert(
-                        hash,
-                        std::sync::Arc::<[u8]>::from(row.get::<_, Vec<u8>>(1)?),
-                    );
+                    Err(refusal) => return Ok(Err(DurableError::Graph(refusal))),
                 }
+                found.insert(hash, std::sync::Arc::<[u8]>::from(bytes));
             }
             let mut answered = Vec::with_capacity(pages.len());
             for page in pages {
