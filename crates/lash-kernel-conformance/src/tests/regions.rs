@@ -2195,6 +2195,17 @@ fn a_bound_anywhere_in_a_small_slots_walk_stops_as_the_reference() {
     slots_walk_as_the_reference_walks("slots walks: every bound of a small walk");
 }
 
+/// FIG-7003: a walk opens an element's statements only where something
+/// needs them. A callback that answers an object, so its answer is pinned,
+/// one that leaves its island, so the plan stands at its site, a text
+/// answer, a filter answer no bool, and a kept item that is an object, each
+/// on one element of a walk whose other elements step without opening
+/// their statements, stop, stand, resume and charge as the reference does.
+#[test]
+fn slots_walks_that_pin_or_stand_on_one_element_run_as_the_reference() {
+    slots_walk_as_the_reference_walks("slots walks: one element pins or leaves its island");
+}
+
 /// Kernel loops whose straight-line statements run as typed blocks over
 /// word integers: a whole loop with an `if`, whose product overflows a
 /// word on its 22nd iteration, so that its typed run misses from there and

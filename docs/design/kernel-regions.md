@@ -106,8 +106,11 @@ of region are built from one unit.
   that shortens the list leaves holes behind it, skip a hole, apply the
   callback to a present item, and write its answer, or keep the item where
   the answer is `true`, coercing any other answer through `ts.to_boolean`.
-  The region's machine steps it natively (FIG-6978): it opens every
-  statement the plan opens, in order, compares the index with the length
+  The region's machine steps it natively (FIG-6978): it stands in every
+  statement the plan opens, in order, opening one only where something it
+  does needs it open, so an element whose callback returns a scalar and
+  whose answer is written in place opens none past its end test, and the
+  next test ends them together (FIG-7003). It compares the index with the length
   and advances it as Rust, and runs the item read, the callback's
   application at its steady site (entering the callback's island with its
   arguments in place) and the writes as the region's own forms on the

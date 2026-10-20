@@ -96,7 +96,7 @@ pub(super) struct PlanRun<'m, const SHARED: bool> {
 }
 
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
-    fn shared(&self, slot: u32) -> bool {
+    pub(super) fn shared(&self, slot: u32) -> bool {
         SHARED
             && self
                 .prepared
@@ -259,6 +259,16 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     pub(super) fn widen(&mut self) {
         if let Some(mark) = self.statement.as_mut() {
             mark.span = self.prepared.plan.registers;
+        }
+    }
+
+    /// Widens the open statement over the plan registers below `span`:
+    /// its end empties them too, as the ends of statements a region's step
+    /// left unopened would have (`super::plan_regions`).
+    #[inline(always)]
+    pub(super) fn widen_over(&mut self, span: u32) {
+        if let Some(mark) = self.statement.as_mut() {
+            mark.span = mark.span.max(span);
         }
     }
 

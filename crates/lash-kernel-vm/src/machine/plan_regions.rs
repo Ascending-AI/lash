@@ -909,10 +909,20 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         (value, unit): (&Operand<SHARED>, &Operand<SHARED>),
     ) -> Result<Value, PlanExit> {
         let tested = value.get(self)?;
-        // `same` of a value and the empty tuple is whether the value is a
-        // tuple of no members; a tuple not resident is compared as the plan
-        // compares it, which warms it.
-        let empty = match tested {
+        match self.unit_held(tested) {
+            Some(empty) => Ok(Value::Bool(empty)),
+            None => self.built_unit(reg, lib, (value, unit), tested),
+        }
+    }
+
+    /// The hole test of `tested` where it needs no tuple built: `same` of a
+    /// value and the empty tuple is whether the value is a tuple of no
+    /// members. `None` where the plan's build of the tuple may not pass
+    /// the bound, or the tuple is not resident: it is compared as the plan
+    /// compares it, which warms it.
+    #[inline(always)]
+    fn unit_held(&self, tested: Value) -> Option<bool> {
+        match tested {
             _ if self.machine.capacity_headroom() < UNIT_HOLD => None,
             Value::Tuple(tuple) => self
                 .machine
@@ -922,10 +932,6 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 .ok()
                 .map(|len| len == 0),
             _ => Some(false),
-        };
-        match empty {
-            Some(empty) => Ok(Value::Bool(empty)),
-            None => self.built_unit(reg, lib, (value, unit), tested),
         }
     }
 
