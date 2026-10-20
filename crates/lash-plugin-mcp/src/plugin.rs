@@ -366,7 +366,7 @@ impl ToolProvider for McpToolProvider {
         self.offered(config)
             .ok()?
             .into_iter()
-            .find(|tool| tool.name() == name)
+            .find(|tool| tool.manifest.tool() == name)
             .map(|tool| Arc::new(tool.contract()))
     }
 
@@ -497,7 +497,7 @@ pub(crate) async fn prepared_test_call(
             pending: lash_core::sansio::PendingToolCall {
                 call_id: context.call_id().clone(),
                 provider_call_id: None,
-                tool_name: manifest.name.clone(),
+                tool_name: manifest.tool(),
                 args: serde_json::json!({}),
                 replay: None,
             },

@@ -40,7 +40,7 @@ impl ToolProvider for GrantBoundTools {
 fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:grant_bound",
-        "grant_bound",
+        "tools.grant_bound",
         "Executes only under a granted route.",
         serde_json::json!({ "type": "object", "additionalProperties": false }),
         serde_json::json!({ "type": "object" }),
@@ -81,7 +81,7 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 
     // The ungranted route cannot admit the tool: its manifest lives on the
     // grant, outside the provider's catalog membership.
-    let outcome = lash::testing::run_tool(&GrantBoundTools, "grant_bound", &args).await;
+    let outcome = lash::testing::run_tool(&GrantBoundTools, "tools.grant_bound", &args).await;
     let lash_core::ToolAttemptOutcome::Done { result, .. } = outcome else {
         panic!("the catalog-route probe resolves to a completed failure");
     };

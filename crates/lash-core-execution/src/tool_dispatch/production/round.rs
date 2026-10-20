@@ -866,7 +866,7 @@ impl RoundTools for ProductionRoundTools {
             .tool_catalog()
             .entries()
             .iter()
-            .find(|tool| tool.manifest.name == call.tool_name)
+            .find(|tool| tool.manifest.tool() == call.tool_name)
             .map(|tool| tool.manifest.clone());
         let tool = manifest.as_ref().map_or_else(
             || crate::ToolId::new(call.tool_name.clone()),

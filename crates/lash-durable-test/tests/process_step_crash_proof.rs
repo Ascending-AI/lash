@@ -36,7 +36,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core_execution::ProcessId;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
@@ -55,6 +54,7 @@ use lash_protocol_types::sync::MutexExt as _;
 
 const ENGINE: &str = "process-step-proof";
 const TOOL: &str = "ext_write";
+const TOOL_OPERATION: &str = "tools.ext_write";
 const WROTE: &str = "wrote";
 
 fn process_actor(process: &ProcessId) -> ActorKey {
@@ -90,7 +90,7 @@ const EXT_WRITE: lash_core::ProcessConfigKey<()> =
 fn ext_write_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -103,7 +103,6 @@ fn ext_write_definition() -> lash_core::ToolDefinition {
     .expect("ext_write's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL))
 }
 
 /// The process component that contributes `ext_write` over `world`.

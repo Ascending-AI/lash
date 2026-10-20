@@ -134,7 +134,8 @@ fn document(body: &str) -> (String, EncodedPayload) {
 fn parsed(body: &str) -> lash_kernel_doc::Document {
     let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
         .expect("an embedding of every built dialect");
-    let mut text = String::from("numbers by_spelling\nkernel 1\neffect echo(x?: Any) -> Any\n");
+    let mut text =
+        String::from("numbers by_spelling\nkernel 1\neffect host.echo(x?: Any) -> Any\n");
     for (name, id) in embedding.library().iter() {
         if ["num.add", "num.lt", "text.repeat"].contains(&name.to_string().as_str()) {
             text.push_str(&format!("use {name} = @{id}\n"));
@@ -410,7 +411,7 @@ fn admitted(step: RunStep) -> (lash_kernel_doc::WaitId, Datum, EncodedPayload, [
     let [Request::Effect(request)] = &park.requests[..] else {
         panic!("one effect: {park:?}")
     };
-    assert_eq!(request.effect.to_string(), "echo");
+    assert_eq!(request.effect.to_string(), "host.echo");
     let admission = lash_vm_broker::kernel::state::admission(&lash_kernel_state::AdmittedWait {
         identity: request.identity.clone(),
         request: lash_kernel_state::AdmittedRequest::Effect {
@@ -456,7 +457,7 @@ const TOOL_LOOP: &str = r#"
 main {
   let total = 0
   for step in [1, 2, 3] {
-    let got = perform echo(step) as Any
+    let got = perform host.echo(step) as Any
     set total = num.add(total, got)
   }
   return total
@@ -551,8 +552,8 @@ fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
         r#"
 main {{
   if num.lt(1, 0) {{ let unused = "{padding}" }}
-  let kept = perform echo("a") as Any
-  let again = perform echo(kept) as Any
+  let kept = perform host.echo("a") as Any
+  let again = perform host.echo(kept) as Any
   return again
 }}"#
     ));
@@ -610,19 +611,22 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     let request = Request::Lower {
         dialect: "typescript".into(),
         source:
-            "let total = 0; for (const step of [1, 2, 3]) { total = total + await echo(step); }"
+            "let total = 0; for (const step of [1, 2, 3]) { total = total + await host.echo(step); }"
                 .into(),
-        effects: [(
-            lash_kernel_doc::EffectName::new("echo").expect("effect name"),
-            echo,
-        )]
-        .into(),
-        controls: Default::default(),
-        tool_roots: Default::default(),
+        operations: lash_kernel_dialect::Namespaces::of_signatures(
+            &[(
+                lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
+                echo,
+            )]
+            .into(),
+            &Default::default(),
+        )
+        .expect("the law's effects are operations")
+        .operations()
+        .clone(),
         bindings: Default::default(),
         functions: Default::default(),
         helpers: lash_vm_library::HELPER_RELEASE,
-        reads: Default::default(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -724,18 +728,22 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     };
     let request = Request::Lower {
         dialect: "python".into(),
-        source: "total = 0\nfor step in [1, 2, 3]:\n    total = total + await echo(step)\n".into(),
-        effects: [(
-            lash_kernel_doc::EffectName::new("echo").expect("effect name"),
-            echo,
-        )]
-        .into(),
-        controls: Default::default(),
-        tool_roots: Default::default(),
+        source: "total = 0\nfor step in [1, 2, 3]:\n    total = total + await host.echo(step)\n"
+            .into(),
+        operations: lash_kernel_dialect::Namespaces::of_signatures(
+            &[(
+                lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
+                echo,
+            )]
+            .into(),
+            &Default::default(),
+        )
+        .expect("the law's effects are operations")
+        .operations()
+        .clone(),
         bindings: Default::default(),
         functions: Default::default(),
         helpers: lash_vm_library::HELPER_RELEASE,
-        reads: Default::default(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -770,7 +778,7 @@ fn a_parked_run_is_refused_under_another_document() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let mut parent = Parent::new(DIALECT);
     let (identity, document_a) = document(TOOL_LOOP);
-    let (other, document_b) = document("main { let got = perform echo(1) as Any return got }");
+    let (other, document_b) = document("main { let got = perform host.echo(1) as Any return got }");
     let mut worker = checkout(&pool);
     worker
         .start(
@@ -817,7 +825,7 @@ entry go(n: Any) -> Any
 fn same(value) { return value }
 fn go(n) {
   for i in [1, 2] { let v = call same(i) }
-  let got = perform echo(n) as Any
+  let got = perform host.echo(n) as Any
   return got
 }
 main { }"#,
@@ -1186,7 +1194,7 @@ main {
   while num.lt(i, 200) {
     set i = num.add(i, 1)
   }
-  let got = perform echo(i) as Any
+  let got = perform host.echo(i) as Any
   let j = 0
   while num.lt(j, 200) {
     set j = num.add(j, 1)
@@ -1946,16 +1954,7 @@ fn bootstrap_uses_the_builds_allowance_without_extending_live_silence() {
 fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     HOST_DIALECTS.set("typescript");
     let workers = service::Service::new(config("normal")).with_worker_receipts();
-    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard()).expect("embedding");
-    let effects = Default::default();
-    let roots = Default::default();
-    let controls = Default::default();
-    let environment = lash_kernel_dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &controls,
-    };
+    let environment = lash_kernel_dialect::Operations::default();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

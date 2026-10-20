@@ -580,11 +580,13 @@ pub mod tools {
     pub use lash_core::AttemptSessionReads;
     pub use lash_core::CancelHint;
     pub use lash_core::ExecutionOwner;
+    pub use lash_core::IntoOperation;
     pub use lash_core::IsolatedProcessRequest;
     pub use lash_core::IsolatedStart;
     pub use lash_core::PendingCompletion;
     pub use lash_core::PendingResolver;
     pub use lash_core::PreparedToolCall;
+    pub use lash_core::QualifiedOperation;
     pub use lash_core::ResolveTargetError;
     pub use lash_core::SurfaceTools;
     pub use lash_core::ToolArgumentProjectionPolicy;
@@ -614,7 +616,6 @@ pub mod tools {
     pub use lash_core::ToolIntentKind;
     pub use lash_core::ToolIntentRealizedRef;
     pub use lash_core::ToolManifest;
-    pub use lash_core::ToolModule;
     pub use lash_core::ToolOutcome;
     pub use lash_core::ToolOutcomeDone;
     pub use lash_core::ToolOutputContract;
@@ -630,6 +631,7 @@ pub mod tools {
     pub use lash_core::facade_support::ReconfigureError;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
+    pub use lash_core::standard_name;
     pub use lash_core::turn_stop_from_tool_control;
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
@@ -675,10 +677,6 @@ pub mod tools {
     /// cell: the reader a provider registers beside itself, with the
     /// recipe's `provider_with_reads` (ADR 0144).
     pub use lash_core::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
-    /// The dialect-agnostic tool binding and its one setter. The manifest key
-    /// is lash's internal projection — hosts never read or write it, and which
-    /// dialect executes a bound tool is decided inside lash.
-    pub use lash_core::{ToolBinding, ToolDefinitionBindingExt};
     pub use lash_execution_contracts::DeclaredStart;
     pub use lash_execution_contracts::DeclaredStartRefused;
     pub use lash_execution_contracts::plugin_error::ToolIntentCommandFailure;
@@ -715,15 +713,10 @@ pub mod tools {
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
     /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
-    /// `ToolBinding`, `ToolDefinitionBindingExt`,
     /// `LASH_VM_BINDINGS_ENABLED`) tools are built from. The glob keeps the
     /// facade complete as the crate grows; where it overlaps the explicit
     /// `rlm` re-exports above, those name the same items.
     pub use lash_tool_support::*;
-    #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::{
-        ToolBindingResolutionExt, ToolManifestBindingExt, required_tool_binding,
-    };
 }
 
 /// Direct protocol transport types.

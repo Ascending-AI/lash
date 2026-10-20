@@ -21,7 +21,7 @@ impl PluginScenario for Presentation {
     async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
         let tool = lash_core::ToolDefinition::raw(
             "echo",
-            "echo",
+            "tools.echo",
             "echo",
             serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             serde_json::json!({"type":"string"}),
@@ -47,7 +47,7 @@ impl PluginScenario for Presentation {
             lash::provider::LlmResponse {
                 parts: vec![lash::direct::LlmOutputPart::ToolCall {
                     call_id: "echo".into(),
-                    tool_name: "echo".into(),
+                    tool_name: "tools__echo".into(),
                     input_json: "{}".into(),
                     replay: None,
                 }],

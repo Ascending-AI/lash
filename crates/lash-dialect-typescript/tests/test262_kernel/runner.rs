@@ -220,7 +220,7 @@ impl<M: Machine> Executor for OnMachine<M> {
                 Step::Slice => {}
                 Step::Parked(park) => match park.requests.as_slice() {
                     [lash_kernel_vm::Request::Effect(effect)]
-                        if effect.effect.as_str() == "finish" && finished_with.is_none() =>
+                        if effect.effect.as_str() == "host.finish" && finished_with.is_none() =>
                     {
                         finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
                         machine
@@ -229,7 +229,7 @@ impl<M: Machine> Executor for OnMachine<M> {
                     }
                     requests => {
                         return Err(format!(
-                            "the program waits on {} request(s); the Test262 host answers only `finish`",
+                            "the program waits on {} request(s); the Test262 host answers only `host.finish`",
                             requests.len()
                         ));
                     }
@@ -240,10 +240,10 @@ impl<M: Machine> Executor for OnMachine<M> {
 }
 
 /// The test host's turn-ending tool: a program ends with
-/// `await finish(value)`, as a model's cell ends with `control.finish`.
+/// `await host.finish(value)`, as a model's cell ends with `control.finish`.
 fn finish_effect() -> BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature> {
     BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("finish").expect("a tool's name"),
+        lash_kernel_doc::EffectName::new("host.finish").expect("a tool's name"),
         lash_kernel_doc::Signature {
             params: vec![lash_kernel_doc::Param {
                 name: Name::new("value"),
@@ -359,12 +359,10 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
 fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     let effects = finish_effect();
     let bindings = BTreeSet::new();
-    let environment = Environment {
-        tool_roots: &std::collections::BTreeSet::new(),
-        library: library(),
-        effects: &effects,
-        controls: finish_control(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, finish_control())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library(), &environment_namespaces);
     lash_dialect_typescript::lower(
         source,
         &environment,
@@ -558,12 +556,10 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     .into_iter()
     .map(Name::new)
     .collect();
-    let environment = Environment {
-        tool_roots: &std::collections::BTreeSet::new(),
-        library: library(),
-        effects: &effects,
-        controls: finish_control(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, finish_control())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library(), &environment_namespaces);
     let Ok(original) = lash_dialect_typescript::lower(
         &source,
         &environment,
@@ -590,7 +586,7 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
 /// String positions count UTF-16 units, while codePointAt combines a pair.
 #[test]
 fn string_positions_count_utf16_units() {
-    let source = "await finish(['😀'.length, '😀'.charCodeAt(0), '😀'.charCodeAt(1), '😀'.codePointAt(0), '😀x'.indexOf('x'), '😀'.slice(0, 2)]);";
+    let source = "await host.finish(['😀'.length, '😀'.charCodeAt(0), '😀'.charCodeAt(1), '😀'.codePointAt(0), '😀x'.indexOf('x'), '😀'.slice(0, 2)]);";
     let result = execute(source);
     let expected = Datum::List(vec![
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
@@ -607,7 +603,7 @@ fn string_positions_count_utf16_units() {
 #[test]
 fn regexp_aliases_observe_coerced_last_index_and_failure_reset() {
     let result = execute(
-        "const r = /x/g; const alias = r; r.lastIndex = '1'; const match = r.exec('xx'); const index = alias.lastIndex; const missed = r.test('x'); await finish([index, match.index, match[0], missed, alias.lastIndex]);",
+        "const r = /x/g; const alias = r; r.lastIndex = '1'; const match = r.exec('xx'); const index = alias.lastIndex; const missed = r.test('x'); await host.finish([index, match.index, match[0], missed, alias.lastIndex]);",
     );
     assert_finished(
         result,
@@ -626,7 +622,7 @@ fn regexp_aliases_observe_coerced_last_index_and_failure_reset() {
 fn uri_codecs_preserve_reserved_escape_spelling() {
     assert_finished(
         execute(
-            "await finish([encodeURI('é?#'), encodeURIComponent('é?#'), decodeURI('%2f%C3%A9'), decodeURIComponent('%2f%C3%A9')]);",
+            "await host.finish([encodeURI('é?#'), encodeURIComponent('é?#'), decodeURI('%2f%C3%A9'), decodeURIComponent('%2f%C3%A9')]);",
         ),
         Datum::List(vec![
             Datum::Text("%C3%A9?#".into()),
@@ -640,7 +636,7 @@ fn uri_codecs_preserve_reserved_escape_spelling() {
 /// ECMA Decode rejects UTF-8 encodings of surrogates with a typed URIError.
 #[test]
 fn uri_decode_refuses_surrogate_utf8() {
-    let result = execute("await finish(decodeURIComponent('%ED%A0%80'));");
+    let result = execute("await host.finish(decodeURIComponent('%ED%A0%80'));");
     assert!(
         matches!(result, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("URIError"))
     );
@@ -651,7 +647,7 @@ fn uri_decode_refuses_surrogate_utf8() {
 fn template_substitutions_convert_in_source_order() {
     assert_finished(
         execute(
-            "let n = 0; const value = {toString() { n = n + 1; return String(n); }}; await finish(`${value}${value}`);",
+            "let n = 0; const value = {toString() { n = n + 1; return String(n); }}; await host.finish(`${value}${value}`);",
         ),
         Datum::Text("12".into()),
     );
@@ -678,7 +674,7 @@ fn assert_finished(end: End, expected: Datum) {
 /// end at the memory bound, so the next conformance case can still run.
 #[test]
 fn huge_sparse_array_writes_end_at_the_memory_bound() {
-    let end = execute("const xs = []; xs[2147483648] = 1; await finish(xs.length);");
+    let end = execute("const xs = []; xs[2147483648] = 1; await host.finish(xs.length);");
     assert!(
         matches!(end, End::Error(RunError::Bound(lash_kernel_vm::BoundExceeded {
         bound: lash_kernel_vm::Bound::Memory,
@@ -695,7 +691,7 @@ fn huge_sparse_array_writes_end_at_the_memory_bound() {
 fn unshift_without_arguments_does_not_traverse_the_receiver() {
     assert_finished(
         execute(
-            "const xs = {length: Infinity}; const length = Array.prototype.unshift.call(xs); await finish([length, xs.length]);",
+            "const xs = {length: Infinity}; const length = Array.prototype.unshift.call(xs); await host.finish([length, xs.length]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(9007199254740991.0)),
@@ -710,7 +706,7 @@ fn unshift_without_arguments_does_not_traverse_the_receiver() {
 fn ordinary_to_primitive_uses_defaults_only_for_missing_methods() {
     assert_finished(
         execute(
-            "const text = String({valueOf() { return 1; }}); const number = Number({valueOf() { return {}; }}); let refused = false; try { Number({valueOf: undefined, toString: undefined}); } catch (e) { refused = e.name === 'TypeError'; } await finish([text, Number.isNaN(number), refused]);",
+            "const text = String({valueOf() { return 1; }}); const number = Number({valueOf() { return {}; }}); let refused = false; try { Number({valueOf: undefined, toString: undefined}); } catch (e) { refused = e.name === 'TypeError'; } await host.finish([text, Number.isNaN(number), refused]);",
         ),
         Datum::List(vec![
             Datum::Text("[object Object]".into()),
@@ -726,7 +722,7 @@ fn ordinary_to_primitive_uses_defaults_only_for_missing_methods() {
 fn json_stringify_rechecks_the_kind_after_to_json() {
     assert_finished(
         execute(
-            "const obj = {toJSON() { return undefined; }}; await finish([JSON.stringify(obj) === undefined, JSON.stringify([1, obj, 3]), JSON.stringify({key: obj})]);",
+            "const obj = {toJSON() { return undefined; }}; await host.finish([JSON.stringify(obj) === undefined, JSON.stringify([1, obj, 3]), JSON.stringify({key: obj})]);",
         ),
         Datum::List(vec![
             Datum::Bool(true),
@@ -741,7 +737,7 @@ fn json_stringify_rechecks_the_kind_after_to_json() {
 fn empty_array_search_does_not_convert_from_index() {
     assert_finished(
         execute(
-            "const from = {valueOf() { throw new Error('converted'); }}; await finish([ [].indexOf(1, from), [].lastIndexOf(1, from), [].includes(1, from) ]);",
+            "const from = {valueOf() { throw new Error('converted'); }}; await host.finish([ [].indexOf(1, from), [].lastIndexOf(1, from), [].includes(1, from) ]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(-1.0)),
@@ -756,7 +752,7 @@ fn empty_array_search_does_not_convert_from_index() {
 fn trim_and_number_parsing_use_ecma_whitespace() {
     assert_finished(
         execute(
-            "await finish(['\\uFEFF x \\uFEFF'.trim(), '\\uFEFFx'.trimStart(), 'x\\uFEFF'.trimEnd(), '\\u0085x\\u0085'.trim(), Number('\\uFEFF1'), parseInt('\\uFEFF1'), parseFloat('\\uFEFF1'), Number.isNaN(Number('\\u00851'))]);",
+            "await host.finish(['\\uFEFF x \\uFEFF'.trim(), '\\uFEFFx'.trimStart(), 'x\\uFEFF'.trimEnd(), '\\u0085x\\u0085'.trim(), Number('\\uFEFF1'), parseInt('\\uFEFF1'), parseFloat('\\uFEFF1'), Number.isNaN(Number('\\u00851'))]);",
         ),
         Datum::List(vec![
             Datum::Text("x".into()),
@@ -776,7 +772,7 @@ fn trim_and_number_parsing_use_ecma_whitespace() {
 fn date_utc_preserves_floating_point_evaluation_order() {
     assert_finished(
         execute(
-            "await finish([Date.UTC(1970, 0, 1, 80063993375, 29, 1, -288230376151711740), Date.UTC(1970, 0, 213503982336, 0, 0, 0, -18446744073709552000)]);",
+            "await host.finish([Date.UTC(1970, 0, 1, 80063993375, 29, 1, -288230376151711740), Date.UTC(1970, 0, 213503982336, 0, 0, 0, -18446744073709552000)]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(29312.0)),
@@ -790,7 +786,7 @@ fn date_utc_preserves_floating_point_evaluation_order() {
 fn destructuring_holes_apply_defaults_and_make_dense_rest() {
     assert_finished(
         execute(
-            "const [x = 23, ...tail] = [, , 4]; await finish([x, Object.hasOwn(tail, '0'), tail[0] === undefined, tail[1]]);",
+            "const [x = 23, ...tail] = [, , 4]; await host.finish([x, Object.hasOwn(tail, '0'), tail[0] === undefined, tail[1]]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(23.0)),
@@ -806,7 +802,7 @@ fn destructuring_holes_apply_defaults_and_make_dense_rest() {
 fn logical_assignment_returns_the_stored_closure() {
     assert_finished(
         execute(
-            "let a; let b = false; let c = true; const x = (a ??= function() { return 7; }); const y = (b ||= function() { return 8; }); const z = (c &&= function() { return 9; }); await finish([x(), y(), z(), a(), b(), c()]);",
+            "let a; let b = false; let c = true; const x = (a ??= function() { return 7; }); const y = (b ||= function() { return 8; }); const z = (c &&= function() { return 9; }); await host.finish([x(), y(), z(), a(), b(), c()]);",
         ),
         Datum::List(
             (7..=9)
@@ -822,7 +818,7 @@ fn logical_assignment_returns_the_stored_closure() {
 fn array_search_returns_positive_zero_and_empty_shift_skips_index_zero() {
     assert_finished(
         execute(
-            "const obj = {length: -1, 0: 99}; const shifted = Array.prototype.shift.call(obj); await finish([1 / [true].indexOf(true, -0), 1 / [true].lastIndexOf(true, -0), shifted === undefined, obj.length, obj[0]]);",
+            "const obj = {length: -1, 0: 99}; const shifted = Array.prototype.shift.call(obj); await host.finish([1 / [true].indexOf(true, -0), 1 / [true].lastIndexOf(true, -0), shifted === undefined, obj.length, obj[0]]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(f64::INFINITY)),
@@ -839,7 +835,7 @@ fn array_search_returns_positive_zero_and_empty_shift_skips_index_zero() {
 fn borrowed_boolean_value_of_rejects_other_kinds() {
     assert_finished(
         execute(
-            "let typeError = false; try { Boolean.prototype.valueOf.call({}); } catch (e) { typeError = e.name === 'TypeError'; } await finish(typeError);",
+            "let typeError = false; try { Boolean.prototype.valueOf.call({}); } catch (e) { typeError = e.name === 'TypeError'; } await host.finish(typeError);",
         ),
         Datum::Bool(true),
     );
@@ -850,7 +846,7 @@ fn borrowed_boolean_value_of_rejects_other_kinds() {
 fn borrowed_bind_rejects_non_callable_targets() {
     assert_finished(
         execute(
-            "let count = 0; for (const value of [undefined, null, true, 1, 'x', [], {}]) { try { Function.prototype.bind.call(value); } catch (e) { if (e.name === 'TypeError') { count++; } } } await finish(count);",
+            "let count = 0; for (const value of [undefined, null, true, 1, 'x', [], {}]) { try { Function.prototype.bind.call(value); } catch (e) { if (e.name === 'TypeError') { count++; } } } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(7.0)),
     );
@@ -861,7 +857,7 @@ fn borrowed_bind_rejects_non_callable_targets() {
 fn borrowed_map_methods_require_map_receivers() {
     assert_finished(
         execute(
-            "let count = 0; const set = []; try { Map.prototype.set.call(set, 1, 2); } catch (e) { if (e.name === 'TypeError') count++; } try { Map.prototype.clear.call(set); } catch (e) { if (e.name === 'TypeError') count++; } await finish(count);",
+            "let count = 0; const set = []; try { Map.prototype.set.call(set, 1, 2); } catch (e) { if (e.name === 'TypeError') count++; } try { Map.prototype.clear.call(set); } catch (e) { if (e.name === 'TypeError') count++; } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
@@ -872,7 +868,7 @@ fn borrowed_map_methods_require_map_receivers() {
 fn borrowed_set_methods_require_set_receivers() {
     assert_finished(
         execute(
-            "let count = 0; const map = new Map(); try { Set.prototype.add.call(map, 1); } catch (e) { if (e.name === 'TypeError') count++; } try { Set.prototype.entries.call([]); } catch (e) { if (e.name === 'TypeError') count++; } await finish(count);",
+            "let count = 0; const map = new Map(); try { Set.prototype.add.call(map, 1); } catch (e) { if (e.name === 'TypeError') count++; } try { Set.prototype.entries.call([]); } catch (e) { if (e.name === 'TypeError') count++; } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
@@ -883,7 +879,7 @@ fn borrowed_set_methods_require_set_receivers() {
 fn date_to_json_is_generic_and_date_only_methods_check_the_receiver() {
     assert_finished(
         execute(
-            "let count = 0; try { Date.prototype.getDate.call({}); } catch (e) { if (e.name === 'TypeError') count++; } try { Date.prototype.setDate.call({}, 1); } catch (e) { if (e.name === 'TypeError') count++; } const obj = {valueOf() {return 0;}, toISOString() {return 'custom';}}; await finish([Date.prototype.toJSON.call(obj), Date.prototype.toJSON.call(new Date(NaN)), count]);",
+            "let count = 0; try { Date.prototype.getDate.call({}); } catch (e) { if (e.name === 'TypeError') count++; } try { Date.prototype.setDate.call({}, 1); } catch (e) { if (e.name === 'TypeError') count++; } const obj = {valueOf() {return 0;}, toISOString() {return 'custom';}}; await host.finish([Date.prototype.toJSON.call(obj), Date.prototype.toJSON.call(new Date(NaN)), count]);",
         ),
         Datum::List(vec![
             Datum::Text("custom".into()),
@@ -898,7 +894,7 @@ fn date_to_json_is_generic_and_date_only_methods_check_the_receiver() {
 fn exponentiation_of_unit_magnitude_by_infinity_is_nan() {
     assert_finished(
         execute(
-            "await finish([Number.isNaN((-1) ** Infinity), Number.isNaN((-1) ** -Infinity), Number.isNaN(1 ** Infinity), (-1) ** 0]);",
+            "await host.finish([Number.isNaN((-1) ** Infinity), Number.isNaN((-1) ** -Infinity), Number.isNaN(1 ** Infinity), (-1) ** 0]);",
         ),
         Datum::List(vec![
             Datum::Bool(true),
@@ -915,7 +911,7 @@ fn exponentiation_of_unit_magnitude_by_infinity_is_nan() {
 fn computed_property_keys_convert_once_and_before_object_values() {
     assert_finished(
         execute(
-            "let count = 0; const key = {toString() { count++; return 'x'; }}; const obj = {x: 1}; obj[key] += 2; const value = {[key]: count}; await finish([count, obj.x, value.x]);",
+            "let count = 0; const key = {toString() { count++; return 'x'; }}; const obj = {x: 1}; obj[key] += 2; const value = {[key]: count}; await host.finish([count, obj.x, value.x]);",
         ),
         Datum::List(vec![
             Datum::Float(lash_kernel_doc::Float::new(2.0)),
@@ -930,7 +926,7 @@ fn computed_property_keys_convert_once_and_before_object_values() {
 fn computed_member_reads_check_the_base_before_key_conversion() {
     assert_finished(
         execute(
-            "const key = {toString() { throw new Error('key'); }}; let count = 0; for (const base of [null, undefined]) { try { base[key]; } catch (e) { if (e.name === 'TypeError') count++; } } await finish(count);",
+            "const key = {toString() { throw new Error('key'); }}; let count = 0; for (const base of [null, undefined]) { try { base[key]; } catch (e) { if (e.name === 'TypeError') count++; } } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
@@ -939,12 +935,13 @@ fn computed_member_reads_check_the_base_before_key_conversion() {
 /// K-VAL-006: kernel Text holds scalar values, so a lone surrogate has no value.
 #[test]
 fn lone_surrogate_literals_and_results_have_typed_refusals() {
-    let diagnostic = lower(r#"await finish("\uD800");"#).expect_err("a lone surrogate is refused");
+    let diagnostic =
+        lower(r#"await host.finish("\uD800");"#).expect_err("a lone surrogate is refused");
     assert_eq!(
         diagnostic.code,
         DiagnosticCode::LoneSurrogateLiteralUnsupported
     );
-    let end = execute("await finish(String.fromCharCode(0xD800));");
+    let end = execute("await host.finish(String.fromCharCode(0xD800));");
     assert!(
         matches!(end, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("TS_LONE_SURROGATE_UNSUPPORTED"))
     );
@@ -955,7 +952,7 @@ fn lone_surrogate_literals_and_results_have_typed_refusals() {
 fn function_to_string_rejects_non_callable_receivers() {
     assert_finished(
         execute(
-            "let count = 0; for (const value of [undefined, null, {}]) { try { Function.prototype.toString.call(value); } catch (e) { if (e.name === 'TypeError') count++; } } await finish(count);",
+            "let count = 0; for (const value of [undefined, null, {}]) { try { Function.prototype.toString.call(value); } catch (e) { if (e.name === 'TypeError') count++; } } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
@@ -966,7 +963,7 @@ fn function_to_string_rejects_non_callable_receivers() {
 fn map_group_by_checks_the_callback_before_iteration() {
     assert_finished(
         execute(
-            "let count = 0; for (const callback of [undefined, null, {}]) { try { Map.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } await finish(count);",
+            "let count = 0; for (const callback of [undefined, null, {}]) { try { Map.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
@@ -977,7 +974,7 @@ fn map_group_by_checks_the_callback_before_iteration() {
 fn object_group_by_checks_the_callback_before_iteration() {
     assert_finished(
         execute(
-            "let count = 0; for (const callback of [undefined, null, {}]) { try { Object.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } await finish(count);",
+            "let count = 0; for (const callback of [undefined, null, {}]) { try { Object.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } await host.finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );

@@ -70,7 +70,7 @@ impl PluginSession {
             .collect::<BTreeSet<_>>();
         let entries = advertised
             .into_iter()
-            .filter(|entry| !removed.contains(&entry.definition.manifest.name))
+            .filter(|entry| !removed.contains(&entry.definition.manifest.operation))
             .collect::<Vec<_>>();
         let surface = crate::RecordedSurface::new(entries, self.composition().deferred_key())
             .map_err(|refusal| PluginError::ToolSurfaceRefused {
@@ -92,8 +92,12 @@ impl PluginSession {
         for (effect, provider) in surface
             .tools()
             .iter()
-            .map(|(effect, entry)| (effect.as_str(), &entry.provider))
-            .chain(surface.deferred().map(|provider| ("deferred", provider)))
+            .map(|(operation, entry)| (operation.effect_name().to_string(), &entry.provider))
+            .chain(
+                surface
+                    .deferred()
+                    .map(|provider| ("deferred".to_owned(), provider)),
+            )
         {
             if provider.registry() == crate::RegistryKind::Session
                 && self.host.retired_plugins.contains_key(provider.owner())
@@ -102,7 +106,7 @@ impl PluginSession {
                     super::super::RetirementRefusal::Serves {
                         registry: crate::RegistryKind::Session,
                         id: provider.owner().to_owned(),
-                        effect: effect.to_owned(),
+                        effect,
                     }
                     .into_runtime_error(),
                 ));
@@ -138,14 +142,23 @@ pub(crate) fn catalog_build_error(err: lash_protocol_types::ToolCatalogBuildErro
                 source: Box::new(source),
             }
         }
-        lash_protocol_types::ToolCatalogBuildError::MissingContract { tool_id, name } => {
-            PluginError::ResidentToolContractUnavailable { tool_id, name }
+        lash_protocol_types::ToolCatalogBuildError::MissingContract { tool_id, operation } => {
+            PluginError::ResidentToolContractUnavailable { tool_id, operation }
         }
         lash_protocol_types::ToolCatalogBuildError::DuplicateId { tool_id } => {
             PluginError::ResidentToolDuplicateId { tool_id }
         }
-        lash_protocol_types::ToolCatalogBuildError::DuplicateName { name } => {
-            PluginError::ResidentToolDuplicateName { name }
+        lash_protocol_types::ToolCatalogBuildError::DuplicateOperation {
+            operation,
+            first_tool,
+            second_tool,
+        } => PluginError::ResidentToolDuplicateOperation {
+            operation,
+            first_tool,
+            second_tool,
+        },
+        lash_protocol_types::ToolCatalogBuildError::InvalidOperation { tool_id, message } => {
+            PluginError::ResidentToolInvalidOperation { tool_id, message }
         }
         lash_protocol_types::ToolCatalogBuildError::RegistrationRefused { refusal } => {
             PluginError::ToolRegistrationRefused {

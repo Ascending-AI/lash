@@ -85,7 +85,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
                         Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "lookup".into(),
-                                tool_name: "app_lookup".into(),
+                                tool_name: "tools__app_lookup".into(),
                                 input_json: "{}".into(),
                                 replay: None,
                             }],
@@ -380,7 +380,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     let [call] = read.tool_calls.as_slice() else {
         panic!("the committed turn holds one tool call")
     };
-    assert_eq!(call.tool, "app_lookup");
+    assert_eq!(call.tool, "tools.app_lookup");
     assert_eq!(call.args, serde_json::json!({}));
     assert!(call.output.is_success());
     assert_eq!(

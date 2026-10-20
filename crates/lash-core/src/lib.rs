@@ -156,8 +156,6 @@ pub mod facade_support {
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;
-    #[doc(hidden)]
-    pub use lash_protocol_types::core_support::TOOL_BINDING_KEY;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
@@ -467,7 +465,6 @@ pub use lash_core_execution::SurfaceTools;
 pub use lash_core_execution::ToolSurfaceDrift;
 pub use lash_core_execution::ToolSurfaceDriftKind;
 pub use lash_core_execution::call_dynamic_endpoint;
-pub use lash_core_execution::effect_path_of;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
 pub use lash_protocol_types::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
@@ -477,21 +474,21 @@ pub use lash_protocol_types::{
     DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
     ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FinishDeclaration, FrameKey,
-    FrameKeyError, InputId, InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage,
-    MediaType, Message, MessageOrigin, MessageRole, NodeId, OutcomeShape, OutputRetentionPolicy,
-    OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RetainedValue, RunId,
-    SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TerminationMode, TextProjectionMetadata,
-    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
-    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl,
-    TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply, ValueMismatch, ValueShape,
-    ValueShapeLimits,
+    FrameKeyError, InputId, InternalPartKind, IntoOperation, JsonSchema, LimitCause, LlmCallError,
+    LlmUsage, MediaType, Message, MessageOrigin, MessageRole, NodeId, OutcomeShape,
+    OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
+    PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, QualifiedOperation,
+    RegistrationRefused, RetainedOutput, RetainedValue, RunId, SchemaAdmissionError,
+    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
+    SessionAppendNode, TerminationMode, TextProjectionMetadata, TokenUsageOverflow,
+    ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput,
+    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
+    ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind, ToolContract,
+    ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolDraft, ToolFailure,
+    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
+    ToolIntentKind, ToolManifest, ToolOutputContract, ToolValue, ToolView, ToolViewBlock,
+    ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply,
+    ValueMismatch, ValueShape, ValueShapeLimits, standard_name,
 };
 pub(crate) use lash_protocol_types::{
     BaseRenderCache, messages_are_prompt_resume_safe, visible_response_parts,

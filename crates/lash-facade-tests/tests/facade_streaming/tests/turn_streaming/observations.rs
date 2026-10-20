@@ -235,7 +235,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
                             let reasoning = reasoning_output_part("inspect once", "reasoning-tool");
                             let tool = LlmOutputPart::ToolCall {
                                 call_id: "lookup-once".to_string(),
-                                tool_name: "app_lookup".to_string(),
+                                tool_name: "tools__app_lookup".to_string(),
                                 input_json: "{}".to_string(),
                                 replay: None,
                             };
@@ -1105,7 +1105,7 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
         }
         let definition = lash_core::ToolDefinition::control(
         "switch_frame",
-        "switch_frame",
+        "tools.switch_frame",
         "Switch frames",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -1119,7 +1119,7 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: "snapshot-switch".into(),
-                        tool_name: "switch_frame".into(),
+                        tool_name: "tools__switch_frame".into(),
                         input_json: "{}".into(),
                         replay: None,
                     }],

@@ -7,14 +7,14 @@ use lash::workflow::view::{
     BindingKind, ComparisonView, ValueRef, ValueSource, WorkflowNodeKind, WorkflowView, derive,
 };
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 const TRIAGE: &str = r#"export async function triage(title: string, priority: string, notes?: string) {
   if (priority === "high") {
-    await inbox.send_item({ title: "Urgent request", body: "Needs an answer today." });
+    await inbox.sendItem({ title: "Urgent request", body: "Needs an answer today." });
     return { routed: "urgent" };
   } else {
-    await inbox.send_item({ title: "Request filed", body: "Filed for later." });
+    await inbox.sendItem({ title: "Request filed", body: "Filed for later." });
     return { routed: "later" };
   }
 }"#;
@@ -41,13 +41,10 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
             result: k::Type::Any,
         },
     )]);
-    let roots = BTreeSet::from([k::Name::new("inbox")]);
-    let environment = lash::dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &Default::default(),
-    };
+    let environment_namespaces =
+        lash::dialect::Namespaces::of_signatures(&effects, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mode = lash::dialect::Mode::Module;
     let document = match dialect {
         Dialect::TypeScript => lash::typescript::lower(source, &environment, mode)
@@ -221,16 +218,16 @@ fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned
     let view = view(
         Dialect::TypeScript,
         r#"export async function route(priority: string) {
-  const reply = await inbox.send_item({ title: priority });
+  const reply = await inbox.sendItem({ title: priority });
   const urgent = priority !== "low";
-  if (urgent) { await inbox.send_item({ title: "1" }); }
-  if (reply === "ok") { await inbox.send_item({ title: "2" }); }
+  if (urgent) { await inbox.sendItem({ title: "1" }); }
+  if (reply === "ok") { await inbox.sendItem({ title: "2" }); }
   let again = priority === "high";
   again = false;
-  if (again) { await inbox.send_item({ title: "3" }); }
-  let later = await inbox.send_item({ title: priority });
+  if (again) { await inbox.sendItem({ title: "3" }); }
+  let later = await inbox.sendItem({ title: priority });
   later = "no";
-  if (later === "ok") { await inbox.send_item({ title: "4" }); }
+  if (later === "ok") { await inbox.sendItem({ title: "4" }); }
 }"#,
         "route",
     );

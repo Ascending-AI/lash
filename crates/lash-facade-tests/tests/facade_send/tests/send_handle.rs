@@ -614,7 +614,7 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
                     async move {
                         if call == 0 {
                             return Ok(text_response(&typescript_block(
-                                r#"await control.continue_as({ task: "wait to be cancelled" });"#,
+                                r#"await control.continueAs({ task: "wait to be cancelled" });"#,
                             )));
                         }
                         std::future::pending::<()>().await;
@@ -1177,7 +1177,7 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
                     let call = calls.fetch_add(1, Ordering::SeqCst);
                     async move {
                         Ok(text_response(&typescript_block(if call == 0 {
-                            r#"await control.continue_as({ task: "finish in the next frame" });"#
+                            r#"await control.continueAs({ task: "finish in the next frame" });"#
                         } else {
                             r#"await control.finish("done");"#
                         })))

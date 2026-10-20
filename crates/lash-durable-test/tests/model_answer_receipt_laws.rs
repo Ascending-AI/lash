@@ -76,7 +76,6 @@ use std::time::Duration;
 
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockEvent, StreamBlockIdentity,
@@ -119,6 +118,7 @@ const USAGE: LlmUsage = LlmUsage {
 };
 /// The host tool a turn's answer may call, declared `Once`.
 const WRITE: &str = "write";
+const WRITE_OPERATION: &str = "tools.write";
 /// How far a law runs a node before it calls the turn stalled.
 const HORIZON_MS: u64 = 600_000;
 
@@ -312,7 +312,7 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                         let mut response = streamed(&request, &["writing ", marker]);
                         response.parts.push(LlmOutputPart::ToolCall {
                             call_id: "call-write".to_owned(),
-                            tool_name: WRITE.to_owned(),
+                            tool_name: WRITE_OPERATION.replace('.', "__"),
                             input_json: json!({ "marker": marker }).to_string(),
                             replay: None,
                         });
@@ -571,7 +571,7 @@ impl StaticToolExecute for Writes {
 fn write_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         WRITE,
-        WRITE,
+        WRITE_OPERATION,
         "A host write the receipt laws count.",
         json!({
             "type": "object",
@@ -583,7 +583,6 @@ fn write_tool() -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE))
 }
 
 /// One core over `backend`: the protocol `answer` needs, the model over

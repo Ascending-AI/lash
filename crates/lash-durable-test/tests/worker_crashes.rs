@@ -44,13 +44,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmRequest;
 use lash_core::{ExecutionPolicy, ToolCall, ToolOutcome};
 use served::{Tier, World};
 
 const TOOL: &str = "count_call";
-const CELL: &str = "const first = await tools.count_call({}); await control.finish({ first });";
+
+const TOOL_OPERATION: &str = "tools.count_call";
+const CELL: &str = "const first = await tools.countCall({}); await control.finish({ first });";
 
 /// `count_call`'s body: it counts its runs and answers `counted`.
 struct Count {
@@ -75,15 +76,14 @@ fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
 fn count_call(body: impl StaticToolExecute + 'static) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Counts its calls.",
         serde_json::json!({ "type": "object", "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
     .expect("count_call's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    .with_execution_policy(ExecutionPolicy::Once);
     Arc::new(StaticToolProvider::new(vec![definition], body))
 }
 
@@ -786,7 +786,7 @@ async fn a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_withou
 }
 
 /// A cell that completes a call and then computes for several slices.
-const CALL_THEN_LOOP: &str = "const first = await tools.count_call({}); let n = 0; \
+const CALL_THEN_LOOP: &str = "const first = await tools.countCall({}); let n = 0; \
      for (let i = 0; i < 500000; i = i + 1) { n = n + 1; } await control.finish({ first, n });";
 
 /// The ends of the cell's execution a follower of `updates` reads, up to
@@ -952,18 +952,20 @@ async fn a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure(tier: T
 }
 
 const RETIRE_TOOL: &str = "retire_pages";
+
+const RETIRE_TOOL_OPERATION: &str = "tools.retire_pages";
 /// Cell 0 of `rows` is 0 under the first park's root, which the activation
 /// leases; 1 under the second's; 2 under the third's, which retires the
 /// second; and 1 again at the fourth park, whose page the worker sealed at
 /// the second and names again under that seal's grant.
 const RETIRE_CELL: &str = "const rows = []; for (let i = 0; i < 256; i++) { rows.push(0); }
-await tools.retire_pages({});
+await tools.retirePages({});
 rows[0] = 1;
-await tools.retire_pages({});
+await tools.retirePages({});
 rows[0] = 2;
-await tools.retire_pages({});
+await tools.retirePages({});
 rows[0] = 1;
-await tools.retire_pages({});
+await tools.retirePages({});
 await control.finish({ last: rows[0] });";
 
 /// `retire_pages`' body: it runs page retirement until a step finds
@@ -1002,14 +1004,13 @@ async fn a_page_an_earlier_park_committed_stays_stored_while_its_activation_name
     let stores = Arc::new(std::sync::OnceLock::new());
     let definition = lash_core::ToolDefinition::raw(
         RETIRE_TOOL,
-        RETIRE_TOOL,
+        RETIRE_TOOL_OPERATION,
         "Retires every page no root holds.",
         serde_json::json!({ "type": "object", "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
     .expect("retire_pages' schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], RETIRE_TOOL));
+    .with_execution(std::time::Duration::from_secs(120));
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StaticToolProvider::new(
         vec![definition],
         RetirePages {

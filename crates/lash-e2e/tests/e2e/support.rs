@@ -91,7 +91,7 @@ pub fn settled(outcome: &Value) -> (String, Option<String>) {
         TurnOutcome::Finished(finish) => {
             let reply = match finish {
                 TurnFinish::AssistantMessage { text } => Some(text),
-                TurnFinish::Finished { tool_name, value } if tool_name == "finish" => {
+                TurnFinish::Finished { tool_name, value } if tool_name == "control.finish" => {
                     value.as_str().map(ToOwned::to_owned)
                 }
                 TurnFinish::Finished { .. } => None,
@@ -137,7 +137,7 @@ fn settled_reads_the_host_native_turn_outcome() {
         ),
         (
             TurnOutcome::Finished(TurnFinish::Finished {
-                tool_name: "finish".into(),
+                tool_name: "control.finish".into(),
                 value: json!("cell reply"),
             }),
             "completed",
@@ -145,7 +145,7 @@ fn settled_reads_the_host_native_turn_outcome() {
         ),
         (
             TurnOutcome::Finished(TurnFinish::Finished {
-                tool_name: "finish".into(),
+                tool_name: "control.finish".into(),
                 value: json!({"answer": 42}),
             }),
             "completed",

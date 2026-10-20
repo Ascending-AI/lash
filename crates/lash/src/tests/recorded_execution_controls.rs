@@ -409,7 +409,7 @@ fn fanning_provider(shown: &Arc<std::sync::Mutex<Vec<usize>>>) -> ProviderHandle
                     parts: (0..2)
                         .map(|call| LlmOutputPart::ToolCall {
                             call_id: format!("fan-{call}"),
-                            tool_name: "app_lookup".into(),
+                            tool_name: "tools__app_lookup".into(),
                             input_json: "{}".into(),
                             replay: None,
                         })

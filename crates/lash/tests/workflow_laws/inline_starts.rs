@@ -392,11 +392,10 @@ const LAUNCH_TOOLS: lash::process::ProcessConfigKey<()> =
 /// `tools.launch`, whose call a recovering node runs again, and
 /// `tools.launch_once`, whose call it settles as interrupted.
 fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::ToolDefinitionBindingExt as _;
     let launch = |name: &str| {
         lash::tools::ToolDefinition::raw(
             format!("tool:{name}"),
-            name,
+            format!("tools.{name}"),
             "Starts the function it is handed.",
             serde_json::json!({"type": "object"}),
             serde_json::json!({"x-lash": {"kind": "process_unknown"}}),
@@ -411,15 +410,12 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
         .expect("a declaring tool")
     };
     vec![
-        launch("launch")
-            .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(4).unwrap(),
-                1,
-                1,
-            ))
-            .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "launch")),
-        launch("launch_once")
-            .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "launch_once")),
+        launch("launch").with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(4).unwrap(),
+            1,
+            1,
+        )),
+        launch("launch_once"),
     ]
 }
 
@@ -827,7 +823,7 @@ fn launching(launch: &str) -> lash::process::ProcessEnv {
         .component(LAUNCH_TOOLS, &());
     for tool in launch_definitions()
         .iter()
-        .filter(|tool| tool.manifest.name == launch)
+        .filter(|tool| tool.manifest.tool() == format!("tools.{launch}"))
     {
         builder = builder.link_tool(
             LAUNCH_TOOLS.tool_provider(lash::tool_provider_key!("launch")),

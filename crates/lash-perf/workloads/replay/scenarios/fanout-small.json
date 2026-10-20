@@ -11,14 +11,14 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-0Synthetic payload for re",
                 "bytes": 15
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-1Synthetic payload for re",
                 "bytes": 15

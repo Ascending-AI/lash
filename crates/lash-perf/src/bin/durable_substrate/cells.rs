@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
@@ -30,6 +29,7 @@ use crate::turn::{ANSWER, Scripts, session_of_admission};
 
 /// The `Once` tool a cell awaits.
 const CELL_TOOL: &str = "ext_echo";
+const CELL_TOOL_OPERATION: &str = "tools.ext_echo";
 /// The model every cell session names.
 const MODEL: &str = "durable-substrate-cell-model";
 
@@ -124,7 +124,7 @@ fn cell_source(scripts: &Scripts, session: &SessionId) -> String {
     let pad = "x".repeat(script.cell_payload);
     let fresh = if script.cell_fresh { " + i" } else { "" };
     format!(
-        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.{CELL_TOOL}({{ i: i, pad: \"{pad}\"{fresh} }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
+        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.extEcho({{ i: i, pad: \"{pad}\"{fresh} }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
         calls = script.cell_calls,
     )
 }
@@ -201,7 +201,7 @@ impl StaticToolExecute for Echo {
 fn echo() -> Result<Arc<dyn lash_core::ToolProvider>> {
     let definition = lash_core::ToolDefinition::raw(
         CELL_TOOL,
-        CELL_TOOL,
+        CELL_TOOL_OPERATION,
         "Answers its arguments.",
         serde_json::json!({
             "type": "object",
@@ -213,7 +213,6 @@ fn echo() -> Result<Arc<dyn lash_core::ToolProvider>> {
     )
     .map_err(|error| anyhow::anyhow!("ext_echo's schemas: {error}"))?
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], CELL_TOOL));
+    .with_execution_policy(ExecutionPolicy::Once);
     Ok(Arc::new(StaticToolProvider::new(vec![definition], Echo)))
 }

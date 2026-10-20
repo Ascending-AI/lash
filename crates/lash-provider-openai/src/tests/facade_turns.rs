@@ -186,7 +186,7 @@ struct EchoProbe {
 impl StaticToolExecute for EchoProbe {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            assert_eq!(call.name(), "echo_probe");
+            assert_eq!(call.name(), "tools.echo_probe");
             self.seen.lock_recover().push(call.args.clone());
             ToolOutcome::ok(json!({ "echo": call.args }))
         })
@@ -198,7 +198,7 @@ impl StaticToolExecute for EchoProbe {
 fn echo_probe_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:echo_probe",
-        "echo_probe",
+        "tools.echo_probe",
         "Echo the provided arguments.",
         json!({
             "type": "object",
@@ -219,7 +219,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         ScriptedWsAction::ToolCall {
             response_id: "resp_ws_tool",
             call_id: "call_echo_1",
-            tool_name: "echo_probe",
+            tool_name: "tools__echo_probe",
             arguments: r#"{"value":"ping"}"#,
         },
         ScriptedWsAction::Complete {

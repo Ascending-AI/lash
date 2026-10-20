@@ -66,11 +66,11 @@ trailing text refuse.
 ```typescript
 export async function deep_research() {
   let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
-  let evidence = await tools.research.search(search_input);
+  let evidence = await research.search(search_input);
   let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
-  let report = await tools.research.synthesize(synthesis_input);
+  let report = await research.synthesize(synthesis_input);
   let display_input = {text: report.summary};
-  await tools.display.show_message(display_input);
+  await display.showMessage(display_input);
   return report;
 }
 async function main() {

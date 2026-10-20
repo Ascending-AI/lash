@@ -1,6 +1,6 @@
 //! The catalogue listing the shipped presenters share: each tool's doc in
-//! catalogue order, a module's heading opening each run of its tools, and
-//! under a budget the pinned tools, then rounds over the namespaces.
+//! catalogue order, and under a budget the pinned tools, then rounds over
+//! the namespaces.
 //!
 //! A presenter supplies each doc's text; this decides which docs are listed
 //! and joins them. A tool appended to the catalogue appends its doc and leaves
@@ -10,9 +10,6 @@ use lash_protocol_types::{ToolContract, ToolManifest};
 use lash_tool_shape::{SchemaShape, ShapeRow};
 
 use crate::{PresentedToolSection, ToolDisclosure, ToolPresentationEntry};
-
-/// The heading of tools of no module listed after a module's tools.
-const UNGROUPED_HEADING: &str = "#### Ungrouped tools";
 
 /// A selected catalogue, with each document carrying only the definitions first
 /// needed at its position. Headings and separators are outside catalogue cost.
@@ -47,7 +44,7 @@ impl ListingPlan {
         self.docs.get(index)?.as_ref().map(String::len)
     }
 
-    /// Join the selected documents under module headings. Supply the same
+    /// Join the selected documents. Supply the same
     /// offered entries passed to [`plan`], in the same order.
     ///
     /// ```rust,ignore
@@ -56,29 +53,12 @@ impl ListingPlan {
     pub fn render(self, tools: &[ToolPresentationEntry<'_>]) -> PresentedToolSection {
         let mut section = PresentedToolSection::default();
         let mut parts = Vec::new();
-        let mut open: Option<Option<&str>> = None;
         for (tool, doc) in tools.iter().zip(self.docs) {
             let Some(doc) = doc else {
                 section.omitted.push(tool.manifest.id.clone());
                 continue;
             };
             section.listed.push(tool.manifest.id.clone());
-            let module = tool
-                .manifest
-                .module
-                .as_deref()
-                .map(|module| module.name.as_str());
-            match (module, open) {
-                (Some(name), current) if current != Some(Some(name)) => {
-                    parts.push(format!("#### {name}"));
-                    open = Some(Some(name));
-                }
-                (None, Some(Some(_))) => {
-                    parts.push(UNGROUPED_HEADING.to_string());
-                    open = Some(None);
-                }
-                _ => {}
-            }
             parts.push(doc);
         }
         section.text = parts.join("\n\n");
@@ -432,7 +412,7 @@ fn field_row(row: &ShapeRow, schema_type: &dyn Fn(&SchemaShape) -> String) -> St
 ///
 /// ```rust,ignore
 /// let text = listing::discovery_text(&tool.manifest, &tool.contract)?;
-/// assert!(text.starts_with(&tool.manifest.name));
+/// assert!(text.starts_with(&tool.manifest.tool()));
 /// ```
 ///
 /// # Errors
@@ -441,7 +421,7 @@ pub fn discovery_text(
     manifest: &ToolManifest,
     contract: &ToolContract,
 ) -> Result<String, crate::PresentationRefusal> {
-    let mut lines = vec![manifest.name.clone()];
+    let mut lines = vec![manifest.tool()];
     let description = manifest.description.trim();
     if !description.is_empty() {
         lines.push(description.to_string());

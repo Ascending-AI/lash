@@ -73,7 +73,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
@@ -96,14 +95,15 @@ use dialect::Dialect;
 const SESSION: &str = "v0-session";
 const RUN: &str = "v0-turn";
 const TOOL: &str = "ext_write";
+const TOOL_OPERATION: &str = "tools.ext_write";
 const MODEL: &str = "v0-model";
 
 /// The cell the model writes: one `Once` host operation, then a printout of
 /// what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\n</typescript>";
+const CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\n</typescript>";
 /// The cell [`Protocol::Archived`]'s model writes: [`CELL`]'s operation and
 /// printout, then prints past [`ARCHIVE_RETENTION`]'s inline limit.
-const ARCHIVED_CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\nfor (let i = 0; i < 64; i++) { console.log('archived print ' + i + ' of the cell output'); }\n</typescript>";
+const ARCHIVED_CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\nfor (let i = 0; i < 64; i++) { console.log('archived print ' + i + ' of the cell output'); }\n</typescript>";
 /// The output retention [`Protocol::Archived`]'s deployment runs under: its
 /// cell's prints exceed the inline limit, and the witness keeps the
 /// operation's answer.
@@ -172,7 +172,7 @@ fn carried() -> String {
 
 /// Cell A: binds [`carried`] and a function, then calls the operation,
 /// whatever its answer.
-const WORKING_FIRST_CELL: &str = "<typescript>\nlet carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.ext_write({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);\n</typescript>";
+const WORKING_FIRST_CELL: &str = "<typescript>\nlet carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.extWrite({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);\n</typescript>";
 
 /// The session global the host binds before [`Protocol::Defaults`]' turns
 /// (FIG-6418 L3).
@@ -182,7 +182,7 @@ const DEFAULTS_FIRST_CELL: &str =
     "<typescript>\nconst bound_first = fig6418_default;\nconsole.log(bound_first);\n</typescript>";
 /// Its second turn's cell: writes the default to the outside world and
 /// finishes with it.
-const DEFAULTS_SECOND_CELL: &str = "<typescript>\nconst seen = fig6418_default;\nawait tools.ext_write({ x: seen });\nawait control.finish(seen);\n</typescript>";
+const DEFAULTS_SECOND_CELL: &str = "<typescript>\nconst seen = fig6418_default;\nawait tools.extWrite({ x: seen });\nawait control.finish(seen);\n</typescript>";
 /// The turn [`RUN_TWO`] is sent under.
 const RUN_TWO: &str = "v0-turn-2";
 
@@ -249,7 +249,7 @@ impl StaticToolExecute for ExtWrite {
 fn ext_write(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -261,8 +261,7 @@ fn ext_write(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("ext_write's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    .with_execution_policy(ExecutionPolicy::Once);
     Arc::new(StaticToolProvider::new(
         vec![definition],
         ExtWrite { world },
@@ -323,7 +322,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                                         0 => "v0-call".to_owned(),
                                         round => format!("v0-call-{round}"),
                                     },
-                                    tool_name: TOOL.to_owned(),
+                                    tool_name: TOOL_OPERATION.replace('.', "__"),
                                     input_json: r#"{"x":7}"#.to_owned(),
                                     replay: None,
                                 }],

@@ -305,17 +305,17 @@ define_plugin_errors! {
         => "value_mismatch"
         => crate::ToolFailureClass::InvalidRequest;
 /// An effective resident catalog member could not supply its immutable definition.
-    #[error("resident tool `{name}` ({tool_id}) has no contract")]
+    #[error("resident tool `{operation}` ({tool_id}) has no contract")]
     ResidentToolContractUnavailable {
         tool_id: crate::ToolId,
-        name: String,
+        operation: String,
     }
-        => PluginError::ResidentToolContractUnavailable { tool_id, name }
+        => PluginError::ResidentToolContractUnavailable { tool_id, operation }
         => {
         tool_id: crate::ToolId,
-        name: String,
+        operation: String,
     }
-        => Self::ResidentToolContractUnavailable { tool_id: tool_id.clone(), name: name.clone() }
+        => Self::ResidentToolContractUnavailable { tool_id: tool_id.clone(), operation: operation.clone() }
         => Self::ResidentToolContractUnavailable { .. }
         => "resident_tool_contract_unavailable"
         => crate::ToolFailureClass::Internal;
@@ -327,13 +327,21 @@ define_plugin_errors! {
         => Self::ResidentToolDuplicateId { .. }
         => "resident_tool_duplicate_id"
         => crate::ToolFailureClass::Internal;
-#[error("resident catalog repeats tool name `{name}`")]
-    ResidentToolDuplicateName { name: String }
-        => PluginError::ResidentToolDuplicateName { name }
-        => { name: String }
-        => Self::ResidentToolDuplicateName { name: name.clone() }
-        => Self::ResidentToolDuplicateName { .. }
-        => "resident_tool_duplicate_name"
+#[error("resident tool `{tool_id}` names no operation: {message}")]
+    ResidentToolInvalidOperation { tool_id: crate::ToolId, message: String }
+        => PluginError::ResidentToolInvalidOperation { tool_id, message }
+        => { tool_id: crate::ToolId, message: String }
+        => Self::ResidentToolInvalidOperation { tool_id: tool_id.clone(), message: message.clone() }
+        => Self::ResidentToolInvalidOperation { .. }
+        => "resident_tool_invalid_operation"
+        => crate::ToolFailureClass::Internal;
+#[error("resident tools `{first_tool}` and `{second_tool}` are both the operation `{operation}`")]
+    ResidentToolDuplicateOperation { operation: String, first_tool: crate::ToolId, second_tool: crate::ToolId }
+        => PluginError::ResidentToolDuplicateOperation { operation, first_tool, second_tool }
+        => { operation: String, first_tool: crate::ToolId, second_tool: crate::ToolId }
+        => Self::ResidentToolDuplicateOperation { operation: operation.clone(), first_tool: first_tool.clone(), second_tool: second_tool.clone() }
+        => Self::ResidentToolDuplicateOperation { .. }
+        => "resident_tool_duplicate_operation"
         => crate::ToolFailureClass::Internal;
 /// A catalog member's declared execution is refused against the runtime's
     /// execution budgets: an inline-only tool declared above the ceiling.
@@ -1030,7 +1038,8 @@ impl PluginError {
             | Self::ToolPresentationRefused { .. }
             | Self::ResidentToolContractUnavailable { .. }
             | Self::ResidentToolDuplicateId { .. }
-            | Self::ResidentToolDuplicateName { .. }
+            | Self::ResidentToolDuplicateOperation { .. }
+            | Self::ResidentToolInvalidOperation { .. }
             | Self::ToolRegistrationRefused { .. }
             | Self::ToolSurfaceRefused { .. }
             | Self::SessionAlreadyExists { .. }
@@ -1292,7 +1301,7 @@ mod classification_tests {
             .expect_err("null cannot be admitted as a schema");
         let catalog = crate::ToolDefinition::raw(
             "bad",
-            "bad",
+            "tools.bad",
             "bad",
             serde_json::Value::Null,
             serde_json::json!({}),

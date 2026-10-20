@@ -13,22 +13,22 @@ impl Oracle {
         hard_call(&mut self.world, name, &args).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
     fn orders(&mut self, name: &str) -> Vec<Value> {
-        let customer = self.call("retail_customer", json!({"name":name}));
-        let ids = self.call("retail_orders", json!({"customer_id":customer["id"]}));
+        let customer = self.call("retail.customer", json!({"name":name}));
+        let ids = self.call("retail.orders", json!({"customer_id":customer["id"]}));
         ids.as_array()
             .unwrap()
             .iter()
-            .map(|id| self.call("retail_order", json!({"id":id})))
+            .map(|id| self.call("retail.order", json!({"id":id})))
             .collect()
     }
     fn incidents(&mut self, name: &str) -> (Value, Vec<Value>) {
-        let service = self.call("ops_service", json!({"name":name}));
-        let ids = self.call("ops_tickets", json!({"service_id":service["id"]}));
+        let service = self.call("ops.service", json!({"name":name}));
+        let ids = self.call("ops.tickets", json!({"service_id":service["id"]}));
         let tickets = ids
             .as_array()
             .unwrap()
             .iter()
-            .map(|id| self.call("ops_ticket", json!({"id":id})))
+            .map(|id| self.call("ops.ticket", json!({"id":id})))
             .collect();
         (service, tickets)
     }
@@ -67,8 +67,8 @@ fn refund_oracle() {
         let orders = o.orders("Mira");
         let mut total = 0;
         for order in orders.iter().filter(|order| returnable(order)) {
-            let receipt = o.call("retail_refund", json!({"order_id":order["id"]}));
-            let verified = o.call("retail_order", json!({"id":receipt["order_id"]}));
+            let receipt = o.call("retail.refund", json!({"order_id":order["id"]}));
+            let verified = o.call("retail.order", json!({"id":receipt["order_id"]}));
             total += number(&verified, "refunded_cents");
         }
         json!(total)
@@ -77,16 +77,16 @@ fn refund_oracle() {
 #[test]
 fn exchange_recovery_oracle() {
     prove("hard-retail-exchange", |o| {
-        let order = o.call("retail_order", json!({"id":"R7"}));
+        let order = o.call("retail.order", json!({"id":"R7"}));
         let before_refusal = o.world.clone();
         let rejected = o.call(
-            "retail_exchange",
+            "retail.exchange",
             json!({"order_id":order["id"],"sku":"P2"}),
         );
         assert_eq!(rejected, json!({"error":{"code":"out_of_stock"}}));
         assert_eq!(o.world, before_refusal, "refusal must be atomic");
-        let original = o.call("retail_product", json!({"sku":order["sku"]}));
-        let products = o.call("retail_products", json!({"category":original["category"]}));
+        let original = o.call("retail.product", json!({"sku":order["sku"]}));
+        let products = o.call("retail.products", json!({"category":original["category"]}));
         let best = products
             .as_array()
             .unwrap()
@@ -95,25 +95,25 @@ fn exchange_recovery_oracle() {
             .min_by_key(|p| number(p, "price_cents"))
             .unwrap();
         let receipt = o.call(
-            "retail_exchange",
+            "retail.exchange",
             json!({"order_id":order["id"],"sku":best["sku"]}),
         );
-        o.call("retail_order", json!({"id":receipt["order_id"]}))["sku"].clone()
+        o.call("retail.order", json!({"id":receipt["order_id"]}))["sku"].clone()
     });
 }
 #[test]
 fn reschedule_oracle() {
     prove("hard-retail-reschedule", |o| {
-        let customer = o.call("retail_customer", json!({"name":"Sana"}));
+        let customer = o.call("retail.customer", json!({"name":"Sana"}));
         if number(&customer, "pending_cents") != 0 {
             return json!("PAYMENT_PENDING");
         }
-        let ids = o.call("retail_orders", json!({"customer_id":customer["id"]}));
+        let ids = o.call("retail.orders", json!({"customer_id":customer["id"]}));
         let orders = ids
             .as_array()
             .unwrap()
             .iter()
-            .map(|id| o.call("retail_order", json!({"id":id})))
+            .map(|id| o.call("retail.order", json!({"id":id})))
             .collect::<Vec<_>>();
         let first = orders
             .iter()
@@ -121,10 +121,10 @@ fn reschedule_oracle() {
             .min_by_key(|r| number(r, "delivery_day"))
             .unwrap();
         let receipt = o.call(
-            "retail_reschedule",
+            "retail.reschedule",
             json!({"order_id":first["id"],"day":22}),
         );
-        o.call("retail_order", json!({"id":receipt["order_id"]}))["delivery_day"].clone()
+        o.call("retail.order", json!({"id":receipt["order_id"]}))["delivery_day"].clone()
     });
 }
 #[test]
@@ -135,7 +135,7 @@ fn reprice_oracle() {
             .iter()
             .filter(|r| returnable(r))
             .map(|r| {
-                let product = o.call("retail_product", json!({"sku":r["sku"]}));
+                let product = o.call("retail.product", json!({"sku":r["sku"]}));
                 number(&product, "price_cents") * number(r, "quantity") - number(r, "paid_cents")
             })
             .sum();
@@ -150,7 +150,7 @@ fn lamps_oracle() {
             orders
                 .iter()
                 .filter_map(|r| {
-                    let p = o.call("retail_product", json!({"sku":r["sku"]}));
+                    let p = o.call("retail.product", json!({"sku":r["sku"]}));
                     (r["status"] == "delivered" && p["category"] == "lamp").then(|| r["id"].clone())
                 })
                 .collect::<Vec<_>>()
@@ -173,19 +173,19 @@ fn best_return_oracle() {
 #[test]
 fn deploy_recovery_oracle() {
     prove("hard-ops-deploy-recovery", |o| {
-        let service = o.call("ops_service", json!({"name":"Beacon"}));
-        let ids = o.call("ops_releases", json!({"service_id":service["id"]}));
+        let service = o.call("ops.service", json!({"name":"Beacon"}));
+        let ids = o.call("ops.releases", json!({"service_id":service["id"]}));
         let mut releases = ids
             .as_array()
             .unwrap()
             .iter()
-            .map(|id| o.call("ops_release", json!({"id":id})))
+            .map(|id| o.call("ops.release", json!({"id":id})))
             .collect::<Vec<_>>();
         releases.retain(|r| r["checks"] == "passed");
         releases.sort_by_key(|r| std::cmp::Reverse(number(r, "version")));
         let before_refusal = o.world.clone();
         let rejected = o.call(
-            "ops_deploy",
+            "ops.deploy",
             json!({"service_id":service["id"],"release_id":releases[0]["id"]}),
         );
         assert_eq!(rejected, json!({"error":{"code":"capacity_exceeded"}}));
@@ -195,31 +195,31 @@ fn deploy_recovery_oracle() {
             .find(|r| number(r, "required_capacity") <= number(&service, "capacity"))
             .unwrap();
         o.call(
-            "ops_deploy",
+            "ops.deploy",
             json!({"service_id":service["id"],"release_id":fits["id"]}),
         );
-        o.call("ops_service", json!({"name":service["name"]}))["deployed_release"].clone()
+        o.call("ops.service", json!({"name":service["name"]}))["deployed_release"].clone()
     });
 }
 #[test]
 fn resolve_chain_oracle() {
     prove("hard-ops-resolve-chain", |o| {
-        let incident = o.call("ops_ticket", json!({"id":"I2"}));
-        let dependency = o.call("ops_ticket", json!({"id":incident["blocked_by"][0]}));
-        let release = o.call("ops_release", json!({"id":dependency["fix_release"]}));
-        let service = o.call("ops_service", json!({"name":"Beacon"}));
+        let incident = o.call("ops.ticket", json!({"id":"I2"}));
+        let dependency = o.call("ops.ticket", json!({"id":incident["blocked_by"][0]}));
+        let release = o.call("ops.release", json!({"id":dependency["fix_release"]}));
+        let service = o.call("ops.service", json!({"name":"Beacon"}));
         assert_eq!(release["checks"], "passed");
         o.call(
-            "ops_deploy",
+            "ops.deploy",
             json!({"service_id":service["id"],"release_id":release["id"]}),
         );
-        let receipt = o.call("ops_resolve", json!({"ticket_id":dependency["id"]}));
+        let receipt = o.call("ops.resolve", json!({"ticket_id":dependency["id"]}));
         assert_eq!(
-            o.call("ops_ticket", json!({"id":receipt["ticket_id"]}))["status"],
+            o.call("ops.ticket", json!({"id":receipt["ticket_id"]}))["status"],
             "resolved"
         );
-        let receipt = o.call("ops_resolve", json!({"ticket_id":incident["id"]}));
-        o.call("ops_ticket", json!({"id":receipt["ticket_id"]}))["status"].clone()
+        let receipt = o.call("ops.resolve", json!({"ticket_id":incident["id"]}));
+        o.call("ops.ticket", json!({"id":receipt["ticket_id"]}))["status"].clone()
     });
 }
 #[test]
@@ -253,7 +253,7 @@ fn oncall_oracle() {
         } else {
             harbor
         };
-        let team = o.call("ops_team", json!({"id":service["team_id"]}));
+        let team = o.call("ops.team", json!({"id":service["team_id"]}));
         team[if team["primary_available"] == true {
             "primary"
         } else {
@@ -277,7 +277,7 @@ fn ready_oracle() {
             {
                 continue;
             }
-            let r = o.call("ops_release", json!({"id":t["fix_release"]}));
+            let r = o.call("ops.release", json!({"id":t["fix_release"]}));
             if r["checks"] == "passed"
                 && number(&r, "required_capacity") <= number(&service, "capacity")
             {
@@ -290,7 +290,7 @@ fn ready_oracle() {
 #[test]
 fn blocked_impact_oracle() {
     prove("hard-ops-blocked-impact", |o| {
-        let first = o.call("ops_ticket", json!({"id":"I2"}));
+        let first = o.call("ops.ticket", json!({"id":"I2"}));
         let (_, mut tickets) = o.incidents("Harbor");
         tickets.push(first);
         let mut releases = std::collections::BTreeMap::new();
@@ -299,7 +299,7 @@ fn blocked_impact_oracle() {
             let id = t["fix_release"].as_str().unwrap();
             let r = releases
                 .entry(id.to_string())
-                .or_insert_with(|| o.call("ops_release", json!({"id":id})));
+                .or_insert_with(|| o.call("ops.release", json!({"id":id})));
             if r["checks"] == "failed" {
                 total += number(t, "affected_users");
             }
@@ -336,42 +336,42 @@ fn refusals_and_strict_inputs_leave_world_unchanged() {
     let mut world = World::seeded();
     for (name, args, code) in [
         (
-            "retail_reschedule",
+            "retail.reschedule",
             json!({"order_id":"R4","day":22}),
             "pending_payment",
         ),
         (
-            "retail_reschedule",
+            "retail.reschedule",
             json!({"order_id":"R6","day":22}),
             "not_pending",
         ),
         (
-            "retail_refund",
+            "retail.refund",
             json!({"order_id":"R2"}),
             "outside_return_policy",
         ),
         (
-            "retail_exchange",
+            "retail.exchange",
             json!({"order_id":"R4","sku":"P4"}),
             "pending_payment",
         ),
         (
-            "retail_exchange",
+            "retail.exchange",
             json!({"order_id":"R7","sku":"P6"}),
             "category_mismatch",
         ),
         (
-            "ops_deploy",
+            "ops.deploy",
             json!({"service_id":"S2","release_id":"V5"}),
             "checks_failed",
         ),
         (
-            "ops_deploy",
+            "ops.deploy",
             json!({"service_id":"S1","release_id":"V4"}),
             "wrong_service",
         ),
-        ("ops_resolve", json!({"ticket_id":"I2"}), "dependency_open"),
-        ("ops_resolve", json!({"ticket_id":"I1"}), "fix_not_deployed"),
+        ("ops.resolve", json!({"ticket_id":"I2"}), "dependency_open"),
+        ("ops.resolve", json!({"ticket_id":"I1"}), "fix_not_deployed"),
     ] {
         assert_eq!(
             hard_call(&mut world, name, &args).unwrap(),
@@ -385,7 +385,7 @@ fn refusals_and_strict_inputs_leave_world_unchanged() {
         json!({}),
         json!(null),
     ] {
-        assert!(hard_call(&mut world, "retail_order", &args).is_err());
+        assert!(hard_call(&mut world, "retail.order", &args).is_err());
         assert_eq!(world, World::seeded());
     }
 }
@@ -394,8 +394,8 @@ fn refusals_and_strict_inputs_leave_world_unchanged() {
 fn repeated_refund_and_exchange_do_not_duplicate_mutations() {
     let mut world = World::seeded();
     for (name, args) in [
-        ("retail_refund", json!({"order_id":"R1"})),
-        ("retail_exchange", json!({"order_id":"R7","sku":"P5"})),
+        ("retail.refund", json!({"order_id":"R1"})),
+        ("retail.exchange", json!({"order_id":"R7","sku":"P5"})),
     ] {
         let first = hard_call(&mut world, name, &args).unwrap();
         assert!(first.get("error").is_none());
@@ -410,7 +410,7 @@ fn integer_arguments_accept_zero_fraction_without_truncation() {
     let mut world = World::seeded();
     hard_call(
         &mut world,
-        "retail_reschedule",
+        "retail.reschedule",
         &json!({"order_id":"R7","day":22.0}),
     )
     .unwrap();
@@ -420,7 +420,7 @@ fn integer_arguments_accept_zero_fraction_without_truncation() {
         assert!(
             hard_call(
                 &mut world,
-                "retail_reschedule",
+                "retail.reschedule",
                 &json!({"order_id":"R7","day":day})
             )
             .is_err()

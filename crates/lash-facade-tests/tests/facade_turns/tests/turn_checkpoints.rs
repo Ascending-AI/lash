@@ -238,11 +238,12 @@ async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
 
 /// The tool whose body sends what its law sends to the running turn.
 const SEND_TOOL: &str = "send_to_turn";
+const SEND_TOOL_OPERATION: &str = "tools.send_to_turn";
 
 fn send_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{SEND_TOOL}"),
-        SEND_TOOL,
+        SEND_TOOL_OPERATION,
         "Sends the law's input to the running turn.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
@@ -272,7 +273,7 @@ impl ToolProvider for SendTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SEND_TOOL).then(|| Arc::new(send_tool_definition().contract()))
+        (name == SEND_TOOL_OPERATION).then(|| Arc::new(send_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -287,7 +288,7 @@ fn send_then_answer(n: usize) -> Answer {
         return Ok(LlmResponse {
             parts: vec![LlmOutputPart::ToolCall {
                 call_id: "send-call".to_string(),
-                tool_name: SEND_TOOL.to_string(),
+                tool_name: SEND_TOOL_OPERATION.replace('.', "__"),
                 input_json: "{}".to_string(),
                 replay: None,
             }],

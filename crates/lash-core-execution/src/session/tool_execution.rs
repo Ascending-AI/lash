@@ -272,7 +272,7 @@ impl RuntimeExecutionContext<'_> {
             .tool_catalog
             .entries()
             .iter()
-            .find(|tool| tool.manifest.name == tool_name)
+            .find(|tool| tool.manifest.tool() == tool_name)
             .map(|tool| tool.manifest.id.clone())
     }
 

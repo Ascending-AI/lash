@@ -60,12 +60,12 @@ fn run(source: &str) -> End {
 
 fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let kernel = kernel();
-    let environment = Environment {
-        tool_roots: &std::collections::BTreeSet::new(),
-        library: &kernel.library,
-        effects: &super::machine::effects(),
-        controls: super::controls(),
-    };
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+        &super::machine::effects(),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
+    let environment = Environment::new(&kernel.library, &environment_namespaces);
     let lowered = crate::lower(
         source,
         &environment,
@@ -128,7 +128,7 @@ fn drive_document(
                         Request::Sleep(request) => {
                             machine.deliver(request.wait, Outcome::Elapsed).unwrap();
                         }
-                        Request::Effect(effect) if effect.effect.as_str() == "finish" => {
+                        Request::Effect(effect) if effect.effect.as_str() == "control.finish" => {
                             finished_with =
                                 Some(effect.args.first().cloned().unwrap_or(Datum::Null));
                             machine
@@ -170,7 +170,7 @@ fn consumed_and_spread_pushes_return_the_new_length() {
         a.push(...[7, 8]);
         const empty = a.push();
         function typed(a: number[]) { return a.push(9); }
-        await finish(n === 1 && passed === 3 && expression[0] === 5
+        await control.finish(n === 1 && passed === 3 && expression[0] === 5
             && spread === 6 && empty === 8 && typed(a) === 9
             && a.join(',') === '1,2,3,4,5,6,7,8,9');
     "#);
@@ -191,7 +191,7 @@ fn discarded_multi_argument_push_preserves_evaluation_and_mutation_order() {
         let caught = false;
         const fail = () => { throw 'stop'; };
         try { a.push('never', fail()); } catch (e) { caught = e === 'stop'; }
-        await finish(trace === 'receiver;first:1;second:start,inner;'
+        await control.finish(trace === 'receiver;first:1;second:start,inner;'
             && a.join(',') === 'start,inner,one,two,typed-one,typed-two' && caught);
     "#);
 }
@@ -212,7 +212,7 @@ fn discarded_push_on_non_arrays_keeps_generic_method_semantics() {
         unknown(arraylike);
         const a = [];
         a.push(o.push());
-        await finish(trace === 'old:xy;replacement;replacement;'
+        await control.finish(trace === 'old:xy;replacement;replacement;'
             && arraylike.length === 4 && arraylike[1] === 'b'
             && arraylike[2] === 'c' && arraylike[3] === 'd' && a[0] === 7);
     "#);
@@ -230,7 +230,7 @@ fn holes_length_and_canonical_index_keys_keep_array_identity() {
             && !(3 in a) && (4 in a) && !(5 in a) && a[1] === undefined
             && a['01'] === undefined && present === '2,4,';
         a.length = 3;
-        await finish(before && alias === a && alias.length === 3 && !(4 in a));
+        await control.finish(before && alias === a && alias.length === 3 && !(4 in a));
     "#);
 }
 
@@ -246,7 +246,7 @@ fn callbacks_snapshot_length_but_read_live_properties() {
             return this.offset + value + (receiver === a ? 0 : 100);
         }, context);
         const sparse = [1, , 3].map(x => x * 2);
-        await finish(indices === '012' && mapped.join(',') === '11,12,13'
+        await control.finish(indices === '012' && mapped.join(',') === '11,12,13'
             && sparse.length === 3 && !(1 in sparse) && sparse[2] === 6);
     "#);
     law(r#"
@@ -269,7 +269,7 @@ fn callbacks_snapshot_length_but_read_live_properties() {
             && calls[0][1] === 0 && calls[1][1] === 2 && calls[0][2] === a;
         const fallback = generic.length === 3 && generic[0] === 1 && generic[1] === 2
             && !(2 in generic);
-        await finish(slots && escaped && fallback);
+        await control.finish(slots && escaped && fallback);
     "#);
 }
 
@@ -282,7 +282,7 @@ fn a_limited_split_builds_only_the_pieces_it_returns() {
         const commas = ",".repeat(1000000);
         const first = commas.split(",", 1);
         const two = commas.split("", 2);
-        await finish(first.length === 1 && first[0] === "" && two.join("|") === ",|,"
+        await control.finish(first.length === 1 && first[0] === "" && two.join("|") === ",|,"
             && "a😀b".split("", 1).join("|") === "a");
     "#);
 }
@@ -298,7 +298,7 @@ fn async_map_callbacks_start_concurrently_and_join() {
         });
         const started = order === '123';
         const result = await Promise.all(promises);
-        await finish(started && result.join(',') === '2,4,6' && order === '123123');
+        await control.finish(started && result.join(',') === '2,4,6' && order === '123123');
     "#);
 }
 
@@ -314,7 +314,7 @@ fn sort_uses_utf16_stability_and_undefined_before_holes() {
         const records = [{key: 1, id: 'a'}, {key: 1, id: 'b'}, {key: 0, id: 'c'}];
         records.sort((x, y) => x.key - y.key);
         const equal = [2, 1].sort(() => NaN);
-        await finish(ordered && alias === a && records.map(x => x.id).join('') === 'cab'
+        await control.finish(ordered && alias === a && records.map(x => x.id).join('') === 'cab'
             && equal.join(',') === '2,1');
     "#);
 }
@@ -343,7 +343,7 @@ fn default_sort_takes_an_objects_string_at_each_comparison() {
         const kept = ys[0].v === 2 && ys[1] === 1 && ys.length === 3;
         const zs = [10, 'b', 9, true, null, 'B', 1, '\uE000', '\uD83D\uDE00', 'b'].sort();
         const units = zs.map(String).join('|') === '1|10|9|B|b|b|null|true|\uD83D\uDE00|\uE000';
-        await finish(order && each && none && thrown && kept && units);
+        await control.finish(order && each && none && thrown && kept && units);
     "#);
 }
 
@@ -377,7 +377,7 @@ fn comparator_sort_applies_the_comparator_once_per_merge_comparison() {
         for (let i = 1; i < n; i++) {
             if (xs[i - 1].key > xs[i].key || (xs[i - 1].key === xs[i].key && xs[i - 1].id > xs[i].id)) { stable = false; }
         }
-        await finish(stable && calls.length <= n * 7 && calls.join(',') === expected.join(',')
+        await control.finish(stable && calls.length <= n * 7 && calls.join(',') === expected.join(',')
             && runs.map(r => r.id).join(',') === xs.map(r => r.id).join(','));
     "#);
 }
@@ -393,7 +393,7 @@ fn mutation_preserves_holes_and_copy_methods_materialize_them() {
         const sparse = [1, , 3]; const reversed = sparse.toReversed();
         const changed = sparse.with(-2, 9);
         const sorted = sparse.toSorted();
-        await finish(sparseRemoved && a.join(',') === 'x,1,1'
+        await control.finish(sparseRemoved && a.join(',') === 'x,1,1'
             && (1 in reversed) && reversed[1] === undefined && !(1 in sparse)
             && changed.join(',') === '1,9,3' && sorted[2] === undefined && (2 in sorted));
     "#);
@@ -410,7 +410,7 @@ fn iteration_is_live_and_spread_finishes_before_later_operands() {
         const iterator = a.values(); const first = iterator.next();
         a[1] = 2; const second = iterator.next();
         const values = [...iterator];
-        await finish(visited === '1u34' && spread.length === 5 && spread[4] === 5
+        await control.finish(visited === '1u34' && spread.length === 5 && spread[4] === 5
             && (1 in spread) && first.value === 1 && second.value === 2
             && values.join(',') === '3,4,5');
     "#);
@@ -433,7 +433,7 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
         const shortened = [1, 2];
         const from = {valueOf() { shortened.length = 0; return 0; }};
         const shrink = shortened.indexOf(undefined, from) === -1;
-        await finish(sparse && holes && nans && bounds && shrink && reduced === 8 && reverse === '431');
+        await control.finish(sparse && holes && nans && bounds && shrink && reduced === 8 && reverse === '431');
     "#);
     law(r#"
         const inner = {value: 1}; const a = [inner, , undefined, 4]; let order = '';
@@ -451,7 +451,7 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
             && sparse[1] === undefined;
         const empty = a.slice(Infinity).length === 0 && a.slice(1, -Infinity).length === 0
             && a.slice(NaN, -0).length === 0;
-        await finish(shrunk && slots && empty && snapshot.join(',') === '2');
+        await control.finish(shrunk && slots && empty && snapshot.join(',') === '2');
     "#);
 }
 
@@ -463,7 +463,7 @@ fn generic_methods_write_to_a_primitive_receivers_wrapper() {
         const pushed = Array.prototype.push.call(true) === 0 && Array.prototype.push.call(1, 'x') === 1;
         const popped = Array.prototype.pop.call(false) === undefined && Array.prototype.shift.call(2) === undefined;
         const spliced = Array.prototype.splice.call(true).length === 0 && Array.prototype.unshift.call(false) === 0;
-        await finish(pushed && popped && spliced);
+        await control.finish(pushed && popped && spliced);
     "#);
 }
 
@@ -482,7 +482,7 @@ fn from_maps_between_live_iterator_steps_and_flatten_skips_holes() {
         const flat = [1, , [2, , [3]]].flat(2);
         const flatMapped = [1, , 2].flatMap(x => [x, , x * 2]);
         const first = mapped.join(',') === '11,12,13' && snapshot.join(',') === '1';
-        await finish(first && flat.join(',') === '1,2,3' && flatMapped.join(',') === '1,2,2,4');
+        await control.finish(first && flat.join(',') === '1,2,3' && flatMapped.join(',') === '1,2,2,4');
     "#);
 }
 
@@ -491,20 +491,24 @@ fn from_maps_between_live_iterator_steps_and_flatten_skips_holes() {
 #[test]
 fn invalid_lengths_raise_and_typed_sparse_reads_hide_holes() {
     for length in ["-1", "1.5", "Infinity", "4294967296"] {
-        let source = format!("const a = [1, , 3]; a.length = {length}; await finish(true);");
+        let source =
+            format!("const a = [1, , 3]; a.length = {length}; await control.finish(true);");
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "RangeError"),
             "{source}"
         );
     }
-    law("const a: number[] = [1, , 3]; await finish(a[1] === undefined && a.length === 3);");
+    law(
+        "const a: number[] = [1, , 3]; await control.finish(a[1] === undefined && a.length === 3);",
+    );
 }
 
 /// The final result exposes JSON-shaped array slots, including nested aliases,
 /// while a boundary copy leaves the guest's sparse property presence intact.
 #[test]
 fn final_results_normalize_holes_without_mutating_guest_arrays() {
-    let end = run("const a = [1, , undefined]; const copied = [a, a]; await finish(copied);");
+    let end =
+        run("const a = [1, , undefined]; const copied = [a, a]; await control.finish(copied);");
     let row = Datum::List(vec![
         Datum::Float(lash_kernel_doc::Float::new(1.0)),
         Datum::Null,
@@ -529,9 +533,9 @@ fn tool_and_effect_arguments_normalize_nested_holes_on_copies() {
     ];
     let end = drive(
         r#"
-        const a = [, 2]; const p = echo(a); await p;
-        await echo({nested: a});
-        await finish(!(0 in a) && a.length === 2 && a[1] === 2);
+        const a = [, 2]; const p = host.echo(a); await p;
+        await host.echo({nested: a});
+        await control.finish(!(0 in a) && a.length === 2 && a[1] === 2);
     "#,
         &expected,
     );
@@ -609,10 +613,10 @@ fn regexp_match_arrays_keep_the_callback_receiver_and_write_refusal() {
     law(r#"
         const match = /a(.)/.exec('ab');
         const original = match.map((value, index, receiver) => receiver === match);
-        await finish(Array.isArray(match) && original.every(value => value)
+        await control.finish(Array.isArray(match) && original.every(value => value)
             && match.length === 2 && match[1] === 'b');
     "#);
-    let end = run("const match = /a(.)/.exec('ab'); match.push('c'); await finish(true);");
+    let end = run("const match = /a(.)/.exec('ab'); match.push('c'); await control.finish(true);");
     assert!(
         matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
     );
@@ -631,13 +635,13 @@ fn declared_array_paths_accept_regexp_match_arrays() {
     ] {
         law(&format!(
             "function check(words: string[]) {{ {body} }}
-            await finish(check(/a(.)/.exec('ab')!) && check(['ab', 'b']));"
+            await control.finish(check(/a(.)/.exec('ab')!) && check(['ab', 'b']));"
         ));
     }
     for args in ["", "'c'"] {
         let end = run(&format!(
             "function append(words: string[]) {{ words.push({args}); }}
-            append(/a(.)/.exec('ab')!); await finish(true);"
+            append(/a(.)/.exec('ab')!); await control.finish(true);"
         ));
         assert!(
             matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
@@ -650,7 +654,7 @@ fn declared_array_paths_accept_regexp_match_arrays() {
 #[test]
 fn non_index_array_writes_keep_the_existing_typed_refusal() {
     for key in ["-1", "1.5", "4294967295", "'extra'"] {
-        let source = format!("const a = [1]; a[{key}] = 9; await finish(true);");
+        let source = format!("const a = [1]; a[{key}] = 9; await control.finish(true);");
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED"),
             "{source}"
@@ -662,12 +666,12 @@ fn non_index_array_writes_keep_the_existing_typed_refusal() {
 /// through the same array; it does not coerce a text into a number.
 #[test]
 fn typed_array_alias_writes_are_checked_at_the_typed_use() {
-    let source = "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1);";
+    let source = "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; await control.finish(xs[0] + 1);";
     assert!(
         matches!(run(source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error")
     );
     law(
-        "const xs: any = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1 === 'a1');",
+        "const xs: any = [1, 2]; const alias: any = xs; alias[0] = 'a'; await control.finish(xs[0] + 1 === 'a1');",
     );
 }
 
@@ -677,10 +681,10 @@ fn typed_array_alias_writes_are_checked_at_the_typed_use() {
 fn live_for_of_carries_declared_element_and_return_types() {
     let source = "type Price = number; interface Item { price: Price } function total(items: Item[]): number { let sum = 0; for (const item of items) { sum += item.price; } return sum; }";
     law(&format!(
-        "{source} await finish(total([{{price: 2}}, {{price: 3}}]) * 2 === 10);"
+        "{source} await control.finish(total([{{price: 2}}, {{price: 3}}]) * 2 === 10);"
     ));
     assert!(
-        matches!(run(&format!("{source} await finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error")
+        matches!(run(&format!("{source} await control.finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error")
     );
 }
 
@@ -689,7 +693,7 @@ fn live_for_of_carries_declared_element_and_return_types() {
 #[test]
 fn string_conversion_obeys_own_join_and_keeps_locale_refusal() {
     law(
-        "const a = {0: 1, length: 1, join: function() { return this[0] + 10; }}; await finish(Array.prototype.toString.call(a) === 11 && Array.prototype.toString.call({length: 1}) === '[object Object]');",
+        "const a = {0: 1, length: 1, join: function() { return this[0] + 10; }}; await control.finish(Array.prototype.toString.call(a) === 11 && Array.prototype.toString.call({length: 1}) === '[object Object]');",
     );
     let lowered =
         super::lower("[1].toLocaleString();").expect_err("locale formatting remains refused");
@@ -710,7 +714,7 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
         "Array.prototype.toSpliced.call(huge, 0, 0)",
     ] {
         let source = format!(
-            "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; await finish(true);"
+            "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; await control.finish(true);"
         );
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "RangeError"),
@@ -720,7 +724,7 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
     law(
         "const like = {'9007199254740989': 1, '9007199254740990': 2, '9007199254740992': 4, length: 2 ** 53 + 20};
         const kept = Array.prototype.toSpliced.call(like, 0, 2 ** 53 - 3, 'a');
-        await finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
+        await control.finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
     );
 }
 
@@ -770,7 +774,7 @@ fn guarded_search_and_join_match_generic_array_semantics() {
         for setup in [
             "let xs = {\"0\": 1.0, length: 1.0} let args = [1.0]",
             "let xs = null let args = []",
-            "let xs = [1.0, 2.0] let args = [absent, {valueOf: fn(this, args) { print \"from\" set xs[0] = () do perform echo(2.0) as Any return 0.0 }}]",
+            "let xs = [1.0, 2.0] let args = [absent, {valueOf: fn(this, args) { print \"from\" set xs[0] = () do perform host.echo(2.0) as Any return 0.0 }}]",
             "let xs = [] let args = [null, {valueOf: fn(this, args) { throw \"not reached\" }}]",
             "let object = {x: 1.0} let xs = [object, {x: 1.0}] let args = [object]",
             "let xs = [1.0] let args = [1.0, {valueOf: fn(this, args) { print \"throw\" throw \"bad start\" }}]",
@@ -786,7 +790,7 @@ fn guarded_search_and_join_match_generic_array_semantics() {
         "let xs = [\"a\", (), null, absent, 3.0] let args = [\"|\"]",
         "let xs = [\"a\", \"b\", null, absent, ()] let args = [\"😀\"]",
         "let xs = [\"😀\", \"é\", {toString: fn(this, args) { print \"late element\" return \"z\" }}] let args = [\"|\"]",
-        "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform echo(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
+        "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform host.echo(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
         "let xs = [{toString: fn(this, args) { print \"element\" throw \"bad element\" }}] let args = [{toString: fn(this, args) { print \"separator first\" return \"|\" }}]",
         "let xs = {\"0\": \"a\", length: 2.0} let args = []",
         "let xs = null let args = []",
@@ -838,7 +842,8 @@ impl Host for ArrayPathHost {
 }
 
 fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<String>, u64) {
-    let mut source = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
+    let mut source =
+        String::from("kernel 1\nnumbers by_spelling\neffect host.echo(x: Any) -> Any\n");
     for (name, id) in kernel().library.iter() {
         source.push_str(&format!("use {name} = @{id}\n"));
     }
@@ -939,6 +944,6 @@ fn callback_arguments_and_rest_outlive_their_invocation() {
         const captured = readers[0]() === 20 && readers[1]() === 42;
         const asyncAndBound = asyncResult.join(',') === '4,6' && bound.join(',') === '16,18';
         const sync = slots && distinct && values && indices;
-        await finish(sync && receivers && captured && asyncAndBound);
+        await control.finish(sync && receivers && captured && asyncAndBound);
     "#);
 }

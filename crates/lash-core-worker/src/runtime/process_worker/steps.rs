@@ -116,7 +116,7 @@ impl DurableProcessWorker {
             let call = lash_core_execution::sansio::PendingToolCall {
                 call_id: execution.call().clone(),
                 provider_call_id: None,
-                tool_name: definition.manifest.name.clone(),
+                tool_name: definition.manifest.tool(),
                 args: input,
                 replay: None,
             };
@@ -135,7 +135,7 @@ impl DurableProcessWorker {
             .entries()
             .iter()
             .find(|entry| entry.manifest.id == *tool)
-            .map_or_else(|| effect.to_string(), |entry| entry.manifest.name.clone());
+            .map_or_else(|| effect.to_string(), |entry| entry.manifest.tool());
         let call = lash_core_execution::sansio::PendingToolCall {
             call_id: execution.call().clone(),
             provider_call_id: None,

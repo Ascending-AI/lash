@@ -34,10 +34,10 @@ pub(super) fn prepared() -> &'static PreparedLibrary {
     PREPARED.get_or_init(|| PreparedLibrary::new(Arc::clone(registry())))
 }
 
-/// The tools a cell may call: `echo(x)` answers `x` and `boom(x)` fails
+/// The tools a cell may call: `host.echo(x)` answers `x` and `host.boom(x)` fails
 /// with an error of kind `boom` whose message is `x`.
 pub(crate) fn effects() -> BTreeMap<EffectName, Signature> {
-    ["echo", "boom", "finish"]
+    ["host.echo", "host.boom", "control.finish"]
         .into_iter()
         .map(|name| {
             let signature = Signature {
@@ -129,7 +129,7 @@ impl Recorded {
     }
 }
 
-/// What a request is called in a delivery script: `echo:a`, `boom:x`,
+/// What a request is called in a delivery script: `host.echo:a`, `host.boom:x`,
 /// `sleep:50`.
 fn label(request: &Request) -> String {
     match request {
@@ -150,7 +150,7 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
         Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
         Request::Effect(effect) => {
             let argument = effect.args.first().cloned().unwrap_or(Datum::Null);
-            let outcome = if effect.effect.as_str() == "boom" {
+            let outcome = if effect.effect.as_str() == "host.boom" {
                 Outcome::Failed(ErrorDatum {
                     kind: "boom".to_string(),
                     message: match &argument {
@@ -220,7 +220,7 @@ pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -
                 let [Request::Effect(effect)] = park.requests.as_slice() else {
                     panic!("only `finish` is answered: {park:?}\n{text}");
                 };
-                assert_eq!(effect.effect.as_str(), "finish", "{text}");
+                assert_eq!(effect.effect.as_str(), "control.finish", "{text}");
                 finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
                 machine
                     .deliver(effect.wait, Outcome::Completed(Datum::Null))
@@ -253,12 +253,10 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     let library = super::library();
     let effects = effects();
     let bindings = values.names();
-    let environment = Environment {
-        tool_roots: &std::collections::BTreeSet::new(),
-        library,
-        effects: &effects,
-        controls: super::controls(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library, &environment_namespaces);
     let lowered = crate::lower(
         source,
         &environment,
@@ -295,7 +293,7 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
 #[test]
 fn math_random_preserves_the_kernel_unit_interval_for_direct_and_borrowed_calls() {
     let (mut machine, text) = start(
-        "const draw = Math.random; const values = []; for (let i = 0; i < 4; i++) { values.push(Math.random()); values.push(draw()); } await finish(values);",
+        "const draw = Math.random; const values = []; for (let i = 0; i < 4; i++) { values.push(Math.random()); values.push(draw()); } await control.finish(values);",
     );
     let mut console = Console {
         random_bits: [0, 1 << 62, 1 << 63, u64::MAX]
@@ -310,7 +308,7 @@ fn math_random_preserves_the_kernel_unit_interval_for_direct_and_borrowed_calls(
     let [Request::Effect(effect)] = park.requests.as_slice() else {
         panic!("only finish is requested: {park:?}");
     };
-    assert_eq!(effect.effect.as_str(), "finish");
+    assert_eq!(effect.effect.as_str(), "control.finish");
     let [Datum::List(values)] = effect.args.as_slice() else {
         panic!("finish carries the draws: {:?}", effect.args);
     };
@@ -481,7 +479,7 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
                         panic!("effect only")
                     };
                     let value = effect.args.first().cloned().unwrap_or(Datum::Null);
-                    if effect.effect.as_str() == "finish" {
+                    if effect.effect.as_str() == "control.finish" {
                         result = Some(value.clone());
                     }
                     machine
@@ -502,7 +500,7 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
 /// cell, including an await between a member reference and its write.
 #[test]
 fn plain_record_mid_path_park_resumes_the_guarded_heap() {
-    let source = "const r = { next: { leaf: 0 } }; r.next.leaf = await echo(7); await finish(r);";
+    let source = "const r = { next: { leaf: 0 } }; r.next.leaf = await host.echo(7); await control.finish(r);";
     let text = super::main_text_with_effects(source);
     assert!(text.contains("__lash_brand"), "{text}");
     let plain = plain_record_resume(source, u64::MAX, false);
@@ -510,7 +508,7 @@ fn plain_record_mid_path_park_resumes_the_guarded_heap() {
     assert_eq!((&plain.0, plain.1), (&restored.0, restored.1));
     assert_eq!(restored.2, 2, "echo and finish parks were imported");
     assert_eq!(
-        end("const r = { next: { leaf: 7 } }; await finish(r);"),
+        end("const r = { next: { leaf: 7 } }; await control.finish(r);"),
         Ended::Finished(plain.0)
     );
 }
@@ -519,7 +517,7 @@ fn plain_record_mid_path_park_resumes_the_guarded_heap() {
 /// its result and exact charge over serialized slices.
 #[test]
 fn plain_record_paths_account_charge_across_slice_resume() {
-    let source = "const r = { next: { leaf: 0 } }; for (let n = 0; n < 3; n++) { r.next.leaf = n; } await finish(r);";
+    let source = "const r = { next: { leaf: 0 } }; for (let n = 0; n < 3; n++) { r.next.leaf = n; } await control.finish(r);";
     let text = super::main_text_with_effects(source);
     assert!(!text.contains("__lash_brand"), "{text}");
     let plain = plain_record_resume(source, u64::MAX, false);
@@ -544,7 +542,7 @@ fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
         let half = ".next".repeat(depth / 2);
         let rest = ".next".repeat(depth - depth / 2);
         source.push_str(&format!(
-            "for (let i = 0; i < {iterations}; i++) {{ const middle = {parent}{half}; middle{rest}.leaf = i; }} await finish({parent});"
+            "for (let i = 0; i < {iterations}; i++) {{ const middle = {parent}{half}; middle{rest}.leaf = i; }} await control.finish({parent});"
         ));
         source
     }
@@ -568,7 +566,7 @@ fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
 /// total charge, key identities and results as uninterrupted execution.
 #[test]
 fn map_admission_preserves_exact_charge_across_slices_and_argument_parks() {
-    let source = "const key = {}; const f = () => 1; const m = new Map(); m.set(-0, 1); m.set(NaN, 2); m.set(key, 3); m.set(f, await echo(7)); m.set(); key.x = 9; const checks = [m.size === 5, m.get(0) === 1, m.get(NaN) === 2, m.get(key) === 3, m.get(f) === 7, m.has(), m.get() === undefined, m.delete(f), !m.has(f)]; let valid = true; for (const check of checks) { valid = valid && check; } await finish(valid);";
+    let source = "const key = {}; const f = () => 1; const m = new Map(); m.set(-0, 1); m.set(NaN, 2); m.set(key, 3); m.set(f, await host.echo(7)); m.set(); key.x = 9; const checks = [m.size === 5, m.get(0) === 1, m.get(NaN) === 2, m.get(key) === 3, m.get(f) === 7, m.has(), m.get() === undefined, m.delete(f), !m.has(f)]; let valid = true; for (const check of checks) { valid = valid && check; } await control.finish(valid);";
     let plain = plain_record_resume(source, u64::MAX, false);
     assert_eq!(plain.0, Datum::Bool(true));
     for slice in [1, 7, u64::MAX] {
@@ -695,12 +693,10 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             .split_once("function f")
             .expect("a source function");
         let effects = effects();
-        let environment = Environment {
-            library: super::library(),
-            effects: &effects,
-            controls: super::controls(),
-            tool_roots: &std::collections::BTreeSet::new(),
-        };
+        let environment_namespaces =
+            lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+                .expect("the test's effects are operations");
+        let environment = Environment::new(super::library(), &environment_namespaces);
         let entry = crate::lower(
             &format!("export async function run{tail}"),
             &environment,
@@ -712,7 +708,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         let convention = entry.entries[&Name::new("run")].convention.clone();
         let (_, result) = end_of_entry(entry, "run", args.clone());
         assert_eq!(result, expected, "workflow: {function}");
-        let source = format!("{function} await echo(f);");
+        let source = format!("{function} await host.echo(f);");
         let (mut machine, text) = start(&source);
         let mut host = Console::default();
         let function = loop {

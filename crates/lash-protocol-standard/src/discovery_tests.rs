@@ -36,7 +36,7 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
         lash_core::ToolDefinition::raw(
             "tool:mcp/issues_search",
-            "issues_search",
+            "tools.issues_search",
             "Search issues.",
             input_schema.clone(),
             serde_json::json!({"type":"string"}),
@@ -67,7 +67,7 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
     assert_eq!(
         docs.text,
         concat!(
-            "### issues_search({ query: str, ",
+            "### tools__issues_search({ query: str, ",
             "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"]}, ",
             "sort?: list[record{field: str}] }) -> str\n",
             "Search issues.\n",
@@ -89,9 +89,10 @@ fn provider_native_schemas_are_byte_identical_to_the_canonical_contract() {
             "value":{"type":["string","null"], "description":"A nullable value"}
         }, "additionalProperties":false}}
     });
-    let tool = lash_core::ToolDefinition::raw("query", "query", "Query", schema.clone(), schema)
-        .expect("valid recursive schemas")
-        .with_execution(std::time::Duration::from_secs(30));
+    let tool =
+        lash_core::ToolDefinition::raw("query", "tools.query", "Query", schema.clone(), schema)
+            .expect("valid recursive schemas")
+            .with_execution(std::time::Duration::from_secs(30));
     let canonical_input = serde_json::to_vec(tool.contract.input_schema.canonical()).unwrap();
     let canonical_output = serde_json::to_vec(tool.contract.output_schema.canonical()).unwrap();
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
@@ -142,7 +143,7 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
     };
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
         tool("tools.search", true),
-        tool("hidden", false),
+        tool("tools.hidden", false),
     ]);
     let manifests = catalog
         .entries()
@@ -171,7 +172,7 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         });
         assert_eq!(preamble.tool_specs.len(), expected);
     }
-    for operation in ["hidden", "absent"] {
+    for operation in ["tools.hidden", "tools.absent"] {
         assert!(matches!(
             validate_discovery(
                 &manifests,

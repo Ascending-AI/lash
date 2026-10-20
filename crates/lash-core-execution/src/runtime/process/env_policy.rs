@@ -190,10 +190,9 @@ impl<'a> ProcessEnvCx<'a> {
         };
         let mut effects = BTreeMap::new();
         for effect in performed.keys() {
-            let offered = surface.entries().find(|entry| {
-                crate::effect_path_of(&entry.definition.manifest).as_deref()
-                    == Some(effect.as_str())
-            });
+            let offered = surface
+                .entries()
+                .find(|entry| entry.definition.manifest.operation.effect_name() == *effect);
             let link = match (offered, self.recorded_grants.get(effect)) {
                 (Some(entry), _) => {
                     let tool = entry.tool();

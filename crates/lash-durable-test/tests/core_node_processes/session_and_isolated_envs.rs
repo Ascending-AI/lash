@@ -135,7 +135,7 @@ fn session_turn_model(answers: bool, held: &Arc<tokio::sync::Notify>) -> Provide
                 if results(&request).is_empty() {
                     return Ok(call(
                         "session-turn-env-spawn",
-                        "spawn_agent",
+                        "agents.spawn",
                         serde_json::json!({ "task": TOOL_CHILD_TASK }),
                     ));
                 }
@@ -272,7 +272,9 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
 
 const EXPLICIT_ENGINE: &str = "core-node-explicit-env-engine";
 const EXPLICIT_TOOL: &str = "iso_explicit";
+const EXPLICIT_OPERATION: &str = "iso.explicit";
 const ORDINARY_TOOL: &str = "core_node_ordinary";
+const ORDINARY_OPERATION: &str = "tools.core_node_ordinary";
 const B_TOOL: &str = "core_node_b";
 /// Cross-cutting: no tools, one result check.
 const CHECK_COMPONENT: lash_core::ProcessConfigKey<()> =
@@ -315,12 +317,16 @@ fn b_runs() -> Vec<lash_core::ToolDefinition> {
 }
 
 fn object_tool(name: &str, binding: [&str; 2]) -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(name, name, "Answers its arguments.", object.clone(), object)
-        .expect("the tool's schemas")
-        .with_execution(Duration::from_secs(120))
-        .with_tool_binding(lash_core::ToolBinding::new([binding[0]], binding[1]))
+    lash_core::ToolDefinition::raw(
+        name,
+        format!("{}.{}", binding[0], binding[1]),
+        "Answers its arguments.",
+        object.clone(),
+        object,
+    )
+    .expect("the tool's schemas")
+    .with_execution(Duration::from_secs(120))
 }
 
 /// The ordinary tool: repeatable, so that a worker stopping mid-body
@@ -402,8 +408,8 @@ impl lash_core::ToolProvider for SessionTools {
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
         match name {
-            EXPLICIT_TOOL => Some(Arc::new(explicit_definition().contract())),
-            ORDINARY_TOOL => Some(Arc::new(ordinary_definition().contract())),
+            EXPLICIT_OPERATION => Some(Arc::new(explicit_definition().contract())),
+            ORDINARY_OPERATION => Some(Arc::new(ordinary_definition().contract())),
             _ => None,
         }
     }
@@ -411,7 +417,7 @@ impl lash_core::ToolProvider for SessionTools {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         assert_eq!(
             call.name(),
-            ORDINARY_TOOL,
+            ORDINARY_OPERATION,
             "only the ordinary tool runs a body"
         );
         let first = {
@@ -455,12 +461,12 @@ fn explicit_core(backend: &lash::Backend, tools: &Arc<SessionTools>) -> lash::La
     let model = scripted(move |request, _| match results(request).len() {
         0 => call(
             "explicit-ordinary",
-            ORDINARY_TOOL,
+            ORDINARY_OPERATION,
             serde_json::json!({ "n": 1 }),
         ),
         1 => call(
             "explicit-isolated",
-            EXPLICIT_TOOL,
+            EXPLICIT_OPERATION,
             serde_json::json!({ "label": "explicit" }),
         ),
         _ => {

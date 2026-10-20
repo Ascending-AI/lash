@@ -9,9 +9,7 @@ use lash_core::{
     facade_support::DirectRole,
 };
 use lash_execution_contracts::plugin_error::PluginError;
-use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
-};
+use lash_tool_support::{StaticToolExecute, StaticToolProvider};
 use serde_json::{Value, json};
 
 /// The plugin id `llm_query` registers under.
@@ -25,6 +23,9 @@ const LLM_QUERY_PROVIDER_KEY: lash_core::plugin::ToolProviderKey =
 /// The usage source, and the name of the direct purpose, of every
 /// `llm_query` sub-question.
 pub const LLM_QUERY_PURPOSE: &str = "llm_query";
+
+/// The operation the `llm_query` tool is performed as.
+pub const LLM_QUERY_OPERATION: &str = "llm.query";
 
 /// The instructions a sub-question carries: the `llm_tools/llm_query`
 /// section, which renders only for the [`LLM_QUERY_PURPOSE`] direct purpose,
@@ -310,8 +311,8 @@ impl LlmToolsProvider {
 #[async_trait]
 impl StaticToolExecute for LlmToolsProvider {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        let result = match call.name() {
-            "llm_query" => self.llm_query(call.args, call.context).await,
+        let result = match call.name().as_str() {
+            LLM_QUERY_OPERATION => self.llm_query(call.args, call.context).await,
             _ => Err(LlmQueryError::Message(format!(
                 "Unknown tool: {}",
                 call.name()
@@ -332,10 +333,10 @@ impl StaticToolExecute for LlmToolsProvider {
 pub fn llm_query_tool_definition() -> ToolDefinition {
     tool_definition(
         "llm_query",
+        LLM_QUERY_OPERATION,
         "Run a one-shot LLM prompt over supplied data and return its result. The `task` plus everything in `inputs` is rendered into that single prompt; the call cannot use tools, inspect files, or gather more context beyond what you pass it. Use this for extracting information, classification, summarization, judging, or transformation over data already in your variables. `inputs` can be any structured value. `output` is optional and defaults to a string; when present, it requests structured output using record descriptors or `Type { ... }` literals.",
         llm_query_input_schema(),
     )
-    .with_tool_binding(ToolBinding::new(["llm"], "query"))
     .with_output_from_input_schema(
         "output",
         Some(
@@ -456,12 +457,13 @@ fn parse_llm_query_result(
 )]
 fn tool_definition(
     name: &str,
+    operation: &str,
     description: impl Into<String>,
     input_schema: Value,
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        operation,
         description,
         input_schema,
         json!({ "type": "object", "additionalProperties": true }),
@@ -503,10 +505,10 @@ mod tests {
         context: &lash_core::AttemptContext<'_>,
     ) -> lash_core::ToolOutcome {
         let manifest = provider
-            .resolve_manifest("llm_query", &lash_core::OwnerConfigView::default())
+            .resolve_manifest(LLM_QUERY_OPERATION, &lash_core::OwnerConfigView::default())
             .expect("llm_query manifest resolves");
         let contract = provider
-            .resolve_contract("llm_query", &lash_core::OwnerConfigView::default())
+            .resolve_contract(LLM_QUERY_OPERATION, &lash_core::OwnerConfigView::default())
             .expect("llm_query contract resolves");
         match provider
             .execute(ToolCall::new(&manifest, &contract, args, context))

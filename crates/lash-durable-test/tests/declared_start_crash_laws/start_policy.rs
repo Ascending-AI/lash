@@ -259,7 +259,7 @@ impl Deployment {
                 vec![
                     served::response(vec![served::call(
                         "start-policy-call",
-                        "start_process",
+                        "processes.start",
                         serde_json::json!({ "definition_id": definition.id.to_tagged_json() }),
                     )]),
                     served::response(vec![lash_core::LlmOutputPart::Text {

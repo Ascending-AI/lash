@@ -1026,49 +1026,47 @@ fn python_operators_print_minimal_parentheses_with_an_exact_inverse() {
 /// G-SOURCE-EFFECTS: dotted and nonidentifier names preserve result metadata.
 #[test]
 fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
-    for name in [
-        "research.search",
-        "tools.search",
-        "class.query",
-        "tools.class",
+    for (name, path) in [
+        ("research.search", "research.search"),
+        ("tools.search", "tools.search"),
+        ("class.query", "class.query"),
+        ("tools.class", "getattr(tools, \"class\")"),
     ] {
         let effect = k::EffectName::new(name).unwrap();
-        for declared in [true, false] {
-            for result in [k::Type::Any, k::Type::List(Box::new(k::Type::Text))] {
-                let mut doc = document(k::Stmt::Let {
-                    name: "answer".into(),
-                    value: k::Rhs::Action(k::Action::Perform {
-                        effect: effect.clone(),
-                        args: vec![
-                            k::Atom::Variable("query".into()),
-                            k::Atom::Literal(k::Literal::Int(1.into())),
-                        ],
-                        result,
-                        then_yield: false,
-                    }),
-                });
-                if declared {
-                    doc.manifest.effects.insert(
-                        effect.clone(),
-                        k::OperationRequirement::of_signature(k::Signature {
-                            params: vec![],
-                            result: k::Type::Any,
-                        }),
-                    );
-                }
-                let printed = roundtrip(&doc, true);
-                assert!(
-                    printed.source.contains("answer = await tools"),
-                    "{}",
-                    printed.source
-                );
-                assert!(
-                    !printed.source.lines().any(|line| line.contains("k.")),
-                    "{}",
-                    printed.source
-                );
-                check_map(&doc, &printed);
-            }
+        for result in [k::Type::Any, k::Type::List(Box::new(k::Type::Text))] {
+            let mut doc = document(k::Stmt::Let {
+                name: "answer".into(),
+                value: k::Rhs::Action(k::Action::Perform {
+                    effect: effect.clone(),
+                    args: vec![
+                        k::Atom::Variable("query".into()),
+                        k::Atom::Literal(k::Literal::Int(1.into())),
+                    ],
+                    result,
+                    then_yield: false,
+                }),
+            });
+            doc.manifest.effects.insert(
+                effect.clone(),
+                k::OperationRequirement::of_signature(k::Signature {
+                    params: vec![],
+                    result: k::Type::Any,
+                }),
+            );
+            let printed = roundtrip(&doc, true);
+            assert!(
+                printed
+                    .source
+                    .contains(&format!("answer = await {path}(query, 1")),
+                "{}",
+                printed.source
+            );
+            assert!(
+                !printed.source.lines().any(|line| line.contains("k.")),
+                "{}",
+                printed.source
+            );
+            check_map(&doc, &printed);
         }
     }
 }
@@ -1164,7 +1162,7 @@ fn generic_member_assignments_decode_native_await_rhs() {
                 }
             } else {
                 k::Action::Perform {
-                    effect: k::EffectName::new("echo").unwrap(),
+                    effect: k::EffectName::new("host.echo").unwrap(),
                     args: vec![],
                     result: k::Type::Any,
                     then_yield: false,
@@ -1176,7 +1174,7 @@ fn generic_member_assignments_decode_native_await_rhs() {
                 order: k::AssignOrder::ValueFirst,
             });
             doc.manifest.effects.insert(
-                k::EffectName::new("echo").unwrap(),
+                k::EffectName::new("host.echo").unwrap(),
                 k::OperationRequirement::of_signature(k::Signature {
                     params: vec![],
                     result: k::Type::Any,

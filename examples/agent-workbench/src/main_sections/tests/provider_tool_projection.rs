@@ -98,7 +98,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         .iter()
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
-    for expected in ["start_process", "inbox__test__send"] {
+    for expected in ["processes__start", "inbox__test__send"] {
         assert!(
             names.contains(&expected),
             "the offered tool surface must include {expected}: {names:?}"

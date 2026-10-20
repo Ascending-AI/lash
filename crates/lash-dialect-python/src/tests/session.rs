@@ -168,12 +168,14 @@ fn restored_session_bindings_cannot_mask_builtins() {
         let bindings = BTreeSet::from([Name::new(name)]);
         let error = crate::lower(
             "1\n",
-            &Environment {
-                library: machine::library(),
-                effects: &BTreeMap::new(),
-                controls: &BTreeMap::new(),
-                tool_roots: &std::collections::BTreeSet::new(),
-            },
+            &Environment::new(
+                machine::library(),
+                &lash_kernel_dialect::Namespaces::of_signatures(
+                    &Default::default(),
+                    &Default::default(),
+                )
+                .expect("the test's effects are operations"),
+            ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
                 functions: &BTreeMap::new(),
@@ -207,15 +209,15 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
     use lash_kernel_dialect::FrontEnd as _;
     let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
     let calls = crate::Python::default().tool_calls(
-        "text = 'phantom.call()'\ndef order(items):\n    items.sort(key=lambda item: item['key'])\nprevious.sort()\n[2, 1].sort()\nprint(text)\n# phantom.comment()\nawait items.sort({})\nawait other_fetch({})\n",
-        &lash_kernel_dialect::Environment {
-            library: machine::library(), effects: &Default::default(),
-            controls: &Default::default(), tool_roots: &Default::default(),
-        },
+        "text = 'phantom.call()'\ndef order(items):\n    items.sort(key=lambda item: item['key'])\nprevious.sort()\n[2, 1].sort()\nprint(text)\n# phantom.comment()\nawait items.sort({})\nawait other.fetch({})\n",
+        &lash_kernel_dialect::Environment::new(
+machine::library(),
+&lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default()).expect("the test's effects are operations"),
+),
         lash_kernel_dialect::CellEnvironment { bindings: &bindings, functions: &Default::default() },
     ).expect("discover calls in their scopes");
     assert_eq!(
         calls,
-        std::collections::BTreeSet::from(["items.sort".into(), "other_fetch".into()])
+        std::collections::BTreeSet::from(["items.sort".into(), "other.fetch".into()])
     );
 }

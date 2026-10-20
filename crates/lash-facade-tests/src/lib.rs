@@ -172,17 +172,6 @@ pub async fn committed(session: &lash::LashSession) -> lash_core::SessionReadVie
         .expect("the session has a head")
 }
 
-/// `definition` bound under `tools.<name>`.
-pub fn test_tool_definition_with_tool_binding(
-    definition: lash_core::ToolDefinition,
-    name: impl Into<String>,
-) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinitionBindingExt::with_tool_binding(
-        definition,
-        lash_core::ToolBinding::new(["tools"], name),
-    )
-}
-
 /// A provider that answers each request with the next of `texts`.
 pub fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
     let responses = Arc::new(tokio::sync::Mutex::new(
@@ -342,7 +331,7 @@ impl ToolProvider for AppTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -351,10 +340,9 @@ impl ToolProvider for AppTools {
 }
 
 pub fn app_tool_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         "tool:app_lookup",
-        "app_lookup",
+        "tools.app_lookup",
         "Look up app state.",
         serde_json::json!({
             "type": "object",
@@ -365,7 +353,6 @@ pub fn app_tool_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "app_lookup"))
     .with_declaration(
         lash_core::ToolDeclaration::deferring(),
         Some(lash_core::ParkBound::Within(

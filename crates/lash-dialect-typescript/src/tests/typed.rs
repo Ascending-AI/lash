@@ -71,9 +71,9 @@ fn unknown_types_keep_the_helper() {
 #[test]
 fn a_tools_declared_result_type_is_stated_and_known() {
     let effects: BTreeMap<EffectName, Signature> = [
-        ("count", Type::Int),
-        ("ratio", Type::Float),
-        ("any", Type::Any),
+        ("stats.count", Type::Int),
+        ("stats.ratio", Type::Float),
+        ("stats.any", Type::Any),
     ]
     .into_iter()
     .map(|(name, result)| {
@@ -84,14 +84,14 @@ fn a_tools_declared_result_type_is_stated_and_known() {
         (EffectName::new(name).unwrap(), signature)
     })
     .collect();
-    let source = "const n = (await count()) + 1; const r = (await ratio()) * 2; \
-                  const a = (await any()) + 1;";
+    let source = "const n = (await stats.count()) + 1; const r = (await stats.ratio()) * 2; \
+                  const a = (await stats.any()) + 1;";
     let lowered = lower_against(source, &[], &effects).unwrap();
     let text = print_document(&lowered.document);
     for expected in [
-        "perform count() as Int",
-        "perform ratio() as Float",
-        "perform any() as Any",
+        "perform stats.count() as Int",
+        "perform stats.ratio() as Float",
+        "perform stats.any() as Any",
     ] {
         assert!(text.contains(expected), "missing `{expected}` in\n{text}");
     }
@@ -102,15 +102,15 @@ fn a_tools_declared_result_type_is_stated_and_known() {
             .to_string()
     };
     assert!(
-        computed("n").starts_with("num.add(num.to_float(perform count() as Int then yield)"),
+        computed("n").starts_with("num.add(num.to_float(perform stats.count() as Int then yield)"),
         "{text}"
     );
     assert!(
-        computed("r").starts_with("num.mul(perform ratio() as Float then yield"),
+        computed("r").starts_with("num.mul(perform stats.ratio() as Float then yield"),
         "{text}"
     );
     assert!(
-        computed("a").starts_with("ts.add(perform any() as Any then yield"),
+        computed("a").starts_with("ts.add(perform stats.any() as Any then yield"),
         "{text}"
     );
 }
@@ -135,7 +135,7 @@ fn a_value_changed_through_an_alias_reads_what_it_now_holds() {
              b.inner = 'str'; const r3 = a.inner.length; b.inner = null; let r4 = 'none'; \
              try { a.inner.v; } catch (e) { r4 = e.name; } \
              const xs = [1, 2]; const ys = xs; ys.length = 0; \
-             await finish(JSON.stringify([r1, r2, r3, r4, xs.length, xs[0] === undefined]));"
+             await control.finish(JSON.stringify([r1, r2, r3, r4, xs.length, xs[0] === undefined]));"
         ),
         "[5,20,3,\"TypeError\",0,true]"
     );
@@ -163,7 +163,7 @@ fn a_method_is_read_before_its_arguments_run() {
         alias.set(...['spread', 8]);
         const missing = alias.get() === undefined && !alias.has();
         const borrowed = alias.get;
-        await finish(JSON.stringify([first, captured(), alias.get(1), own,
+        await control.finish(JSON.stringify([first, captured(), alias.get(1), own,
             same, order, alias.has('k'), alias.get('spread'), missing,
             borrowed.call(alias, 1)]));
     "#
@@ -176,7 +176,7 @@ fn a_method_is_read_before_its_arguments_run() {
             "const o = { f: (x) => 'old' + x }; \
              const replace = () => { o.f = (x) => 'new' + x; return 1; }; \
              const first = o.f(replace()); const second = o.f(2); \
-             await finish(first + ',' + second);"
+             await control.finish(first + ',' + second);"
         ),
         "old1,new2"
     );
@@ -196,7 +196,7 @@ fn a_function_binding_nothing_else_is_assigned_calls_its_closure() {
         finished(
             "const add = (a, b) => a + b; let pick = function () { return 'a'; }; \
              const before = pick(); pick = () => 'b'; \
-             await finish(String(add(1, 2)) + before + pick());"
+             await control.finish(String(add(1, 2)) + before + pick());"
         ),
         "3ab"
     );
@@ -210,7 +210,7 @@ fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
     assert_eq!(
         finished(
             "const n = 0.1 + 0.2; \
-             await finish(`${n}|${-0}|${1 / 0}|${-1 / 0}|${0 / 0}|${1e21}|${2 ** 53}|${1e-7}|${-5}`);"
+             await control.finish(`${n}|${-0}|${1 / 0}|${-1 / 0}|${0 / 0}|${1e21}|${2 ** 53}|${1e-7}|${-5}`);"
         ),
         "0.30000000000000004|0|Infinity|-Infinity|NaN|1e+21|9007199254740992|1e-7|-5"
     );
@@ -229,7 +229,7 @@ fn a_built_in_array_methods_new_array_is_a_list() {
         finished(
             "const xs = [1, , 3]; const ys = xs.map((x) => x * 2); ys.push(8); \
              const zs = xs.slice(1).concat([4]).filter((x) => x !== undefined); \
-             await finish(JSON.stringify([ys.length, 1 in ys, ys[3], zs]));"
+             await control.finish(JSON.stringify([ys.length, 1 in ys, ys[3], zs]));"
         ),
         "[4,false,8,[3,4]]"
     );
@@ -333,7 +333,7 @@ fn a_shadowed_name_types_each_binding_by_what_it_holds() {
              function pick() { return 'declared'; } \
              function other() { function pick() { return 'inner'; } \
                pick = () => 'replaced'; return pick(); } \
-             await finish(JSON.stringify([items, custom, result, before, ys, inner, \
+             await control.finish(JSON.stringify([items, custom, result, before, ys, inner, \
                pick(), other()]));"
         ),
         r#"[[1],"custom own",[2],[0,1],["new"],[1],"declared","replaced"]"#
@@ -352,7 +352,7 @@ fn plain_record_spines_skip_admission_and_preserve_heap_state() {
     source.push_str(&format!(
         "const tree = t0;\nfor (let n = 0; n < 3; n++) {{ \
          const middle = tree{half}; middle{half}.leaf = [n]; }}\n\
-         await finish(tree);"
+         await control.finish(tree);"
     ));
     let text = super::main_text_with_effects(&source);
     assert!(!text.contains("__lash_brand"), "{text}");
@@ -379,16 +379,16 @@ fn plain_fallback(source: &str) {
 #[test]
 fn plain_record_alias_writes_keep_nested_admission() {
     plain_fallback(
-        "const r = { next: {} }; const alias = r; alias.next = new Date(7); await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; const alias = r; alias.next = new Date(7); await control.finish(r.next.__lash_brand === undefined);",
     );
     // A computed alias write may replace any structural link.
     plain_fallback(
-        "const r = { next: {} }; const alias = r; let key = 'next'; alias[key] = new Date(7); await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; const alias = r; let key = 'next'; alias[key] = new Date(7); await control.finish(r.next.__lash_brand === undefined);",
     );
     // Deletion removes presence, even when the old field was a record.
     assert_eq!(
         super::machine::end(
-            "const r = { next: {} }; delete r.next; await finish(r.next === undefined);"
+            "const r = { next: {} }; delete r.next; await control.finish(r.next === undefined);"
         ),
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -399,10 +399,10 @@ fn plain_record_alias_writes_keep_nested_admission() {
 #[test]
 fn plain_record_mutating_calls_keep_admission() {
     plain_fallback(
-        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await control.finish(r.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await finish(inner.next.__lash_brand === undefined);",
+        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await control.finish(inner.next.__lash_brand === undefined);",
     );
 }
 
@@ -410,7 +410,7 @@ fn plain_record_mutating_calls_keep_admission() {
 #[test]
 fn plain_record_captures_keep_admission() {
     plain_fallback(
-        "const r = { next: {} }; const change = () => { r.next = new Date(7); }; change(); await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; const change = () => { r.next = new Date(7); }; change(); await control.finish(r.next.__lash_brand === undefined);",
     );
 }
 
@@ -418,7 +418,9 @@ fn plain_record_captures_keep_admission() {
 /// reassigned internal receiver plain. User classes keep their refusal.
 #[test]
 fn plain_record_reassignment_keeps_brand_admission() {
-    plain_fallback("let r = {}; r = new Date(7); await finish(r.__lash_brand === undefined);");
+    plain_fallback(
+        "let r = {}; r = new Date(7); await control.finish(r.__lash_brand === undefined);",
+    );
     assert_eq!(
         super::lower("let r = {}; class C {} r = new C(); r.x;")
             .unwrap_err()
@@ -444,14 +446,16 @@ fn plain_record_getters_keep_the_accessor_refusal() {
 #[test]
 fn plain_record_unknown_definitions_keep_admission() {
     for source in [
-        "const r = { next: {}, next: new Date(7) }; await finish(r.next.__lash_brand === undefined);",
-        "const r = { next: {} }; const copy = { ...r }; copy.next = new Date(7); await finish(copy.next.__lash_brand === undefined);",
-        "let r = { next: {} }; r = { next: new Date(7) }; await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {}, next: new Date(7) }; await control.finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; const copy = { ...r }; copy.next = new Date(7); await control.finish(copy.next.__lash_brand === undefined);",
+        "let r = { next: {} }; r = { next: new Date(7) }; await control.finish(r.next.__lash_brand === undefined);",
     ] {
         plain_fallback(source);
     }
     assert_eq!(
-        super::machine::end("let r = { next: {} }; r = {}; await finish(r.next === undefined);"),
+        super::machine::end(
+            "let r = { next: {} }; r = {}; await control.finish(r.next === undefined);"
+        ),
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
     let text = lash_kernel_doc::print_document(
@@ -470,7 +474,7 @@ fn plain_record_unknown_definitions_keep_admission() {
     );
     // The root exists before a var initializer executes.
     assert_eq!(
-        super::machine::end("await finish(r === undefined); var r = { next: {} };"),
+        super::machine::end("await control.finish(r === undefined); var r = { next: {} };"),
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
@@ -480,20 +484,20 @@ fn plain_record_unknown_definitions_keep_admission() {
 #[test]
 fn plain_record_implicit_calls_and_hidden_aliases_keep_admission() {
     plain_fallback(
-        "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'x'; } }; const text = '' + r; await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'x'; } }; const text = '' + r; await control.finish(r.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const inner = { next: {} }; const r = ({ inner } as any); Object.assign(r.inner, { next: new Date(7) }); await finish(inner.next.__lash_brand === undefined);",
+        "const inner = { next: {} }; const r = ({ inner } as any); Object.assign(r.inner, { next: new Date(7) }); await control.finish(inner.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await finish(r.next.child.__lash_brand === undefined);",
+        "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await control.finish(r.next.child.__lash_brand === undefined);",
     );
 }
 
 /// TS-PLAIN-OBJECT-KEY: A computed literal key may coerce and mutate its receiver before a later member path reads it.
 #[test]
 fn plain_record_computed_object_keys_keep_admission() {
-    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const keyed = { [r]: 1 }; await finish(r.next.__lash_brand === undefined);";
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const keyed = { [r]: 1 }; await control.finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -505,7 +509,7 @@ fn plain_record_computed_object_keys_keep_admission() {
 /// TS-PLAIN-PATTERN-KEY: Destructuring key coercion has the same escape semantics as computed member access.
 #[test]
 fn plain_record_computed_pattern_keys_keep_admission() {
-    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const { [r]: ignored } = {}; await finish(r.next.__lash_brand === undefined);";
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const { [r]: ignored } = {}; await control.finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -517,7 +521,7 @@ fn plain_record_computed_pattern_keys_keep_admission() {
 /// TS-PLAIN-THROW: A catch binding aliases the thrown value, so a call on that binding can invalidate the original nested facts.
 #[test]
 fn plain_record_thrown_aliases_keep_admission() {
-    let source = "const r = { next: {} }; try { throw r; } catch (caught) { Object.assign(caught, { next: new Date(7) }); } await finish(r.next.__lash_brand === undefined);";
+    let source = "const r = { next: {} }; try { throw r; } catch (caught) { Object.assign(caught, { next: new Date(7) }); } await control.finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -529,7 +533,7 @@ fn plain_record_thrown_aliases_keep_admission() {
 /// TS-PLAIN-FRESH-FIELD-ESCAPE: A field of an unnamed literal can expose a local alias to a mutating call.
 #[test]
 fn plain_record_fresh_literal_field_aliases_keep_admission() {
-    let source = "const r = { next: {} }; Object.assign(({ inner: r }).inner, { next: new Date(7) }); await finish(r.next.__lash_brand === undefined);";
+    let source = "const r = { next: {} }; Object.assign(({ inner: r }).inner, { next: new Date(7) }); await control.finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -550,9 +554,9 @@ fn plain_record_restored_brand_markers_keep_admission() {
         ]),
     )]);
     let sources = [
-        "const r = {}; r.__lash_brand = marker; await finish(r.__lash_brand === undefined);",
-        "const r = {}; const key = '__lash_brand'; r[key] = marker; await finish(r.__lash_brand === undefined);",
-        "const r = { __lash_brand: marker }; await finish(({ __lash_brand: marker }).__lash_brand === undefined);",
+        "const r = {}; r.__lash_brand = marker; await control.finish(r.__lash_brand === undefined);",
+        "const r = {}; const key = '__lash_brand'; r[key] = marker; await control.finish(r.__lash_brand === undefined);",
+        "const r = { __lash_brand: marker }; await control.finish(({ __lash_brand: marker }).__lash_brand === undefined);",
     ];
     let observed: Vec<_> = sources
         .iter()
@@ -591,7 +595,7 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
        }\n\
        let result = null;\n\
        for (let repeat = 0; repeat < 2; repeat++) { result = body(); }\n\
-       await finish(result);";
+       await control.finish(result);";
     let text = super::main_text_with_effects(source);
     assert!(!text.contains("__lash_brand"), "{text}");
     assert!(!text.contains("kind("), "{text}");
@@ -626,7 +630,7 @@ fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     ] {
         let source = format!(
             "function body() {{ const r = {{}}; {key} r[key] = marker; \
-             return r.__lash_brand === undefined; }} await finish(body());"
+             return r.__lash_brand === undefined; }} await control.finish(body());"
         );
         let text = super::main_of(lower_against(
             &source,
@@ -642,7 +646,7 @@ fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     }
     plain_fallback(
         "function body() { const r = { 0: {}, next: {} }; const n = 3; r[n % 3] = new Date(7); \
-         return r['0'].__lash_brand === undefined; } await finish(body());",
+         return r['0'].__lash_brand === undefined; } await control.finish(body());",
     );
 }
 
@@ -658,7 +662,7 @@ fn plain_record_captured_function_locals_keep_admission() {
         plain_fallback(&format!(
             "function make() {{ const r = {{ next: {{}} }}; \
              return {{ r: r, check: () => r.next.__lash_brand === undefined }}; }} \
-             const made = make(); {change} await finish(made.check());"
+             const made = make(); {change} await control.finish(made.check());"
         ));
     }
 }
@@ -669,7 +673,7 @@ fn plain_record_captured_function_locals_keep_admission() {
 fn plain_record_text_keyed_function_local_writes_keep_admission() {
     plain_fallback(
         "function body() { const r = { next: {} }; const alias = r; let key = 'next'; \
-         alias[key] = new Date(7); return r.next.__lash_brand === undefined; } await finish(body());",
+         alias[key] = new Date(7); return r.next.__lash_brand === undefined; } await control.finish(body());",
     );
 }
 
@@ -689,7 +693,7 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
          const missing = 'key_' + 'none';\n\
          return [counts.key_1, counts[later], counts[missing] === undefined];\n\
        }\n\
-       await finish(body());";
+       await control.finish(body());";
     let text = super::main_text_with_effects(source);
     for refused in ["__lash_brand", "kind(", "ts.set", "ts.get_computed"] {
         assert!(!text.contains(refused), "{refused}\n{text}");
@@ -747,7 +751,7 @@ fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
     ] {
         let source = format!(
             "function body({params}) {{ const r = {{}}; {key} r[key] = marker; \
-             return r.__lash_brand === undefined; }} await finish(body({argument}));"
+             return r.__lash_brand === undefined; }} await control.finish(body({argument}));"
         );
         let text = super::main_of(lower_against(
             &source,
@@ -770,7 +774,7 @@ fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
 fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
     let source = "function body() { const r = { a: 1 }; const tail = 'String'; \
          const key = 'to' + tail; const other = 'to' + 'X'; r[other] = 1; \
-         return [typeof r[key], typeof r.toString, r[other]]; } await finish(body());";
+         return [typeof r[key], typeof r.toString, r[other]]; } await control.finish(body());";
     let text = super::main_text_with_effects(source);
     assert!(text.contains("ts.get_computed"), "{text}");
     assert!(text.contains("\"__lash_brand\""), "{text}");
@@ -798,8 +802,10 @@ fn computed_reads_of_plain_records_answer_misses_as_the_rows_do() {
     let names: Vec<&str> = crate::builtin_names()
         .into_iter()
         .filter(|name| {
-            super::lower_with_effects(&format!("const r = {{}}; await finish(typeof r.{name});"))
-                .is_ok()
+            super::lower_with_effects(&format!(
+                "const r = {{}}; await control.finish(typeof r.{name});"
+            ))
+            .is_ok()
         })
         .collect();
     assert!(names.len() > 200, "{names:?}");
@@ -831,7 +837,7 @@ fn computed_reads_of_plain_records_answer_misses_as_the_rows_do() {
          const out = probe(r, keys);\n\
          const bad = [];\n\
          for (let i = 0; i < keys.length; i++) {{ if (out[i] !== expected[i]) {{ bad.push(keys[i]); }} }}\n\
-         await finish(bad.join(','));",
+         await control.finish(bad.join(','));",
         keys.join(", "),
         expected.join(", ")
     );
@@ -857,13 +863,13 @@ fn stable_path_matches_guarded(source: &str) {
 #[test]
 fn stable_paths_reject_rebound_and_iteration_local_roots() {
     stable_path_matches_guarded(
-        "let r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 3; i++) { sum += r.a.b.leaf; r = { a: { b: { leaf: i + 10 } } }; } await finish(sum);",
+        "let r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 3; i++) { sum += r.a.b.leaf; r = { a: { b: { leaf: i + 10 } } }; } await control.finish(sum);",
     );
     stable_path_matches_guarded(
-        "let sum = 0; for (let i = 0; i < 3; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await finish(sum);",
+        "let sum = 0; for (let i = 0; i < 3; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await control.finish(sum);",
     );
     stable_path_matches_guarded(
-        "const r = { a: { b: { leaf: 9 } } }; let sum = 0; for (let i = 0; i < 2; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await finish(sum);",
+        "const r = { a: { b: { leaf: 9 } } }; let sum = 0; for (let i = 0; i < 2; i++) { const r = { a: { b: { leaf: i } } }; sum += r.a.b.leaf; } await control.finish(sum);",
     );
 }
 
@@ -878,7 +884,7 @@ fn stable_paths_reject_alias_replacement_deletion_and_computed_writes() {
         "alias.b = null;",
     ] {
         stable_path_matches_guarded(&format!(
-            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; const alias = r.a; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); {mutation} }} catch (e) {{ result += 'caught'; }} }} await finish(result);"
+            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; const alias = r.a; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); {mutation} }} catch (e) {{ result += 'caught'; }} }} await control.finish(result);"
         ));
     }
 }
@@ -894,11 +900,11 @@ fn stable_paths_reject_captures_calls_throws_and_coercions() {
         "const key = { toString() { Object.assign(r.a, { b: { leaf: 7 } }); return 'key'; } }; function change() { const value = { [key]: 0 }; }",
     ] {
         stable_path_matches_guarded(&format!(
-            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; {setup} let sum = 0; for (let i = 0; i < 2; i++) {{ sum += r.a.b.leaf; change(); }} await finish(sum);"
+            "const r = {{ a: {{ b: {{ leaf: 0 }} }} }}; {setup} let sum = 0; for (let i = 0; i < 2; i++) {{ sum += r.a.b.leaf; change(); }} await control.finish(sum);"
         ));
     }
     stable_path_matches_guarded(
-        "const r = { a: { b: { leaf: 0 } } }; function change(x) { Object.assign(x, { b: { leaf: 7 } }); } let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; change(r.a); } await finish(sum);",
+        "const r = { a: { b: { leaf: 0 } } }; function change(x) { Object.assign(x, { b: { leaf: 7 } }); } let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; change(r.a); } await control.finish(sum);",
     );
 }
 
@@ -913,14 +919,14 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
         "{ a: { b: new Date(7) } }",
     ] {
         stable_path_matches_guarded(&format!(
-            "const r = {initial}; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); }} catch (e) {{ result += 'caught'; }} }} await finish(result);"
+            "const r = {initial}; let result = ''; for (let i = 0; i < 2; i++) {{ try {{ result += String(r.a.b.leaf); }} catch (e) {{ result += 'caught'; }} }} await control.finish(result);"
         ));
     }
     stable_path_matches_guarded(
-        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 0; i++) { sum += r.a.b.leaf; } for (let i = 0; i < 3; i++) { if (i === 2) { sum += r.a.b.leaf; } } await finish(sum);",
+        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 0; i++) { sum += r.a.b.leaf; } for (let i = 0; i < 3; i++) { if (i === 2) { sum += r.a.b.leaf; } } await control.finish(sum);",
     );
     stable_path_matches_guarded(
-        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 3; i++) { for (let j = 0; j < 2; j++) { sum += r.a.b.leaf; } } await finish(sum);",
+        "const r = { a: { b: { leaf: 7 } } }; let sum = 0; for (let i = 0; i < 3; i++) { for (let j = 0; j < 2; j++) { sum += r.a.b.leaf; } } await control.finish(sum);",
     );
 }
 
@@ -929,7 +935,7 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
 #[test]
 fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
     use lash_kernel_doc::{Datum, Name};
-    let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await finish(sum);";
+    let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await control.finish(sum);";
     let bindings = super::pages::Session::seeded([(
         Name::new("r"),
         Datum::Record(vec![(
@@ -947,7 +953,7 @@ fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
         super::machine::end_with_bindings(source, bindings),
         super::machine::Ended::Finished(Datum::Float(lash_kernel_doc::Float::new(8.0)))
     );
-    let effect_source = "const r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = await echo({ leaf: 7 }); } await finish(sum);";
+    let effect_source = "const r = { a: { b: { leaf: 0 } } }; let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = await host.echo({ leaf: 7 }); } await control.finish(sum);";
     assert_eq!(
         super::machine::run(effect_source, &[]),
         super::machine::run(&effect_source.replace("const r =", "var r ="), &[])

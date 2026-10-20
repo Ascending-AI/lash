@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 fn echo() -> BTreeMap<k::EffectName, k::Signature> {
     BTreeMap::from([(
-        k::EffectName::new("echo").expect("a tool's name"),
+        k::EffectName::new("tools.echo").expect("a tool's name"),
         k::Signature {
             params: vec![k::Param {
                 name: k::Name::new("x"),
@@ -26,15 +26,13 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let effects = echo();
-    let environment = lash::dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &Default::default(),
-        controls: &Default::default(),
-    };
+    let environment_namespaces =
+        lash::dialect::Namespaces::of_signatures(&effects, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let typescript = lash::typescript::lower(
         "export async function flow(count: number) {
-  const step = async (value: number) => { await sleep(5); return await echo(value); };
+  const step = async (value: number) => { await sleep(5); return await tools.echo(value); };
   const pending = sleep(1);
   const first = await step(count);
   await pending;
@@ -47,7 +45,7 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     .document
     .into_document();
     let python = lash::python::lower(
-        "import asyncio\nasync def work(value):\n    await asyncio.sleep(1)\n    return await echo(value)\ntask = asyncio.create_task(work(2))\nresult = await task\nprint(result)\n",
+        "import asyncio\nasync def work(value):\n    await asyncio.sleep(1)\n    return await tools.echo(value)\ntask = asyncio.create_task(work(2))\nresult = await task\nprint(result)\n",
         &environment,
         lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )

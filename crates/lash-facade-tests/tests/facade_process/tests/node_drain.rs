@@ -72,7 +72,7 @@ async fn answer(script: &Script, request: &LlmRequest) -> LlmResponse {
             LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "call-kept".to_owned(),
-                    tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
+                    tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.replace('.', "__"),
                     input_json: r#"{"value":"kept"}"#.to_owned(),
                     replay: None,
                 }],

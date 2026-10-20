@@ -9,7 +9,7 @@ use super::*;
 fn submit() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         "tool:answer_submit",
-        "answer_submit",
+        "answer.submit",
         "End the turn with an integer",
         lash_core::ToolDefinition::default_input_schema(),
         lash_core::TurnControls::finish(
@@ -19,7 +19,6 @@ fn submit() -> lash_core::ToolDefinition {
     )
     .expect("a valid control tool")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["answer"], "submit"))
 }
 
 struct SubmitTool;
@@ -41,7 +40,7 @@ impl lash_core::ToolProvider for SubmitTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        matches!(name, "answer_submit" | "tool:answer_submit")
+        matches!(name, "answer.submit" | "tool:answer_submit")
             .then(|| Arc::new(submit().contract()))
     }
 
@@ -83,8 +82,8 @@ async fn a_finish_value_its_schema_refuses_fails_the_call_inside_the_cell() {
         ),
         (
             CellDialect::python(),
-            "first = 'none'\ntry:\n    await answer_submit({'value': 'seven'})\nexcept Exception as error:\n    first = str(error)\nsecond = 'none'\ntry:\n    await answer_submit({'value': 7})\nexcept Exception:\n    second = 'refused'\nprint(first)\nprint(second)",
-            "await answer_submit({'value': 7})",
+            "first = 'none'\ntry:\n    await answer.submit({'value': 'seven'})\nexcept Exception as error:\n    first = str(error)\nsecond = 'none'\ntry:\n    await answer.submit({'value': 7})\nexcept Exception:\n    second = 'refused'\nprint(first)\nprint(second)",
+            "await answer.submit({'value': 7})",
         ),
     ];
     for (dialect, refused, admitted) in cases {

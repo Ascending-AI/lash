@@ -195,6 +195,31 @@ impl Embedding {
         let dialect = self.dialects.get(dialect)?;
         Some(dialect.front_end.lower(source, environment, mode))
     }
+
+    /// The namespaces `operations` compose with this embedding's packages,
+    /// under the roots its installed dialects reserve: what a cell, a
+    /// workflow import and discovery all resolve through.
+    ///
+    /// # Errors
+    ///
+    /// [`lash_kernel_dialect::NamespaceRefusal`], naming both sides.
+    pub fn namespaces(
+        &self,
+        operations: lash_kernel_dialect::Operations,
+    ) -> Result<lash_kernel_dialect::Namespaces, lash_kernel_dialect::NamespaceRefusal> {
+        let reserves = |root: &str| {
+            self.dialects
+                .values()
+                .find_map(|package| package.front_end.reserves(root))
+        };
+        lash_kernel_dialect::Namespaces::build(
+            &lash_kernel_dialect::Reserving {
+                view: &lash_kernel_dialect::NoPackages,
+                reserves: &reserves,
+            },
+            operations,
+        )
+    }
 }
 
 /// A worker's configuration while it is assembled: the natives the host
@@ -698,10 +723,6 @@ pub(crate) mod tests {
             EffectName::new("control.finish").expect("a tool's name"),
             BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )]);
-        let tool_roots: BTreeSet<Name> = ["web", "host", "processes", "control"]
-            .into_iter()
-            .map(Name::new)
-            .collect();
         let bindings = BTreeSet::new();
         let functions = BTreeMap::new();
         for (cell, source) in [
@@ -718,12 +739,11 @@ pub(crate) mod tests {
                 .lower(
                     lash_vm_releases::TYPESCRIPT,
                     source,
-                    &lash_kernel_dialect::Environment {
-                        library: embedding.library(),
-                        effects: &effects,
-                        tool_roots: &tool_roots,
-                        controls: &controls,
-                    },
+                    &lash_kernel_dialect::Environment::new(
+                        embedding.library(),
+                        &lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+                            .expect("the test's effects are operations"),
+                    ),
                     Mode::Cell(lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
                         functions: &functions,
@@ -748,12 +768,12 @@ pub(crate) mod tests {
         let mut tuning = WorkerTuning::standard();
         tuning.typescript_source_bytes = source.len();
         let embedding = typescript_only(&tuning).unwrap();
-        let environment = Environment {
-            library: embedding.library(),
-            effects: &BTreeMap::new(),
-            controls: &BTreeMap::new(),
-            tool_roots: &BTreeSet::new(),
-        };
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+            &Default::default(),
+            &Default::default(),
+        )
+        .expect("the test's effects are operations");
+        let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(
                 lash_vm_releases::TYPESCRIPT,
@@ -772,12 +792,12 @@ pub(crate) mod tests {
         let python_source = format!("#{}", "x".repeat(1 << 20));
         tuning.python_source_bytes = python_source.len();
         let embedding = crate::built_embedding(&tuning).unwrap();
-        let environment = Environment {
-            library: embedding.library(),
-            effects: &BTreeMap::new(),
-            controls: &BTreeMap::new(),
-            tool_roots: &BTreeSet::new(),
-        };
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+            &Default::default(),
+            &Default::default(),
+        )
+        .expect("the test's effects are operations");
+        let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(
                 lash_vm_releases::PYTHON,

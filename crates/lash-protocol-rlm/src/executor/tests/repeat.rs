@@ -5,12 +5,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use lash_vm_runtime::ToolDefinitionBindingExt as _;
-
 use super::{SESSION, TURN, finish_of, open_host, typescript_services, typescript_state};
 use crate::testing::{cell_context, run_cell};
 
 const FLAKY: &str = "flaky";
+
+const FLAKY_OPERATION: &str = "tools.flaky";
 
 /// `tools.flaky`: a `Repeatable` tool allowed two attempts with no backoff.
 /// It counts its attempts, and fails with `class` on its first, or on every
@@ -32,7 +32,7 @@ impl Flaky {
 fn flaky_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{FLAKY}"),
-        FLAKY,
+        FLAKY_OPERATION,
         "Fails its first attempt.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
@@ -44,7 +44,6 @@ fn flaky_definition() -> lash_core::ToolDefinition {
         0,
         0,
     ))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["tools"], FLAKY))
 }
 
 #[async_trait::async_trait]
@@ -64,7 +63,7 @@ impl lash_core::ToolProvider for Flaky {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == FLAKY).then(|| Arc::new(flaky_definition().contract()))
+        (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

@@ -112,7 +112,7 @@ fn response(request: &LlmRequest) -> LlmResponse {
     } else {
         LlmOutputPart::ToolCall {
             call_id: "provider-echo".into(),
-            tool_name: "echo".into(),
+            tool_name: "tools__echo".into(),
             input_json: json!({"text": text, "hold": text.starts_with("hold:")}).to_string(),
             replay: None,
         }
@@ -192,7 +192,7 @@ impl ConsumerPlugin {
         reg: &mut lash::plugins::PluginRegistrar<Self>,
     ) -> std::result::Result<(), lash::plugins::PluginError> {
         reg.tools().provider(lash::tool_provider_key!("tools"), move |this, _state| { let definition = ToolDefinition::raw(
-            "consumer:echo", "echo", "Echo the admitted text",
+            "consumer:echo", "tools.echo", "Echo the admitted text",
             json!({"type":"object", "properties":{"text":{"type":"string"}, "hold":{"type":"boolean"}}, "required":["text","hold"], "additionalProperties":false}),
             json!({"type":"string"}),
         ).map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?

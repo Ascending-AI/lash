@@ -623,27 +623,17 @@ impl PluginHost {
         Ok(())
     }
 
-    /// Build and validate a candidate catalog without registering a session,
-    /// restoring its execution, or announcing a plugin installation. A
-    /// refused config therefore publishes no capabilities (FIG-5824).
-    pub async fn validate_session_tool_catalog(
+    /// Build a candidate catalog without registering a session, restoring
+    /// its execution, or announcing a plugin installation. A refused config
+    /// therefore publishes no capabilities.
+    pub fn validate_session_tool_catalog(
         &self,
         request: PluginSessionRequest<'_>,
-        state: &super::ProtocolSessionRestoreView,
-        live: Option<&Arc<dyn super::ProtocolSessionPlugin>>,
     ) -> Result<(), PluginError> {
         let preview = self.defer_session(request)?;
         self.prepare_session_capabilities(&preview)?;
-        let catalog = preview.resolved_tool_catalog()?;
-        match live {
-            Some(live) => live.validate_tool_catalog(&catalog, None).await,
-            None => {
-                preview
-                    .protocol_session()
-                    .validate_tool_catalog(&catalog, Some(state))
-                    .await
-            }
-        }
+        preview.resolved_tool_catalog()?;
+        Ok(())
     }
 
     /// Frozen prompt metadata, without constructing an owner or a renderer.

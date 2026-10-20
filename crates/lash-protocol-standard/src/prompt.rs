@@ -38,7 +38,7 @@ pub(crate) fn register_sections<T: Send + Sync + 'static>(
             let behaviour = behaviour(owner);
             Ok(Arc::new(move |input: &PromptInput<'_>| {
                 // The section names the finish tools the turn is actually
-                // offered: Lash's `finish`, or a host's own in its place.
+                // offered: Lash's `control__finish`, or a host's own in its place.
                 let finishing = input
                     .offered()
                     .manifests()
@@ -47,7 +47,7 @@ pub(crate) fn register_sections<T: Send + Sync + 'static>(
                             .controls
                             .contains(lash_core::TurnControlKind::Finish)
                     })
-                    .map(|tool| tool.name.clone())
+                    .map(lash_core::ToolManifest::standard_name)
                     .collect::<Vec<_>>();
                 Ok(SectionText::Text(format!(
                     "## Execution\n\n{}",

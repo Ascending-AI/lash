@@ -25,7 +25,7 @@ impl SchemaChangingTool {
         };
         lash_core::ToolDefinition::raw(
             "tool:schema_changing",
-            "schema_changing",
+            "tools.schema_changing",
             "A stable member whose contract can refresh",
             serde_json::json!({
                 "type": "object",
@@ -57,7 +57,7 @@ impl lash_core::ToolProvider for SchemaChangingTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
+        (name == "tools.schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -125,7 +125,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
+        (name == "tools.echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -156,7 +156,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
 fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:echo_tool",
-        "echo_tool",
+        "tools.echo_tool",
         "Return a tool payload",
         serde_json::json!({
             "type": "object",

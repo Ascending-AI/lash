@@ -10,7 +10,6 @@ use lash::plugins::{FormatVersion, PluginError};
 use lash::process::{
     EffectLink, LinkKind, ProcessConfigKey, ProcessEnv, ProcessEnvRefusal, ProcessSurface,
 };
-use lash::tools::ToolDefinitionBindingExt as _;
 
 /// Serves `search_a` at `search.run`.
 const SEARCH_A: ProcessConfigKey<()> = ProcessConfigKey::new("link-search-a", FormatVersion::ONE);
@@ -48,10 +47,15 @@ fn search_tool(
     input: serde_json::Value,
     output: serde_json::Value,
 ) -> lash::tools::ToolDefinition {
-    lash::tools::ToolDefinition::raw(format!("tool:{name}"), name, "Searches.", input, output)
-        .expect("the tool's schemas")
-        .with_execution(std::time::Duration::from_secs(60))
-        .with_tool_binding(lash::tools::ToolBinding::new(["search"], "run"))
+    lash::tools::ToolDefinition::raw(
+        format!("tool:{name}"),
+        "search.run",
+        "Searches.",
+        input,
+        output,
+    )
+    .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(60))
 }
 
 fn search_a() -> lash::tools::ToolDefinition {
@@ -84,15 +88,16 @@ fn search_wide() -> lash::tools::ToolDefinition {
     )
 }
 
-/// Each search tool answers its own name as its hits; only the wide tool
-/// declares timing in its result.
+/// Each search tool answers its own name, its id's, as its hits; only the
+/// wide tool declares timing in its result.
 struct Answer;
 
 #[lash::async_trait]
 impl lash::tools::StaticToolExecute for Answer {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
-        let mut value = serde_json::json!({ "hits": call.name() });
-        if call.name() == "search_wide" {
+        let name = call.tool_id().as_str().trim_start_matches("tool:");
+        let mut value = serde_json::json!({ "hits": name });
+        if name == "search_wide" {
             value["took_ms"] = serde_json::json!(1);
         }
         lash::tools::ToolOutcome::ok(value).into()
@@ -316,7 +321,7 @@ async fn one_template_links_under_two_envs_and_an_unserved_tool_refuses() {
             .expect("the pair links");
         assert_eq!(
             answer(&core, &process).await["hits"],
-            serde_json::json!(tool.manifest.name),
+            serde_json::json!(tool.manifest.id.as_str().trim_start_matches("tool:")),
             "the run performed the effect on its env's tool"
         );
     }

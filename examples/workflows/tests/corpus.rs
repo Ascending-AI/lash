@@ -3,13 +3,22 @@ fn corpus_tool_signatures() -> anyhow::Result<
 > {
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in workflow_corpus::tools()? {
-        boundary.offer_bound_tool(
+        boundary.offer_tool(
             &tool.manifest,
             &tool.contract.input_schema.canonical,
             &tool.contract.output_schema.canonical,
         )?;
     }
-    Ok(boundary.signatures())
+    Ok(boundary
+        .operations()
+        .iter()
+        .map(|(operation, offered)| {
+            (
+                operation.effect_name(),
+                offered.requirement.signature.clone(),
+            )
+        })
+        .collect())
 }
 
 #[test]
@@ -143,7 +152,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
     let mut effects = corpus_tool_signatures().expect("the shared corpus tool signatures");
     {
         effects.insert(
-            lash_kernel_doc::EffectName::new("finish").unwrap(),
+            lash_kernel_doc::EffectName::new("control.finish").unwrap(),
             lash_kernel_doc::Signature {
                 params: vec![lash_kernel_doc::Param {
                     name: lash_kernel_doc::Name::new("input"),
@@ -155,17 +164,15 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         );
     }
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("finish").unwrap(),
+        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let roots = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("corpus")]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let environment = lash_kernel_dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        controls: &controls,
-        tool_roots: &roots,
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+            .expect("the test's effects are operations");
+    let environment =
+        lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mut failures = Vec::new();
     for (name, source) in sources {
         let parsed = ruff_python_parser::parse_module(source).unwrap();
@@ -293,7 +300,7 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     use lash_kernel_doc::{Node, Stmt};
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let effects = [
-        "finish",
+        "control.finish",
         "display.show_message",
         "display.set_status",
         "display.add_item",
@@ -318,15 +325,12 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     .chain(corpus_tool_signatures().expect("the shared corpus tool signatures"))
     .collect();
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("finish").unwrap(),
+        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env = lash_kernel_dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        controls: &controls,
-        tool_roots: &Default::default(),
-    };
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+        .expect("the test's effects are operations");
+    let env = lash_kernel_dialect::Environment::new(embedding.library(), &env_namespaces);
     let mut failures = Vec::new();
     let sources = [
         (

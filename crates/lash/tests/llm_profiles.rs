@@ -1064,12 +1064,12 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(tie
     assert_eq!(kimi.calls(), 1, "the redriven run made its call once");
 }
 
-const ASK_TWICE: &str = "ask_twice";
+const ASK_TWICE_OPERATION: &str = "tools.ask_twice";
 
 fn ask_twice_definition() -> lash::tools::ToolDefinition {
     lash::tools::ToolDefinition::raw(
         "tool:ask_twice",
-        ASK_TWICE,
+        ASK_TWICE_OPERATION,
         "Ask the session's model two questions through direct completions.",
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
         serde_json::json!({"type": "string"}),
@@ -1140,7 +1140,7 @@ impl lash::tools::ToolProvider for AskTwice {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash::tools::ToolContract>> {
-        (name == ASK_TWICE).then(|| Arc::new(ask_twice_definition().contract()))
+        (name == ASK_TWICE_OPERATION).then(|| Arc::new(ask_twice_definition().contract()))
     }
 
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
@@ -1172,7 +1172,7 @@ fn ask_twice_provider(calls: &Arc<AtomicUsize>, completions: usize) -> ProviderH
                 0 => LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: "ask-1".to_string(),
-                        tool_name: ASK_TWICE.to_string(),
+                        tool_name: ASK_TWICE_OPERATION.replace('.', "__"),
                         input_json: "{}".to_string(),
                         replay: None,
                     }],

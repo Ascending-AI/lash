@@ -235,7 +235,7 @@ impl lash::tools::StaticToolExecute for HostTools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         use lash::sync::MutexExt;
         use lash::tools::{PendingCompletion, ToolAttemptOutcome, ToolOutcome};
-        if matches!(call.name(), "corpus_echo" | "corpus_capture") {
+        if matches!(call.name().as_str(), "corpus.echo" | "corpus.capture") {
             let Some(process) = call.context.enclosing_process() else {
                 return ToolOutcome::err_fmt("echo requires a workflow process").into();
             };
@@ -255,7 +255,7 @@ impl lash::tools::StaticToolExecute for HostTools {
             }
             return ToolOutcome::ok(call.args.clone()).into();
         }
-        if call.name() == "host_approval" {
+        if call.name() == "host.approval" {
             let Some(process) = call.context.enclosing_process() else {
                 return ToolOutcome::err_fmt("approval requires a workflow process").into();
             };
@@ -272,8 +272,9 @@ impl lash::tools::StaticToolExecute for HostTools {
                 });
             return ToolAttemptOutcome::pending(PendingCompletion::new());
         }
-        let Some(operation) = call.name().strip_prefix("display_") else {
-            return match crate::sample_tools::apply_tool(call.name(), call.args) {
+        let name = call.name();
+        let Some(operation) = name.strip_prefix("display.") else {
+            return match crate::sample_tools::apply_tool(&name, call.args) {
                 Ok(value) => ToolOutcome::ok(value).into(),
                 Err(error) => ToolOutcome::err_fmt(error).into(),
             };
@@ -303,7 +304,7 @@ impl lash::tools::StaticToolExecute for HostTools {
     reason = "the example declares valid schemas and bindings"
 )]
 pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::{ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt};
+    use lash::tools::{ToolDeclaration, ToolDefinition};
     let mut definitions = workflow_corpus::tools().expect("the shared corpus tool declaration");
     for operation in OPERATIONS {
         let properties = operation
@@ -321,18 +322,16 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
             })
             .collect::<serde_json::Map<_, _>>();
         let name = format!("display_{}", operation.operation);
-        definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
+        definitions.push(ToolDefinition::raw(format!("tool:{name}"), format!("display.{}", operation.operation), operation.label,
             serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
-            serde_json::json!({"type":"null"})).expect("display schema").with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay")));
+            serde_json::json!({"type":"null"})).expect("display schema").with_execution(std::time::Duration::from_secs(120)));
     }
     definitions.push(ToolDefinition::raw(
-        "tool:host_approval", "host_approval", "Park until the operator approves this request.",
+        "tool:host_approval", "host.approval", "Park until the operator approves this request.",
         serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
         serde_json::json!({"type":"object", "properties":{"approved":{"type":"boolean"}}, "required":["approved"], "additionalProperties":false}),
     ).expect("approval schema")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["host"], "approval"))
         // The operator decides in their own time: the park lasts until the
         // decision or the end of the run that asked.
         .with_declaration(ToolDeclaration::deferring(), Some(lash::tools::ParkBound::UntilScopeEnd))
@@ -341,17 +340,13 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
         let name = operation.host_operation.replace('.', "_");
         let definition = ToolDefinition::raw(
             format!("tool:{name}"),
-            name,
+            format!("{}.{}", operation.module, operation.operation),
             operation.label,
             operation.input_schema(),
             operation.output_schema(),
         )
         .expect("example schema")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(
-            ToolBinding::new([operation.module], operation.operation)
-                .with_authority_type(operation.resource_type),
-        );
+        .with_execution(std::time::Duration::from_secs(120));
         definitions.push(match operation.output_from_input() {
             Some((field, default)) => definition.with_output_from_input_schema(
                 field,

@@ -7,7 +7,7 @@
 //! a fixed budget, and the host's page checks after the last gate grow at
 //! most linearly.
 use anyhow::{Context as _, Result, ensure};
-use lash::tools::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt as _};
+use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::llm::types::{LlmRequest, LlmRole};
 use lash_core_ids::perf_witness::Collector;
 use lash_core_ids::perf_witness::Snapshot;
@@ -279,16 +279,16 @@ fn source(scenario: &str, h: usize, cell: usize) -> String {
     };
     let body = if scenario == "next-cell" {
         if cell == 0 {
-            format!("{seed} await tools.heap_gate({{phase:0}}); console.log(\"heap-seeded\");")
+            format!("{seed} await tools.heapGate({{phase:0}}); console.log(\"heap-seeded\");")
         } else {
-            "await tools.heap_gate({phase:1}); console.log(\"heap-ok\");".to_owned()
+            "await tools.heapGate({phase:1}); console.log(\"heap-ok\");".to_owned()
         }
     } else {
         let steps = if scenario == "worker-resets" { 3 } else { 1 };
-        let mut body = format!("{seed} await tools.heap_gate({{phase:0}});");
+        let mut body = format!("{seed} await tools.heapGate({{phase:0}});");
         for phase in 1..=steps {
             body.push_str(&format!(
-                "{operation} await tools.heap_gate({{phase:{phase}}});"
+                "{operation} await tools.heapGate({{phase:{phase}}});"
             ));
         }
         body.push_str("console.log(\"heap-ok\");");
@@ -402,12 +402,11 @@ async fn sample_with_stores(
         }),
     });
     let (gate_sender, mut gates) = tokio::sync::mpsc::channel(4);
-    let tool = lash::tools::ToolDefinition::raw("heap_gate", "heap_gate", "Commit a measured park.",
+    let tool = lash::tools::ToolDefinition::raw("heap_gate", "tools.heap_gate", "Commit a measured park.",
         serde_json::json!({"type":"object","properties":{"phase":{"type":"integer","minimum":0}},"required":["phase"],"additionalProperties":false}),
         serde_json::json!({"type":"object"}))?
         .with_execution(LIMIT)
-        .with_declaration(lash::tools::ToolDeclaration::deferring(), Some(lash::tools::ParkBound::Within(LIMIT)))?
-        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "heap_gate"));
+        .with_declaration(lash::tools::ToolDeclaration::deferring(), Some(lash::tools::ParkBound::Within(LIMIT)))?;
     let core = lash::LashCore::rlm_builder(
         backend,
         lash::rlm::RlmProtocolPluginFactory::new(

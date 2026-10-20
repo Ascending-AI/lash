@@ -185,12 +185,7 @@ fn prepare_tool_catalog(definitions: Vec<ToolDefinition>) -> BenchmarkToolCatalo
         manifests: definitions.iter().map(ToolDefinition::manifest).collect(),
         contracts: definitions
             .iter()
-            .map(|definition| {
-                (
-                    definition.name().to_string(),
-                    Arc::new(definition.contract()),
-                )
-            })
+            .map(|definition| (definition.manifest.tool(), Arc::new(definition.contract())))
             .collect(),
     }
 }
@@ -214,10 +209,10 @@ impl ToolProvider for BenchmarkEchoTool {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
-        (match call.name() {
-            "benchmark_echo" => execute_benchmark_echo(call).await,
-            "benchmark_slow" => execute_benchmark_slow(call).await,
-            "benchmark_async" => {
+        (match call.name().as_str() {
+            "tools.benchmark_echo" => execute_benchmark_echo(call).await,
+            "tools.benchmark_slow" => execute_benchmark_slow(call).await,
+            "tools.benchmark_async" => {
                 execute_benchmark_async(
                     self.completion_resolver.clone(),
                     self.settlement_control.clone(),
@@ -251,10 +246,10 @@ impl ToolProvider for BenchmarkObliqueTools {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
-        (match call.name() {
-            "oblique_search" => execute_oblique_search(call).await,
-            "oblique_judge_candidates" => execute_oblique_judge_candidates(call).await,
-            "oblique_list_async_handles" => execute_oblique_list_async_handles(call).await,
+        (match call.name().as_str() {
+            "obliq.search" => execute_oblique_search(call).await,
+            "obliq.judge_candidates" => execute_oblique_judge_candidates(call).await,
+            "obliq.list_async_handles" => execute_oblique_list_async_handles(call).await,
             _ => ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark oblique tool: {}",
                 call.name()
@@ -353,7 +348,7 @@ async fn execute_benchmark_async(
 fn benchmark_echo_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_echo",
-        "benchmark_echo",
+        "tools.benchmark_echo",
         "Return the input payload with a tiny async yield for runtime profiling.",
         serde_json::json!({
             "type": "object",
@@ -380,7 +375,6 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tools"], "benchmark_echo").with_authority_type("Tools"))
 }
 
 #[expect(
@@ -390,7 +384,7 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
 fn benchmark_slow_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_slow",
-        "benchmark_slow",
+        "tools.benchmark_slow",
         "Sleep briefly before returning; used to profile process handle cancellation and await paths.",
         serde_json::json!({
             "type": "object",
@@ -411,9 +405,6 @@ fn benchmark_slow_tool_definition() -> ToolDefinition {
         }),
     ).expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(
-        ToolBinding::new(["tools"], "benchmark_slow").with_authority_type("Tools"),
-    )
 }
 
 #[expect(
@@ -423,7 +414,7 @@ fn benchmark_slow_tool_definition() -> ToolDefinition {
 fn benchmark_async_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_async",
-        "benchmark_async",
+        "tools.benchmark_async",
         "Return asynchronously through the host AwaitEvent completion path.",
         serde_json::json!({
             "type": "object",
@@ -447,7 +438,6 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
     .with_declaration(
         lash_core::ToolDeclaration::deferring(),
         Some(lash_core::ParkBound::Within(
@@ -472,7 +462,7 @@ pub(super) fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {
 pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_search",
-        "oblique_search",
+        "obliq.search",
         "Synthetic OBLIQ retrieval. Returns a ranked match list with full text and nested metadata inline.",
         serde_json::json!({
             "type": "object",
@@ -493,9 +483,6 @@ pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
         oblique_search_output_schema(),
     ).expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(
-        ToolBinding::new(["obliq"], "search").with_authority_type("Obliq"),
-    )
 }
 
 #[expect(
@@ -505,7 +492,7 @@ pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
 fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_judge_candidates",
-        "oblique_judge_candidates",
+        "obliq.judge_candidates",
         "Synthetic OBLIQ candidate judge. Calls the direct completion client from inside the tool.",
         serde_json::json!({
             "type": "object",
@@ -539,7 +526,6 @@ fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["obliq"], "judge_candidates").with_authority_type("Obliq"))
 }
 
 #[expect(
@@ -549,7 +535,7 @@ fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
 fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_list_async_handles",
-        "oblique_list_async_handles",
+        "obliq.list_async_handles",
         "Synthetic live async handle listing shaped like the OBLIQ helper tool.",
         serde_json::json!({
             "type": "object",
@@ -569,9 +555,6 @@ fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(
-        ToolBinding::new(["obliq"], "list_async_handles").with_authority_type("Obliq"),
-    )
 }
 
 pub(super) fn oblique_search_output_schema() -> serde_json::Value {
@@ -759,7 +742,10 @@ impl ToolProvider for BenchmarkLargeToolCatalog {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
-        if !GMAIL_LIKE_TOOL_NAMES.contains(&call.name()) {
+        if !GMAIL_LIKE_TOOL_NAMES
+            .iter()
+            .any(|name| gmail_operation(name) == call.name())
+        {
             return ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name()))
                 .into();
         }
@@ -783,6 +769,15 @@ impl BenchmarkLargeToolCatalog {
     }
 }
 
+/// The operation the Gmail-like tool `name` is performed as:
+/// `GMAIL_ADD_LABEL_TO_EMAIL` is `gmail.add_label_to_email`.
+fn gmail_operation(name: &str) -> String {
+    format!(
+        "gmail.{}",
+        name.trim_start_matches("GMAIL_").to_ascii_lowercase()
+    )
+}
+
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
@@ -790,23 +785,13 @@ impl BenchmarkLargeToolCatalog {
 fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
     let mut definition = ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        gmail_operation(name),
         gmail_like_tool_description(index, name),
         gmail_like_input_schema(name),
         gmail_like_output_schema(name),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(
-        ToolBinding::new(
-            ["gmail"],
-            name.trim_start_matches("GMAIL_").to_ascii_lowercase(),
-        )
-        .with_aliases([name
-            .trim_start_matches("GMAIL_")
-            .to_ascii_lowercase()
-            .replace('_', " ")]),
-    );
+    .with_execution(std::time::Duration::from_secs(120));
 
     if index.is_multiple_of(7) {
         definition.contract.output_contract = ToolOutputContract::from_input_schema(
@@ -1170,9 +1155,9 @@ mod preparation_tests {
         let tools = BenchmarkObliqueTools;
         let config = lash_core::OwnerConfigView::default();
         for name in [
-            "oblique_search",
-            "oblique_judge_candidates",
-            "oblique_list_async_handles",
+            "obliq.search",
+            "obliq.judge_candidates",
+            "obliq.list_async_handles",
         ] {
             let first = tools.resolve_contract(name, &config).unwrap();
             let repeated = BenchmarkObliqueTools
@@ -1181,7 +1166,7 @@ mod preparation_tests {
             assert!(Arc::ptr_eq(&first, &repeated), "{name} was prepared again");
             let definition = benchmark_oblique_tool_definitions()
                 .into_iter()
-                .find(|definition| definition.name() == name)
+                .find(|definition| definition.manifest.tool() == name)
                 .unwrap();
             assert_eq!(*first, definition.contract());
         }
@@ -1191,9 +1176,9 @@ mod preparation_tests {
             benchmark_slow_tool_definition(),
             benchmark_async_tool_definition(),
         ] {
-            let name = definition.name();
-            let first = echo_tool_catalog().contracts.get(name).unwrap();
-            let repeated = echo_tool_catalog().contracts.get(name).unwrap();
+            let name = definition.manifest.tool();
+            let first = echo_tool_catalog().contracts.get(&name).unwrap();
+            let repeated = echo_tool_catalog().contracts.get(&name).unwrap();
             assert!(Arc::ptr_eq(first, repeated));
             assert_eq!(**first, definition.contract());
         }

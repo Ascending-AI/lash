@@ -23,7 +23,7 @@
       "replies": [
         {
           "cell": [
-            "const phase0 = await tools.fixture_slow({ key: \"phase-{turn}-0\", ms: 5 });",
+            "const phase0 = await tools.fixtureSlow({ key: \"phase-{turn}-0\", ms: 5 });",
             "progress.push({turn});",
             "await control.finish({ completed: progress.length });"
           ]

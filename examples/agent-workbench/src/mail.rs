@@ -26,8 +26,8 @@ use std::{
 
 use async_trait::async_trait;
 use lash::tools::{
-    ExecutionPolicy, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
+    ExecutionPolicy, ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest,
+    ToolOutcome, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -373,7 +373,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     };
     ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("inbox.{}.{}", slug, operation),
         description,
         input_schema,
         json!({ "type": "object" }),
@@ -381,7 +381,6 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(execution_policy)
-    .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }
 
 /// Dynamic provider: one `Inbox` authority per account, three operations each.
@@ -423,9 +422,9 @@ impl MockMailProvider {
     /// live accounts exclusively. A recorded run that calls a removed account's tool parks
     /// until the account is re-added.
     fn route(&self, name: &str) -> Option<(String, &'static str)> {
-        let rest = name.strip_prefix("inbox__")?;
+        let rest = name.strip_prefix("inbox.")?;
         for operation in MAIL_OPERATIONS {
-            if let Some(slug) = rest.strip_suffix(&format!("__{operation}"))
+            if let Some(slug) = rest.strip_suffix(&format!(".{operation}"))
                 && !slug.is_empty()
             {
                 return Some((slug.to_string(), operation));
@@ -471,7 +470,7 @@ impl ToolProvider for MockMailProvider {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        let Some((slug, operation)) = self.route(call.name()) else {
+        let Some((slug, operation)) = self.route(&call.name()) else {
             return ToolOutcome::err_fmt(format_args!("unknown inbox tool `{}`", call.name()))
                 .into();
         };

@@ -6,7 +6,7 @@ fn compact(tool: &ToolDefinition) -> CompactToolContract {
     compact_contract(
         &tool.manifest,
         &tool.contract,
-        tool.name(),
+        tool.operation().name.as_str(),
         &StandardPresenterConfig::standard(),
     )
     .expect("representable tool")
@@ -16,7 +16,7 @@ fn compact(tool: &ToolDefinition) -> CompactToolContract {
 fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
     let tool = ToolDefinition::raw(
         "tool:search_docs",
-        "search_docs",
+        "host.search_docs",
         "Search indexed docs",
         serde_json::json!({
             "type": "object",
@@ -72,7 +72,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
 fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
     let tool = ToolDefinition::raw(
         "tool:search_tools",
-        "search_tools",
+        "host.search_tools",
         "Search tools",
         serde_json::json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -123,7 +123,7 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
 fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     let tool = ToolDefinition::raw(
         "tool:spawn_agent",
-        "spawn_agent",
+        "host.spawn_agent",
         "Run a child session",
         serde_json::json!({
             "type": "object",
@@ -155,7 +155,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
 fn dynamic_output_contract_renders_default_schema() {
     let tool = ToolDefinition::raw(
         "tool:llm_query",
-        "llm_query",
+        "host.llm_query",
         "Run a lightweight LLM query",
         serde_json::json!({
             "type": "object",
@@ -192,7 +192,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     let tool: ToolDefinition = serde_json::from_value(serde_json::json!({
         "manifest": {
             "id": "tool:mcp__appworld__spotify_show_album_library",
-            "name": "mcp__appworld__spotify_show_album_library",
+            "operation": "appworld.spotify_show_album_library",
             "description": "[MCP appworld] Search or show a list of albums in your album library.",
             "execution": { "secs": 30, "nanos": 0 },
         },
@@ -335,7 +335,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
 fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
     let tool = ToolDefinition::raw(
         "tool:mcp/issues_search",
-        "issues_search",
+        "host.issues_search",
         "Search issues.",
         serde_json::json!({
             "type": "object",
@@ -399,7 +399,7 @@ fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
 fn recursive_filter_has_one_named_body_and_path_only_notes() {
     let tool = ToolDefinition::raw(
         "filter",
-        "filter",
+        "host.filter",
         "Filter records",
         serde_json::json!({
             "type":"object", "properties":{"filter":{"$ref":"#/$defs/Filter"}},
@@ -448,10 +448,17 @@ fn reference_closures_preserve_mutual_edges_sharing_and_use_site_notes() {
             "a.b`":{"type":["string","null"], "description":"Quoted key"}
         }
     });
-    let tool = ToolDefinition::raw("Field", "Field", "Compare", schema.clone(), schema)
+    let tool = ToolDefinition::raw("Field", "host.field", "Compare", schema.clone(), schema)
         .unwrap()
         .with_execution(std::time::Duration::from_secs(30));
-    let docs = compact(&tool).render_markdown();
+    let docs = compact_contract(
+        &tool.manifest,
+        &tool.contract,
+        "Field",
+        &StandardPresenterConfig::standard(),
+    )
+    .expect("representable tool")
+    .render_markdown();
     for name in ["Left", "Right", "Field_2", "type_2", "input_2"] {
         assert_eq!(docs.matches(&format!("type {name} =")).count(), 1, "{docs}");
     }
@@ -493,7 +500,7 @@ fn reference_closures_preserve_mutual_edges_sharing_and_use_site_notes() {
 fn dynamic_witness_and_default_closure_survive_a_referenced_input_root() {
     let tool = ToolDefinition::raw(
         "ask",
-        "ask",
+        "host.ask",
         "Ask",
         serde_json::json!({"$ref":"#/$defs/Input", "$defs":{"Input":{
             "type":"object", "properties":{"output":{"type":"object"}}, "required":["output"]
@@ -535,7 +542,7 @@ fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
     }}});
     let plain = ToolDefinition::raw(
         "plain",
-        "plain",
+        "host.plain",
         "Static result",
         input.clone(),
         serde_json::json!({"type":"string"}),
@@ -544,7 +551,7 @@ fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
     .with_execution(std::time::Duration::from_secs(30));
     let dynamic = ToolDefinition::raw(
         "dynamic",
-        "dynamic",
+        "host.dynamic",
         "Dynamic result",
         input,
         serde_json::json!({"type":"string"}),
@@ -554,13 +561,18 @@ fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
     .with_output_from_input_schema("output", None);
     let tools = [plain, dynamic];
     let contracts = tools.iter().map(|tool| tool.contract()).collect::<Vec<_>>();
+    let paths = tools
+        .iter()
+        .map(|tool| tool.operation().name.to_string())
+        .collect::<Vec<_>>();
     let entries = tools
         .iter()
         .zip(&contracts)
-        .map(|(tool, contract)| ToolPresentationEntry {
+        .zip(&paths)
+        .map(|((tool, contract), call_path)| ToolPresentationEntry {
             manifest: &tool.manifest,
             contract,
-            call_path: &tool.manifest.name,
+            call_path,
             pinned: false,
         })
         .collect::<Vec<_>>();
@@ -593,7 +605,7 @@ fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
 fn compact_discovery_refuses_legacy_authored_examples() {
     let tool = ToolDefinition::raw(
         "tool:lookup",
-        "lookup",
+        "host.lookup",
         "Lookup",
         serde_json::json!({"type":"object"}),
         serde_json::json!({"type":"string"}),
@@ -617,7 +629,7 @@ fn compact_discovery_refuses_legacy_authored_examples() {
 fn a_nullable_field_is_noted_on_its_own_path_and_a_real_union_names_its_arms() {
     let tool = ToolDefinition::raw(
         "select",
-        "select",
+        "host.select",
         "Select records.",
         serde_json::json!({"type":"object", "properties":{
             "endCursor":{"anyOf":[{"type":"string","title":"End Cursor","description":"Cursor of the last item."},{"type":"null"}]},

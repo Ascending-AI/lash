@@ -59,7 +59,7 @@ fn instructions(composed: &ComposedPrompt) -> &str {
 fn tool(name: &str, module: &str, inline: bool) -> lash_core::ToolDefinition {
     let mut tool = lash_core::ToolDefinition::raw(
         name,
-        name,
+        format!("{module}.{name}"),
         "Issue operation",
         serde_json::json!({"type":"object"}),
         serde_json::json!({"type":"string"}),
@@ -67,9 +67,6 @@ fn tool(name: &str, module: &str, inline: bool) -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
     tool.manifest.inline = inline;
-    tool.manifest.module = Some(Arc::new(lash_core::ToolModule {
-        name: module.into(),
-    }));
     tool
 }
 

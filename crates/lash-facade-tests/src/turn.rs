@@ -36,7 +36,7 @@ pub struct AccountTools {
 pub fn account_tool(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Reads an account's inbox.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
@@ -68,8 +68,8 @@ impl ToolProvider for AccountTools {
         self.names
             .lock_recover()
             .iter()
-            .any(|tool| tool == name)
-            .then(|| Arc::new(account_tool(name).contract()))
+            .find(|tool| format!("tools.{tool}") == name)
+            .map(|tool| Arc::new(account_tool(tool).contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

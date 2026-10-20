@@ -279,13 +279,13 @@ fn standard_tool_names(prompt: &str, standard: bool) -> String {
     }
 
     [
-        ("weather.lookup", "weather_lookup"),
-        ("kv.get", "kv_get"),
-        ("kv.put", "kv_put"),
-        ("notes.render", "notes_render"),
-        ("mail.list", "mail_list"),
-        ("mail.send", "mail_send"),
-        ("contacts.get", "contacts_get"),
+        ("weather.lookup", "weather__lookup"),
+        ("kv.get", "kv__get"),
+        ("kv.put", "kv__put"),
+        ("notes.render", "notes__render"),
+        ("mail.list", "mail__list"),
+        ("mail.send", "mail__send"),
+        ("contacts.get", "contacts__get"),
     ]
     .into_iter()
     .fold(prompt.to_string(), |prompt, (display, registered)| {

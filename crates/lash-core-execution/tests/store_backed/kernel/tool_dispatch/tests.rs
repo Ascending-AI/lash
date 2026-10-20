@@ -20,7 +20,7 @@ mod protocol_version_refusal;
 fn named_beta_tool(name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "",
         json!({
             "type": "object",
@@ -72,7 +72,7 @@ impl ToolProvider for ExactDispatchTools {
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
     ) -> Option<crate::ToolManifest> {
-        (name == "host_only").then(|| named_beta_tool("host_only").manifest())
+        (name == "tools.host_only").then(|| named_beta_tool("host_only").manifest())
     }
 
     fn resolve_manifest_by_id(
@@ -90,7 +90,7 @@ impl ToolProvider for ExactDispatchTools {
         _config: &crate::plugin::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
         self.contracts_resolved.fetch_add(1, Ordering::SeqCst);
-        (self.contract_available && name == "host_only")
+        (self.contract_available && name == "tools.host_only")
             .then(|| Arc::new(named_beta_tool("host_only").contract()))
     }
 
@@ -184,8 +184,12 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .await;
-    let outcome =
-        dispatch_tool_call(&context, "host_only".to_string(), json!({ "value": "ok" })).await;
+    let outcome = dispatch_tool_call(
+        &context,
+        "tools.host_only".to_string(),
+        json!({ "value": "ok" }),
+    )
+    .await;
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(
@@ -229,7 +233,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     let pending = crate::sansio::PendingToolCall {
         call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
         provider_call_id: None,
-        tool_name: "host_only".to_string(),
+        tool_name: "tools.host_only".to_string(),
         args: json!({ "value": "ok" }),
         replay: None,
     };
@@ -295,7 +299,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
     fn definition() -> crate::ToolDefinition {
         crate::ToolDefinition::raw(
             "tool:mcp__appworld__venmo_show_transactions",
-            "mcp__appworld__venmo_show_transactions",
+            "appworld.venmo_show_transactions",
             "Show Venmo transactions",
             json!({
                 "type": "object",
@@ -329,8 +333,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
         ) -> Option<Arc<crate::ToolContract>> {
-            (name == "mcp__appworld__venmo_show_transactions")
-                .then(|| Arc::new(definition().contract()))
+            (name == "appworld.venmo_show_transactions").then(|| Arc::new(definition().contract()))
         }
 
         async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -349,7 +352,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
     .await;
     let outcome = dispatch_tool_call(
         &context,
-        "mcp__appworld__venmo_show_transactions".to_string(),
+        "appworld.venmo_show_transactions".to_string(),
         json!({
             "min_datetime": "2024-01-01T00:00:00Z",
             "limit": 20
@@ -374,7 +377,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     fn definition() -> crate::ToolDefinition {
         crate::ToolDefinition::raw(
             "tool:seedy",
-            "seedy",
+            "tools.seedy",
             "Seed-aware",
             crate::ToolDefinition::default_input_schema(),
             json!({ "type": "string" }),
@@ -403,7 +406,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
         ) -> Option<Arc<crate::ToolContract>> {
-            (name == "seedy").then(|| Arc::new(definition().contract()))
+            (name == "tools.seedy").then(|| Arc::new(definition().contract()))
         }
 
         async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -437,7 +440,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     .expect("plugin session");
     let outcome = dispatch_tool_call(
         &refusing_dispatch_context(plugins).await,
-        "seedy".to_string(),
+        "tools.seedy".to_string(),
         json!({}),
     )
     .await;
@@ -608,7 +611,7 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     let pending = crate::sansio::PendingToolCall {
         call_id: member.id().clone(),
         provider_call_id: None,
-        tool_name: "send_email".to_owned(),
+        tool_name: "tools.send_email".to_owned(),
         args: json!({ "value": "email" }),
         replay: None,
     };

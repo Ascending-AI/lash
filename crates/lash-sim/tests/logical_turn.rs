@@ -69,7 +69,7 @@ impl ToolProvider for SeedSwitchTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
-        (name == "switch_frame").then(|| Arc::new(switch_tool_definition().contract()))
+        (name == "tools.switch_frame").then(|| Arc::new(switch_tool_definition().contract()))
     }
 
     #[expect(
@@ -78,7 +78,7 @@ impl ToolProvider for SeedSwitchTool {
     )]
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            assert_eq!(call.name(), "switch_frame");
+            assert_eq!(call.name(), "tools.switch_frame");
             ToolOutcome::switch_agent_frame(
                 lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
                     .expect("non-empty caller material"),
@@ -100,7 +100,7 @@ impl ToolProvider for SeedSwitchTool {
 fn switch_tool_definition() -> ToolDefinition {
     ToolDefinition::control(
         "tool:switch_frame",
-        "switch_frame",
+        "tools.switch_frame",
         "Switch to the seeded follow-on frame.",
         ToolDefinition::default_input_schema(),
         lash_core::TurnControls::switch_agent_frame(),
@@ -113,7 +113,7 @@ fn tool_call_response() -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: "sim-switch-call".to_string(),
-            tool_name: "switch_frame".to_string(),
+            tool_name: "tools__switch_frame".to_string(),
             input_json: "{}".to_string(),
             replay: None,
         }],
@@ -425,7 +425,7 @@ impl BoundedSwitchTools {
     fn definition(index: usize) -> ToolDefinition {
         ToolDefinition::control(
             format!("tool:terminal_tool_{index}"),
-            format!("terminal_tool_{index}"),
+            format!("terminal.tool{index}"),
             "Switch to the next frame in the bounded chain.",
             ToolDefinition::default_input_schema(),
             lash_core::TurnControls::switch_agent_frame(),
@@ -454,7 +454,7 @@ impl ToolProvider for BoundedSwitchTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
-        let index = name.strip_prefix("terminal_tool_")?.parse::<usize>().ok()?;
+        let index = name.strip_prefix("terminal.tool")?.parse::<usize>().ok()?;
         (index < self.switch_count).then(|| Arc::new(Self::definition(index).contract()))
     }
 
@@ -466,7 +466,7 @@ impl ToolProvider for BoundedSwitchTools {
         (async {
             let index = call
                 .name()
-                .strip_prefix("terminal_tool_")
+                .strip_prefix("terminal.tool")
                 .and_then(|value| value.parse::<usize>().ok())
                 .expect("bounded switch tool name");
             ToolOutcome::switch_agent_frame(
@@ -601,7 +601,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: format!("switch-{index}"),
-                            tool_name: format!("terminal_tool_{index}"),
+                            tool_name: format!("terminal__tool{index}"),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
@@ -754,7 +754,7 @@ async fn rlm_continue_as_seed_materializes_in_the_new_frame() {
                         0 => {
                             r#"
 <typescript>
-await control.continue_as({
+await control.continueAs({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
 });
@@ -892,7 +892,7 @@ await control.finish({ bound: local_actions.continue_as });
                     } else {
                         r#"
 <typescript>
-await local_actions.continue_as({
+await local_actions.continueAs({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
 });

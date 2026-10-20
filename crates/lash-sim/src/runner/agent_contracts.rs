@@ -295,7 +295,7 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         "Call the app lookup tool and finish its value.",
         vec![
             r#"<typescript>
-const value = await tools.app_lookup({});
+const value = await tools.appLookup({});
 await control.finish(value);
 </typescript>"#,
         ],
@@ -311,7 +311,7 @@ await control.finish(value);
                 .into_iter()
                 .flatten()
                 .any(|entry| {
-                    entry.get("name").and_then(Value::as_str) == Some("app_lookup")
+                    entry.get("name").and_then(Value::as_str) == Some("tools.app_lookup")
                         && entry.get("value") == Some(&expected)
                 })
             && result
@@ -320,7 +320,7 @@ await control.finish(value);
                 .into_iter()
                 .flatten()
                 .any(|entry| {
-                    entry.get("name").and_then(Value::as_str) == Some("finish")
+                    entry.get("name").and_then(Value::as_str) == Some("control.finish")
                         && entry.get("value") == Some(&Value::Null)
                 }),
         "agent foreground tool execution did not record a concrete app_lookup completion",
@@ -712,7 +712,7 @@ async fn facade_agent_durable_input_execution_with(
         vec![
             r#"<typescript>
 const requestAnswer = async () => {
-  const result = await tools.mock_input_request({ question: "Need input?" });
+  const result = await tools.mockInputRequest({ question: "Need input?" });
   return result;
 };
 const handle = await processes.start({ definition: requestAnswer });

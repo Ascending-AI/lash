@@ -48,7 +48,14 @@ impl PromptSectionSource for ModuleGuidance {
     fn sections(&self, offered: &OfferedTools) -> Vec<PromptFamilySection> {
         let mut modules = offered
             .manifests()
-            .filter_map(|manifest| manifest.module.as_ref().map(|module| module.name.clone()))
+            .filter_map(|manifest| {
+                manifest
+                    .operation
+                    .package
+                    .iter()
+                    .next()
+                    .map(ToString::to_string)
+            })
             .collect::<Vec<_>>();
         modules.dedup();
         modules
@@ -399,19 +406,15 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
 }
 
 fn module_tool(name: &str, module: &str) -> lash::tools::ToolDefinition {
-    let mut tool = lash::tools::ToolDefinition::raw(
+    lash::tools::ToolDefinition::raw(
         name,
-        name,
+        format!("{module}.{name}"),
         "",
         serde_json::json!({"type": "object"}),
         serde_json::json!({}),
     )
     .expect("tool schema admits")
-    .with_execution(std::time::Duration::from_secs(120));
-    tool.manifest.module = Some(Arc::new(lash::tools::ToolModule {
-        name: module.into(),
-    }));
-    tool
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A call offering `tools` natively, from their pinned catalog.

@@ -97,7 +97,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
             )
         ));
     }
-    let source = ToolDefinition::raw("bad", "bad", "bad", Value::Null, json!({}))
+    let source = ToolDefinition::raw("bad", "host.bad", "bad", Value::Null, json!({}))
         .expect_err("invalid schema");
     let fault = McpServerFault::UnusableSchema(Box::new(source.clone()));
     for health in [
@@ -256,11 +256,8 @@ async fn execute_with_manifest<P: ToolProvider>(
     }
 }
 
-fn forced_publication_name() -> (String, lash_tool_support::ToolBinding) {
-    (
-        "mcp__forced__collision".to_string(),
-        lash_tool_support::ToolBinding::new(["forced"], "collision"),
-    )
+fn forced_publication_name() -> String {
+    "collision".to_string()
 }
 
 fn advertised_tool(name: &str) -> rmcp::model::Tool {
@@ -274,7 +271,9 @@ fn advertised_tool(name: &str) -> rmcp::model::Tool {
 #[test]
 fn import_refuses_a_forced_final_name_collision_without_overwriting() {
     let names =
-        naming::build_catalog_names_with_digest("directory", &["get-user", "get_user"], |_| [7; 5]);
+        naming::build_catalog_names_with_digest("directory", &["get-user", "get_user"], |_| {
+            "aaaaaaaa".to_string()
+        });
     let result = import_tools_with_name_builder(
         "directory",
         vec![advertised_tool("get-user"), advertised_tool("get_user")],
@@ -286,7 +285,7 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
         Err(error) => error,
     };
     let message = error.to_string();
-    assert!(message.contains("model-facing name collision"), "{message}");
+    assert!(message.contains("MCP operation collision"), "{message}");
     assert!(message.contains("get-user"), "{message}");
     assert!(message.contains("get_user"), "{message}");
 }
@@ -343,29 +342,6 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     assert!(
         stale_error.to_string().contains("stale tool publication"),
         "{stale_error}"
-    );
-
-    let contender = McpEntry::new_in_catalog(
-        Arc::clone(&pool.catalog),
-        "abcdefghijklmno-two".to_string(),
-        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
-        McpHostServices::default(),
-    );
-    pool.install(contender.server_name.clone(), Arc::clone(&contender))
-        .unwrap_or_else(|(_, error)| panic!("install contender entry: {error}"));
-    let collision = contender
-        .replace_imported_tools(forced_catalog(&contender.server_name, "abcdefghijklmnop"))
-        .expect_err("replacement reservation must refuse a forced collision");
-    assert!(
-        collision
-            .to_string()
-            .contains("model-facing name collision"),
-        "{collision}"
-    );
-    assert_eq!(pool.advertised_tools().len(), 1);
-    assert!(
-        pool.advertised_tools_for_server(&contender.server_name)
-            .is_empty()
     );
 
     removed.shutdown().await;
@@ -628,14 +604,14 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
         name: &str,
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        if name == self.native.name() {
+        if name == self.native.manifest.tool() {
             return Some(Arc::new(self.native.contract()));
         }
         self.mcp.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == self.native.name() {
+        if call.name() == self.native.manifest.tool() {
             return ToolOutcome::ok(json!("native-ok")).into();
         }
         self.mcp.execute(call).await
@@ -694,7 +670,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
     let attach_result = pool.attach("docs".to_string(), config()).await;
     let native = ToolDefinition::raw(
         "tool:native/status",
-        "native_status",
+        "native.status",
         "native status",
         ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
@@ -732,13 +708,13 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
     assert!(
         manifests
             .iter()
-            .any(|manifest| manifest.name == "native_status"),
+            .any(|manifest| manifest.tool() == "native.status"),
         "the native tool remains in the rebuilt catalog"
     );
     assert!(
         manifests
             .iter()
-            .any(|manifest| manifest.name == mcp_name("Docs", "lookup")),
+            .any(|manifest| manifest.tool() == mcp_name("Docs", "lookup")),
         "the original MCP tool remains in the rebuilt catalog"
     );
     let native_result = execute_by_id(
@@ -1041,8 +1017,8 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let initial = pool.advertised_tools();
     assert_eq!(initial.len(), 1);
     let stable_name = mcp_name("directory", "get_user");
-    assert_eq!(initial[0].name(), "mcp__directory__get_user");
-    assert_eq!(initial[0].name(), stable_name);
+    assert_eq!(initial[0].manifest.tool(), "directory.get_user");
+    assert_eq!(initial[0].manifest.tool(), stable_name);
     let saved_id = initial[0].manifest.id.clone();
     let resolved = Arc::new(policy_tests::ActorPauseHook::default());
     pool.set_resolved_target_hook(Some(Arc::clone(&resolved)));
@@ -1087,20 +1063,20 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     if retain_original {
         let renamed = refreshed_original.expect("surviving raw tool stays imported");
         assert_ne!(
-            renamed.name(),
+            renamed.manifest.tool(),
             stable_name,
             "collision renames both members"
         );
-        assert!(renamed.name().starts_with("mcp__directory__get_user__"));
+        assert!(renamed.manifest.tool().starts_with("directory.get_user_h"));
         assert!(
             refreshed
                 .iter()
-                .all(|definition| definition.name() != stable_name)
+                .all(|definition| definition.manifest.tool() != stable_name)
         );
     } else {
         assert!(refreshed_original.is_none());
         assert_eq!(
-            refreshed[0].name(),
+            refreshed[0].manifest.tool(),
             stable_name,
             "the new raw tool inherits the bare path"
         );
@@ -1312,17 +1288,13 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         .expect("connect collision server");
 
     async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolOutcome> {
-        let definition = pool.advertised_tools().into_iter().find(|definition| {
-            lash_vm_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
-                .ok()
-                .flatten()
-                .and_then(|binding| binding.operation)
-                .as_deref()
-                == Some(operation)
-        })?;
+        let definition = pool
+            .advertised_tools()
+            .into_iter()
+            .find(|definition| definition.manifest.tool() == operation)?;
         Some(
             pool.call_tool(
-                definition.name(),
+                &definition.manifest.tool(),
                 &json!({}),
                 &lash_core::testing::mock_attempt_context(),
             )
@@ -1331,25 +1303,20 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
     }
 
     fn expected_operation(native_tool_name: &str) -> String {
-        naming::build_catalog_names("directory", &["get-user", "get_user"])[native_tool_name]
-            .1
-            .clone()
-            .operation
-            .expect("MCP tools have a Lash VM operation")
+        format!(
+            "directory.{}",
+            naming::build_catalog_names("directory", &["get-user", "get_user"])[native_tool_name]
+        )
     }
 
     fn bound_operation(pool: &McpConnectionPool, native_tool_name: &str) -> String {
         let tool_id = naming::durable_tool_id("directory", native_tool_name);
-        let definition = pool
-            .advertised_tools()
+        pool.advertised_tools()
             .into_iter()
             .find(|definition| definition.manifest.id.as_str() == tool_id)
-            .expect("raw MCP identity is advertised");
-        lash_vm_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
-            .expect("valid Lash VM binding")
-            .expect("MCP tool has a Lash VM binding")
-            .operation
-            .expect("MCP tools have a Lash VM operation")
+            .expect("raw MCP identity is advertised")
+            .manifest
+            .tool()
     }
 
     let replacement = replacement_connection(&pool, "directory");

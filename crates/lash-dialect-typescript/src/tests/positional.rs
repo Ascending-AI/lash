@@ -181,7 +181,7 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
     .unwrap();
     let written = lowered.written;
     let mut document = lowered.document.into_document();
-    let echo = lash_kernel_doc::EffectName::new("echo").unwrap();
+    let echo = lash_kernel_doc::EffectName::new("host.echo").unwrap();
     document.manifest.effects.insert(
         echo.clone(),
         lash_kernel_doc::OperationRequirement::of_signature(machine::effects()[&echo].clone()),

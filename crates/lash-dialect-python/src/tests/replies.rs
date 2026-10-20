@@ -31,7 +31,7 @@ fn text(text: &str) -> Datum {
     Datum::Text(text.to_string())
 }
 
-/// The lines `source` prints when `echo(x)` answers the reply `replies`
+/// The lines `source` prints when `host.echo(x)` answers the reply `replies`
 /// lists for `x`, each call as soon as it is asked.
 fn printed(source: &str, replies: &[(&str, Datum)]) -> Vec<String> {
     let mut pending: VecDeque<Request> = VecDeque::new();
@@ -68,8 +68,8 @@ fn printed(source: &str, replies: &[(&str, Datum)]) -> Vec<String> {
 #[test]
 fn a_tool_object_is_a_dict() {
     let source = "\
-r = await echo('x')
-print(r['a'], len(r), r.get('a'), bool(await echo('y')))
+r = await host.echo('x')
+print(r['a'], len(r), r.get('a'), bool(await host.echo('y')))
 ";
     let replies = [("x", object(&[("a", text("v"))])), ("y", object(&[]))];
     assert_eq!(printed(source, &replies), ["v 1 v False"]);
@@ -79,7 +79,7 @@ print(r['a'], len(r), r.get('a'), bool(await echo('y')))
 #[test]
 fn a_nested_tool_object_is_a_dict_at_every_depth() {
     let source = "\
-r = await echo('n')
+r = await host.echo('n')
 print(r)
 print(r['outer']['inner'], type(r['outer']).__name__, list(r), list(r['outer'].items()), 'outer' in r, r['outer'] == {'inner': 1, 'z': None})
 print(r['list'][0]['b'], type(r['list'][0]).__name__, r.get('missing', 'd'), [k for k in r], list(r.values())[1])
@@ -113,12 +113,12 @@ print(len(r['outer']), sorted(r['outer'].keys()))
 fn a_tool_array_is_a_list_of_dicts_however_it_is_awaited() {
     let source = "\
 import asyncio
-xs = await echo('l')
+xs = await host.echo('l')
 print(type(xs).__name__, xs[0]['k'], type(xs[1][0]['m']).__name__, bool(xs[1][0]['m']), len(xs[1][0]))
-task = asyncio.create_task(echo('t'))
+task = asyncio.create_task(host.echo('t'))
 r = await task
 print(type(r).__name__, r['a'], bool(r['a']))
-g, h = await asyncio.gather(echo('g'), echo('t'))
+g, h = await asyncio.gather(host.echo('g'), host.echo('t'))
 print(g['g'], len(h))
 ";
     let replies = [

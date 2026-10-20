@@ -5,7 +5,7 @@
 fn main() {
     let grant = lash::tools::ToolExecutionGrant::from_definition(lash::plugins::ToolProviderHandle::new(lash::plugins::RegistryKind::Session, "mock", lash::tool_provider_key!("tools")), lash::tools::ToolDefinition::raw(
         "tool:grant_only",
-        "grant_only",
+        "tools.grant_only",
         "granted",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),

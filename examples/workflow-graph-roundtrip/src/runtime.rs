@@ -110,7 +110,8 @@ pub(crate) fn complete(
     for (effect, requirement) in &mut document.manifest.effects {
         *requirement = OperationRequirement::of_signature(
             environment
-                .effects()
+                .checker()
+                .effects
                 .get(effect)
                 .ok_or_else(|| RunError::Invalid(format!("this host offers no effect `{effect}`")))?
                 .clone(),

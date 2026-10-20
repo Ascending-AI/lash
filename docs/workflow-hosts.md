@@ -326,7 +326,7 @@ The supported operations are SetValue, InsertStep, RemoveStep, MoveStep,
 WrapSteps, UnwrapSteps and ChangeCondition. Values are data or in-scope binding
 references. Structural step operations accept separable perform/tool steps.
 A whole-statement perform whose inline argument helpers are pure library calls,
-such as `await tools.inbox.send_item(ts.boundary({...}))`, moves, removes and
+such as `await inbox.sendItem(ts.boundary({...}))`, moves, removes and
 wraps with those helpers. Library purity follows the called bodies; another
 perform, a wait, a declared call or a callback application is not an argument
 helper. Assignment receivers must remain action-free.
@@ -816,7 +816,8 @@ read its `BindingCaption`. For one that holds a tool's reply, read
 `BindingView.produced_by` too: the site of the `perform` it awaited, in
 `dataflow.actions`, so "what Fetch the orders returned" can name the step
 by its node's caption. It is set for TypeScript's
-`const r = await tools.x(…)`, Python's `r = await tools.x(…)` (through its
+`const r = await tools.x(…)`, Python's `r = await tools.x(…)` for an
+operation `tools.x` (through its
 reply helper, `py.reply`) and an `await` of a promise or task that only
 performs the call, for a `let` nothing reassigns. A value computed from a
 reply, such as `(await tools.x()).urgent`, has none: it comes from the code.

@@ -45,18 +45,15 @@ fn appendix_text() -> String {
 struct RetentionTools;
 
 fn retention_tool(name: &str) -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            format!("tool:{name}"),
-            name,
-            "A tool whose output is larger than history keeps.",
-            serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
-            serde_json::json!({}),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120)),
-        name,
+    lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        format!("tools.{name}"),
+        "A tool whose output is larger than history keeps.",
+        serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        serde_json::json!({}),
     )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 const TOOLS: [&str; 3] = ["bulk_ok", "bulk_fail", "small_ok"];
@@ -80,15 +77,18 @@ impl ToolProvider for RetentionTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         TOOLS
             .contains(&name)
             .then(|| Arc::new(retention_tool(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        match call.name() {
-            "bulk_ok" => lash_core::ToolOutcome::ok(serde_json::json!(bulk_text())).into(),
-            "bulk_fail" => {
+        match call.name().as_str() {
+            "tools.bulk_ok" => lash_core::ToolOutcome::ok(serde_json::json!(bulk_text())).into(),
+            "tools.bulk_fail" => {
                 lash_core::ToolOutcome::failure(lash_core::ToolFailure::io("dump", failure_text()))
                     .into()
             }
@@ -103,7 +103,7 @@ impl ToolProvider for RetentionTools {
 fn appendix_step() -> lash_core::plugin::ToolPresentationStep {
     Arc::new(|input: lash_core::plugin::ToolPresentationInput| {
         let mut next = input.previous;
-        if input.context.tool_name == "small_ok" {
+        if input.context.tool_name == "tools.small_ok" {
             next.parts
                 .push(lash_core::facade_support::ModelToolReturnPart::text(
                     appendix_text(),
@@ -125,7 +125,7 @@ fn tool_calling_provider() -> ProviderHandle {
                         .iter()
                         .map(|name| LlmOutputPart::ToolCall {
                             call_id: format!("call-{name}"),
-                            tool_name: (*name).to_string(),
+                            tool_name: format!("tools__{name}"),
                             input_json: "{}".to_string(),
                             replay: None,
                         })
@@ -243,24 +243,24 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         .collect();
     assert_eq!(
         retained.keys().map(String::as_str).collect::<Vec<_>>(),
-        vec!["bulk_fail", "bulk_ok", "small_ok"],
+        vec!["tools__bulk_fail", "tools__bulk_ok", "tools__small_ok"],
         "every oversized result is retained: {retained:#?}"
     );
 
     sweep_without_grace(&backend).await;
     assert_eq!(
-        stored_text(&backend, &retained["bulk_ok"].reference).await,
+        stored_text(&backend, &retained["tools__bulk_ok"].reference).await,
         bulk_text()
     );
     assert_eq!(
-        stored_text(&backend, &retained["bulk_fail"].reference).await,
+        stored_text(&backend, &retained["tools__bulk_fail"].reference).await,
         failure_text()
     );
-    let appended = stored_text(&backend, &retained["small_ok"].reference).await;
+    let appended = stored_text(&backend, &retained["tools__small_ok"].reference).await;
     assert!(appended.contains("small"), "{}", &appended[..64]);
     assert!(appended.ends_with(&appendix_text()));
     assert!(
-        retained["small_ok"].witness.len() <= 512,
+        retained["tools__small_ok"].witness.len() <= 512,
         "the plugin addition's witness is bounded by the policy"
     );
     Ok(())
@@ -648,7 +648,7 @@ async fn a_retained_value_is_read_in_place_as_its_shape_and_whole_on_request_on_
     let (read, _) = read_back_retained_rows(
         "retained-shape",
         r#"
-const whole = await control.read_output({ archive: prior.attachment });
+const whole = await control.readOutput({ archive: prior.attachment });
 await control.finish({
   described: rows.length,
   keys: rows.items.fields.map((field) => field.key),
@@ -678,7 +678,7 @@ async fn asking_for_a_reclaimed_retained_value_throws_a_catchable_refusal_on_sql
         "retained-reclaimed",
         r#"
 try {
-  await control.read_output({ archive: prior.attachment });
+  await control.readOutput({ archive: prior.attachment });
   await control.finish("read");
 } catch (error) {
   await control.finish({ name: error.name, described: rows.length });
@@ -722,7 +722,7 @@ fn archive_reader_cell() -> &'static str {
 for (let i = 0; i < history.length; i++) {
   const step = history[i];
   if (step.kind === "lash_vm_step" && step.output_archive) {
-    await control.finish(await control.read_output({ archive: step.output_archive.attachment }));
+    await control.finish(await control.readOutput({ archive: step.output_archive.attachment }));
   }
 }
 await control.finish("missing archive");
@@ -811,11 +811,11 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
 for (let i = 0; i < history.length; i++) {
   const step = history[i];
   if (step.kind === "lash_vm_step" && step.output_archive) {
-    await control.continue_as({ task: "read shared archive in fresh frame", seed: { archive: step.output_archive.attachment } });
+    await control.continueAs({ task: "read shared archive in fresh frame", seed: { archive: step.output_archive.attachment } });
   }
 }
 "#),
-            typescript_block("await control.finish(await control.read_output({ archive }));"),
+            typescript_block("await control.finish(await control.readOutput({ archive }));"),
         ]), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
     sweep_without_grace(&backend).await;
@@ -1043,7 +1043,7 @@ async fn read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
         ] {
             let python = dialect.name() == "python";
             let rows = if python {
-                "rows = []\nfor i in range(3000):\n    rows.append({'index': i, 'text': 'a retained row'})\nawait control_finish({'rows': rows})".to_string()
+                "rows = []\nfor i in range(3000):\n    rows.append({'index': i, 'text': 'a retained row'})\nawait control.finish({'rows': rows})".to_string()
             } else {
                 ROWS_CELL.to_string()
             };
@@ -1058,10 +1058,10 @@ async fn read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
                 .output()
                 .await?;
             let reader = if python {
-                "archive = history[1]['final_output']['attachment']\nwhole = await control_read_output({'archive': archive})\nawait control_finish(whole)".to_string()
+                "archive = history[1]['final_output']['attachment']\nwhole = await control.read_output({'archive': archive})\nawait control.finish(whole)".to_string()
             } else {
                 format!(
-                    "{PRIOR_FINAL_OUTPUT}\nawait control.finish(await control.read_output({{ archive: prior.attachment }}));"
+                    "{PRIOR_FINAL_OUTPUT}\nawait control.finish(await control.readOutput({{ archive: prior.attachment }}));"
                 )
             };
             responses
@@ -1084,9 +1084,9 @@ async fn read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
                 "retrieval preserves the complete retained value"
             );
             let call_path = if python {
-                "control_read_output"
-            } else {
                 "control.read_output"
+            } else {
+                "control.readOutput"
             };
             {
                 let requests = requests.lock_recover();

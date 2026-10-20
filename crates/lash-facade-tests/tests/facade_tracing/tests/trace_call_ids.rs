@@ -11,11 +11,12 @@ use lash::provider::{LlmTransportError, TransportRetryVerdict};
 const SESSION: &str = "l26-call-ids";
 const PROMPT: &str = "direct prompt";
 const DIRECT: &str = "direct_ask";
+const DIRECT_OPERATION: &str = "tools.direct_ask";
 
 fn direct_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{DIRECT}"),
-        DIRECT,
+        DIRECT_OPERATION,
         "Ask the model directly.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -41,7 +42,7 @@ impl ToolProvider for DirectAsk {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == DIRECT).then(|| Arc::new(direct_definition().contract()))
+        (name == DIRECT_OPERATION).then(|| Arc::new(direct_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -104,7 +105,7 @@ fn decorated(seen: &Arc<StdMutex<Vec<Seen>>>) -> ProviderHandle {
                     Some(1) => Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "call-direct".to_owned(),
-                            tool_name: DIRECT.to_owned(),
+                            tool_name: DIRECT_OPERATION.replace('.', "__"),
                             input_json: "{}".to_owned(),
                             replay: None,
                         }],

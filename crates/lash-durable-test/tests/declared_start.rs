@@ -179,7 +179,7 @@ impl Script {
                 let spawns = (0..self.children).map(|index| {
                     served::call(
                         &format!("declared-start-spawn-{index}"),
-                        "spawn_agent",
+                        "agents.spawn",
                         serde_json::json!({ "task": child_task(index) }),
                     )
                 });
@@ -193,7 +193,7 @@ impl Script {
                 let keep = self.parent_keeps_scope.then(|| {
                     served::call(
                         "declared-start-keep-scope",
-                        PROBE_TOOL,
+                        PROBE_TOOL_OPERATION,
                         Probe {
                             forge: Forge::KeepScope,
                             ..Probe::default()
@@ -308,6 +308,7 @@ fn model(script: &Arc<Script>) -> lash_core::facade_support::ProviderHandle {
 
 /// The tool name of [`DeclaringProbe`].
 const PROBE_TOOL: &str = "declared_start_probe";
+const PROBE_TOOL_OPERATION: &str = "tools.declared_start_probe";
 
 /// The payload key a probe's child carries its session under.
 const PROBE_MARKER: &str = "declared_start_probe";
@@ -394,18 +395,16 @@ impl Forge {
 const FOREIGN_SESSION: &str = "declared-start-law-foreign-session";
 
 fn probe_tool() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{PROBE_TOOL}"),
-        PROBE_TOOL,
+        PROBE_TOOL_OPERATION,
         "Declares one child start and resolves on its terminal.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE_TOOL))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).unwrap(),
         1,
@@ -557,7 +556,7 @@ impl lash_core::ToolProvider for DeclaringProbe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == PROBE_TOOL).then(|| Arc::new(probe_tool().contract()))
+        (name == PROBE_TOOL_OPERATION).then(|| Arc::new(probe_tool().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -607,7 +606,7 @@ impl lash_core::ToolProvider for DeclaringProbe {
 fn probe_step(index: usize, probe: Probe) -> LlmResponse {
     served::response(vec![served::call(
         &format!("declared-start-probe-{index}"),
-        PROBE_TOOL,
+        PROBE_TOOL_OPERATION,
         probe.args(),
     )])
 }

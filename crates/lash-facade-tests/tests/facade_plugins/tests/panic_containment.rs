@@ -58,10 +58,7 @@ impl ToolProvider for PanicTool {
 }
 
 fn panic_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinitionBindingExt::with_tool_binding(
-        lash_core::testing::fixture_echo_definition(),
-        lash_core::ToolBinding::new(["tools"], "fixture_echo"),
-    )
+    lash_core::testing::fixture_echo_definition()
 }
 
 /// Answers `replies` in order; `panic_first` makes the first call panic
@@ -152,7 +149,7 @@ fn panic_tool_response() -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: "panic-call".to_owned(),
-            tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
+            tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.replace('.', "__"),
             input_json: r#"{"value":"boom"}"#.to_owned(),
             replay: None,
         }],
@@ -169,7 +166,7 @@ async fn assert_tool_panic(session: &lash::DurableSession, output: &lash::TurnOu
     else {
         panic!("expected ToolPanicked, got {:?}", output.outcome);
     };
-    assert_eq!(tool_name, "fixture_echo");
+    assert_eq!(tool_name, "tools.fixture_echo");
     assert_eq!(message, "tool payload only");
     let output_tool_calls =
         lash::testing::tool_calls_for_activity(session, &output.activities).await;
@@ -201,8 +198,8 @@ async fn cell_panic(process: bool) -> Result<()> {
     let script = if process {
         r#"const run = async () => {
   let result;
-  try { result = await tools.fixture_echo({value: "boom"}); } catch (e) { result = e; }
-  await tools.fixture_echo({value: "after panic"});
+  try { result = await tools.fixtureEcho({value: "boom"}); } catch (e) { result = e; }
+  await tools.fixtureEcho({value: "after panic"});
   return 1;
 };
 const handle = await processes.start({definition: run});
@@ -211,8 +208,8 @@ try { result = await handle; } catch (e) { result = e; }
 await control.finish("must not finish");"#
     } else {
         r#"let result;
-try { result = await tools.fixture_echo({value: "boom"}); } catch (e) { result = e; }
-await tools.fixture_echo({value: "after panic"});
+try { result = await tools.fixtureEcho({value: "boom"}); } catch (e) { result = e; }
+await tools.fixtureEcho({value: "after panic"});
 await control.finish("must not finish");"#
     };
     let calls = Arc::new(AtomicUsize::new(0));

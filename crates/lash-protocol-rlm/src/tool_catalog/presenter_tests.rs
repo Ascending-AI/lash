@@ -9,7 +9,6 @@ use lash_tool_presenter_api::{
     ToolPresenter, ToolPresenterSlot, WrappedToolPresenter,
 };
 use lash_tool_presenter_typescript::TypescriptToolPresenter;
-use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 
 use crate::dialect::{CellDialect, SessionDialect};
@@ -17,7 +16,7 @@ use crate::dialect::{CellDialect, SessionDialect};
 fn lookup() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:test/lookup",
-        "lookup",
+        "tools.lookup",
         "Find a record.",
         json!({
             "type": "object",
@@ -29,7 +28,6 @@ fn lookup() -> ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::from_path("tools.lookup"))
 }
 
 fn declarations(
@@ -180,7 +178,7 @@ fn defaults() -> [Box<dyn ToolPresenter>; 3] {
 fn referenced(name: &str, kind: &str) -> ToolDefinition {
     ToolDefinition::raw(
         name,
-        name,
+        format!("tools.{name}"),
         format!("Call {name}."),
         json!({"$defs":{"Field":{"type":kind,"description":"Shared field notes."}},
             "type":"object","properties":{"value":{"$ref":"#/$defs/Field"}},
@@ -189,17 +187,25 @@ fn referenced(name: &str, kind: &str) -> ToolDefinition {
     )
     .expect("admitted schema")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::from_path(&format!("tools.{name}")))
 }
 
-fn entries(catalog: &ToolCatalog) -> Vec<ToolPresentationEntry<'_>> {
+fn paths(catalog: &ToolCatalog) -> Vec<String> {
     catalog
         .entries()
         .iter()
-        .map(|tool| ToolPresentationEntry {
+        .map(|tool| tool.manifest.tool())
+        .collect()
+}
+
+fn entries<'a>(catalog: &'a ToolCatalog, paths: &'a [String]) -> Vec<ToolPresentationEntry<'a>> {
+    catalog
+        .entries()
+        .iter()
+        .zip(paths)
+        .map(|(tool, call_path)| ToolPresentationEntry {
             manifest: &tool.manifest,
             contract: &tool.contract,
-            call_path: &tool.manifest.name,
+            call_path,
             pinned: false,
         })
         .collect()
@@ -219,7 +225,8 @@ fn selected_closures_are_shared_and_discovery_is_standalone_in_every_dialect() {
         hidden,
         unique,
     ]);
-    let entries = entries(&catalog);
+    let paths = paths(&catalog);
+    let entries = entries(&catalog, &paths);
     for presenter in defaults() {
         let config = presenter.admit_config(&json!({})).expect("config");
         let full = presenter
@@ -288,7 +295,8 @@ fn later_collisions_append_without_rewriting_earlier_declarations() {
         referenced("second", "integer"),
         referenced("third", "boolean"),
     ]);
-    let entries = entries(&catalog);
+    let paths = paths(&catalog);
+    let entries = entries(&catalog, &paths);
     for presenter in defaults() {
         let config = presenter.admit_config(&json!({})).expect("config");
         let request = ToolPresentationRequest {
@@ -320,7 +328,8 @@ fn later_collisions_append_without_rewriting_earlier_declarations() {
 #[test]
 fn pinned_sections_refuse_with_the_complete_required_size() {
     let catalog = ToolCatalog::from_tool_definitions(vec![referenced("first", "string")]);
-    let mut entries = entries(&catalog);
+    let paths = paths(&catalog);
+    let mut entries = entries(&catalog, &paths);
     entries[0].pinned = true;
     for presenter in defaults() {
         let config = presenter.admit_config(&json!({})).expect("config");
@@ -364,10 +373,11 @@ fn a_public_helper_wrapper_filters_reheads_and_appends_budgeted_tools() {
         referenced("drop", "integer"),
         referenced("second", "string"),
     ]);
-    let entries = entries(&catalog);
+    let paths = paths(&catalog);
+    let entries = entries(&catalog, &paths);
     let presenter = WrappedToolPresenter::new("host.tools.v1", TypescriptToolPresenter)
         .with_heading("Host tools")
-        .with_filter(|tool| tool.call_path != "drop")
+        .with_filter(|tool| tool.call_path != "tools.drop")
         .with_appended("Host note.");
     let config = presenter.admit_config(&json!({})).expect("config");
     let request = ToolPresentationRequest {
@@ -417,7 +427,8 @@ fn inferred_binding_names_reserve_tool_definition_symbols_in_every_dialect() {
     assert!(bound.contains("type Field = "), "{bound}");
     assert!(cache.reserved_names.iter().any(|name| name == "Field"));
     let catalog = ToolCatalog::from_tool_definitions(vec![referenced("lookup", "string")]);
-    let entries = entries(&catalog);
+    let paths = paths(&catalog);
+    let entries = entries(&catalog, &paths);
     for presenter in defaults() {
         let config = presenter.admit_config(&json!({})).expect("config");
         let text = presenter

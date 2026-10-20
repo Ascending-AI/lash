@@ -15,7 +15,7 @@ pub(crate) enum RemoteCompletion {
 /// ids are deliberately absent: a reconnect may redeliver the same attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct McpToolBinding {
+pub(crate) struct McpCallTarget {
     pub server: String,
     pub native_tool: String,
     pub transport_digest: String,
@@ -52,7 +52,7 @@ pub(super) fn bind_imported_tools(
     let transport_digest = digest(&entry.config.transport)?;
     let peer_digest = peer_digest(peer)?;
     for tool in tools.values_mut() {
-        let binding = McpToolBinding {
+        let binding = McpCallTarget {
             server: entry.server_name.clone(),
             native_tool: tool.original_name.clone(),
             transport_digest: transport_digest.clone(),
@@ -77,7 +77,7 @@ pub(super) fn tool_digest(tool: &rmcp::model::Tool) -> Result<String, McpError> 
 
 pub(crate) fn admitted_binding(
     manifest: &lash_core::ToolManifest,
-) -> Result<McpToolBinding, ToolOutcome> {
+) -> Result<McpCallTarget, ToolOutcome> {
     let binding = manifest
         .bindings
         .get(MCP_BINDING_KEY)
@@ -147,7 +147,7 @@ impl McpConnectionPool {
             }
             .into();
         }
-        let prepared = match call.context.decode_prepared_payload::<McpToolBinding>() {
+        let prepared = match call.context.decode_prepared_payload::<McpCallTarget>() {
             Ok(prepared) => prepared,
             Err(_) => {
                 return McpCallFailure::InvalidExecutionBinding {

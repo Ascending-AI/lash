@@ -16,14 +16,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
     AssignOrder, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float, FunctionCatalog,
-    FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Signature, Stmt,
-    TryStmt,
+    FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt,
 };
 
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
 use crate::types::{Facts, PlainRecord, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use lash_kernel_dialect::Spelling;
 
 mod async_fn;
 mod calls;
@@ -384,11 +384,11 @@ pub(crate) struct Lowerer<'a> {
     /// cell.
     module: Option<workflow::Module>,
     library: &'a dyn Library,
-    /// The effects the host supplies: a call of one is a tool call.
-    effects: &'a BTreeMap<EffectName, Signature>,
-    /// The effects whose call ends the turn: a control call ends `main`
-    /// when it settles, and is written only where it can.
-    controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+    /// The packages and offered operations a dotted call resolves through:
+    /// a call of an operation is a tool call. An operation that declares
+    /// controls ends the turn: a control call ends `main` when it settles,
+    /// and is written only where it can.
+    namespaces: &'a lash_kernel_dialect::Namespaces,
     /// The effects the document performs, for its manifest (`K-DOC-002`).
     performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
     session: &'a BTreeSet<Name>,
@@ -436,10 +436,7 @@ pub(crate) struct Lowerer<'a> {
 
 /// Session names are checked before either source or saved state can mask a built-in.
 /// `control` stays reserved; ordinary tool namespaces obey lexical shadowing.
-pub(crate) fn check_binding_names<'a>(
-    names: impl IntoIterator<Item = &'a str>,
-    _effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
-) -> Lowering<()> {
+pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
     for name in names.into_iter().collect::<BTreeSet<_>>() {
         if builtins::is_global(name) {
             return Err(Diagnostic::with_repair(
@@ -494,8 +491,7 @@ pub(crate) fn lower(
         source,
         module,
         library: environment.library,
-        effects: environment.effects,
-        controls: environment.controls,
+        namespaces: environment.namespaces,
         performed: BTreeMap::new(),
         session: cell.bindings,
         table: builtins::table(),
@@ -521,14 +517,29 @@ pub(crate) fn lower(
             program,
             cell.bindings,
             &environment
-                .controls
+                .namespaces
+                .operations()
                 .iter()
-                .filter(|(_, controls)| {
-                    controls.contains(&lash_kernel_dialect::EffectControl::Finish)
+                .filter(|(_, offered)| {
+                    offered
+                        .controls
+                        .contains(&lash_kernel_dialect::EffectControl::Finish)
                 })
-                .map(|(name, _)| name.as_str().to_string())
+                .map(|(operation, _)| {
+                    lash_kernel_dialect::spell_operation(Spelling::TypeScript, operation)
+                })
                 .collect(),
-            environment.effects,
+            &environment
+                .namespaces
+                .operations()
+                .iter()
+                .map(|(operation, offered)| {
+                    (
+                        lash_kernel_dialect::spell_operation(Spelling::TypeScript, operation),
+                        &offered.requirement.signature,
+                    )
+                })
+                .collect(),
         ),
         narrowed: Vec::new(),
         paths: Vec::new(),
@@ -544,10 +555,7 @@ pub(crate) fn lower(
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
     lowerer.declare_block(&program.statements)?;
-    check_binding_names(
-        lowerer.scopes[0].bindings.keys().map(String::as_str),
-        environment.effects,
-    )?;
+    check_binding_names(lowerer.scopes[0].bindings.keys().map(String::as_str))?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
     let (main, main_notes) = std::mem::take(&mut lowerer.buf).into_parts();
@@ -574,8 +582,7 @@ pub(crate) fn lower(
             cell.functions,
             &lowerer.saved_used,
             &crate::function_values(),
-            environment.effects,
-            environment.controls,
+            environment.namespaces,
             &|function| catalog.definition(function).is_some(),
         )
         .map_err(|unusable| {

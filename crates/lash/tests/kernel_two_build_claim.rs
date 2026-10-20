@@ -788,12 +788,11 @@ main {
 "#;
 
 fn hold_definition() -> lash::tools::ToolDefinition {
-    use lash::tools::ToolDefinitionBindingExt as _;
     // It answers the text `"released"`: its output schema admits that
     // answer at settle (FIG-6330).
     lash::tools::ToolDefinition::raw(
         HOLD_TOOL,
-        HOLD_TOOL,
+        "hold.run",
         "Holds, then answers.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "string" }),
@@ -805,7 +804,6 @@ fn hold_definition() -> lash::tools::ToolDefinition {
         1,
         1,
     ))
-    .with_tool_binding(lash::tools::ToolBinding::new(["hold"], "run"))
 }
 
 /// The hold tool's deliveries, per process run. It outlives every build.

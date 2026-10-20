@@ -250,6 +250,9 @@ struct Reader<'a> {
     byte_limit: usize,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
+    /// The base document's effects: a call of one's dotted path is a
+    /// perform.
+    effects: std::collections::BTreeSet<String>,
     scope: BindingScope,
     main: bool,
     operators: crate::generated_operators::Operators,
@@ -304,6 +307,12 @@ impl<'a> Reader<'a> {
                 .helpers
                 .into_iter()
                 .map(|(id, alias)| (alias, id))
+                .collect(),
+            effects: base
+                .manifest
+                .effects
+                .keys()
+                .map(|effect| effect.as_str().to_owned())
                 .collect(),
             scope: Default::default(),
             main: false,

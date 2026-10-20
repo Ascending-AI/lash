@@ -81,6 +81,20 @@ impl Printer for TypeScript {
     }
 }
 
+/// The dotted path an effect prints as: a canonical operation in the
+/// dialect's spelling (`inbox.sendItem`), any other effect as it is named.
+/// No printed local shadows its root ([`NamePlan`]), so the reader resolves
+/// it against the base document's effects alone.
+pub(crate) fn operation_path(effect: &k::EffectName) -> String {
+    match lash_kernel_dialect::QualifiedOperation::from_effect(effect) {
+        Ok(operation) => lash_kernel_dialect::spell_operation(
+            lash_kernel_dialect::Spelling::TypeScript,
+            &operation,
+        ),
+        Err(_) => effect.as_str().to_owned(),
+    }
+}
+
 pub(crate) fn legal_identifier(name: &str) -> bool {
     property_identifier(name)
         && !name.starts_with("helper_")
@@ -90,7 +104,6 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
             "k" | "Object"
                 | "projection"
                 | "main"
-                | "tools"
                 | "declared"
                 | "finish"
                 | "failure"
@@ -627,8 +640,7 @@ impl Renderer<'_> {
                 } else {
                     "await "
                 });
-                self.out.write("tools.");
-                self.out.write(effect.as_str());
+                self.out.write(&operation_path(effect));
                 self.out.write("(");
                 self.arguments(args);
                 self.out.write(")");
@@ -725,11 +737,11 @@ impl Renderer<'_> {
                 then_yield,
             } => {
                 self.out.write(if *then_yield {
-                    "await await tools."
+                    "await await "
                 } else {
-                    "await tools."
+                    "await "
                 });
-                self.out.write(effect.as_str());
+                self.out.write(&operation_path(effect));
                 self.out.write("(");
                 for (i, arg) in act.args.iter().enumerate() {
                     if i > 0 {

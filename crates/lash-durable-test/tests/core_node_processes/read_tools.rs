@@ -35,10 +35,9 @@ main {
 
 /// The `Read` tool `lookup`: what the knowledge base says about a topic.
 fn lookup_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         LOOKUP_TOOL,
-        "lookup",
+        "tools.lookup",
         "Looks a topic up.",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
@@ -46,7 +45,6 @@ fn lookup_definition() -> lash_core::ToolDefinition {
     .expect("the lookup tool's schemas")
     .with_execution(Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Read)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "lookup"))
 }
 
 /// What the knowledge base says about the topic `args` names.

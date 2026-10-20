@@ -418,7 +418,7 @@ impl OfferedTools {
 
     /// Whether a tool named `name` is offered in the inline surface.
     pub fn offers(&self, name: &str) -> bool {
-        self.manifests().any(|manifest| manifest.name == name)
+        self.manifests().any(|manifest| manifest.tool() == name)
     }
 }
 

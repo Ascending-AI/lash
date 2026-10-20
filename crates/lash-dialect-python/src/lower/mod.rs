@@ -26,8 +26,8 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc::{
     ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr,
-    FunctionCatalog, FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature,
-    Stmt, TryStmt, validate_document,
+    FunctionCatalog, FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Stmt,
+    TryStmt, validate_document,
 };
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
@@ -160,10 +160,10 @@ pub(crate) struct Lowerer<'a> {
     source: &'a str,
     calls: Option<&'a mut BTreeSet<String>>,
     library: &'a dyn Library,
-    effects: &'a BTreeMap<EffectName, Signature>,
-    /// The effects whose call ends the turn: a control call ends `main`
-    /// when it settles, and is written only where it can.
-    controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+    /// The packages and offered operations a dotted call resolves through.
+    /// An operation that declares controls ends the turn: a control call
+    /// ends `main` when it settles, and is written only where it can.
+    namespaces: &'a lash_kernel_dialect::Namespaces,
     performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
@@ -209,18 +209,18 @@ pub(crate) struct Lowerer<'a> {
     typed_dicts: typed_dicts::TypedDicts,
 }
 
+/// Whether `name` is one of the dialect's built-ins.
+pub(crate) fn is_builtin(name: &str) -> bool {
+    calls::is_builtin(name) || crate::exceptions::is_builtin(name)
+}
+
 /// No module or restored session binding may mask the dialect's built-ins,
-/// nor a callable tool name or `control`. Ordinary catalog namespace roots
-/// obey lexical shadowing.
-pub(crate) fn check_binding_names<'a>(
-    names: impl IntoIterator<Item = &'a str>,
-    effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
-    _tool_roots: &BTreeSet<Name>,
-) -> Lowering<()> {
+/// nor `control`. Package roots obey lexical shadowing.
+pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
     for name in names {
         let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
             format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        } else if name == "control" || effects.keys().any(|effect| effect.as_str() == name) {
+        } else if name == "control" {
             format!(
                 "`{name}` names one of the session's tools; a top-level binding cannot reuse its name"
             )
@@ -284,18 +284,10 @@ pub(crate) fn lower_with_calls(
     // A `global` statement anywhere makes the name the module's, and an
     // earlier cell's bindings are the module's too.
     bindings.locals.extend(globals);
-    check_binding_names(
-        bindings.locals.iter().map(String::as_str),
-        environment.effects,
-        environment.tool_roots,
-    )?;
+    check_binding_names(bindings.locals.iter().map(String::as_str))?;
     for statement in &module.body {
         if let ast::Stmt::ClassDef(class) = statement {
-            check_binding_names(
-                [class.name.id.as_str()],
-                environment.effects,
-                environment.tool_roots,
-            )?;
+            check_binding_names([class.name.id.as_str()])?;
         }
     }
     let declared: Vec<String> = bindings
@@ -320,8 +312,7 @@ pub(crate) fn lower_with_calls(
         source,
         calls,
         library: environment.library,
-        effects: environment.effects,
-        controls: environment.controls,
+        namespaces: environment.namespaces,
         performed: BTreeMap::new(),
         used: BTreeMap::new(),
         private: BTreeSet::new(),
@@ -396,8 +387,7 @@ pub(crate) fn lower_with_calls(
             cell.functions,
             &lowerer.saved_used,
             &lash_kernel_doc::FunctionRepresentation::Bare,
-            environment.effects,
-            environment.controls,
+            environment.namespaces,
             &|function| catalog.definition(function).is_some(),
         ).map_err(|unusable| {
             let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
@@ -868,16 +858,6 @@ impl Lowerer<'_> {
     }
 
     fn not_a_variable(&self, id: &str, range: TextRange) -> Diagnostic {
-        if self.effects.keys().any(|effect| effect.as_str() == id) {
-            return diagnostics::with_repair(
-                Code::CoroutineNotAwaited,
-                format!("`{id}` is a tool; it is called and awaited, not passed around"),
-                range,
-                format!(
-                    "call `{id}` with its required arguments and await the call; use `asyncio.create_task` to run that call beside this code"
-                ),
-            );
-        }
         if self.typed_dicts.contains_key(id) {
             return diagnostics::with_repair(
                 Code::ClassUnsupported,

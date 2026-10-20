@@ -11,7 +11,7 @@ use crate::DiagnosticCode;
 #[test]
 fn built_in_functions_are_callable_values() {
     agrees(
-        "const numbers = ['1', '2', 'x'].map(Number); const kept = [0, 1, '', 'a'].filter(Boolean); const slice = Array.prototype.slice; function rest() { return Array.prototype.slice.call(arguments, 1); } const largest = Math.max; const atLeastTen = Math.max.bind(null, 10); await finish(numbers[1] === 2 && Number.isNaN(numbers[2]) && kept.length === 2 && slice.call([1, 2, 3], 1)[0] === 2 && rest(1, 2, 3).length === 2 && largest.call(null, 4, 7) === 7 && Math.max.apply(null, [1, 5, 2]) === 5 && atLeastTen(3) === 10 && Number.isNaN([3, 9].reduce(Math.max)) && [-1, 2].map(Math.abs)[0] === 1);",
+        "const numbers = ['1', '2', 'x'].map(Number); const kept = [0, 1, '', 'a'].filter(Boolean); const slice = Array.prototype.slice; function rest() { return Array.prototype.slice.call(arguments, 1); } const largest = Math.max; const atLeastTen = Math.max.bind(null, 10); await control.finish(numbers[1] === 2 && Number.isNaN(numbers[2]) && kept.length === 2 && slice.call([1, 2, 3], 1)[0] === 2 && rest(1, 2, 3).length === 2 && largest.call(null, 4, 7) === 7 && Math.max.apply(null, [1, 5, 2]) === 5 && atLeastTen(3) === 10 && Number.isNaN([3, 9].reduce(Math.max)) && [-1, 2].map(Math.abs)[0] === 1);",
     );
 }
 
@@ -20,7 +20,7 @@ fn built_in_functions_are_callable_values() {
 #[test]
 fn built_in_values_have_identity_name_and_length() {
     agrees(
-        "const max = Math.max; const keyed = new Map([[max, 'max']]); const f = Array.prototype.slice; await finish([].map === Array.prototype.map && f === [1].slice && keyed.get(max) === 'max' && [...keyed.keys()][0] === Math.max && [...keyed.keys()][0](1, 2) === 2 && Math.max.name === 'max' && Math.max.length === 2 && f.name === 'slice' && f.length === 2 && Map.length === 0 && typeof Math === 'object' && typeof Array.prototype === 'object' && typeof f === 'function' && typeof Map === 'function' && Array.prototype.constructor === Array && [].constructor === Array && Object.prototype.toString.call(Math) === '[object Math]' && String(Math.abs) === 'function abs() { [native code] }');",
+        "const max = Math.max; const keyed = new Map([[max, 'max']]); const f = Array.prototype.slice; await control.finish([].map === Array.prototype.map && f === [1].slice && keyed.get(max) === 'max' && [...keyed.keys()][0] === Math.max && [...keyed.keys()][0](1, 2) === 2 && Math.max.name === 'max' && Math.max.length === 2 && f.name === 'slice' && f.length === 2 && Map.length === 0 && typeof Math === 'object' && typeof Array.prototype === 'object' && typeof f === 'function' && typeof Map === 'function' && Array.prototype.constructor === Array && [].constructor === Array && Object.prototype.toString.call(Math) === '[object Math]' && String(Math.abs) === 'function abs() { [native code] }');",
     );
 }
 
@@ -31,7 +31,7 @@ fn built_in_values_have_identity_name_and_length() {
 #[test]
 fn methods_sharing_a_helper_keep_their_own_identity() {
     agrees(
-        "const s = 'x'; const d = new Date(0); await finish(s.localeCompare === String.prototype.localeCompare && s.toLocaleLowerCase === String.prototype.toLocaleLowerCase && s.toLocaleUpperCase === String.prototype.toLocaleUpperCase && s.localeCompare !== s.toLocaleUpperCase && s.toLocaleLowerCase !== s.toLocaleUpperCase && s.localeCompare.name === 'localeCompare' && s.localeCompare.length === 1 && s.toLocaleLowerCase.name === 'toLocaleLowerCase' && s.toLocaleUpperCase.length === 0 && d.toDateString === Date.prototype.toDateString && d.toDateString !== d.toTimeString && d.getTimezoneOffset.name === 'getTimezoneOffset' && d.toLocaleDateString.name === 'toLocaleDateString' && d.toTimeString.name === 'toTimeString' && new Set().keys === Set.prototype.values && new Set().keys.name === 'values');",
+        "const s = 'x'; const d = new Date(0); await control.finish(s.localeCompare === String.prototype.localeCompare && s.toLocaleLowerCase === String.prototype.toLocaleLowerCase && s.toLocaleUpperCase === String.prototype.toLocaleUpperCase && s.localeCompare !== s.toLocaleUpperCase && s.toLocaleLowerCase !== s.toLocaleUpperCase && s.localeCompare.name === 'localeCompare' && s.localeCompare.length === 1 && s.toLocaleLowerCase.name === 'toLocaleLowerCase' && s.toLocaleUpperCase.length === 0 && d.toDateString === Date.prototype.toDateString && d.toDateString !== d.toTimeString && d.getTimezoneOffset.name === 'getTimezoneOffset' && d.toLocaleDateString.name === 'toLocaleDateString' && d.toTimeString.name === 'toTimeString' && new Set().keys === Set.prototype.values && new Set().keys.name === 'values');",
     );
 }
 
@@ -41,7 +41,7 @@ fn methods_sharing_a_helper_keep_their_own_identity() {
 #[test]
 fn a_borrowed_method_checks_the_receiver_it_is_given() {
     agrees(
-        "const has = new Set([1]).has; let rejected = false; try { has.call(new Map([[1, 2]]), 1); } catch (e) { rejected = e instanceof TypeError; } await finish(rejected && has.call(new Set([1]), 1));",
+        "const has = new Set([1]).has; let rejected = false; try { has.call(new Map([[1, 2]]), 1); } catch (e) { rejected = e instanceof TypeError; } await control.finish(rejected && has.call(new Set([1]), 1));",
     );
 }
 
@@ -65,7 +65,7 @@ fn reflection_on_a_built_in_is_a_typed_refusal() {
     }
     for source in [
         "const f = Math.max; Object.hasOwn(f, 'length');",
-        "const m = Math; await finish('max' in m);",
+        "const m = Math; await control.finish('max' in m);",
         "const p = Array.prototype; p.extra = 1;",
         "const f = Math.max; Object.defineProperty(f, 'x', {value: 1});",
     ] {
@@ -113,7 +113,7 @@ fn a_program_reaches_only_the_built_ins_it_names() {
 fn eval_is_a_function_value_without_dynamic_evaluation() {
     assert_eq!(
         machine::end(
-            "function sameReceiver() { return this === eval; } await finish([1].every(sameReceiver, eval) && eval.length === 1 && eval.prototype === undefined);"
+            "function sameReceiver() { return this === eval; } await control.finish([1].every(sameReceiver, eval) && eval.length === 1 && eval.prototype === undefined);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
     );
@@ -127,7 +127,7 @@ fn eval_is_a_function_value_without_dynamic_evaluation() {
 #[test]
 fn object_instanceof_distinguishes_objects_from_primitives() {
     agrees(
-        "let valid = true; for (const value of [{}, [], new Map(), new Set(), new Date(0), /x/, function() {}, Math, new Error()]) { valid = valid && value instanceof Object; } for (const value of [null, undefined, false, 0, 'x']) { valid = valid && !(value instanceof Object); } await finish(valid && !(Object.prototype instanceof Object));",
+        "let valid = true; for (const value of [{}, [], new Map(), new Set(), new Date(0), /x/, function() {}, Math, new Error()]) { valid = valid && value instanceof Object; } for (const value of [null, undefined, false, 0, 'x']) { valid = valid && !(value instanceof Object); } await control.finish(valid && !(Object.prototype instanceof Object));",
     );
 }
 

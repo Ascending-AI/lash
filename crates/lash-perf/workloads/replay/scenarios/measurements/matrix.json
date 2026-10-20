@@ -25,7 +25,7 @@
     "retained_bytes": 8001,
     "preview_bytes": 95,
     "state_percentile": 10,
-    "cell_bytes": 246
+    "cell_bytes": 245
   },
   {
     "name": "analysis-py-small",

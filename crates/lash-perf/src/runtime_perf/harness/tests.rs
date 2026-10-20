@@ -125,7 +125,7 @@ async fn large_print_fixture_finishes_with_projection_evidence() {
                     .iter()
                     .map(|call| call.tool.as_str())
                     .collect::<Vec<_>>(),
-                ["benchmark_echo", "finish"]
+                ["tools.benchmark_echo", "control.finish"]
             );
             assert_eq!(
                 turn_calls[1].args,

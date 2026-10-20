@@ -1,0 +1,146 @@
+//! Laws of operation names in Python cells: OP-NAME, NS-SHADOW, NS-ESCAPE
+//! and PRINT-ROUNDTRIP.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, Namespaces};
+use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
+
+use super::machine;
+
+/// Each of `names` as an operation taking one `input` and giving anything.
+fn effects(names: &[&str]) -> BTreeMap<EffectName, Signature> {
+    names
+        .iter()
+        .map(|name| {
+            (
+                EffectName::new(*name).expect("an effect name"),
+                Signature {
+                    params: vec![Param {
+                        name: Name::new("input"),
+                        ty: Type::Any,
+                        optional: false,
+                    }],
+                    result: Type::Any,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Lowers `source` as a cell of a session holding `bindings` whose host
+/// offers `names`.
+fn lower(
+    source: &str,
+    bindings: &[&str],
+    names: &[&str],
+) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
+    let namespaces = Namespaces::of_signatures(&effects(names), &BTreeMap::new())
+        .expect("the law's effects are operations");
+    let bindings = bindings
+        .iter()
+        .map(|name| Name::new(*name))
+        .collect::<BTreeSet<_>>();
+    crate::lower(
+        source,
+        &Environment::new(machine::library(), &namespaces),
+        Mode::Cell(CellEnvironment {
+            bindings: &bindings,
+            functions: &BTreeMap::new(),
+        }),
+    )
+}
+
+/// OP-NAME: a Python cell names an operation by its canonical path, with
+/// no flattening, and performs it by its canonical effect name.
+#[test]
+fn a_dotted_call_performs_the_operation_by_its_canonical_name() {
+    for (source, operation) in [
+        (
+            "await web.fetch({\"url\": \"https://example.test\"})\n",
+            "web.fetch",
+        ),
+        (
+            "await inbox.send_item({\"item_id\": 1})\n",
+            "inbox.send_item",
+        ),
+    ] {
+        let lowered = lower(source, &[], &[operation]).unwrap_or_else(|error| panic!("{error}"));
+        let text = k::print_document(&lowered.document);
+        assert!(text.contains(&format!("perform {operation}(")), "{text}");
+    }
+    let error = lower("await web_fetch({})\n", &[], &["web.fetch"])
+        .expect_err("the flattened name is no operation");
+    assert!(!error.code.is_empty(), "{error}");
+}
+
+/// NS-SHADOW: a binding, a session binding included, takes a package root's
+/// name lexically; a dotted call through it that names an offered operation
+/// is refused naming both.
+#[test]
+fn a_binding_shadows_a_package_root_and_a_dotted_call_through_it_is_refused() {
+    for (source, bindings) in [
+        ("report = 41\nprint(report + 1)\n", &[][..]),
+        ("print(report + 1)\n", &["report"][..]),
+    ] {
+        lower(source, bindings, &["report.read"]).unwrap_or_else(|error| panic!("{error}"));
+    }
+    let error = lower("await report.read({})\n", &["report"], &["report.read"])
+        .expect_err("the root is a binding");
+    assert_eq!(error.code, "PY_OPERATION_SHADOWED", "{error}");
+    assert!(
+        error.message.contains("`report`") && error.message.contains("`report.read`"),
+        "{error}"
+    );
+}
+
+/// NS-ESCAPE: an operation whose spelling is a Python keyword stays
+/// callable through the qualified escape.
+#[test]
+fn a_keyword_operation_is_callable_through_the_qualified_escape() {
+    let lowered = lower(
+        "await getattr(processes, \"await\")({\"id\": 1})\n",
+        &[],
+        &["processes.await"],
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let text = k::print_document(&lowered.document);
+    assert!(text.contains("perform processes.await("), "{text}");
+}
+
+/// PRINT-ROUNDTRIP: a code export and an operation that share the package
+/// prefix `dataframe` print and read back byte-exact.
+#[test]
+fn a_code_export_beside_an_operation_of_its_package_prints_and_reads_back() {
+    let mut registry = k::FunctionRegistry::new();
+    let col = k::parse_definition(
+        "function dataframe.col(name: Any) -> Any\nkernel 1\ncharge 1\nbody {\n  return name\n}\n",
+    )
+    .expect("a definition");
+    let col = registry
+        .register(col, None)
+        .expect("the definition registers");
+    let document = k::parse_document(&format!(
+        r#"kernel 1
+numbers float
+use dataframe.col = @{col}
+effect dataframe.run(input: Any) -> Any
+main {{
+  let column = dataframe.col("value")
+  let ran = perform dataframe.run(column) as Any
+  finish ran
+}}"#
+    ))
+    .expect("a document");
+    let printed = crate::print(&document, None, Default::default())
+        .expect("the document prints")
+        .source;
+    assert!(printed.contains("await dataframe.run("), "{printed}");
+    let (read, _) = crate::read(&printed, &document, Default::default())
+        .unwrap_or_else(|error| panic!("{error}\n{printed}"));
+    assert_eq!(
+        read.canonical_bytes(),
+        document.canonical_bytes(),
+        "{printed}"
+    );
+}

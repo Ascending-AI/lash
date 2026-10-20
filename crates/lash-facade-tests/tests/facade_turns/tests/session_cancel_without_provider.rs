@@ -14,7 +14,6 @@
 
 use super::*;
 use lash::{TurnCancelMode, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
 
 /// How long a stop may take to reach its terminal.
@@ -22,6 +21,7 @@ pub(super) const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_se
 /// How long a pending `AfterStep` cancel is watched for not ending.
 const STAYS_PENDING_FOR: std::time::Duration = std::time::Duration::from_secs(2);
 const TOOL: &str = "held_tool";
+const TOOL_OPERATION: &str = "tools.held_tool";
 
 /// The stores a law's deployments run over, and what must outlive them.
 async fn stores(
@@ -65,14 +65,13 @@ struct HeldTool(Calls);
 fn tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{TOOL}"),
-        TOOL,
+        TOOL_OPERATION,
         "A call that never answers.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL))
 }
 
 #[async_trait]
@@ -89,7 +88,7 @@ impl ToolProvider for HeldTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == TOOL).then(|| Arc::new(tool_definition().contract()))
+        (name == TOOL_OPERATION).then(|| Arc::new(tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -110,7 +109,7 @@ fn tool_calling_model(calls: &Calls) -> ProviderHandle {
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: "call-1".to_string(),
-                        tool_name: TOOL.to_string(),
+                        tool_name: TOOL_OPERATION.replace('.', "__"),
                         input_json: "{}".to_string(),
                         replay: None,
                     }],

@@ -1,6 +1,6 @@
 language: TypeScript
 exceptions: none
-main/0 [0..21] "await finish(\"done\");"
-main/0/0/0 [0..21] "await finish(\"done\");"
-main/1 [22..55] "await corpus.echo(\"unreachable\");"
-main/1/0 [22..55] "await corpus.echo(\"unreachable\");"
+main/0 [0..29] "await control.finish(\"done\");"
+main/0/0/0 [0..29] "await control.finish(\"done\");"
+main/1 [30..63] "await corpus.echo(\"unreachable\");"
+main/1/0 [30..63] "await corpus.echo(\"unreachable\");"

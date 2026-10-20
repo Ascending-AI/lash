@@ -97,12 +97,12 @@ pub use lash_vm_worker::{
 };
 
 /// The host boundary in the kernel type grammar, the providers that answer
-/// projection reads with kernel data, and how a tool is named in guest code.
+/// projection reads with kernel data, and what a tool is offered as.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    BoundaryError, HostBoundary, HostEffect, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
+    BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
     ProjectionCatalog, ProjectionProvider, ProjectionRefusal, SchemaConflict,
-    SchemaProjectionRefusal, ToolBindingError, required_tool_executable, type_of_schema,
+    SchemaProjectionRefusal, effect_controls, offered_tool, type_of_schema,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).

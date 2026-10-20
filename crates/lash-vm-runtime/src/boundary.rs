@@ -7,33 +7,60 @@ pub use lash_kernel_check::{
     MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
     type_of_schema,
 };
-use lash_kernel_doc::{EffectName, Signature, Type};
+use lash_kernel_dialect::{EffectControl, Offered, OfferedSource, Operations, QualifiedOperation};
+use lash_kernel_doc::{ContractId, EffectName, OperationRequirement, Type};
 use lash_protocol_types::ToolId;
-
-/// One effect a document may perform, and the tool that answers it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HostEffect {
-    pub tool: ToolId,
-    /// The signature a document's manifest must state to perform it.
-    pub signature: Signature,
-    /// The turn-ending controls the tool declares its result may be.
-    pub controls: lash_protocol_types::TurnControls,
-}
 
 /// Why a boundary could not be stated.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BoundaryError {
-    #[error("`{name}` is not an effect name: {message}")]
+    #[error("`{name}` is not an operation: {message}")]
     EffectName { name: String, message: String },
     #[error("the effect `{effect}` is offered twice")]
     DuplicateEffect { effect: EffectName },
 }
 
-/// The effects and the handle kinds a host offers.
+/// The operations and the handle kinds a host offers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostBoundary {
-    effects: BTreeMap<EffectName, HostEffect>,
+    operations: Operations,
     handles: BTreeSet<String>,
+}
+
+/// The turn-ending controls `controls` names, as a front end lowers against
+/// them.
+#[must_use]
+pub fn effect_controls(controls: &lash_protocol_types::TurnControls) -> BTreeSet<EffectControl> {
+    controls
+        .iter()
+        .map(|kind| match kind {
+            lash_protocol_types::TurnControlKind::Finish => EffectControl::Finish,
+            lash_protocol_types::TurnControlKind::SwitchAgentFrame => {
+                EffectControl::SwitchAgentFrame
+            }
+        })
+        .collect()
+}
+
+/// A tool as an offered operation: it takes the tool's input as one record
+/// and gives its output, both typed from the tool's JSON schemas.
+#[must_use]
+pub fn offered_tool(
+    manifest: &lash_protocol_types::ToolManifest,
+    input: &lash_protocol_types::JsonSchema,
+    output: &lash_protocol_types::JsonSchema,
+    source: OfferedSource,
+) -> Offered {
+    let signature = lash_protocol_types::tool_signature(input, output);
+    Offered {
+        requirement: OperationRequirement {
+            contract: ContractId::of_signature(&signature),
+            signature,
+        },
+        controls: effect_controls(&manifest.declaration().controls),
+        read: manifest.execution_policy == lash_protocol_types::ExecutionPolicy::Read,
+        source,
+    }
 }
 
 impl HostBoundary {
@@ -41,45 +68,116 @@ impl HostBoundary {
         Self::default()
     }
 
-    /// Offers `effect` under `name`.
+    /// Offers `offered` as `operation`.
     ///
     /// # Errors
     ///
-    /// [`BoundaryError`] when the name is no effect name or is taken.
-    pub fn offer(&mut self, name: &str, effect: HostEffect) -> Result<(), BoundaryError> {
-        let name = EffectName::new(name).map_err(|error| BoundaryError::EffectName {
-            name: name.to_owned(),
-            message: error.to_string(),
-        })?;
-        if self.effects.contains_key(&name) {
-            return Err(BoundaryError::DuplicateEffect { effect: name });
+    /// [`BoundaryError::DuplicateEffect`] when the operation is taken.
+    pub fn offer_operation(
+        &mut self,
+        operation: QualifiedOperation,
+        offered: Offered,
+    ) -> Result<(), BoundaryError> {
+        if self.operations.contains_key(&operation) {
+            return Err(BoundaryError::DuplicateEffect {
+                effect: operation.effect_name(),
+            });
         }
-        self.effects.insert(name, effect);
+        self.operations.insert(operation, offered);
         Ok(())
     }
 
-    /// Offers a tool as an effect that takes the tool's input as one record
-    /// and gives its output, both typed from the tool's JSON schemas.
+    /// Offers the catalog tool `manifest` describes as its operation.
     ///
     /// # Errors
     ///
-    /// [`BoundaryError`].
+    /// [`BoundaryError`] when its operation is taken.
     pub fn offer_tool(
         &mut self,
-        name: &str,
-        tool: ToolId,
+        manifest: &lash_protocol_types::ToolManifest,
         input: &lash_protocol_types::JsonSchema,
         output: &lash_protocol_types::JsonSchema,
-        controls: lash_protocol_types::TurnControls,
     ) -> Result<(), BoundaryError> {
-        self.offer(
-            name,
-            HostEffect {
-                tool,
-                signature: lash_protocol_types::tool_signature(input, output),
-                controls,
-            },
+        self.offer_operation(
+            manifest.operation.clone(),
+            offered_tool(
+                manifest,
+                input,
+                output,
+                OfferedSource::Catalog {
+                    tool: manifest.id.to_string(),
+                },
+            ),
         )
+    }
+
+    /// Every tool of `catalog` as its operation: what a process of that
+    /// catalog may perform. A tool that declares a turn control is not
+    /// offered: a process cannot end a session turn, so a process document
+    /// that performs one is refused at admission as an effect its catalog
+    /// does not offer.
+    ///
+    /// # Errors
+    ///
+    /// [`BoundaryError`] when two tools take one operation.
+    pub fn of_catalog(catalog: &lash_core::ToolCatalog) -> Result<Self, BoundaryError> {
+        let mut boundary = Self::new();
+        for entry in catalog.entries() {
+            if !entry.manifest.declaration().controls.is_empty() {
+                continue;
+            }
+            boundary.offer_tool(
+                &entry.manifest,
+                &entry.contract.input_schema.canonical,
+                &entry.contract.output_schema.canonical,
+            )?;
+        }
+        Ok(boundary)
+    }
+
+    /// Every effect a process's env links, under its path, typed from the
+    /// surface the link retained (P3): what a run of that env may perform.
+    /// A linked tool that declares a turn control is not offered, as
+    /// [`Self::of_catalog`] offers none.
+    ///
+    /// # Errors
+    ///
+    /// [`BoundaryError`] when a path is no canonical operation.
+    pub fn of_links(
+        effects: &BTreeMap<EffectName, lash_core::EffectLink>,
+    ) -> Result<Self, BoundaryError> {
+        let mut boundary = Self::new();
+        for (effect, link) in effects {
+            if !link.surface.declaration.controls.is_empty() {
+                continue;
+            }
+            let operation = QualifiedOperation::from_effect(effect).map_err(|error| {
+                BoundaryError::EffectName {
+                    name: effect.to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            let signature = lash_protocol_types::tool_signature(
+                &link.surface.input_schema.canonical,
+                &link.surface.output_schema.canonical,
+            );
+            boundary.offer_operation(
+                operation,
+                Offered {
+                    requirement: OperationRequirement {
+                        contract: ContractId::of_signature(&signature),
+                        signature,
+                    },
+                    controls: BTreeSet::new(),
+                    read: link.surface.execution_policy
+                        == lash_protocol_types::ExecutionPolicy::Read,
+                    source: OfferedSource::Catalog {
+                        tool: link.tool().to_string(),
+                    },
+                },
+            )?;
+        }
+        Ok(boundary)
     }
 
     /// Admits projection handles of `kind`.
@@ -87,40 +185,36 @@ impl HostBoundary {
         self.handles.insert(kind.into());
     }
 
-    /// The effect a document performs under `name`.
-    pub fn effect(&self, name: &EffectName) -> Option<&HostEffect> {
-        self.effects.get(name)
+    /// The operation a document performs as `effect`.
+    pub fn effect(&self, effect: &EffectName) -> Option<(&QualifiedOperation, &Offered)> {
+        let operation = QualifiedOperation::from_effect(effect).ok()?;
+        self.operations.get_key_value(&operation)
     }
 
-    /// Every effect with its signature: what a front end lowers against.
-    pub fn signatures(&self) -> BTreeMap<EffectName, Signature> {
-        self.effects
-            .iter()
-            .map(|(name, effect)| (name.clone(), effect.signature.clone()))
-            .collect()
+    /// The tool that answers `effect`, when a catalog tool or a deferred
+    /// grant does.
+    pub fn tool(&self, effect: &EffectName) -> Option<ToolId> {
+        match &self.effect(effect)?.1.source {
+            OfferedSource::Catalog { tool } | OfferedSource::Deferred { tool } => {
+                Some(ToolId::new(tool.as_str()))
+            }
+            OfferedSource::Unavailable { .. } => None,
+        }
     }
 
-    /// The controls each control-declaring effect declares, as a front end
-    /// lowers against them: an effect that declares none is absent.
-    pub fn controls(&self) -> BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>> {
-        self.effects
+    /// The offered operations: what a front end lowers against.
+    pub fn operations(&self) -> &Operations {
+        &self.operations
+    }
+
+    /// The controls each control-declaring operation declares, by effect: a
+    /// view of [`Self::operations`] for a run's start, which saves what a
+    /// cell's functions perform.
+    pub fn controls(&self) -> BTreeMap<EffectName, BTreeSet<EffectControl>> {
+        self.operations
             .iter()
-            .filter(|(_, effect)| !effect.controls.is_empty())
-            .map(|(name, effect)| {
-                let controls = effect
-                    .controls
-                    .iter()
-                    .map(|kind| match kind {
-                        lash_protocol_types::TurnControlKind::Finish => {
-                            lash_kernel_dialect::EffectControl::Finish
-                        }
-                        lash_protocol_types::TurnControlKind::SwitchAgentFrame => {
-                            lash_kernel_dialect::EffectControl::SwitchAgentFrame
-                        }
-                    })
-                    .collect();
-                (name.clone(), controls)
-            })
+            .filter(|(_, offered)| !offered.controls.is_empty())
+            .map(|(operation, offered)| (operation.effect_name(), offered.controls.clone()))
             .collect()
     }
 
@@ -132,7 +226,7 @@ impl HostBoundary {
 
 /// A tool call's input as the tool reads it, from the operands the call
 /// performs the tool with: a tool takes its input as one record
-/// ([`HostBoundary::offer_tool`]), and a call that omits it gives exactly
+/// ([`offered_tool`]), and a call that omits it gives exactly
 /// the empty object, never null or the schema's defaults. Cells and
 /// processes both read a tool call's operands through this one rule.
 ///
@@ -220,7 +314,7 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_kernel_doc::{RecordType, RecordTypeField};
+    use lash_kernel_doc::{RecordType, RecordTypeField, Signature};
 
     /// OPEN-RESULT-FITS (law 18, D4): a tool's result projects to an open
     /// record, so a tool whose result adds a field serves a document checked
@@ -326,34 +420,35 @@ mod tests {
     /// the boundary does not offer, and admission refuses it.
     #[test]
     fn a_process_boundary_offers_no_turn_ending_tool() {
-        use crate::{ToolBinding, ToolDefinitionBindingExt as _};
         let ordinary = lash_core::ToolDefinition::raw(
             "tool:lookup",
-            "lookup",
+            "tools.lookup",
             "Looks a value up.",
             serde_json::json!({ "type": "object" }),
             serde_json::json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(30))
-        .with_tool_binding(ToolBinding::new(["tools"], "lookup"));
+        .with_execution(std::time::Duration::from_secs(30));
         let finish = lash_core::ToolDefinition::control(
             "tool:finish",
-            "finish",
+            "control.finish",
             "Ends the turn.",
             serde_json::json!({}),
             lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         )
         .expect("valid declared tool schema")
-        .with_execution(std::time::Duration::from_secs(30))
-        .with_tool_binding(ToolBinding::new(["control"], "finish"));
+        .with_execution(std::time::Duration::from_secs(30));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![ordinary, finish]);
 
         let offered = HostBoundary::of_catalog(&catalog)
-            .expect("the catalog's tools are bound")
-            .signatures();
+            .expect("the catalog's tools are offered")
+            .operations()
+            .clone();
         assert_eq!(
-            offered.keys().map(EffectName::as_str).collect::<Vec<_>>(),
+            offered
+                .keys()
+                .map(|operation| operation.effect_name().to_string())
+                .collect::<Vec<_>>(),
             ["tools.lookup"]
         );
     }

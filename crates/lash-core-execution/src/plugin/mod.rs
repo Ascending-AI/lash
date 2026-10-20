@@ -480,7 +480,7 @@ mod tests {
         ) -> Option<Arc<crate::ToolContract>> {
             self.tool_definitions()
                 .into_iter()
-                .find(|tool| tool.name() == name)
+                .find(|tool| tool.manifest.tool() == name)
                 .map(|tool| Arc::new(tool.contract()))
         }
 
@@ -494,7 +494,7 @@ mod tests {
             vec![
                 ToolDefinition::raw(
                     "tool:mock_tool",
-                    "mock_tool",
+                    "tools.mock_tool",
                     "",
                     json!({
                         "type": "object",

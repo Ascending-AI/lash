@@ -294,7 +294,7 @@ await control.finish(fetched.url);
             .iter()
             .map(|call| call.tool.as_str())
             .collect::<Vec<_>>(),
-        ["web_fetch", "finish"]
+        ["web.fetch", "control.finish"]
     );
     for call in &output_tool_calls {
         let sites = events

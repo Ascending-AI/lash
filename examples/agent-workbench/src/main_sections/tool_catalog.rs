@@ -53,8 +53,8 @@ async fn listing(
         .into_iter()
         .map(|manifest| ToolRow {
             selectable: selectable.contains(&manifest.id),
+            name: manifest.tool(),
             id: manifest.id,
-            name: manifest.name,
             offered: true,
         })
         .collect::<Vec<_>>();
@@ -62,8 +62,8 @@ async fn listing(
         mail.into_iter()
             .filter(|manifest| !offered_ids.contains(&manifest.id))
             .map(|manifest| ToolRow {
+                name: manifest.tool(),
                 id: manifest.id,
-                name: manifest.name,
                 offered: false,
                 selectable: true,
             }),

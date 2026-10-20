@@ -44,7 +44,6 @@ pub(super) fn verify(rule: &str) {
 
 fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessError>) {
     let effects = effects();
-    let tool_roots = BTreeSet::from([Name::new("corpus")]);
     let controls: BTreeMap<EffectName, BTreeSet<EffectControl>> = BTreeMap::new();
     let dialects: [(Dialect, NamedLibrary, SourceFormat, &str); 2] = [
         (
@@ -60,16 +59,13 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
             PYTHON,
         ),
     ];
+    let namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+        .expect("the test's effects are operations");
     for (package, library, format, corpus) in &dialects {
         let corpus = CaptionCorpus::from_json(corpus).expect("caption corpus");
         let dialect = CaptionDialect {
             package,
-            environment: Environment {
-                library,
-                effects: &effects,
-                tool_roots: &tool_roots,
-                controls: &controls,
-            },
+            environment: Environment::new(library, &namespaces),
             format: *format,
             corpus: &corpus,
         };
@@ -839,14 +835,10 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             .next()
             .expect("a module has an entry");
         let root = Site::new(Unit::Function(entry.clone()), Vec::new());
-        let (effect, signature) = dialect
-            .environment
-            .effects
-            .iter()
-            .next()
-            .expect("the corpus tool");
+        let effects = dialect.environment.namespaces.signatures();
+        let (effect, signature) = effects.iter().next().expect("the corpus tool");
         let environment = lash_kernel_check::Environment {
-            effects: dialect.environment.effects.clone(),
+            effects: effects.clone(),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
@@ -928,7 +920,7 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
             .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
         let document = lowered.document.document();
         let environment = lash_kernel_check::Environment {
-            effects: dialect.environment.effects.clone(),
+            effects: dialect.environment.namespaces.signatures(),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };

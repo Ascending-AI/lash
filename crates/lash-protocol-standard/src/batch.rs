@@ -20,6 +20,10 @@ pub type BatchResultRow = lash_protocol_types::BatchResultRow;
 /// The name the model calls the sugar by.
 pub(crate) const BATCH_TOOL_NAME: &str = "batch";
 
+/// The sugar's operation. It is never offered or performed: the model calls
+/// the sugar by [`BATCH_TOOL_NAME`] and the round expands it.
+const BATCH_OPERATION: &str = "standard.batch";
+
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
@@ -27,7 +31,7 @@ pub(crate) const BATCH_TOOL_NAME: &str = "batch";
 pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> lash_core::ToolDraft {
     ToolDefinition::raw(
         "tool:batch",
-        BATCH_TOOL_NAME,
+        BATCH_OPERATION,
         format!(
             "Run 1-{max_members} independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls."
         ),

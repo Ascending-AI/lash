@@ -66,6 +66,10 @@ pub enum DiagnosticCode {
     DuplicateBinding,
     TemporalDeadZone,
     UnknownBinding,
+    /// A dotted call whose root is a binding names an offered operation.
+    OperationShadowed,
+    /// An operation written in another dialect's spelling.
+    OperationSpelling,
     /// Printed helper identities and declarations require their base document.
     PrintedSourceNeedsBase,
     AssignConst,
@@ -152,6 +156,8 @@ impl DiagnosticCode {
         Self::DuplicateBinding,
         Self::TemporalDeadZone,
         Self::UnknownBinding,
+        Self::OperationShadowed,
+        Self::OperationSpelling,
         Self::PrintedSourceNeedsBase,
         Self::AssignConst,
         Self::SavedFunctionUnusable,
@@ -403,6 +409,8 @@ impl DiagnosticCode {
             | Self::DuplicateBinding
             | Self::TemporalDeadZone
             | Self::UnknownBinding
+            | Self::OperationShadowed
+            | Self::OperationSpelling
             | Self::AssignConst
             | Self::AwaitRequired
             | Self::ReturnOutsideFunction
@@ -478,6 +486,8 @@ impl DiagnosticCode {
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
+            Self::OperationShadowed => "TS_OPERATION_SHADOWED",
+            Self::OperationSpelling => "TS_OPERATION_SPELLING",
             Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
@@ -887,12 +897,12 @@ mod tests {
                 DecoratorUnsupported,
                 "const wrap = value => value; const invoice = wrap(1); invoice;",
             ),
-            (DynamicImportUnsupported, "await echo(1);"),
+            (DynamicImportUnsupported, "await host.echo(1);"),
             (
                 JsxUnsupported,
                 "const element = { tag: 'p', text: 'invoice' }; const html = `<p>${element.text}</p>`; html;",
             ),
-            (ImportExportUnsupported, "await echo(1);"),
+            (ImportExportUnsupported, "await host.echo(1);"),
             (
                 UsingUnsupported,
                 "const release = () => 1; try { 1; } finally { release(); }",
@@ -909,10 +919,10 @@ mod tests {
                 ForOfUnsupported,
                 "const values = [1, 2]; for (const value of values) console.log(value);",
             ),
-            (AwaitRequired, "await echo(1);"),
+            (AwaitRequired, "await host.echo(1);"),
             (
                 UnawaitedTool,
-                "await echo(1); await Promise.all([echo(2)]); await Promise.allSettled([echo(3)]);",
+                "await host.echo(1); await Promise.all([host.echo(2)]); await Promise.allSettled([host.echo(3)]);",
             ),
             (
                 YieldUnsupported,

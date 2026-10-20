@@ -226,19 +226,22 @@ fn lower() -> EncodedPayload {
         dialect: "typescript".into(),
         source: r#"await tools.mark({ key: "probe" }); await control.finish({ operation: "op" });"#
             .into(),
-        effects: ["tools.mark", "control.finish"]
-            .into_iter()
-            .map(|name| (EffectName::new(name).expect("a tool's name"), tool()))
-            .collect(),
-        tool_roots: ["tools", "control"].into_iter().map(Name::new).collect(),
-        controls: BTreeMap::from([(
-            EffectName::new("control.finish").expect("a tool's name"),
-            BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
-        )]),
+        operations: lash_kernel_dialect::Namespaces::of_signatures(
+            &["tools.mark", "control.finish"]
+                .into_iter()
+                .map(|name| (EffectName::new(name).expect("a tool's name"), tool()))
+                .collect(),
+            &BTreeMap::from([(
+                EffectName::new("control.finish").expect("a tool's name"),
+                BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+            )]),
+        )
+        .expect("the law's effects are operations")
+        .operations()
+        .clone(),
         bindings: BTreeSet::new(),
         functions: BTreeMap::new(),
         helpers: lash_vm_library::HELPER_RELEASE,
-        reads: BTreeSet::new(),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))
 }

@@ -620,7 +620,6 @@ mod named_component_laws {
         ProcessComponentFactory, ProcessComponentSpec, ProcessConfigKey, ProcessEnv,
         ProcessEnvRefusal,
     };
-    use lash::tools::ToolDefinitionBindingExt as _;
     use lash_protocol_types::sync::MutexExt as _;
 
     const MODEL: &str = "named-components";
@@ -664,18 +663,21 @@ mod named_component_laws {
         }
     }
 
+    fn operation(text: &str) -> lash::tools::QualifiedOperation {
+        lash::tools::IntoOperation::into_operation(text).expect("a canonical operation")
+    }
+
     fn a_definition(name: &str) -> lash::tools::ToolDefinition {
         let object = serde_json::json!({ "type": "object", "additionalProperties": true });
         lash::tools::ToolDefinition::raw(
             format!("tool:{name}"),
-            name,
+            format!("tools.{name}"),
             "Answers `a`.",
             object,
             serde_json::json!({ "type": "string" }),
         )
         .expect("the tool's schemas")
         .with_execution(std::time::Duration::from_secs(60))
-        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], name))
     }
 
     struct AnswerA;
@@ -1106,7 +1108,7 @@ mod named_component_laws {
                 .run(
                     name,
                     &format!(
-                        "const body = async () => await tools.{A_TOOL}({{}});\n\
+                        "const body = async () => await tools.evidenceATool({{}});\n\
                          const handle = await processes.start({{ definition: body }});\n\
                          await control.finish(await handle);"
                     ),
@@ -1314,7 +1316,7 @@ mod named_component_laws {
             .run(
                 "authority-session",
                 &format!(
-                    "const body = async () => await tools.{A_TOOL}({{}});
+                    "const body = async () => await tools.evidenceATool({{}});
              const handle = await processes.start({{definition: body, label: 'authority-child'}});
              await control.finish(await handle);"
                 ),
@@ -1437,9 +1439,9 @@ mod named_component_laws {
             .await
             .unwrap();
         let offered = world.witness.offered.lock_recover().clone().unwrap();
-        assert!(!offered.has_callable_tool(A_TOOL));
-        assert!(offered.has_callable_tool("b"));
-        assert!(offered.has_callable_tool("c"));
+        assert!(!offered.has_callable_tool(&operation(&format!("tools.{A_TOOL}"))));
+        assert!(offered.has_callable_tool(&operation("tools.b")));
+        assert!(offered.has_callable_tool(&operation("tools.c")));
         // A committed session narrowing leaves the recorded env, settings and
         // provenance unchanged, while its linked effect is now excess.
         assert_eq!(
@@ -1522,9 +1524,9 @@ mod named_component_laws {
             catalog
                 .entries()
                 .iter()
-                .map(|entry| entry.manifest.name.as_str())
+                .map(|entry| entry.manifest.tool())
                 .collect::<Vec<_>>(),
-            [A_TOOL]
+            [format!("tools.{A_TOOL}")]
         );
         assert!(
             world.witness.builds(A) > builds,
@@ -1633,7 +1635,7 @@ mod named_component_laws {
             ToolCatalog::from_tool_definitions(vec![a_definition("a"), a_definition("b")]);
         assert!(tools_within(&env, &offered));
         let mut renamed = a_definition("a");
-        renamed.manifest.name = "renamed".into();
+        renamed.manifest.operation = operation("renamed.a");
         assert!(
             tools_within(&env, &ToolCatalog::from_tool_definitions(vec![renamed])),
             "a new model-facing name is not authority"
@@ -1648,7 +1650,7 @@ mod named_component_laws {
         let object = serde_json::json!({ "type": "object", "additionalProperties": true });
         let changed = lash::tools::ToolDefinition::raw(
             "tool:a",
-            "a",
+            "tools.a",
             "Answers `a`.",
             serde_json::json!({
                 "type": "object",
@@ -1658,8 +1660,7 @@ mod named_component_laws {
             object,
         )
         .expect("the tool's schemas")
-        .with_execution(std::time::Duration::from_secs(60))
-        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "a"));
+        .with_execution(std::time::Duration::from_secs(60));
         assert_eq!(
             tools_excess(&env, &ToolCatalog::from_tool_definitions(vec![changed])),
             excess,

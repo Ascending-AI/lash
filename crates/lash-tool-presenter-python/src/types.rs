@@ -252,7 +252,12 @@ pub fn emit_tool_signature(
     output: &SchemaShape,
     output_names: &BTreeMap<DefinitionId, String>,
 ) -> Result<String, PresentationRefusal> {
-    if !identifier(call_path) {
+    // A cell calls an operation by its dotted path: each segment is a name,
+    // a keyword one included, which a cell reaches through `getattr`.
+    if !call_path
+        .split('.')
+        .all(|segment| identifier(segment) || KEYWORDS.contains(&segment))
+    {
         return Err(unsupported("Python callable name"));
     }
     Ok(format!(

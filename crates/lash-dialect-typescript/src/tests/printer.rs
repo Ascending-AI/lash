@@ -83,7 +83,7 @@ fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (En
                                 "effect {} {:?} {:?}",
                                 effect.effect, effect.args, effect.identity
                             ));
-                            let value = if effect.effect.as_str() == "projection" {
+                            let value = if effect.effect.as_str() == "views.projection" {
                                 k::Datum::Handle(k::Handle {
                                     kind: "view".into(),
                                     id: "host-view".into(),
@@ -119,12 +119,10 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         functions: &BTreeMap::new(),
     });
     let signatures = document.manifest.signatures();
-    let environment = Environment {
-        library,
-        effects: &signatures,
-        controls: &BTreeMap::new(),
-        tool_roots: &std::collections::BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&signatures, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library, &environment_namespaces);
     let (lowered, _) = crate::read(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
@@ -246,9 +244,9 @@ main {
 }"#,
         ),
         document(
-            r#"effect fetch(url: Text) -> Any
+            r#"effect web.fetch(url: Text) -> Any
 fn worker() {
-  try { let page = perform fetch("cancel") as Any }
+  try { let page = perform web.fetch("cancel") as Any }
   finally { print "cleanup" do sleep 0.0 }
 }
 main {
@@ -265,9 +263,9 @@ main {
         document(r#"main { try { throw "error" } finally { print "finally" } }"#),
         document(r#"main { fail "failed" }"#),
         document(
-            r#"effect projection() -> Handle("view")
+            r#"effect views.projection() -> Handle("view")
 main {
-  let h = perform projection() as Handle("view")
+  let h = perform views.projection() as Handle("view")
   let answer = read(h, "lookup")
   finish answer
 }"#,
@@ -295,13 +293,13 @@ main {{
 
     // The actual gate-3 edit vocabulary applied to its frontend fixture.
     let mut draft = Draft::open(document(
-        r#"effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
+        r#"effect web.fetch(url: Text) -> Any
+effect web.notify(text: Text) -> Any
 main {
   let t1 = "https://a"
-  let page = perform fetch(t1) as Any
+  let page = perform web.fetch(t1) as Any
   let t2 = page.ok
-  if t2 { let t3 = "done" do perform notify(t3) as Any }
+  if t2 { let t3 = "done" do perform web.notify(t3) as Any }
   finish page
 }"#,
     ))

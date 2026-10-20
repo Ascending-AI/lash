@@ -65,8 +65,6 @@ pub enum CoreConfigRefusal {
     /// other session supplies the turn budget, tool-call limit or model a
     /// request leaves unstated (ADR 0134).
     PolicyUnstated,
-    /// FIG-5824: offering this tool namespace would hide a session binding.
-    ToolNamespaceCollision { root: String, binding: String },
     /// The tools the candidate's providers advertise do not build into one
     /// surface (S4): two share a model-facing name, or a tool id.
     ToolSurfaceRefused { refusal: Box<crate::SurfaceRefusal> },
@@ -79,10 +77,6 @@ impl std::fmt::Display for CoreConfigRefusal {
                 write!(formatter, "the host's models register no model `{key}`")
             }
             Self::ReasoningRefused { message, .. } => formatter.write_str(message),
-            Self::ToolNamespaceCollision { root, binding } => write!(
-                formatter,
-                "tool namespace `{root}` conflicts with top-level binding `{binding}`; rename `{binding}` to `{binding}_` before offering these tools"
-            ),
             Self::ToolSurfaceRefused { refusal } => write!(formatter, "{refusal}"),
             Self::ReasoningWithoutLlmProfile { reasoning } => write!(
                 formatter,

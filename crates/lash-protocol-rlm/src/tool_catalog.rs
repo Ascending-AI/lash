@@ -4,20 +4,17 @@ use lash_execution_contracts::plugin_error::PluginError;
 use lash_tool_presenter_api::{
     PresentationRefusal, ToolDisclosure, ToolPresentationEntry, ToolPresentationRequest,
 };
-use lash_vm_runtime::{ToolBindingResolutionExt, required_tool_binding, required_tool_executable};
 
 use crate::dialect::SessionDialect;
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
-/// rendered as a full prompt doc under its call-path. RLM contributes
-/// no removals; it validates that each member carries an explicit
-/// `lash.tool` binding the session's dialect can call by module path.
+/// rendered as a full prompt doc under its operation's path, which every
+/// dialect can write (through the qualified escape where a segment is one
+/// of its keywords). RLM contributes no removals.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
-    dialect: &SessionDialect,
+    _dialect: &SessionDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
-    let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
-    validate_rlm_language_bindings(&ctx.tools, dialect.language())?;
     // A host's own finish tool takes the place of `control.finish`.
     Ok(lash_core::suppress_default_finish(
         &ctx,
@@ -54,10 +51,6 @@ impl ToolListing {
     /// words the listing; which tools are offered, and under which call
     /// paths, is this mode's, and a listing that does not account for
     /// exactly the offered tools is refused.
-    #[expect(
-        clippy::expect_used,
-        reason = "catalog registration validates every tool binding against the session's dialect, so tool_call_path only errs on an unregistered manifest"
-    )]
     pub(crate) fn of(
         tool_catalog: &ToolCatalog,
         dialect: &crate::dialect::SessionDialect,
@@ -67,13 +60,11 @@ impl ToolListing {
         let offered = tool_catalog
             .entries()
             .iter()
-            .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
-            .map(|tool| {
-                let call_path = dialect.tool_call_path(&tool.manifest).expect(
-                    "RLM tool catalog registration validates the session dialect's binding",
-                );
-                (tool, call_path)
+            .filter(|tool| {
+                features.decomposition
+                    || tool.manifest.tool() != crate::control_tools::CONTINUE_AS_OPERATION
             })
+            .map(|tool| (tool, dialect.tool_call_path(&tool.manifest)))
             .collect::<Vec<_>>();
         let entries = offered
             .iter()
@@ -81,7 +72,8 @@ impl ToolListing {
                 manifest: &tool.manifest,
                 contract: &tool.contract,
                 call_path,
-                pinned: discovery.is_some_and(|discovery| *call_path == discovery.operation)
+                pinned: discovery
+                    .is_some_and(|discovery| tool.manifest.tool() == discovery.operation)
                     || !tool.manifest.declaration().controls.is_empty(),
             })
             .collect::<Vec<_>>();
@@ -108,7 +100,7 @@ impl ToolListing {
             entries
                 .iter()
                 .filter(|entry| ids.contains(&entry.manifest.id))
-                .map(|entry| entry.manifest.name.clone())
+                .map(|entry| entry.manifest.tool())
                 .collect()
         };
         Ok(Self {
@@ -182,8 +174,7 @@ fn admitted(
 /// What a session in `dialect` with tool presentation `tool_presentation`
 /// and `features` lists of `tool_catalog` under `discovery`: the facts the
 /// protocol's declarations render, for a host that renders its catalogue
-/// itself. `tool_catalog` is a session's validated catalogue: every member
-/// has a binding `dialect` can call.
+/// itself.
 ///
 /// # Errors
 ///
@@ -209,23 +200,22 @@ pub fn tool_catalogue_disclosure(
     )
 }
 
-/// A discovered tool's signature from its binding and admitted schemas in the
-/// session's `dialect` and `tool_presentation`: the complete bundle of named
-/// definitions and the final signature line, without Markdown or tool prose.
-/// Retain the complete bundle so every reference has its definition.
+/// A discovered tool's signature from its operation and admitted schemas in
+/// the session's `dialect` and `tool_presentation`: the complete bundle of
+/// named definitions and the final signature line, without Markdown or tool
+/// prose. Retain the complete bundle so every reference has its definition.
 ///
 /// # Errors
 ///
-/// The binding names a path `dialect` cannot call, or the dialect's tool
-/// presenter refuses.
+/// The dialect's tool presenter refuses.
 pub fn discovered_tool_signature(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    binding: &lash_core::ToolBinding,
+    operation: &lash_core::QualifiedOperation,
     input: &lash_core::JsonSchema,
     output: &lash_core::JsonSchema,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let call_path = binding_call_path(dialect, binding)?;
+    let call_path = lash_kernel_dialect::spell_operation(dialect.prompts().spelling(), operation);
     dialect
         .tool_presenter()
         .presenter()
@@ -238,39 +228,6 @@ pub fn discovered_tool_signature(
         .map_err(presentation_refused)
 }
 
-/// The call path `dialect` spells `binding` as.
-fn binding_call_path(
-    dialect: &crate::dialect::CellDialect,
-    binding: &lash_core::ToolBinding,
-) -> Result<String, crate::dialect::DialectRefusal> {
-    let name = format!(
-        "{}.{}",
-        binding.module_path.join("."),
-        binding.operation.as_deref().unwrap_or_default(),
-    );
-    let binding =
-        binding
-            .executable_for(&name)
-            .map_err(|error| crate::dialect::DialectRefusal {
-                kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-                message: error.to_string(),
-            })?;
-    dialect.prompts().tool_call_path(&binding)
-}
-
-/// The call path `dialect` spells `tool`'s binding as.
-fn tool_call_path(
-    dialect: &crate::dialect::CellDialect,
-    tool: &lash_core::ToolDefinition,
-) -> Result<String, crate::dialect::DialectRefusal> {
-    let binding =
-        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
-            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-            message: error.to_string(),
-        })?;
-    binding_call_path(dialect, &binding)
-}
-
 /// A loaded tool's one-line signature, without Markdown or field notes.
 /// This is the same signature [`discovered_tool_doc`] puts in its first line.
 /// For a binding and schemas without a loaded definition, use
@@ -278,11 +235,11 @@ fn tool_call_path(
 ///
 /// ```rust
 /// use lash::rlm::{CellDialect, loaded_tool_signature};
-/// use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+/// use lash::tools::ToolDefinition;
 /// use serde_json::json;
 ///
 /// let tool = ToolDefinition::raw(
-///     "lookup", "lookup", "Find a record.",
+///     "lookup", "tools.lookup", "Find a record.",
 ///     json!({
 ///         "type": "object",
 ///         "properties": { "query": { "type": "string" } },
@@ -291,8 +248,7 @@ fn tool_call_path(
 ///     }),
 ///     json!({ "type": "string" }),
 /// )?
-/// .with_execution(std::time::Duration::from_secs(30))
-/// .with_tool_binding(ToolBinding::from_path("tools.lookup"));
+/// .with_execution(std::time::Duration::from_secs(30));
 /// let signature = loaded_tool_signature(&CellDialect::typescript(), &json!({}), &tool)?;
 /// assert_eq!(signature, "tools.lookup({ query: string }): Promise<string>");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -300,22 +256,16 @@ fn tool_call_path(
 ///
 /// # Errors
 ///
-/// The tool has no binding, or one `dialect` cannot call, or the dialect's
-/// tool presenter refuses.
+/// The dialect's tool presenter refuses.
 pub fn loaded_tool_signature(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let binding =
-        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
-            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-            message: error.to_string(),
-        })?;
     discovered_tool_signature(
         dialect,
         tool_presentation,
-        &binding,
+        &tool.manifest.operation,
         &tool.contract.input_schema.canonical,
         &tool.contract.output_schema.canonical,
     )
@@ -328,14 +278,16 @@ pub fn loaded_tool_signature(
 ///
 /// # Errors
 ///
-/// The tool has no binding, or one `dialect` cannot call, or the dialect's
-/// tool presenter refuses.
+/// The dialect's tool presenter refuses.
 pub fn discovered_tool_doc(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let call_path = tool_call_path(dialect, tool)?;
+    let call_path = lash_kernel_dialect::spell_operation(
+        dialect.prompts().spelling(),
+        &tool.manifest.operation,
+    );
     dialect
         .tool_presenter()
         .presenter()
@@ -376,37 +328,14 @@ pub fn discovery_text(
         .map_err(presentation_refused)
 }
 
-fn validate_rlm_language_bindings(
-    tools: &[lash_core::ToolManifest],
-    language: &dyn crate::dialect::DialectPrompts,
-) -> Result<(), PluginError> {
-    for tool in tools {
-        let binding = required_tool_executable(tool)
-            .map_err(|err| PluginError::Registration(err.to_string()))?;
-        // Being a catalog member is being advertised under the call path the
-        // dialect spells; a binding the dialect cannot address could only be
-        // advertised as a callable nothing, so it is refused here instead.
-        language.tool_call_path(&binding).map_err(|refusal| {
-            PluginError::Registration(format!(
-                "tool `{}` has a `lash.tool` binding the {} dialect cannot call: {refusal}",
-                tool.name,
-                language.prompt_vocabulary().language_name
-            ))
-        })?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dialect::typescript_test_dialect;
     use lash_core::{
-        ToolContract, ToolDefinition, facade_support::build_tool_catalog,
-        test_support::ToolCatalogBuildInput,
+        ToolDefinition, facade_support::build_tool_catalog, test_support::ToolCatalogBuildInput,
     };
     use lash_protocol_types::SessionId;
-    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -415,7 +344,7 @@ mod tests {
     fn native_rlm_and_validation_share_one_pinned_definition_under_registry_drift() {
         let definition = ToolDefinition::raw(
             "tool:test/pinned",
-            "pinned_tool",
+            "authority.pinned",
             "Pinned schema authority",
             json!({
                 "type": "object",
@@ -426,11 +355,10 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
+        .with_execution(std::time::Duration::from_secs(120));
         let drifted = ToolDefinition::raw(
             "tool:test/pinned",
-            "pinned_tool",
+            "authority.pinned",
             "Drifted provider schema",
             json!({
                 "type": "object",
@@ -441,8 +369,7 @@ mod tests {
             json!({ "type": "integer" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
+        .with_execution(std::time::Duration::from_secs(120));
         let resolutions = Arc::new(AtomicUsize::new(0));
         let resolution_count = Arc::clone(&resolutions);
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
@@ -484,14 +411,18 @@ mod tests {
         // The effect a cell performs carries the pinned contract's types.
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
-            .offer_bound_tool(
+            .offer_tool(
                 &catalog.entries()[0].manifest,
                 &catalog.entries()[0].contract.input_schema.canonical,
                 &catalog.entries()[0].contract.output_schema.canonical,
             )
-            .expect("pinned contract binds as an effect");
-        let signatures = boundary.signatures();
-        let signature = format!("{:?}", signatures.values().next().expect("one effect"));
+            .expect("pinned contract is offered as an operation");
+        let offered = boundary
+            .operations()
+            .values()
+            .next()
+            .expect("one operation");
+        let signature = format!("{:?}", offered.requirement.signature);
         assert!(
             signature.contains("pinned") && !signature.contains("drifted"),
             "{signature}"
@@ -518,83 +449,10 @@ mod tests {
     }
 
     #[test]
-    fn rlm_catalog_rejects_members_without_tool_binding() {
-        let missing = ToolDefinition::raw(
-            "tool:test/update_plan",
-            "update_plan",
-            "Update plan",
-            ToolContract::default_input_schema(),
-            json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120));
-
-        let err = rlm_tool_catalog(
-            ToolCatalogContext {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                tools: vec![missing.manifest()],
-                config: lash_core::OwnerConfigView::default(),
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .expect_err("missing binding should fail RLM registration");
-
-        assert!(
-            err.to_string()
-                .contains("missing an explicit `lash.tool` binding"),
-            "{err}"
-        );
-    }
-
-    /// The retired `lash_vm.tool` key is not a reader alias: a manifest that
-    /// carries only it has no binding at all, and registration must say so
-    /// rather than silently accepting the dead key (FIG-3273).
-    #[test]
-    fn rlm_catalog_rejects_members_with_only_retired_binding_key() {
-        let mut retired_only = ToolDefinition::raw(
-            "tool:test/update_plan",
-            "update_plan",
-            "Update plan",
-            ToolContract::default_input_schema(),
-            json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["plan"], "update"));
-        let binding = retired_only
-            .manifest
-            .bindings
-            .remove(lash_core::facade_support::TOOL_BINDING_KEY)
-            .expect("with_tool_binding wrote the canonical key");
-        retired_only
-            .manifest
-            .bindings
-            .insert("lash_vm.tool".to_string(), binding);
-
-        let err = rlm_tool_catalog(
-            ToolCatalogContext {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                tools: vec![retired_only.manifest()],
-                config: lash_core::OwnerConfigView::default(),
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .expect_err("a manifest carrying only `lash_vm.tool` must fail RLM registration");
-
-        assert!(
-            err.to_string()
-                .contains("missing an explicit `lash.tool` binding"),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn member_rlm_tool_docs_render_and_link_module_call() {
         let update_plan = ToolDefinition::raw(
             "tool:test/update_plan",
-            "update_plan",
+            "plan.update",
             "Update the visible plan",
             json!({
                 "type": "object",
@@ -617,8 +475,7 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["plan"], "update"));
+        .with_execution(std::time::Duration::from_secs(120));
 
         let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
             .iter()
@@ -661,17 +518,17 @@ mod tests {
         // The advertised path is the effect a cell performs.
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
-            .offer_bound_tool(
+            .offer_tool(
                 &catalog.entries()[0].manifest,
                 &catalog.entries()[0].contract.input_schema.canonical,
                 &catalog.entries()[0].contract.output_schema.canonical,
             )
-            .expect("explicit binding binds as an effect");
+            .expect("the tool is offered as its operation");
         assert!(
             boundary
-                .signatures()
+                .operations()
                 .keys()
-                .any(|effect| effect.as_str() == "plan.update")
+                .any(|operation| operation.effect_name().as_str() == "plan.update")
         );
     }
 
@@ -683,7 +540,7 @@ mod tests {
     fn an_mcp_style_open_schema_renders_every_field_name_and_type() {
         let search = ToolDefinition::raw(
             "tool:mcp/issues_search",
-            "mcp__tracker__issues_search",
+            "tracker.issues_search",
             "[MCP tracker] Search issues.",
             json!({
                 "type": "object",
@@ -731,8 +588,7 @@ mod tests {
             }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
+        .with_execution(std::time::Duration::from_secs(120));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![search]);
 
         let docs = rlm_prompt_tool_docs(
@@ -743,7 +599,7 @@ mod tests {
         assert_eq!(
             docs,
             concat!(
-                "`tracker.issues_search({ query: string; ",
+                "`tracker.issuesSearch({ query: string; ",
                 "filter?: { labels?: Array<string>; state?: \"open\" | \"closed\" }; ",
                 "page?: number | null; ",
                 "sort?: Array<{ field: string; descending?: boolean }> }): ",
@@ -763,7 +619,7 @@ mod tests {
     fn tool_with_prose(description: &str, schema_description: &str) -> ToolDefinition {
         ToolDefinition::raw(
             "tool:test/spawn_agent",
-            "spawn_agent",
+            "agents.spawn",
             description,
             json!({
                 "type": "object",
@@ -776,7 +632,6 @@ mod tests {
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     }
 
     #[test]
@@ -807,14 +662,11 @@ mod tests {
 pub(crate) fn validate_discovery(
     tools: &[lash_core::ToolManifest],
     discovery: Option<&crate::plugin::RlmDiscovery>,
-    dialect: &crate::dialect::SessionDialect,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
-        && !tools.iter().any(|tool| {
-            tool.inline
-                && dialect.tool_call_path(tool).ok().as_deref()
-                    == Some(discovery.operation.as_str())
-        })
+        && !tools
+            .iter()
+            .any(|tool| tool.inline && tool.tool() == discovery.operation)
     {
         return Err(PluginError::InvalidToolDiscovery {
             operation: discovery.operation.clone(),
@@ -826,20 +678,18 @@ pub(crate) fn validate_discovery(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
     #[test]
     fn discovery_filters_each_dialect_and_channel_and_requires_an_inline_operation() {
         let tool = |name: &str, inline| {
             let mut tool = lash_core::ToolDefinition::raw(
                 name,
-                name,
+                format!("tools.{name}"),
                 format!("Description for {name}"),
                 serde_json::json!({"type":"object"}),
                 serde_json::json!({"type":"string"}),
             )
             .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(ToolBinding::new(["tools"], name));
+            .with_execution(std::time::Duration::from_secs(120));
             tool.manifest.inline = inline;
             tool
         };
@@ -863,7 +713,7 @@ mod discovery_tests {
                         catalogue_bytes: usize::MAX,
                     }),
                 ] {
-                    validate_discovery(&manifests, discovery.as_ref(), &dialect).unwrap();
+                    validate_discovery(&manifests, discovery.as_ref()).unwrap();
                     let visible = catalog.clone();
                     let execution = if native {
                         crate::native::prompt::execution_section(
@@ -907,7 +757,6 @@ mod discovery_tests {
                             operation: operation.into(),
                             catalogue_bytes: usize::MAX,
                         }),
-                        &dialect
                     ),
                     Err(PluginError::InvalidToolDiscovery { .. })
                 ));

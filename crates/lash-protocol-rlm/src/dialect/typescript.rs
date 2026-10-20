@@ -1,8 +1,5 @@
-use lash_tool_presenter_typescript::{is_identifier, is_reserved_word};
-
 use super::{
-    CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest,
+    CellTags, DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest,
 };
 
 /// The name `lash-dialect-typescript` is installed under.
@@ -14,22 +11,8 @@ pub(crate) const LANGUAGE_ID: &str = "typescript";
 pub struct TypescriptPrompts;
 
 impl DialectPrompts for TypescriptPrompts {
-    /// Being a catalog member is being advertised, and the execution section
-    /// advertises the binding's call path as a typed declaration the model
-    /// calls verbatim. A path TypeScript resolves to anything but a tool call
-    /// — a module segment no cell can write, an ECMA global namespace, a
-    /// refused method name — can only be advertised as a callable nothing, so
-    /// it is refused (FIG-1444).
-    fn tool_call_path(
-        &self,
-        binding: &lash_vm_runtime::ResolvedToolBinding,
-    ) -> Result<String, DialectRefusal> {
-        let call_path = binding.call_path();
-        ensure_tool_call_path_addressable(&call_path).map_err(|error| DialectRefusal {
-            kind: DialectRefusalKind::UnaddressableToolPath,
-            message: format!("no TypeScript cell can call `{call_path}` as a tool: {error}"),
-        })?;
-        Ok(call_path)
+    fn spelling(&self) -> lash_kernel_dialect::Spelling {
+        lash_kernel_dialect::Spelling::TypeScript
     }
 
     fn schema_type(
@@ -72,7 +55,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     print_statement_prefix: "console.log(",
     print_statement_suffix: ")",
     finish_call: "await control.finish(value)",
-    continue_as_call: "control.continue_as(...)",
+    continue_as_call: "control.continueAs(...)",
     // A wrong field name is the one mistake this runtime does not report.
     // Reading a key that was never there yields `undefined`, which flows into
     // arithmetic as `NaN` and into totals as nothing at all: the cell
@@ -89,10 +72,10 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
 /// dialect gates them, so their availability is read off the catalogue the
 /// host actually rendered rather than off an ability flag.
 pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalog) -> bool {
-    tool_catalog.entries().iter().any(|tool| {
-        lash_vm_runtime::required_tool_executable(&tool.manifest)
-            .is_ok_and(|binding| binding.call_path().starts_with("processes."))
-    })
+    tool_catalog
+        .entries()
+        .iter()
+        .any(|tool| tool.manifest.operation.package.as_slice()[0].as_str() == "processes")
 }
 
 /// The authoring rules the process tool signatures cannot state themselves.
@@ -111,59 +94,6 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
         .to_string()
 }
 
-/// The names a TypeScript cell resolves itself: a tool under one of them
-/// could never be called.
-const GLOBAL_NAMESPACES: &[&str] = &[
-    "Array",
-    "Boolean",
-    "Date",
-    "Error",
-    "JSON",
-    "Map",
-    "Math",
-    "Number",
-    "Object",
-    "Promise",
-    "RegExp",
-    "Set",
-    "String",
-    "URL",
-    "URLSearchParams",
-    "console",
-    "globalThis",
-];
-
-/// Confirms a TypeScript cell can write `call_path` verbatim as a tool call:
-/// it has a module to call the operation on, its receiver is a name a cell
-/// can write in expression position, every member is an identifier, and its
-/// module is not a namespace the language resolves itself. A path that fails
-/// is refused at registration rather than advertised as a callable nothing
-/// (FIG-1444).
-pub(crate) fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), String> {
-    let segments = call_path.split('.').collect::<Vec<_>>();
-    if segments.len() < 2 {
-        return Err(format!(
-            "tool call path `{call_path}` has no module path, so a TypeScript cell has no receiver to call it on"
-        ));
-    }
-    // A member name may be a reserved word (`processes.await(…)`); the
-    // receiver, which a cell writes as an identifier, may not.
-    if let Some(segment) = segments.iter().enumerate().find_map(|(index, segment)| {
-        (!is_identifier(segment) || (index == 0 && is_reserved_word(segment))).then_some(segment)
-    }) {
-        return Err(format!(
-            "`{segment}` is a word no cell can write in expression position"
-        ));
-    }
-    if GLOBAL_NAMESPACES.contains(&segments[0]) {
-        return Err(format!(
-            "`{}` is an ECMAScript global namespace, which the dialect resolves itself",
-            segments[0]
-        ));
-    }
-    Ok(())
-}
-
 fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
     let ExecutionSectionRequest {
         channel,
@@ -177,7 +107,13 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     let label = catalogue.map(|catalogue| {
         super::catalogue_label(
             catalogue,
-            &format!("await {}({{ ... }})", catalogue.discovery_operation),
+            &format!(
+                "await {}({{ ... }})",
+                super::spelled_effect(
+                    lash_kernel_dialect::Spelling::TypeScript,
+                    &catalogue.discovery_operation
+                )
+            ),
         )
     });
     let tools = [(!tools.is_empty()).then_some(tools), label.as_deref()]
@@ -248,34 +184,5 @@ An `async` function starts running when it is called, and async callbacks run co
             "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}"
         ),
         declarations,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    /// Being a catalog member is being advertised under a path a cell
-    /// writes verbatim (FIG-1444): a path with no module, with a word no
-    /// cell can write in expression position, or under a namespace the
-    /// language resolves itself is refused at registration.
-    #[test]
-    fn a_tool_path_no_cell_can_write_is_refused() {
-        use super::ensure_tool_call_path_addressable;
-        use lash_tool_presenter_typescript::reserved_words;
-        ensure_tool_call_path_addressable("web.fetch").expect("an ordinary path is addressable");
-        ensure_tool_call_path_addressable("a.b.c").expect("a nested module path is addressable");
-        // A member name may be a reserved word; only the receiver is written
-        // as an identifier.
-        ensure_tool_call_path_addressable("processes.await")
-            .expect("a reserved word is a member name a cell can write");
-        assert!(ensure_tool_call_path_addressable("fetch").is_err());
-        assert!(ensure_tool_call_path_addressable("Math.floor").is_err());
-        assert!(ensure_tool_call_path_addressable("web.has-dash").is_err());
-        for word in reserved_words() {
-            assert!(
-                ensure_tool_call_path_addressable(&format!("{word}.run")).is_err(),
-                "`{word}` cannot root a tool path"
-            );
-        }
     }
 }

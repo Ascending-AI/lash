@@ -2,8 +2,7 @@ use lash_tool_presenter_python::render_shape;
 use lash_tool_shape::SchemaShape;
 
 use super::{
-    CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest,
+    CellTags, DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest,
 };
 
 /// The name `lash-dialect-python` is installed under.
@@ -19,41 +18,9 @@ const PYTHON_CELL_TAGS: CellTags = CellTags {
     close: "</python>",
 };
 
-const PYTHON_KEYWORDS: &[&str] = &[
-    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
-    "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
-    "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
-    "with", "yield",
-];
-
-fn is_identifier(text: &str) -> bool {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .is_some_and(|first| first == '_' || first.is_alphabetic())
-        && chars.all(|character| character == '_' || character.is_alphanumeric())
-        && !PYTHON_KEYWORDS.contains(&text)
-}
-
 impl DialectPrompts for PythonPrompts {
-    /// A Python cell calls a tool by one name: the binding's module path
-    /// and operation joined with `_` (`web.fetch` is `web_fetch`). A name
-    /// that is no Python identifier is refused.
-    fn tool_call_path(
-        &self,
-        binding: &lash_vm_runtime::ResolvedToolBinding,
-    ) -> Result<String, DialectRefusal> {
-        let name = binding.call_path().replace('.', "_");
-        if !is_identifier(&name) {
-            return Err(DialectRefusal {
-                kind: DialectRefusalKind::UnaddressableToolPath,
-                message: format!(
-                    "no Python cell can call `{}` as a tool: `{name}` is not a name a cell can write",
-                    binding.call_path()
-                ),
-            });
-        }
-        Ok(name)
+    fn spelling(&self) -> lash_kernel_dialect::Spelling {
+        lash_kernel_dialect::Spelling::Python
     }
 
     fn schema_type(
@@ -87,7 +54,10 @@ impl DialectPrompts for PythonPrompts {
                 catalogue,
                 &format!(
                     "await {}({{ ... }})",
-                    catalogue.discovery_operation.replace('.', "_")
+                    super::spelled_effect(
+                        lash_kernel_dialect::Spelling::Python,
+                        &catalogue.discovery_operation
+                    )
                 ),
             )
         });
@@ -114,7 +84,7 @@ impl DialectPrompts for PythonPrompts {
                 "the `execute_code` program".to_string(),
                 concat!(
                     "### Tool transport\n\nEach response makes one `execute_code` call with ",
-                    "`{\"code\": \"<complete program>\"}`. Tool calls, `control_finish` included, run inside ",
+                    "`{\"code\": \"<complete program>\"}`. Tool calls, `control.finish` included, run inside ",
                     "the program.\n"
                 )
                 .to_string(),
@@ -126,12 +96,12 @@ impl DialectPrompts for PythonPrompts {
         };
         ExecutionSection {
             prose: format!(
-                r#"Use prose for conversation; use {action} for action or computation. Call tools as `await tool_name({{ ... }})` with one dict of arguments, only those listed under **Tools**.
+                r#"Use prose for conversation; use {action} for action or computation. Call tools by their dotted path, as `await package.tool_name({{ ... }})`, with one dict of arguments, only those listed under **Tools**.
 
 {response_shape}
 {example}
 
-Built-in names cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. An async function, in this cell or saved from an earlier one, can start a durable process with `await processes_start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered. Passing a function to a tool slot typed as a function (such as `processes_start`'s `definition`) copies its code and current captures inline; later mutations are invisible to the copy. A function in a slot typed as data raises `not_data`. Defining a function publishes nothing. A published workflow starts with `definition_id` instead. The returned handle carries `definition_id`; list with `await processes_list({{"definition": saved_fn}})` or `await processes_list({{"definition_id": handle["definition_id"]}})`. Functions have no definition id property.
+Built-in names cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. An async function, in this cell or saved from an earlier one, can start a durable process with `await processes.start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered. Passing a function to a tool slot typed as a function (such as `processes.start`'s `definition`) copies its code and current captures inline; later mutations are invisible to the copy. A function in a slot typed as data raises `not_data`. Defining a function publishes nothing. A published workflow starts with `definition_id` instead. The returned handle carries `definition_id`; list with `await processes.list({{"definition": saved_fn}})` or `await processes.list({{"definition_id": handle["definition_id"]}})`. Functions have no definition id property.
 
 This is a Python subset, not CPython: there are no imports beyond `asyncio`, and no file, network or process access except through the tools.
 
@@ -141,7 +111,7 @@ Tool declarations describe values and calls. `TypedDict`, aliases and the typing
 
 ### Host API
 
-`print(value)` shows output in the next step. `await control_finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other task has been awaited. A failed tool call raises an exception whose message says why. The top level is already asynchronous: `await` works there. Run calls concurrently with `await asyncio.gather(a(), b())`. Every task the program starts must be awaited before the program ends; a program that ends with a task still running, or failed with an exception nothing awaited, fails with `CELL_TASKS_OUTSTANDING` naming the code that is still running."#
+`print(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other task has been awaited. A failed tool call raises an exception whose message says why. The top level is already asynchronous: `await` works there. Run calls concurrently with `await asyncio.gather(a(), b())`. Every task the program starts must be awaited before the program ends; a program that ends with a task still running, or failed with an exception nothing awaited, fails with `CELL_TASKS_OUTSTANDING` naming the code that is still running."#
             ),
             declarations,
         }
@@ -158,8 +128,8 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     print_call: "print",
     print_statement_prefix: "print(",
     print_statement_suffix: ")",
-    finish_call: "await control_finish(value)",
-    continue_as_call: "control_continue_as(...)",
+    finish_call: "await control.finish(value)",
+    continue_as_call: "control.continue_as(...)",
     not_carried_repair: "Await the task and keep its result, or define the function using captures that are data or other saved functions.",
     unjoined_task_repair: "Await every task before the cell ends: `await` it, or collect them with `await asyncio.gather(...)`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a key you haven't seen in the key sets below: reading a key that is not there raises `KeyError`. If a name is not listed, it does not exist on that value.",

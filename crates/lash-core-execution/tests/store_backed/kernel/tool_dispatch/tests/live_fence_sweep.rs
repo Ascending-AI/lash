@@ -23,7 +23,7 @@ impl ToolProvider for LiveYieldingTools {
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "live_tool").then(|| Arc::new(named_beta_tool("live_tool").contract()))
+        (name == "tools.live_tool").then(|| Arc::new(named_beta_tool("live_tool").contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -65,7 +65,7 @@ async fn a_tool_attempt_dropped_at_each_await_seals_its_live_call() {
             let pending = crate::sansio::PendingToolCall {
                 call_id: lash_core_execution::ToolCallId::fixture("live-call"),
                 provider_call_id: None,
-                tool_name: "live_tool".to_string(),
+                tool_name: "tools.live_tool".to_string(),
                 args: json!({ "value": "ok" }),
                 replay: None,
             };

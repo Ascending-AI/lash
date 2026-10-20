@@ -9,7 +9,7 @@
       "repeat": 9,
       "user": "Look up the fixed record and summarize its status.",
       "replies": [
-        {"tool_calls": [{"tool": "fixture_lookup", "args": {"key": "fixed-record"}}]},
+        {"tool_calls": [{"tool": "tools.fixture_lookup", "args": {"key": "fixed-record"}}]},
         {"text": "The record remains active with the same owner."}
       ]
     }

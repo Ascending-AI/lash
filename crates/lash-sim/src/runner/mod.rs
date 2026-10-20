@@ -27,7 +27,6 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use lash::rlm::TerminationMode;
-use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 use crate::artifacts::*;
 use crate::generator::{

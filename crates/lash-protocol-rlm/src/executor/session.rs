@@ -305,17 +305,6 @@ impl CodeModeExecutionState {
             .collect()
     }
 
-    /// Every name the session binds, loading the names cache first: the
-    /// live catalog check reads it before any turn (FIG-5824).
-    ///
-    /// # Errors
-    ///
-    /// The store's faults reading the session's pages.
-    pub(crate) async fn session_names(&mut self) -> Result<BTreeSet<Name>, PageAccessError> {
-        self.load_names().await?;
-        Ok(self.names())
-    }
-
     /// The bindings not carried, each with why.
     pub(crate) fn not_carried(&self) -> BTreeMap<Name, String> {
         let mut not_carried: BTreeMap<Name, String> = self
@@ -1193,15 +1182,6 @@ pub fn saved_function_pins(
     Ok(stored_descriptor(state)?.pins)
 }
 
-/// The carried session of the execution state a stored session's
-/// descriptor names: what a catalog check looks a tool's namespace root up
-/// in (FIG-5824).
-pub(crate) fn stored_session_descriptor(
-    state: &HydratedExecutionGraph,
-) -> Result<SessionRoot, SessionOpenError> {
-    Ok(stored_descriptor(state)?.session)
-}
-
 /// The helper releases this build holds, read once: a build's releases
 /// never change while it runs.
 fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGraph> {
@@ -1209,41 +1189,4 @@ fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGrap
         std::sync::OnceLock::new();
     HELD.get_or_init(|| lash_vm_broker::kernel::state::release_manifests().ok())
         .as_ref()
-}
-
-/// The stored check (FIG-5824): which of `roots` the stored session
-/// `session` binds, read through `pages`, the committed head's: a point
-/// lookup per root, never a full listing. A page the store cannot answer
-/// fails the check, never passes it.
-///
-/// # Errors
-///
-/// The store's faults leasing or reading the head's pages, or the heap's
-/// reading the bindings'.
-pub(crate) async fn stored_binding_roots(
-    pages: &SessionPages,
-    session: &SessionRoot,
-    roots: &[String],
-) -> Result<BTreeSet<String>, PageAccessError> {
-    let mut bound = BTreeSet::new();
-    if roots.is_empty() || session.bindings_page().is_none() {
-        return Ok(bound);
-    }
-    let mut access = SessionPageAccess::default();
-    access.note(Some(pages));
-    let session = *session;
-    let roots: Vec<Name> = roots.iter().map(|root| Name::new(root.as_str())).collect();
-    let found = access
-        .read(move |source| {
-            lash_kernel_state::paged::session::bound_names(&session, &roots, source)
-        })
-        .await;
-    access.release().await;
-    match found {
-        Ok(found) => {
-            bound.extend(found.into_iter().map(|name| name.as_str().to_owned()));
-            Ok(bound)
-        }
-        Err(error) => Err(error),
-    }
 }

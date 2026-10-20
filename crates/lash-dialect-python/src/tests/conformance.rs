@@ -194,7 +194,7 @@ fn conditional_functions_keep_their_written_signatures() {
 /// FIG-6402 rev2 §12/§15 SHAPE: calls and awaits stay in their author's statement.
 #[test]
 fn nested_actions_keep_the_authors_statement_shape() {
-    let source = "def observe(value):\n    return value\nasync def work(value):\n    return await echo(value)\nresult = observe(await work(1))\nprint(result)\n";
+    let source = "def observe(value):\n    return value\nasync def work(value):\n    return await host.echo(value)\nresult = observe(await work(1))\nprint(result)\n";
     let lowered = machine::lower(source).expect("the admitted program");
     let mut statements = 0;
     let mut pending = vec![lash_kernel_doc::Node::Block(&lowered.document.main)];
@@ -214,7 +214,7 @@ fn nested_actions_keep_the_authors_statement_shape() {
 /// and its `else` runs on exhaustion.
 #[test]
 fn a_while_test_keeps_its_actions_in_the_condition() {
-    let source = "async def more(k):\n    return await echo(k) < 2\nn = 0\nwhile await more(n):\n    n = n + 1\nelse:\n    print('done')\nprint(n)\n";
+    let source = "async def more(k):\n    return await host.echo(k) < 2\nn = 0\nwhile await more(n):\n    n = n + 1\nelse:\n    print('done')\nprint(n)\n";
     let lowered = machine::lower(source).expect("the admitted program");
     let mut statements = 0;
     let mut nested_test = false;

@@ -31,7 +31,7 @@ use crate::HostBoundary;
 /// functions the engine's workers hold.
 #[derive(Clone)]
 pub struct WorkflowEnvironment {
-    effects: std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature>,
+    operations: lash_kernel_dialect::Operations,
     functions: Arc<FunctionRegistry>,
     workers: lash_vm_client::service::Service,
 }
@@ -40,7 +40,7 @@ impl std::fmt::Debug for WorkflowEnvironment {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("WorkflowEnvironment")
-            .field("effects", &self.effects)
+            .field("operations", &self.operations)
             .field("functions", &self.functions)
             .finish_non_exhaustive()
     }
@@ -52,9 +52,10 @@ impl WorkflowEnvironment {
         &self.workers
     }
 
-    /// The effects a document may perform, each with its signature.
-    pub fn effects(&self) -> &std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature> {
-        &self.effects
+    /// The operations a document may perform, each with what a perform of
+    /// it requires.
+    pub fn operations(&self) -> &lash_kernel_dialect::Operations {
+        &self.operations
     }
 
     /// The library functions a document may reference, by identity.
@@ -67,9 +68,25 @@ impl WorkflowEnvironment {
     /// bindings.
     pub fn checker(&self) -> Environment<'_> {
         let mut environment = Environment::new(self.functions.as_ref());
-        environment.effects = self.effects.clone();
+        environment.effects = signatures(&self.operations);
         environment
     }
+}
+
+/// What the checker admits a document against: each operation's effect
+/// name with its signature.
+fn signatures(
+    operations: &lash_kernel_dialect::Operations,
+) -> std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature> {
+    operations
+        .iter()
+        .map(|(operation, offered)| {
+            (
+                operation.effect_name(),
+                offered.requirement.signature.clone(),
+            )
+        })
+        .collect()
 }
 
 /// The catalog a process would run under, whose environment is asked for.
@@ -275,7 +292,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             .map_err(|error| unresolvable(error.to_string()))?;
         Ok(lash_execution_contracts::process::ProcessDocument::new(
             WorkflowEnvironment {
-                effects: boundary.signatures(),
+                operations: boundary.operations().clone(),
                 functions: Arc::clone(&self.engine.functions),
                 workers: self.engine.workers.clone(),
             },
@@ -342,7 +359,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         let identified = request.document;
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
-            environment.effects = boundary.signatures();
+            environment.effects = signatures(boundary.operations());
             WorkflowDocument::admit(
                 identified.document().clone(),
                 WorkflowDocumentEntry::Entry {

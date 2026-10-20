@@ -7,7 +7,7 @@ async def demo(value):
     else:
         pass
     #: Echo the value
-    await helper_py_reply((await tools.corpus.echo(value, result="json")))
+    await helper_py_reply((await corpus.echo(value, result="json")))
     #: Report that it is done
     return "done"
 def main():

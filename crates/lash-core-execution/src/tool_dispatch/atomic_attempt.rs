@@ -317,7 +317,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
             .await,
         ));
     };
-    let tool_name = authority.manifest().name.clone();
+    let tool_name = authority.manifest().tool();
     let declaration = authority.manifest().declaration().clone();
     let contract = authority.contract();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {

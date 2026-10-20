@@ -11,7 +11,9 @@ use crate::DiagnosticCode;
 fn a_function_without_a_return_gives_undefined() {
     use super::machine::{Ended, end};
     assert_eq!(
-        end("function f() {} const g = f; await finish(f() === undefined && g() === undefined);"),
+        end(
+            "function f() {} const g = f; await control.finish(f() === undefined && g() === undefined);"
+        ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
@@ -128,12 +130,11 @@ fn spans_map_sites_and_label_comments_are_trivia() {
     );
 
     let effects = super::machine::effects();
-    let environment = lash_kernel_dialect::Environment {
-        library: super::library(),
-        effects: &effects,
-        controls: super::controls(),
-        tool_roots: &std::collections::BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+            .expect("the test's effects are operations");
+    let environment =
+        lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let module = |source: &str| {
         crate::lower(source, &environment, lash_kernel_dialect::Mode::Module)
             .unwrap()
@@ -152,7 +153,7 @@ fn member_reference_failure_precedes_argument_effects() {
     for method in ["get", "set", "has"] {
         assert_eq!(
             end(&format!(
-                "function receiver() {{ return null; }} let ran = false; try {{ receiver().{method}(ran = true); }} catch(e) {{}} await finish(ran);"
+                "function receiver() {{ return null; }} let ran = false; try {{ receiver().{method}(ran = true); }} catch(e) {{}} await control.finish(ran);"
             )),
             Ended::Finished(lash_kernel_doc::Datum::Bool(false))
         );
@@ -166,7 +167,7 @@ fn member_reference_failure_precedes_argument_effects() {
     );
     assert_eq!(
         end(
-            "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} await finish(ran);"
+            "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} await control.finish(ran);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(false))
     );
@@ -177,7 +178,7 @@ fn member_reference_failure_precedes_argument_effects() {
 fn parenthesized_optional_member_keeps_the_receiver() {
     use super::machine::{Ended, end};
     assert_eq!(
-        end("const o = { x: 7, f() { return this.x; } }; await finish((o?.f)());"),
+        end("const o = { x: 7, f() { return this.x; } }; await control.finish((o?.f)());"),
         Ended::Finished(lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(
             7.0
         )))
@@ -190,7 +191,7 @@ fn strict_arguments_have_object_brand_and_restricted_callee() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } await finish(f(3));"
+            "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } await control.finish(f(3));"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -222,7 +223,7 @@ fn parameters_preserve_defaults_rest_and_escaping_arguments() {
             correct &&= supplied.c === 3 && supplied.rest[0] === 8 && supplied.args[3] === 4;
             correct &&= supplied.args.length === 5 && supplied.lexical() === supplied.args;
             correct &&= again.a === 7 && again.b === 8 && again.args[0] === 7 && again.args !== supplied.args;
-            await finish(correct);
+            await control.finish(correct);
             "#),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
     );
@@ -234,7 +235,7 @@ fn for_of_reads_map_and_set_iterators_live() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "const s = new Set([1]); let n = 0; for (const value of s) { n++; if(value === 1) s.add(2); } const m = new Map([[0, 'a']]); let c = 0; for (var entry of m) { if(entry[0] === 0 && entry[1] === 'a') m.set(1, 'b'); c++; } await finish(n === 2 && c === 2);"
+            "const s = new Set([1]); let n = 0; for (const value of s) { n++; if(value === 1) s.add(2); } const m = new Map([[0, 'a']]); let c = 0; for (var entry of m) { if(entry[0] === 0 && entry[1] === 'a') m.set(1, 'b'); c++; } await control.finish(n === 2 && c === 2);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -245,7 +246,9 @@ fn for_of_reads_map_and_set_iterators_live() {
 fn membership_distinguishes_inherited_and_own_properties() {
     use super::machine::{Ended, end};
     assert_eq!(
-        end("const o = {}; await finish(('valueOf' in o) && !Object.hasOwn(o, 'valueOf'));"),
+        end(
+            "const o = {}; await control.finish(('valueOf' in o) && !Object.hasOwn(o, 'valueOf'));"
+        ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
@@ -264,7 +267,7 @@ fn primitive_global_member_access_uses_runtime_semantics() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "let caught = false; try { undefined.toString(); } catch(e) { caught = e.name === 'TypeError'; } await finish(caught);"
+            "let caught = false; try { undefined.toString(); } catch(e) { caught = e.name === 'TypeError'; } await control.finish(caught);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -276,7 +279,7 @@ fn arguments_iteration_reads_live_length_and_indices() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "function f(a) { const copy = [...arguments]; let sum = 0; for(const value of arguments) { sum += value; if(value === 1) { arguments[1] = 2; arguments.length = 2; } } return copy[0] === 1 && sum === 3; } await finish(f(1));"
+            "function f(a) { const copy = [...arguments]; let sum = 0; for(const value of arguments) { sum += value; if(value === 1) { arguments[1] = 2; arguments.length = 2; } } return copy[0] === 1 && sum === 3; } await control.finish(f(1));"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -288,7 +291,7 @@ fn object_rest_copies_string_indices_into_a_fresh_object() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "const {0: first, ...rest} = 'foo'; await finish(first === 'f' && rest[1] === 'o' && rest[2] === 'o' && Object.keys(rest).length === 2 && rest instanceof Object);"
+            "const {0: first, ...rest} = 'foo'; await control.finish(first === 'f' && rest[1] === 'o' && rest[2] === 'o' && Object.keys(rest).length === 2 && rest instanceof Object);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
     );
@@ -299,7 +302,7 @@ fn object_rest_copies_string_indices_into_a_fresh_object() {
 #[test]
 fn a_function_has_the_name_and_length_ecma_gives_it() {
     super::remaining_builtins::agrees(
-        "function f(a, b,) {} const g = function (a, b = 1, c) {}; const h = (...rest) => rest; const own = function inner() {}; const [d = () => 0] = []; let v: any = 1; v &&= function () {}; const o = { m(x) {} }; async function af(a) {} await finish(f.name === 'f' && f.length === 2 && g.name === 'g' && g.length === 1 && h.name === 'h' && h.length === 0 && own.name === 'inner' && d.name === 'd' && v.name === 'v' && o.m.name === 'm' && o.m.length === 1 && af.name === 'af' && af.length === 1 && (function () {}).name === '');",
+        "function f(a, b,) {} const g = function (a, b = 1, c) {}; const h = (...rest) => rest; const own = function inner() {}; const [d = () => 0] = []; let v: any = 1; v &&= function () {}; const o = { m(x) {} }; async function af(a) {} await control.finish(f.name === 'f' && f.length === 2 && g.name === 'g' && g.length === 1 && h.name === 'h' && h.length === 0 && own.name === 'inner' && d.name === 'd' && v.name === 'v' && o.m.name === 'm' && o.m.length === 1 && af.name === 'af' && af.length === 1 && (function () {}).name === '');",
     );
 }
 
@@ -309,7 +312,7 @@ fn a_function_has_the_name_and_length_ecma_gives_it() {
 #[test]
 fn a_functions_name_and_length_are_read_only_and_configurable() {
     super::remaining_builtins::agrees(
-        "function f(a) {} let rejected = false; try { (f as any).length = 3; } catch (e) { rejected = e instanceof TypeError; } let listed = false; for (const key in f) { listed = true; } await finish(rejected && f.length === 1 && !listed && Object.hasOwn(f, 'length') && delete (f as any).length && !Object.hasOwn(f, 'length') && f.length === 0 && delete (f as any).name && f.name === '');",
+        "function f(a) {} let rejected = false; try { (f as any).length = 3; } catch (e) { rejected = e instanceof TypeError; } let listed = false; for (const key in f) { listed = true; } await control.finish(rejected && f.length === 1 && !listed && Object.hasOwn(f, 'length') && delete (f as any).length && !Object.hasOwn(f, 'length') && f.length === 0 && delete (f as any).name && f.name === '');",
     );
 }
 
@@ -319,7 +322,7 @@ fn a_functions_name_and_length_are_read_only_and_configurable() {
 #[test]
 fn bound_functions_and_iterator_methods_have_their_own_name_and_length() {
     super::remaining_builtins::agrees(
-        "function bar(x, y) {} const once = bar.bind(null, 1); const twice = once.bind(null, 2, 3); const it = [7].values(); await finish(once.name === 'bound bar' && once.length === 1 && twice.name === 'bound bound bar' && twice.length === 0 && Math.max.bind(null).length === 2 && it.next.name === 'next' && it.next.length === 0 && it.next().value === 7);",
+        "function bar(x, y) {} const once = bar.bind(null, 1); const twice = once.bind(null, 2, 3); const it = [7].values(); await control.finish(once.name === 'bound bar' && once.length === 1 && twice.name === 'bound bound bar' && twice.length === 0 && Math.max.bind(null).length === 2 && it.next.name === 'next' && it.next.length === 0 && it.next().value === 7);",
     );
 }
 
@@ -329,7 +332,7 @@ fn bound_functions_and_iterator_methods_have_their_own_name_and_length() {
 #[test]
 fn distinct_functions_are_never_equal() {
     super::remaining_builtins::agrees(
-        "const a = () => 1; const b = () => 1; function f() {} const g = f; const m = new Map([[a, 1]]); await finish(a !== b && a === a && f === g && Object.is(f, g) && !Object.is(a, b) && [a].includes(a) && ![a].includes(b) && [b, a].indexOf(a) === 1 && m.get(a) === 1 && !m.has(b) && new Set([a, b, a]).size === 2 && typeof a === 'function');",
+        "const a = () => 1; const b = () => 1; function f() {} const g = f; const m = new Map([[a, 1]]); await control.finish(a !== b && a === a && f === g && Object.is(f, g) && !Object.is(a, b) && [a].includes(a) && ![a].includes(b) && [b, a].indexOf(a) === 1 && m.get(a) === 1 && !m.has(b) && new Set([a, b, a]).size === 2 && typeof a === 'function');",
     );
 }
 

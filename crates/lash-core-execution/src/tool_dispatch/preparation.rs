@@ -116,7 +116,7 @@ fn resolve_callable_definition<'a>(
         .tool_catalog
         .entries()
         .iter()
-        .find(|tool| tool.manifest.name == tool_name)
+        .find(|tool| tool.manifest.tool() == tool_name)
 }
 
 pub async fn prepare_granted_tool_call_with_context(
@@ -124,7 +124,7 @@ pub async fn prepare_granted_tool_call_with_context(
     grant: &ToolExecutionGrant,
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
-    pending.tool_name = grant.manifest().name.clone();
+    pending.tool_name = grant.manifest().tool();
     prepare_authorized_tool_call_with_context(
         context,
         grant.manifest().clone(),
@@ -150,7 +150,7 @@ pub async fn prepare_recorded_tool_call_with_context(
     binding: &crate::ToolDefinition,
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
-    pending.tool_name = binding.manifest.name.clone();
+    pending.tool_name = binding.manifest.tool();
     let preparation = if binding.manifest.declaration().may_defer {
         ProviderPreparation::Live(None)
     } else {
@@ -185,7 +185,7 @@ async fn prepare_authorized_tool_call_with_context(
     pending: crate::sansio::PendingToolCall,
     preparation: ProviderPreparation<'_>,
 ) -> ToolPreparationOutcome {
-    let tool_name = manifest.name.clone();
+    let tool_name = manifest.tool();
     let ids = ToolCallIds::of_pending(&pending);
     let mut pending = pending;
     let hook_context = super::hooks::hook_context(
@@ -348,13 +348,15 @@ pub(super) async fn prepare_with_provider(
             ),
         ));
     }
-    if prepared.tool_name != manifest.name {
+    if prepared.tool_name != manifest.tool() {
         return Err(runtime_failure(
             ToolFailureClass::Internal,
             "prepared_tool_name_mismatch",
             format!(
                 "Tool provider prepared name `{}` for tool `{}`, expected `{}`",
-                prepared.tool_name, prepared.tool_id, manifest.name
+                prepared.tool_name,
+                prepared.tool_id,
+                manifest.tool()
             ),
         ));
     }
@@ -390,7 +392,7 @@ pub fn resolve_tool_argument_projection_policy(
         .tool_catalog
         .entries()
         .iter()
-        .find(|def| def.manifest.name == tool_name)
+        .find(|def| def.manifest.tool() == tool_name)
         .map(|def| def.manifest.argument_projection.clone())
         .unwrap_or_default()
 }

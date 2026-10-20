@@ -317,7 +317,7 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "const x = await tools.read_file({ path: \"foo\" });",
+                "const x = await tools.readFile({ path: \"foo\" });",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
@@ -351,7 +351,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "await tools.custom_frame_switch({});",
+                "await tools.customFrameSwitch({});",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
@@ -386,7 +386,7 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "const x = await tools.custom_fail({});",
+                "const x = await tools.customFail({});",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
@@ -785,7 +785,7 @@ fn rlm_exec_response_with_tool_calls(
         .iter()
         .map(|record| lash_core::ExecutedCall {
             result_summary: None,
-            operation: if record.tool == "finish" {
+            operation: if record.tool == "control.finish" {
                 "control.finish".into()
             } else {
                 format!("tools.{}", record.tool)

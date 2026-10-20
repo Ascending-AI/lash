@@ -80,7 +80,7 @@ impl lash_core::plugin::prompt::PromptSectionSource for McpGuidanceSections {
         servers
             .into_values()
             .filter_map(|pinned| {
-                let suffix = PromptSectionKey::new(naming::server_prefix(&pinned.server)).ok()?;
+                let suffix = PromptSectionKey::new(naming::server_segment(&pinned.server)).ok()?;
                 let text = format!("#### {}\n\n{}", pinned.server, pinned.text);
                 Some(PromptFamilySection {
                     suffix,

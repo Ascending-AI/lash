@@ -23,13 +23,20 @@ impl StandardProtocolConfig {
         catalog: &lash_core::ToolCatalog,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
         let config = self.tool_presenter.admit(&self.tool_presentation)?.config;
+        // A Standard-mode model calls each tool by its derived name.
+        let names = catalog
+            .entries()
+            .iter()
+            .map(|tool| tool.manifest.standard_name())
+            .collect::<Vec<_>>();
         let entries = catalog
             .entries()
             .iter()
-            .map(|tool| ToolPresentationEntry {
+            .zip(&names)
+            .map(|(tool, name)| ToolPresentationEntry {
                 manifest: &tool.manifest,
                 contract: &tool.contract,
-                call_path: &tool.manifest.name,
+                call_path: name,
                 pinned: false,
             })
             .collect::<Vec<_>>();

@@ -194,8 +194,8 @@ impl Lowerer<'_> {
         awaited: Operand,
         span: SourceSpan,
     ) -> Lowering<Operand> {
-        let offered =
-            EffectName::new(AWAIT_EFFECT).is_ok_and(|effect| self.effects.contains_key(&effect));
+        let offered = EffectName::new(AWAIT_EFFECT)
+            .is_ok_and(|effect| self.namespaces.operation(&effect).is_some());
         if !offered || self.is_bound("processes") {
             return Ok(awaited);
         }

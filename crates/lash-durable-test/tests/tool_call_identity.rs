@@ -22,7 +22,6 @@ mod served;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -30,8 +29,10 @@ use served::{Tier, World};
 
 /// The probe that answers at once, holds, or fails its first attempt.
 const PROBE: &str = "identity_probe";
+const PROBE_OPERATION: &str = "tools.identity_probe";
 /// The probe that parks on its completion key and resolves it itself.
 const DEFERRED: &str = "identity_deferred";
+const DEFERRED_OPERATION: &str = "tools.identity_deferred";
 
 /// One execution of a probe's body.
 #[derive(Clone, Debug)]
@@ -96,14 +97,13 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Records the identity its attempt saw and answers with its label.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
@@ -150,6 +150,9 @@ impl lash_core::ToolProvider for Probes {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [PROBE, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
@@ -160,7 +163,7 @@ impl lash_core::ToolProvider for Probes {
         let hold = call.args["hold"].as_bool().unwrap_or(false);
         let fail_first = call.args["fail_first"].as_bool().unwrap_or(false);
         let attempt = call.context.attempt_number();
-        if call.name() == DEFERRED && fail_first && attempt == 1 {
+        if call.name() == DEFERRED_OPERATION && fail_first && attempt == 1 {
             self.witness.executions.lock_recover().push(Execution {
                 label: label.clone(),
                 call_id: call.context.call_id().clone(),
@@ -175,7 +178,7 @@ impl lash_core::ToolProvider for Probes {
             ))
             .into();
         }
-        if call.name() == DEFERRED {
+        if call.name() == DEFERRED_OPERATION {
             let key = call
                 .context
                 .completion_key()
@@ -244,7 +247,7 @@ async fn world(tier: Tier) -> Option<(World, Arc<Witness>)> {
 }
 
 fn probe(call_id: &str, tool: &str, args: serde_json::Value) -> lash_core::llm::types::LlmResponse {
-    served::response(vec![served::call(call_id, tool, args)])
+    served::response(vec![served::call(call_id, &format!("tools.{tool}"), args)])
 }
 
 /// The labels the transcript's tool results answered, in order.
@@ -895,7 +898,7 @@ mod sqlite_memory_traced {
                     ..
                 } if *call_id == call.call_id => {
                     assert_eq!(provider_call_id.as_deref(), Some("provider-success"));
-                    assert_eq!(name, super::PROBE);
+                    assert_eq!(name, super::PROBE_OPERATION);
                     assert_eq!(args["label"], "success");
                     Some("started")
                 }

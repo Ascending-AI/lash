@@ -57,7 +57,6 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
             "k" | "main"
                 | "Final"
                 | "reassigned"
-                | "tools"
                 | "record"
                 | "spawn"
                 | "sleep"

@@ -1564,9 +1564,10 @@ impl<'a> ToolCall<'a> {
         &self.manifest.id
     }
 
-    /// The provider-facing tool name carried by the pinned manifest.
-    pub fn name(&self) -> &'a str {
-        &self.manifest.name
+    /// The tool's operation, by its effect name, carried by the pinned
+    /// manifest.
+    pub fn name(&self) -> String {
+        self.manifest.tool()
     }
 
     /// The admitted manifest, including the provider's recorded execution binding.
@@ -1658,7 +1659,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         self.tool_manifests(config)
             .ok()?
             .into_iter()
-            .find(|manifest| manifest.name == name)
+            .find(|manifest| manifest.tool() == name)
     }
     fn resolve_manifest_by_id(
         &self,
@@ -1677,7 +1678,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         config: &OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
         let manifest = self.resolve_manifest_by_id(id, config)?;
-        self.resolve_contract(&manifest.name, config)
+        self.resolve_contract(&manifest.tool(), config)
     }
     async fn prepare_tool_call(
         &self,

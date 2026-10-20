@@ -141,10 +141,9 @@ await control.finish(await handle);"#,
 struct RetryingDirectTools;
 
 fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         "tool:retrying_direct",
-        "retrying_direct",
+        "tools.retrying_direct",
         "Call a direct completion and retry the complete attempt once.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "string" }),
@@ -155,10 +154,6 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
         std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
         0,
         0,
-    ))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
-        ["tools"],
-        "retrying_direct",
     ))
 }
 
@@ -180,7 +175,8 @@ impl ToolProvider for RetryingDirectTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "retrying_direct").then(|| Arc::new(retrying_direct_tool_definition().contract()))
+        (name == "tools.retrying_direct")
+            .then(|| Arc::new(retrying_direct_tool_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -222,7 +218,7 @@ async fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once(
                 typescript_block(
                     r#"
 const retryDirect = async () => {
-  const value = await tools.retrying_direct({});
+  const value = await tools.retryingDirect({});
   return value;
 };
 const handle = await processes.start({ definition: retryDirect });
@@ -282,18 +278,15 @@ await control.finish(await handle);"#,
 struct OverflowPayloadTools(Arc<AtomicUsize>);
 
 fn overflow_payload_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            "tool:overflow_payload",
-            "overflow_payload",
-            "Return the oversized report.",
-            serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid tool schemas")
-        .with_execution(std::time::Duration::from_secs(30)),
-        "overflow_payload",
+    lash_core::ToolDefinition::raw(
+        "tool:overflow_payload",
+        "tools.overflow_payload",
+        "Return the oversized report.",
+        serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        serde_json::json!({ "type": "string" }),
     )
+    .expect("valid tool schemas")
+    .with_execution(std::time::Duration::from_secs(30))
 }
 
 #[async_trait]
@@ -310,7 +303,8 @@ impl ToolProvider for OverflowPayloadTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "overflow_payload").then(|| Arc::new(overflow_payload_definition().contract()))
+        (name == "tools.overflow_payload")
+            .then(|| Arc::new(overflow_payload_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -342,7 +336,7 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                     async move {
                         match call {
                             1 => Ok(text_response(&typescript_block(
-                                "const overflow_payload = await tools.overflow_payload({});\nconsole.log(overflow_payload.length);",
+                                "const overflow_payload = await tools.overflowPayload({});\nconsole.log(overflow_payload.length);",
                             ))),
                             2 => {
                                 assert_eq!(tool_calls.load(Ordering::SeqCst), 1);

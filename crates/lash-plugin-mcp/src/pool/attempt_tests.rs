@@ -16,7 +16,7 @@ async fn prepare(
             pending: lash_core::sansio::PendingToolCall {
                 call_id: context.call_id().clone(),
                 provider_call_id: None,
-                tool_name: manifest.name.clone(),
+                tool_name: manifest.tool(),
                 args: json!({}),
                 replay: None,
             },

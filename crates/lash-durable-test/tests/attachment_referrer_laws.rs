@@ -20,17 +20,19 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::{
-    ArtifactReferrer, AttachmentId, ClockWallTime as _, ToolDefinitionBindingExt as _, ToolProvider,
-};
+use lash_core::{ArtifactReferrer, AttachmentId, ClockWallTime as _, ToolProvider};
 use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Keep, Tier, WATCHDOG};
 
 const PUT_BLOB: &str = "put_blob";
+
+const PUT_BLOB_OPERATION: &str = "tools.put_blob";
 const HOLD: &str = "hold";
+const HOLD_OPERATION: &str = "tools.hold";
 const START_TURN_CHILD: &str = "start_turn_child";
+const START_TURN_CHILD_OPERATION: &str = "tools.start_turn_child";
 
 /// The component that serves the law's tools to a process body.
 const BLOB_COMPONENT: lash_core::ProcessConfigKey<()> =
@@ -102,14 +104,13 @@ impl Witness {
 fn tool_definition(name: &str, input: serde_json::Value) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         format!("The {name} law tool."),
         input,
         serde_json::json!({}),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 fn text_input() -> serde_json::Value {
@@ -255,6 +256,9 @@ impl ToolProvider for BlobTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         match name {
             PUT_BLOB => Some(Arc::new(put_blob_definition().contract())),
             HOLD => Some(Arc::new(hold_definition().contract())),
@@ -271,14 +275,14 @@ impl ToolProvider for BlobTools {
                 .unwrap_or_default()
                 .to_owned()
         };
-        match call.name() {
-            START_TURN_CHILD => {
+        match call.name().as_str() {
+            START_TURN_CHILD_OPERATION => {
                 return self
                     .start_turn_child(call.context, text())
                     .await
                     .unwrap_or_else(|error| lash_core::ToolOutcome::err_fmt(error).into());
             }
-            PUT_BLOB => {
+            PUT_BLOB_OPERATION => {
                 self.witness.puts.fetch_add(1, Ordering::SeqCst);
                 match call
                     .context
@@ -294,7 +298,7 @@ impl ToolProvider for BlobTools {
                     Err(error) => lash_core::ToolOutcome::err_fmt(error),
                 }
             }
-            HOLD => {
+            HOLD_OPERATION => {
                 self.witness.holds.fetch_add(1, Ordering::SeqCst);
                 self.witness.held.notify_waiters();
                 let release = self.witness.release.acquire();
@@ -744,7 +748,7 @@ async fn engine_and_session_turn_create_only_real_sessions(tier: Tier) {
         tier,
         vec![start_process_cell(
             "text: string",
-            "await tools.put_blob({ text: text })",
+            "await tools.putBlob({ text: text })",
             &format!("{{ text: {put:?} }}"),
         )],
     )
@@ -802,7 +806,7 @@ async fn delivered_attachment_survives_prune_and_replay_start_input(tier: Tier) 
         tier,
         vec![
             cell(format!(
-                "const started = await tools.start_turn_child({{ text: {put:?} }});
+                "const started = await tools.startTurnChild({{ text: {put:?} }});
 await control.finish(started);"
             )),
             cell("await tools.hold({});\nawait control.finish(\"child done\");"),
@@ -892,7 +896,7 @@ async fn process_referrer_cleanup_is_complete_without_sessions(tier: Tier) {
         tier,
         vec![start_process_cell(
             "first: string, second: string",
-            "{\n  const a = await tools.put_blob({ text: first });\n  const b = await tools.put_blob({ text: second });\n  return [a, b];\n}",
+            "{\n  const a = await tools.putBlob({ text: first });\n  const b = await tools.putBlob({ text: second });\n  return [a, b];\n}",
             &format!("{{ first: {first:?}, second: {second:?} }}"),
         )],
     )
@@ -1103,7 +1107,7 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
         tier,
         vec![start_process_cell(
             "text: string",
-            "{\n  const value = await tools.put_blob({ text: text });\n  await tools.hold({});\n  return value;\n}",
+            "{\n  const value = await tools.putBlob({ text: text });\n  await tools.hold({});\n  return value;\n}",
             &format!("{{ text: {put:?} }}"),
         )],
     )

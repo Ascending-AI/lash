@@ -5,7 +5,6 @@
 
 use super::*;
 use lash::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnEvent, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::atomic::AtomicBool;
@@ -13,7 +12,9 @@ use std::sync::atomic::AtomicBool;
 /// How long a cancelled turn may take to end.
 const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 const WATCH: &str = "watch_tool";
+const WATCH_OPERATION: &str = "tools.watch_tool";
 const RETRY: &str = "retry_once";
+const RETRY_OPERATION: &str = "tools.retry_once";
 
 /// A tool that reports whether it observed the cooperative token, and
 /// either holds until released or waits for the token itself.
@@ -47,14 +48,13 @@ impl TokenWatchingTool {
 fn tool_definition(name: &str) -> lash_core::ToolDefinition {
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A cancel-mode probe.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    .with_execution(std::time::Duration::from_secs(120));
     if name == RETRY {
         definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
@@ -80,7 +80,7 @@ impl ToolProvider for TokenWatchingTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == WATCH).then(|| Arc::new(tool_definition(WATCH).contract()))
+        (name == WATCH_OPERATION).then(|| Arc::new(tool_definition(WATCH).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -127,7 +127,7 @@ impl ToolProvider for RetryOnceTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == RETRY).then(|| Arc::new(tool_definition(RETRY).contract()))
+        (name == RETRY_OPERATION).then(|| Arc::new(tool_definition(RETRY).contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -181,7 +181,7 @@ fn tool_calling_model(
                     return Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "call-1".to_string(),
-                            tool_name: tool.to_string(),
+                            tool_name: format!("tools__{tool}"),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
@@ -221,7 +221,7 @@ fn gated_tool_calling_model(
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: "step-0-call".to_string(),
-                        tool_name: WATCH.to_string(),
+                        tool_name: WATCH_OPERATION.replace('.', "__"),
                         input_json: "{}".to_string(),
                         replay: None,
                     }],
@@ -782,7 +782,7 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
                                 },
                                 LlmOutputPart::ToolCall {
                                     call_id: "checkpoint-tool".to_string(),
-                                    tool_name: WATCH.to_string(),
+                                    tool_name: WATCH_OPERATION.replace('.', "__"),
                                     input_json: "{}".to_string(),
                                     replay: None,
                                 },

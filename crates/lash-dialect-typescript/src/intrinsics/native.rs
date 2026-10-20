@@ -214,10 +214,9 @@ impl Reader {
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(effect) = spelling
             .as_deref()
-            .and_then(|name| name.strip_prefix("tools."))
+            .and_then(|name| self.effects.get(name))
+            .cloned()
         {
-            let effect = k::EffectName::new(effect)
-                .map_err(|e| invalid(e.to_string(), Some(expr.span())))?;
             let result = match annotation {
                 Some(annotation) => decode_type(annotation, self.limits)?,
                 None => k::Type::Any,

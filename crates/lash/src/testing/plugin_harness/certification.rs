@@ -789,19 +789,15 @@ mod tests {
             panic!("the resolver is not an executable")
         }
     }
-    fn definition(id: &str, name: &str) -> Result<ToolDefinition, PluginError> {
+    fn definition(id: &str, operation: &str) -> Result<ToolDefinition, PluginError> {
         ToolDefinition::raw(
             id,
-            name,
-            name,
+            operation,
+            "A certification fixture tool.",
             serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             serde_json::json!({"type":"string"}),
         )
-        .map(|draft| {
-            draft
-                .with_execution(std::time::Duration::from_secs(1))
-                .with_tool_binding(ToolBinding::new(["tools"], name))
-        })
+        .map(|draft| draft.with_execution(std::time::Duration::from_secs(1)))
         .map_err(|error| PluginError::Registration(error.to_string()))
     }
     #[lash::async_trait]
@@ -845,13 +841,15 @@ mod tests {
     #[lash::async_trait]
     impl ToolProvider for Host {
         fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
-            Ok(vec![definition("host:lookup", "lookup")?.manifest])
+            Ok(vec![definition("host:lookup", "tools.lookup")?.manifest])
         }
         fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            if name != "lookup" {
+            if name != "tools.lookup" {
                 return None;
             }
-            Some(Arc::new(definition("host:lookup", "lookup").ok()?.contract))
+            Some(Arc::new(
+                definition("host:lookup", "tools.lookup").ok()?.contract,
+            ))
         }
         async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
             ToolOutcome::ok(serde_json::json!("ok")).into()
@@ -926,9 +924,8 @@ mod tests {
                 crate::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
                     empty,
                     resolutions,
-                    definition: definition("remote:send_email", "send_email")?,
-                    workflow: definition("remote:workflows_create", "workflows_create")?
-                        .with_tool_binding(ToolBinding::new(["workflows"], "create")),
+                    definition: definition("remote:send_email", "tools.send_email")?,
+                    workflow: definition("remote:workflows_create", "workflows.create")?,
                 })),
             ),
         )))
@@ -940,7 +937,7 @@ mod tests {
     async fn certification_decodes_each_cell_report_once() {
         let decoded = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
-            code: "await tools.lookup({}); await tools.send_email({}); await tools.send_email({}); await tools.send_email({});",
+            code: "await tools.lookup({}); await tools.sendEmail({}); await tools.sendEmail({}); await tools.sendEmail({});",
             callback: PluginCallbackIdentity::tool_provider("resolver", "deferred"),
             deferred: None,
         });

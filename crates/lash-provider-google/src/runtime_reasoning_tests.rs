@@ -47,7 +47,7 @@ struct RuntimeLookupTool;
 fn runtime_lookup_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:lookup",
-        "lookup",
+        "tools.lookup",
         "Look up a value.",
         json!({
             "type": "object",
@@ -78,7 +78,7 @@ impl lash_core::ToolProvider for RuntimeLookupTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "lookup").then(|| Arc::new(runtime_lookup_definition().contract()))
+        (name == "tools.lookup").then(|| Arc::new(runtime_lookup_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -103,7 +103,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
             "thought":true
         }]}}]}}),
         json!({"response":{"candidates":[{"content":{"parts":[{
-            "functionCall":{"id":"call-1","name":"lookup","args":{"q":"x"}}
+            "functionCall":{"id":"call-1","name":"tools__lookup","args":{"q":"x"}}
         }]}}]}}),
         json!({"response":{"candidates":[{
             "content":{"parts":[{

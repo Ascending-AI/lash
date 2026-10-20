@@ -16,15 +16,13 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use lash::tools::{
     CataloguePreviewOptions, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
-    ExecutionBinding, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding,
-    ToolBindingResolutionExt, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt,
-    ToolFailure, ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
+    ExecutionBinding, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall,
+    ToolContract, ToolDefinition, ToolFailure, ToolId, ToolManifest, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-const SEARCH_TOOL_NAME: &str = "search_tools";
 const SEARCH_CALL_PATH: &str = "tools.search";
 /// The key the workbench declares its deferred provider under.
 pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::ToolProviderKey =
@@ -219,7 +217,7 @@ impl DeferredToolProvider for WorkbenchDeferredProvider {
         self.catalogue
             .definitions
             .iter()
-            .map(|(path, definition)| (definition.name().to_owned(), path.clone()))
+            .map(|(path, definition)| (definition.manifest.tool(), path.clone()))
             .collect()
     }
     async fn resolve(
@@ -277,7 +275,7 @@ impl ToolProvider for WorkbenchDeferredProvider {
             .catalogue
             .definitions
             .values()
-            .find(|definition| definition.name() == call.name())
+            .find(|definition| definition.manifest.tool() == call.name())
         else {
             return ToolOutcome::err_fmt(format_args!("unknown deferred tool `{}`", call.name()))
                 .into();
@@ -322,6 +320,7 @@ impl DeferredCatalogue {
                 search_call_path: SEARCH_CALL_PATH.to_string(),
                 module_limit: PREVIEW_MODULE_LIMIT,
                 call_name_limit: PREVIEW_CALL_NAME_LIMIT,
+                ..CataloguePreviewOptions::default()
             },
         )
         .expect("workbench deferred catalogue is not empty")
@@ -350,7 +349,7 @@ impl DeferredCatalogue {
                 let haystack = format!(
                     "{} {} {}",
                     call_path,
-                    definition.name(),
+                    definition.manifest.tool(),
                     definition.description()
                 )
                 .to_ascii_lowercase();
@@ -393,7 +392,7 @@ impl DeferredSearchResult {
             signature: discovered_tool_signature(
                 &CellDialect::typescript(),
                 &json!({}),
-                &ToolBinding::from_path(call_path),
+                definition.operation(),
                 input,
                 &contract.output_schema.canonical,
             )
@@ -453,7 +452,7 @@ impl StaticToolExecute for SearchDeferredTools {
 fn search_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "workbench:search_tools",
-        SEARCH_TOOL_NAME,
+        "tools.search",
         "Search the deferred workbench utility catalogue by capability. Discovered operations become callable in your next code block.",
         json!({
             "type": "object",
@@ -486,23 +485,11 @@ fn search_tool_definition() -> ToolDefinition {
         }),
     ).expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tools"], "search"))
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "every workbench deferred definition carries a serialized, executable call-path \
-              tool binding (see workbench_deferred_definitions), so all three walks succeed"
-)]
+/// The path a TypeScript cell calls `definition` by.
 fn deferred_call_path(definition: &ToolDefinition) -> String {
-    definition
-        .manifest()
-        .tool_binding()
-        .expect("deferred binding serializes")
-        .expect("deferred workbench tools have call-path bindings")
-        .executable_for(definition.name())
-        .expect("deferred workbench binding is executable")
-        .call_path()
+    lash::dialect::spell_operation(lash::dialect::Spelling::TypeScript, definition.operation())
 }
 
 fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
@@ -605,14 +592,13 @@ fn utility_definition(
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("workbench:deferred:{name}"),
-        format!("workbench_deferred_{name}"),
+        format!("{}.{operation}", module.join(".")),
         description,
         input_schema,
         output_schema,
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(module, operation))
 }
 
 fn one_field_schema(field: &str, ty: &str) -> Value {

@@ -1,5 +1,14 @@
 {
   "context": {
+    "control.finish": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
     "corpus.capture": {
       "params": [
         {
@@ -49,15 +58,6 @@
       "result": "any"
     },
     "display.show_message": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
-    },
-    "finish": {
       "params": [
         {
           "name": "input",

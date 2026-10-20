@@ -11,7 +11,7 @@
 //! saved function of the name reads (FIG-5799). The rows cost nothing:
 //! they are host bookkeeping, not guest memory.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use lash_kernel_doc::Name;
@@ -294,28 +294,6 @@ impl SessionRoot {
         }
         Ok(())
     }
-}
-
-/// Which of `names` the session `session` binds, read through `source`: a
-/// point lookup per name, never a full listing.
-///
-/// # Errors
-///
-/// The heap's faults reading the bindings' pages.
-pub fn bound_names<'a>(
-    session: &SessionRoot,
-    names: impl IntoIterator<Item = &'a Name>,
-    source: Box<dyn PageSource>,
-) -> Result<BTreeSet<Name>, HeapFault> {
-    let access = Access::new(source);
-    let tree = Tree::<BindingRecord>::of_keyed(&session.bindings);
-    let mut bound = BTreeSet::new();
-    for name in names {
-        if tree.get(&metadata_key(name), &access)?.is_some() {
-            bound.insert(name.clone());
-        }
-    }
-    Ok(bound)
 }
 
 /// A session name's notes as stored: the reason as a paged text.

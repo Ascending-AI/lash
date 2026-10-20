@@ -206,7 +206,7 @@ fn trim_guard_keeps_receiver_coercion_errors_and_prints() {
         const throwing = {toString() { console.log('coerce'); throw 17; }};
         let thrown = false;
         try { String.prototype.trim.call(throwing); } catch (e) { thrown = e === 17; }
-        await finish(calls === 3 && errors === 2 && thrown && a === '😀 x' && b === '😀 x \u3000' && c === '\uFEFF 😀 x' && String.prototype.trim.call(42) === '42');
+        await control.finish(calls === 3 && errors === 2 && thrown && a === '😀 x' && b === '😀 x \u3000' && c === '\uFEFF 😀 x' && String.prototype.trim.call(42) === '42');
     "#.trim());
     let recorded = super::machine::run(
         "const receiver = {toString() { console.log('coerce'); throw 17; }}; try { String.prototype.trim.call(receiver); } catch (e) { console.log(e); }",

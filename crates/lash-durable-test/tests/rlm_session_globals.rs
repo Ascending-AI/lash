@@ -33,8 +33,6 @@ mod web_fetch;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_core::ToolDefinitionBindingExt as _;
-
 use served::{Tier, World};
 use web_fetch::Fetch;
 
@@ -399,6 +397,7 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
 const PAGES_SESSION: &str = "multi-turn-pages";
 /// The host tool whose nested result each turn binds.
 const RECORDS: &str = "records";
+const RECORDS_OPERATION: &str = "tools.records";
 /// How many turns the page laws run.
 const PAGE_TURNS: usize = 3;
 
@@ -439,14 +438,13 @@ fn page_builder(
 ) -> lash::LashCoreBuilder {
     let definition = lash_core::ToolDefinition::raw(
         RECORDS,
-        RECORDS,
+        RECORDS_OPERATION,
         "Answers the nested records of a turn.",
         serde_json::json!({ "type": "object", "properties": { "turn": { "type": "integer" } } }),
         serde_json::json!({ "type": "array" }),
     )
     .expect("records' schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], RECORDS));
+    .with_execution(std::time::Duration::from_secs(120));
     lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers)).tools(
         lash::tool_provider_key!("tools"),
         Arc::new(lash::tools::StaticToolProvider::new(

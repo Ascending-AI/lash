@@ -183,9 +183,9 @@ fn tool_contract_types_are_nameable(record: ToolCallRecord, contract: ToolOutput
 
 fn tool_catalog_types_are_nameable(
     contribution: ToolCatalogContribution,
-    module: lash::tools::ToolModule,
+    operation: lash::tools::QualifiedOperation,
 ) {
-    let _ = (contribution, module);
+    let _ = (contribution, operation);
 }
 
 fn message_role_type_is_nameable(role: MessageRole) -> &'static str {
@@ -339,7 +339,7 @@ fn schema_dialect_types_are_nameable() {
     let _: SchemaProjectionOverride = contract.projection.overrides()[0].clone();
     let _ = lash::tools::ToolDefinition::raw(
         "schema",
-        "schema",
+        "tools.schema",
         "Schema",
         serde_json::json!({}),
         serde_json::json!({}),

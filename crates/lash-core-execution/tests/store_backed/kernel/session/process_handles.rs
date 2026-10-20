@@ -22,7 +22,7 @@ mod tests {
             .iter()
             .filter_map(|manifest| {
                 provider
-                    .resolve_contract(&manifest.name, &crate::plugin::OwnerConfigView::default())
+                    .resolve_contract(&manifest.tool(), &crate::plugin::OwnerConfigView::default())
                     .map(|contract| (manifest.id.clone(), contract))
             })
             .collect();
@@ -37,7 +37,7 @@ mod tests {
     fn process_tool_definition() -> ToolDefinition {
         ToolDefinition::raw(
             "tool:process_prepare",
-            "process_prepare",
+            "tools.process_prepare",
             "Records preparation before background registration.",
             serde_json::json!({
                 "type": "object",
@@ -69,7 +69,8 @@ mod tests {
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
         ) -> Option<Arc<crate::ToolContract>> {
-            (name == "process_prepare").then(|| Arc::new(process_tool_definition().contract()))
+            (name == "tools.process_prepare")
+                .then(|| Arc::new(process_tool_definition().contract()))
         }
 
         async fn prepare_tool_call(

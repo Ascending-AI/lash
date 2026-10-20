@@ -2,7 +2,7 @@
 use crate::{GeneratedSourceLimits, PrintOptions};
 use arbitrary::{Arbitrary, Unstructured};
 use lash_kernel_doc as k;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     let printed = crate::print(
@@ -170,12 +170,10 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
     )
     .unwrap();
     let library = lash_kernel_dialect::NamedLibrary::from_registry(&built.registry).unwrap();
-    let env = lash_kernel_dialect::Environment {
-        library: &library,
-        effects: &BTreeMap::new(),
-        controls: &BTreeMap::new(),
-        tool_roots: &BTreeSet::new(),
-    };
+    let env_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
+    let env = lash_kernel_dialect::Environment::new(&library, &env_namespaces);
     let ts_batch = [
         "const x = [1,2]; console.log(x[0] + 3);",
         "function twice(x) { return x + x; } console.log(twice(4));",
@@ -520,8 +518,16 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     );
     let nested_type = "{\"list\":".repeat(360) + "\"any\"" + &"}".repeat(360);
     let source = format!("async def main():\n    await tools.deep(result={nested_type})\n");
+    let mut performing = document.clone();
+    performing.manifest.effects.insert(
+        k::EffectName::new("tools.deep").unwrap(),
+        k::OperationRequirement::of_signature(k::Signature {
+            params: vec![],
+            result: k::Type::Any,
+        }),
+    );
     assert_eq!(
-        crate::read(&source, &document, Default::default())
+        crate::read(&source, &performing, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
@@ -791,7 +797,7 @@ fn inventory_document() -> k::Document {
             ],
         },
         A::Perform {
-            effect: k::EffectName::new("echo").unwrap(),
+            effect: k::EffectName::new("host.echo").unwrap(),
             args: vec![],
             result: inventory_types(),
             then_yield: false,
@@ -801,7 +807,7 @@ fn inventory_document() -> k::Document {
             then_yield: false,
         },
         A::Perform {
-            effect: k::EffectName::new("echo").unwrap(),
+            effect: k::EffectName::new("host.echo").unwrap(),
             args: vec![],
             result: k::Type::Any,
             then_yield: true,
@@ -884,7 +890,7 @@ fn inventory_document() -> k::Document {
         },
     );
     document.manifest.effects.insert(
-        k::EffectName::new("echo").unwrap(),
+        k::EffectName::new("host.echo").unwrap(),
         k::OperationRequirement::of_signature(k::Signature {
             params: vec![],
             result: inventory_types(),
@@ -1684,10 +1690,10 @@ fn discarded_expressions_have_exact_source_inverses() {
     let document = k::parse_document(
         r#"kernel 1
 numbers float
-effect show(value: Any) -> Any
+effect display.show(value: Any) -> Any
 fn child() { return null }
 main {
-  do perform show({text: "x"}) as Any
+  do perform display.show({text: "x"}) as Any
   do {text: "pure"}
   do clock
   do fn() start() -> Any bare direct { return null }
@@ -1701,5 +1707,9 @@ main {
     )
     .unwrap();
     let printed = roundtrip(&document, true);
-    assert!(printed.source.contains("tools.show"), "{}", printed.source);
+    assert!(
+        printed.source.contains("await display.show("),
+        "{}",
+        printed.source
+    );
 }

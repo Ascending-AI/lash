@@ -27,7 +27,7 @@ const LLM_QUERY_ANSWER: &str = r#"{"kind":"value","value":{"answer":"covered"},"
 
 fn args_for(tool_name: &str) -> serde_json::Value {
     match tool_name {
-        "llm_query" => serde_json::json!({
+        "llm.query" => serde_json::json!({
             "task": "Return the covered answer",
             "inputs": {"answer": "covered"},
             "output": {"answer": "str"}
@@ -40,7 +40,7 @@ fn args_for(tool_name: &str) -> serde_json::Value {
 
 fn typescript_source_for(tool_name: &str) -> &'static str {
     match tool_name {
-        "llm_query" => {
+        "llm.query" => {
             r#"const result = await llm.query({
   task: "Return the covered answer",
   inputs: { answer: "covered" },
@@ -132,8 +132,8 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
         "the first-party tool registry must not be empty"
     );
     for manifest in manifests {
-        let _ = args_for(&manifest.name);
-        let input = format!("first-party conformance: {}", manifest.name);
+        let _ = args_for(&manifest.tool());
+        let input = format!("first-party conformance: {}", manifest.tool());
         let executions = Arc::new(AtomicUsize::new(0));
         let direct_calls = Arc::new(AtomicUsize::new(0));
         let tools = Arc::new(CountingFirstPartyProvider {
@@ -145,7 +145,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
             Vec::new(),
             model(
                 input.clone(),
-                typescript_source_for(&manifest.name).to_owned(),
+                typescript_source_for(&manifest.tool()).to_owned(),
                 Arc::clone(&direct_calls),
             ),
             move |backend| {
@@ -168,24 +168,24 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
         .await
         .expect("deadlock watchdog: the turn settles")
         .expect("the turn answers");
-        served::assert_answered(&manifest.name, &output);
+        served::assert_answered(&manifest.tool(), &output);
         assert_eq!(
             output.finished().map(|(_, value)| value),
             Some(&serde_json::json!({ "answer": "covered" })),
             "the production cell answers {}'s result",
-            manifest.name
+            manifest.tool()
         );
         assert_eq!(
             executions.load(Ordering::SeqCst),
             1,
             "{} runs once from the production cell",
-            manifest.name
+            manifest.tool()
         );
         assert_eq!(
             direct_calls.load(Ordering::SeqCst),
             1,
             "{} issues its direct completion once",
-            manifest.name
+            manifest.tool()
         );
         world.shutdown().await;
     }

@@ -17,7 +17,6 @@ use lash::process::{
     EngineLaunch, HostArtifactPin, Lifetime, ProcessConfigKey, ProcessDefinition, ProcessEnv,
     ProcessOriginator, ProcessStartRequest,
 };
-use lash_core::ToolDefinitionBindingExt;
 
 use super::{Args, Case, Meter, Receipt, facade};
 use probes::{LiveReplayProbe, ProcessReplayProbe};
@@ -106,14 +105,13 @@ const WORKLOAD_TOOLS: ProcessConfigKey<()> =
 fn mark_definition() -> Result<lash_core::ToolDefinition> {
     Ok(lash_core::ToolDefinition::raw(
         "tool:mark",
-        "mark",
+        "tools.mark",
         "Synthetic observation workload step",
         serde_json::json!({"type":"object","properties":{"key":{"type":"string"}},
             "required":["key"],"additionalProperties":false}),
         serde_json::json!({"type":"object"}),
     )?
-    .with_execution(Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "mark").with_authority_type("Tools")))
+    .with_execution(Duration::from_secs(120)))
 }
 
 impl Tools {
@@ -153,7 +151,7 @@ impl lash_core::ToolProvider for Tools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "mark").then(|| Arc::new(self.mark.contract()))
+        (name == "tools.mark").then(|| Arc::new(self.mark.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let start = Instant::now();
@@ -370,7 +368,8 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
     for (effect, requirement) in &mut document.manifest.effects {
         *requirement = lash::workflow::document::OperationRequirement::of_signature(
             offered
-                .effects()
+                .checker()
+                .effects
                 .get(effect)
                 .with_context(|| format!("this host offers no effect `{effect}`"))?
                 .clone(),

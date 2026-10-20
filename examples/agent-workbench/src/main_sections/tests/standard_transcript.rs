@@ -9,7 +9,7 @@ struct Echo;
 fn definition() -> lash::tools::ToolDefinition {
     lash::tools::ToolDefinition::raw(
         "tool:transcript_echo",
-        "transcript_echo",
+        "tools.transcript_echo",
         "Returns the round it was asked for.",
         json!({"type": "object"}),
         json!({"type": "object"}),
@@ -32,7 +32,7 @@ impl lash::tools::ToolProvider for Echo {
         name: &str,
         _config: &lash::tools::OwnerConfigView,
     ) -> Option<Arc<lash::tools::ToolContract>> {
-        (name == "transcript_echo").then(|| Arc::new(definition().contract()))
+        (name == "tools.transcript_echo").then(|| Arc::new(definition().contract()))
     }
 
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
@@ -65,14 +65,14 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
                     if round == 1 {
                         parts.push(LlmOutputPart::ToolCall {
                             call_id: "refused".into(),
-                            tool_name: "transcript_echo".into(),
+                            tool_name: "tools__transcript_echo".into(),
                             input_json: "{".into(),
                             replay: None,
                         });
                     }
                     parts.push(LlmOutputPart::ToolCall {
                         call_id: format!("round-{round}"),
-                        tool_name: "transcript_echo".into(),
+                        tool_name: "tools__transcript_echo".into(),
                         input_json: json!({"round": round}).to_string(),
                         replay: None,
                     });

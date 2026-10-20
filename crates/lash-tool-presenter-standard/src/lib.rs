@@ -74,15 +74,22 @@ impl ToolPresenter for StandardToolPresenter {
             .iter()
             .map(|tool| contract_documents(tool.contract))
             .collect::<Result<Vec<_>, _>>()?;
+        let standard_names = request
+            .tools
+            .iter()
+            .map(|tool| tool.manifest.standard_name())
+            .collect::<Vec<_>>();
         let reserved = request
             .reserved_names
             .iter()
             .map(String::as_str)
-            .chain(request.tools.iter().flat_map(|tool| {
-                tool.call_path
-                    .split('.')
-                    .chain([tool.manifest.name.as_str()])
-            }))
+            .chain(
+                request
+                    .tools
+                    .iter()
+                    .flat_map(|tool| tool.call_path.split('.')),
+            )
+            .chain(standard_names.iter().map(String::as_str))
             .collect::<Vec<_>>();
         let initial = |selected: &[bool]| {
             let all_documents = documents
@@ -163,10 +170,13 @@ impl ToolPresenter for StandardToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(
-            compact_contract(manifest, contract, &manifest.name, &Self::config(config)?)?
-                .render_markdown(),
-        )
+        Ok(compact_contract(
+            manifest,
+            contract,
+            &manifest.standard_name(),
+            &Self::config(config)?,
+        )?
+        .render_markdown())
     }
 }
 

@@ -67,10 +67,13 @@ running and the dialect's repair. A bound the run passed is
 
 ## Tools are effects
 
-Each catalog tool is offered to a cell as a kernel effect under the path a
-cell of the session's dialect writes (`web.fetch` in TypeScript, `web_fetch`
-in Python), with a signature typed from the tool's schemas in the cell's
-manifest. A call path the source writes that no catalog tool answers goes
+Each catalog tool is offered to a cell as a kernel effect under its
+operation: one canonical effect name (`inbox.send_item`) in every dialect and
+mode, which each dialect's source spells by its own rule (`inbox.sendItem` in
+TypeScript, `inbox.send_item` in Python), with a signature typed from the
+tool's schemas in the cell's manifest. The offered operations, deferred
+grants and unavailable notes included, are one map that the front end
+resolves dotted calls through; a binding shadows a package root lexically. A call path the source writes that no catalog tool answers goes
 to the host's deferred resolver once per cell; a granted tool is offered as
 an effect of that cell and recorded with it. A `perform` is admitted as the
 tool's own execution under the call identity the broker derives, and the

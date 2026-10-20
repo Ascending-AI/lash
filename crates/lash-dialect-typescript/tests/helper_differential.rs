@@ -131,7 +131,7 @@ fn host_random_matches_injected_top_53_bits_exactly() {
         let case = Case {
             id: format!("bits-{bits}"),
             dialect: "typescript".into(),
-            source: "await observe(Math.random());".into(),
+            source: "await host.observe(Math.random());".into(),
             bits,
             stride: 0,
             nanoseconds: 0,
@@ -152,7 +152,7 @@ fn host_random_counter_draws_cover_both_halves_exactly() {
     let case = Case {
         id: "counter-4096".into(),
         dialect: "typescript".into(),
-        source: "for (let i=0; i<4096; i++) { await observe(Math.random()); }".into(),
+        source: "for (let i=0; i<4096; i++) { await host.observe(Math.random()); }".into(),
         bits: 0,
         stride,
         nanoseconds: 0,
@@ -203,7 +203,7 @@ fn host_clock_helpers_match_injected_instant_exactly() {
         ),
     ] {
         let case = Case { id: "clock".into(), dialect: "typescript".into(), bits: 0, stride: 0, nanoseconds: ns,
-            source: "const d = new Date(); await observe([Date.now(), d.getTime(), d.toISOString(), [d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds(),d.getUTCMilliseconds()], Date() === d.toString()]);".into() };
+            source: "const d = new Date(); await host.observe([Date.now(), d.getTime(), d.toISOString(), [d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds(),d.getUTCMilliseconds()], Date() === d.toString()]);".into() };
         let expected = Datum::List(vec![
             Datum::Float(ms.into()),
             Datum::Float(ms.into()),

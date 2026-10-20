@@ -1,4 +1,4 @@
-# deliver: echo:a1; echo:b1; echo:late; sleep:30; sleep:10; sleep:20
+# deliver: host.echo:a1; host.echo:b1; host.echo:late; sleep:30; sleep:10; sleep:20
 import asyncio
 trace = []
 async def step(tag, pauses):
@@ -13,7 +13,7 @@ trace.append("main goes on")
 print(await second, trace)
 print(await first, await first, trace)
 async def fetch(tag):
-    return await echo(tag)
+    return await host.echo(tag)
 a = asyncio.create_task(fetch("a1"))
 b = asyncio.create_task(fetch("b1"))
 print(await b, await a)
@@ -21,7 +21,7 @@ async def fail(tag):
     await asyncio.sleep(0)
     raise ValueError(tag)
 async def slow(tag):
-    trace.append(await echo(tag))
+    trace.append(await host.echo(tag))
     return tag
 doomed = asyncio.create_task(fail("task failed"))
 try:
@@ -40,7 +40,7 @@ async def nap(tag, seconds):
     return seconds
 print(await asyncio.gather(nap("x", 0.03), nap("y", 0.01), nap("z", 0.02)), trace[-4:])
 async def inner():
-    return await echo("inner")
+    return await host.echo("inner")
 async def outer():
     return [await inner(), await inner()]
 print(await outer())

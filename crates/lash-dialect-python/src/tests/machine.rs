@@ -64,10 +64,10 @@ pub(crate) fn library() -> &'static NamedLibrary {
     &installed().library
 }
 
-/// The tools a cell may call: `echo(x)` answers `x` and `boom(x)` fails
+/// The tools a cell may call: `host.echo(x)` answers `x` and `host.boom(x)` fails
 /// with an error of kind `boom` whose message is `x`.
 pub(crate) fn effects() -> BTreeMap<EffectName, Signature> {
-    ["echo", "boom"]
+    ["host.echo", "host.boom"]
         .into_iter()
         .map(|name| {
             let signature = Signature {
@@ -92,12 +92,11 @@ fn lower_with(
 ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     crate::lower(
         source,
-        &Environment {
-            tool_roots: &std::collections::BTreeSet::new(),
-            library: library(),
-            effects,
-            controls: controls(),
-        },
+        &Environment::new(
+            library(),
+            &lash_kernel_dialect::Namespaces::of_signatures(effects, controls())
+                .expect("the test's effects are operations"),
+        ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
             bindings,
             functions: &BTreeMap::new(),
@@ -105,7 +104,7 @@ fn lower_with(
     )
 }
 
-/// The laws' turn-ending tool: `control_finish(x)` ends the turn with `x`,
+/// The laws' turn-ending tool: `control.finish(x)` ends the turn with `x`,
 /// where a law's host offers it.
 pub(crate) fn controls() -> &'static std::collections::BTreeMap<
     lash_kernel_doc::EffectName,
@@ -119,7 +118,7 @@ pub(crate) fn controls() -> &'static std::collections::BTreeMap<
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         std::collections::BTreeMap::from([(
-            lash_kernel_doc::EffectName::new("control_finish").expect("a tool's name"),
+            lash_kernel_doc::EffectName::new("control.finish").expect("a tool's name"),
             std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )])
     })
@@ -227,7 +226,7 @@ fn shown(datum: Option<&Datum>) -> String {
     }
 }
 
-/// What a request is called in a delivery script: `echo:a`, `boom:x`,
+/// What a request is called in a delivery script: `host.echo:a`, `host.boom:x`,
 /// `sleep:50`.
 fn label(request: &Request) -> String {
     match request {
@@ -241,7 +240,7 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
         Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
         Request::Effect(effect) => {
             let argument = effect.args.first().cloned().unwrap_or(Datum::Null);
-            let outcome = if effect.effect.as_str() == "boom" {
+            let outcome = if effect.effect.as_str() == "host.boom" {
                 Outcome::Failed(ErrorDatum {
                     kind: "boom".to_string(),
                     message: shown(Some(&argument)),
@@ -646,7 +645,7 @@ fn run_cell(
 #[test]
 #[should_panic(expected = "unused delivery batches")]
 fn witness_rejects_unused_delivery_batches() {
-    run("print('done')", &[vec!["echo:unused".into()]]);
+    run("print('done')", &[vec!["host.echo:unused".into()]]);
 }
 
 // These previous definitions are held only by this law, as sealed releases
@@ -737,7 +736,7 @@ body {
 "#;
 
 const ARITHMETIC_RESUME: &str = "\
-n = await echo(7)
+n = await host.echo(7)
 x = n + 3
 y = n - 3
 n += 3
@@ -890,12 +889,11 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
     for named in [library(), &previous] {
         let lowered = crate::lower(
             ARITHMETIC_RESUME,
-            &Environment {
-                tool_roots: &BTreeSet::new(),
-                library: named,
-                effects: &effects,
-                controls: &BTreeMap::new(),
-            },
+            &Environment::new(
+                named,
+                &lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+                    .expect("the test's effects are operations"),
+            ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .expect("the arithmetic witness lowers");
@@ -910,7 +908,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             "{:?}",
             straight.end
         );
-        assert_eq!(straight.requests, ["echo:7"]);
+        assert_eq!(straight.requests, ["host.echo:7"]);
         assert_eq!(
             execution_observation(
                 program,
@@ -1126,7 +1124,7 @@ s = 9223372036854775807
 for i in range(3):
     s += i
     if i == 1:
-        await echo(s)
+        await host.echo(s)
 print(s)
 "#;
     assert!(!kernel_text(source).contains("py.iadd"));
@@ -1139,7 +1137,7 @@ print(s)
     let straight = execution_observation(program.clone(), BOUNDS, false);
     assert!(matches!(straight.end, End::Finished(_)));
     assert_eq!(straight.lines, ["9223372036854775810"]);
-    assert_eq!(straight.requests, ["echo:9223372036854775808"]);
+    assert_eq!(straight.requests, ["host.echo:9223372036854775808"]);
     assert_eq!(
         execution_observation(
             program,
@@ -1269,8 +1267,8 @@ except TypeError as error:
             "TypeError 'str' object cannot be interpreted as an integer",
         ],
     );
-    let source = "for i in ITER:\n    print(i)\n    await echo(i)\nprint(i)\n";
-    let args = "await echo(1), await echo(4), await echo(1)";
+    let source = "for i in ITER:\n    print(i)\n    await host.echo(i)\nprint(i)\n";
+    let args = "await host.echo(1), await host.echo(4), await host.echo(1)";
     let counted = run(&source.replace("ITER", &format!("range({args})")), &[]);
     let eager = run(
         &source.replace("ITER", &format!("list(range({args}))")),
@@ -1570,8 +1568,8 @@ for i in stored:
 #[test]
 fn python_awaits_add_no_turn() {
     let source = "import asyncio\n\
-        async def in_place():\n    v = await echo('i')\n    print(v)\n\
-        async def inner():\n    return await echo('p')\n\
+        async def in_place():\n    v = await host.echo('i')\n    print(v)\n\
+        async def inner():\n    return await host.echo('p')\n\
         async def promised():\n    t = asyncio.create_task(inner())\n    v = await t\n    print(v)\n\
         a = asyncio.create_task(in_place())\n\
         b = asyncio.create_task(promised())\n\
@@ -1579,7 +1577,10 @@ fn python_awaits_add_no_turn() {
     let text = kernel_text(source);
     assert!(!text.contains("then yield"), "{text}");
     assert!(text.contains("via py.await"), "{text}");
-    for order in [["echo:i", "echo:p"], ["echo:p", "echo:i"]] {
+    for order in [
+        ["host.echo:i", "host.echo:p"],
+        ["host.echo:p", "host.echo:i"],
+    ] {
         let recorded = run(source, &[order.map(String::from).to_vec()]);
         assert_eq!(recorded.lines(), ["i", "p"], "{order:?}");
         assert_eq!(recorded.end, "ok");
@@ -1600,7 +1601,7 @@ for n in range(3):
     xs.append(part)
 print(text, '|'.join(xs))
 print(xs.append(alias.pop()))
-xs.append(await echo('last'))
+xs.append(await host.echo('last'))
 print(xs)
 "#;
     let text = kernel_text(source);
@@ -1699,7 +1700,7 @@ async def build():
         part = 'λ' + str(n)
         text += part
         parts.append(part)
-    parts.append(await echo(text))
+    parts.append(await host.echo(text))
     print(parts)
 await build()
 "#;

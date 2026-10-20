@@ -43,7 +43,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_core::runtime::durable::session::SessionActivation;
@@ -100,18 +99,18 @@ enum Cell {
 impl Cell {
     fn source(self) -> String {
         let body = match self {
-            Self::ReadWriteRead => "const a = await tools.ext_read({ x: 1 });\n\
-                 const w = await tools.ext_write({ x: a.v });\n\
-                 const b = await tools.ext_read({ x: 2 });\n\
+            Self::ReadWriteRead => "const a = await tools.extRead({ x: 1 });\n\
+                 const w = await tools.extWrite({ x: a.v });\n\
+                 const b = await tools.extRead({ x: 2 });\n\
                  console.log([a.v, b.v]);"
                 .to_owned(),
             Self::Reads(n) => format!(
                 "let s = 0;\n\
-                 for (let i = 0; i < {n}; i++) {{ const r = await tools.ext_read({{ x: i }}); s = s + r.v; }}\n\
+                 for (let i = 0; i < {n}; i++) {{ const r = await tools.extRead({{ x: i }}); s = s + r.v; }}\n\
                  console.log(s);"
             ),
             Self::ReadThenSleep => format!(
-                "const a = await tools.ext_read({{ x: 1 }});\n\
+                "const a = await tools.extRead({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
                  console.log(a.v);"
             ),
@@ -150,7 +149,7 @@ impl ExternalWorld {
             .lock_recover()
             .values()
             .flatten()
-            .filter(|(tool, _)| tool == WRITE)
+            .filter(|(tool, _)| *tool == format!("tools.{WRITE}"))
             .filter_map(|(_, args)| written_x(args))
             .collect()
     }
@@ -161,7 +160,7 @@ impl ExternalWorld {
             .lock_recover()
             .values()
             .flatten()
-            .filter(|(tool, _)| tool != WRITE)
+            .filter(|(tool, _)| *tool != format!("tools.{WRITE}"))
             .map(|(tool, _)| tool.clone())
             .collect()
     }
@@ -199,7 +198,11 @@ struct WorldReads {
 #[async_trait::async_trait]
 impl lash::tools::ToolReads for WorldReads {
     async fn read(&self, call: lash::tools::ReadCall<'_>) -> Result<Value, lash::tools::ReadError> {
-        assert_eq!(call.manifest.name, READ, "the reader answers its own tool");
+        assert_eq!(
+            call.manifest.tool(),
+            format!("tools.{READ}"),
+            "the reader answers its own tool"
+        );
         let x = written_x(call.args).expect("a read names its x");
         let mut reads = self.world.reads.lock_recover();
         let answer = i64::try_from(reads.len()).unwrap() + 1;
@@ -211,7 +214,7 @@ impl lash::tools::ToolReads for WorldReads {
 fn definition(name: &str, policy: ExecutionPolicy) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         name,
-        name,
+        format!("tools.{name}"),
         "A host call the cell read laws watch.",
         json!({
             "type": "object",
@@ -223,7 +226,6 @@ fn definition(name: &str, policy: ExecutionPolicy) -> lash_core::ToolDefinition 
     .expect("the tool's schemas")
     .with_execution(Duration::from_secs(120))
     .with_execution_policy(policy)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 /// The token a node serves when it registers `ext_read`'s reader, and a

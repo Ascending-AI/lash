@@ -5,7 +5,6 @@
 use super::*;
 
 use lash::TurnInput;
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::{LlmOutputPart, LlmResponse};
 use std::collections::VecDeque;
 use tokio::sync::Mutex as TokioMutex;
@@ -17,14 +16,13 @@ struct DiscoveryTools {
 fn definition(name: &str) -> lash_core::ToolDefinition {
     let mut tool = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         format!("Read {name}."),
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"string"}),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["tools"], name));
+    .with_execution(std::time::Duration::from_secs(120));
     tool.manifest.inline = name != "hidden";
     tool
 }
@@ -46,6 +44,9 @@ impl ToolProvider for DiscoveryTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         ["search", "hidden"]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
@@ -74,9 +75,14 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "discovery-call".into(),
-                    tool_name: if mode == "batch" { "batch" } else { "hidden" }.into(),
+                    tool_name: if mode == "batch" {
+                        "batch"
+                    } else {
+                        "tools__hidden"
+                    }
+                    .into(),
                     input_json: if mode == "batch" {
-                        serde_json::json!({"tool_calls":[{"tool":"hidden","parameters":{}}]})
+                        serde_json::json!({"tool_calls":[{"tool":"tools__hidden","parameters":{}}]})
                             .to_string()
                     } else {
                         "{}".into()
@@ -98,7 +104,12 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 let responses = responses.clone();
                 let captured = captured.clone();
                 async move {
-                    assert!(request.tools.iter().all(|tool| tool.name != "hidden"));
+                    assert!(
+                        request
+                            .tools
+                            .iter()
+                            .all(|tool| tool.name != "tools__hidden")
+                    );
                     captured.lock_recover().push(request.messages);
                     Ok(responses
                         .lock()
@@ -132,7 +143,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                     lash_protocol_standard::StandardProtocolConfig {
                         discovery: Some(lash_core::ToolDiscovery {
-                            operation: "search".into(),
+                            operation: "tools.search".into(),
                         }),
                         ..lash_protocol_standard::StandardProtocolConfig::default()
                     },
@@ -173,7 +184,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
                 panic!("the unlisted tool is refused: {call:?}");
             };
-            assert_eq!(call.tool, "hidden");
+            assert_eq!(call.tool, "tools.hidden");
             assert_eq!(failure.code, "unknown_tool");
             assert_eq!(failure.class, lash_core::ToolFailureClass::Unavailable);
             assert_eq!(
@@ -199,12 +210,12 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 results,
                 vec![(
                     "discovery-call",
-                    Some("hidden"),
+                    Some("tools__hidden"),
                     lash_protocol_types::ToolCallStatus::Failure
                 )]
             );
         } else {
-            assert_eq!(*calls.lock_recover(), ["hidden"], "{mode}");
+            assert_eq!(*calls.lock_recover(), ["tools.hidden"], "{mode}");
             if mode == "rlm" {
                 assert!(output.is_success(), "{mode}");
             } else {

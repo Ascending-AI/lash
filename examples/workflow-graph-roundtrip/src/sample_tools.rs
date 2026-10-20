@@ -6,7 +6,6 @@ type Record = Map<String, JsonValue>;
 pub(crate) struct SampleOperation {
     kind: SampleOperationKind,
     pub module: &'static str,
-    pub resource_type: &'static str,
     pub operation: &'static str,
     pub host_operation: &'static str,
     pub label: &'static str,
@@ -30,7 +29,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::ResearchSearch,
         module: "research",
-        resource_type: "MockResearch",
         operation: "search",
         host_operation: "research.search",
         label: "Find research sources",
@@ -38,7 +36,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::ResearchSynthesize,
         module: "research",
-        resource_type: "MockResearch",
         operation: "synthesize",
         host_operation: "research.synthesize",
         label: "Write cited research brief",
@@ -46,7 +43,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::MetricsFetch,
         module: "metrics",
-        resource_type: "MockMetrics",
         operation: "fetch",
         host_operation: "metrics.fetch",
         label: "Fetch business metrics",
@@ -54,7 +50,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::MetricsReport,
         module: "metrics",
-        resource_type: "MockMetrics",
         operation: "report",
         host_operation: "metrics.report",
         label: "Compare reporting periods",
@@ -62,7 +57,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::GmailListRecent,
         module: "gmail",
-        resource_type: "MockGmail",
         operation: "list_recent",
         host_operation: "gmail.list_recent",
         label: "List recent emails",
@@ -70,7 +64,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::LlmQuery,
         module: "llm",
-        resource_type: "MockLlm",
         operation: "query",
         host_operation: "llm_query",
         label: "Query LLM",
@@ -78,7 +71,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::WebSearch,
         module: "web",
-        resource_type: "MockWeb",
         operation: "search",
         host_operation: "search_web",
         label: "Search the web",
@@ -86,7 +78,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::AgentsSpawn,
         module: "agents",
-        resource_type: "MockAgents",
         operation: "spawn",
         host_operation: "spawn_agent",
         label: "Spawn subagent",
@@ -94,7 +85,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::SlackRecent,
         module: "slack",
-        resource_type: "MockSlack",
         operation: "recent",
         host_operation: "slack.recent",
         label: "Get recent Slack messages",
@@ -102,7 +92,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::GithubRecent,
         module: "github",
-        resource_type: "MockGithub",
         operation: "recent",
         host_operation: "github.recent",
         label: "Get recent GitHub activity",
@@ -289,7 +278,7 @@ fn array_schema(properties: JsonValue, required: &[&str]) -> JsonValue {
 pub(crate) fn apply_tool(name: &str, args: &JsonValue) -> Result<JsonValue, String> {
     let operation = OPERATIONS
         .iter()
-        .find(|operation| operation.host_operation.replace('.', "_") == name)
+        .find(|operation| format!("{}.{}", operation.module, operation.operation) == name)
         .ok_or_else(|| format!("unknown sample tool `{name}`"))?;
     let args = args
         .as_object()
@@ -664,7 +653,7 @@ mod tests {
     #[test]
     fn mock_reports_use_the_supplied_evidence_and_metrics() {
         let research = apply_tool(
-            "research_synthesize",
+            "research.synthesize",
             &json!({
                 "topic": "Changed question",
                 "sources": [{"id": "one", "title": "Supplied source", "url": "https://example.com/one", "excerpt": "Only this finding was supplied."}]
@@ -684,18 +673,18 @@ mod tests {
         );
 
         let mut current = apply_tool(
-            "metrics_fetch",
+            "metrics.fetch",
             &json!({"workspace": "Test", "period": "current"}),
         )
         .expect("current snapshot");
         let previous = apply_tool(
-            "metrics_fetch",
+            "metrics.fetch",
             &json!({"workspace": "Test", "period": "previous"}),
         )
         .expect("previous snapshot");
         current["revenue"] = json!(22_500);
         let report = apply_tool(
-            "metrics_report",
+            "metrics.report",
             &json!({"workspace": "Test", "current": current, "previous": previous}),
         )
         .expect("report");

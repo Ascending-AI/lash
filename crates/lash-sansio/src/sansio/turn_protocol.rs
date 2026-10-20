@@ -324,6 +324,35 @@ pub struct ExecutionEnvironmentSync {
     /// them, and a turn that must end through a control checks one can.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub turn_controls: std::collections::BTreeMap<String, lash_protocol_types::TurnControls>,
+    /// The operation each surface tool's Standard-mode name calls, for the
+    /// names joining the operation's segments with `__` does not give back:
+    /// those truncated with a digest. Every other name calls the operation
+    /// its `__` joins spell ([`Self::operation_named`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub truncated_names: std::collections::BTreeMap<String, String>,
+}
+
+impl ExecutionEnvironmentSync {
+    /// The operation a Standard-mode call of `name` performs, by its effect
+    /// name: the surface's truncated name table first, else `name`'s `__`
+    /// joins read back as the operation's segments. A segment holds no
+    /// `__`, so the reading is exact; a name no surface tool derives reads
+    /// as an operation the surface does not offer.
+    pub fn operation_named(&self, name: &str) -> String {
+        self.truncated_names
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.replace("__", "."))
+    }
+
+    /// The Standard-mode name a model calls `operation` by: the inverse of
+    /// [`Self::operation_named`].
+    pub fn standard_name_of(&self, operation: &str) -> String {
+        self.truncated_names
+            .iter()
+            .find(|(_, truncated)| *truncated == operation)
+            .map_or_else(|| operation.replace('.', "__"), |(name, _)| name.clone())
+    }
 }
 
 /// Lower a call's composed prompt onto `request`, which a projector rendered
@@ -817,6 +846,18 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
+    }
+
+    /// The operation a Standard-mode call of `name` performs
+    /// ([`ExecutionEnvironmentSync::operation_named`]).
+    pub fn operation_named(&self, name: &str) -> String {
+        self.environment.operation_named(name)
+    }
+
+    /// The Standard-mode name of `operation`
+    /// ([`ExecutionEnvironmentSync::standard_name_of`]).
+    pub fn standard_name_of(&self, operation: &str) -> String {
+        self.environment.standard_name_of(operation)
     }
 
     /// Whether a call to the tool `name` ends the turn: the synced surface

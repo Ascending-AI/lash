@@ -22,7 +22,6 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -35,14 +34,13 @@ fn inspect_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:status_tool/{INSPECT}"),
-        INSPECT,
+        format!("status_tool.{}", INSPECT),
         "Inspects the process the call names by id.",
         object.clone(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("the inspector's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["status_tool"], INSPECT))
 }
 
 /// Records every process id it was handed.
@@ -68,7 +66,8 @@ impl lash_core::ToolProvider for Inspector {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == INSPECT).then(|| Arc::new(inspect_definition().contract()))
+        (name == format!("status_tool.{INSPECT}"))
+            .then(|| Arc::new(inspect_definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -227,7 +226,7 @@ fn session_provider(owner: &str) -> lash::plugins::ToolProviderHandle {
 fn send_item(id: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         id,
-        "send_item",
+        "inbox.send_item",
         "Sends one item.",
         serde_json::json!({
             "type": "object",
@@ -247,7 +246,6 @@ fn send_item(id: &str) -> lash_core::ToolDefinition {
     )
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["inbox"], "send_item"))
 }
 
 /// One body entry of `send_item`: what it sent, under which call, with the
@@ -492,12 +490,12 @@ async fn started_process_captures_committed_deferred_binding(tier: Tier) {
             "deferred-start",
             served::spec(64),
             vec![served::cell(&format!(
-                "const sent = await inbox.send_item({{ text: \"cell\" }});\n\
+                "const sent = await inbox.sendItem({{ text: \"cell\" }});\n\
                  const worker = async () => {{\n  \
                    await sleep({SLEEP_MS});\n  \
-                   const mine = await inbox.send_item({{ text: \"process\" }});\n  \
+                   const mine = await inbox.sendItem({{ text: \"process\" }});\n  \
                    const started = await processes.start({{\n    \
-                     definition: async () => await inbox.send_item({{ text: \"child\" }}),\n  \
+                     definition: async () => await inbox.sendItem({{ text: \"child\" }}),\n  \
                    }});\n  \
                    const theirs = await started;\n  \
                    return {{ mine: mine.route, theirs: theirs.route }};\n\
@@ -578,7 +576,7 @@ async fn captured_deferred_codec_is_required_before_execution(tier: Tier) {
         return;
     };
     let cell = served::cell(
-        "const worker = async () => { return await inbox.send_item({ text: \"process\" }); };\n\
+        "const worker = async () => { return await inbox.sendItem({ text: \"process\" }); };\n\
          let refused = \"\";\n\
          try { await processes.start({ definition: worker }); } catch (e) { refused = String(e); }\n\
          await control.finish(refused);",

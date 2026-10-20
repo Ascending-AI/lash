@@ -146,7 +146,7 @@ async fn a_turns_model_call_carries_its_typed_turn_run_and_attempt() {
 async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
     let definition = lash_core::ToolDefinition::control(
         "switch_frame",
-        "switch_frame",
+        "tools.switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -166,7 +166,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
             Ok(LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "facade-frame-switch-call".to_owned(),
-                    tool_name: "switch_frame".to_owned(),
+                    tool_name: "tools__switch_frame".to_owned(),
                     input_json: "{}".to_owned(),
                     replay: None,
                 }],
@@ -263,7 +263,7 @@ async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_se
     assert!(
         !accounts
             .offered_to("first")
-            .contains(&ACCOUNT_TOOL.to_owned())
+            .contains(&format!("tools__{ACCOUNT_TOOL}"))
     );
 
     let admin = accounts
@@ -312,7 +312,7 @@ async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_se
     assert!(
         accounts
             .offered_to("second")
-            .contains(&ACCOUNT_TOOL.to_owned()),
+            .contains(&format!("tools__{ACCOUNT_TOOL}")),
         "the next turn offers the account's tool"
     );
     accounts.core.shutdown().await.expect("shutdown");
@@ -368,7 +368,7 @@ async fn a_refresh_queued_during_a_turn_applies_after_its_commit_and_the_next_tu
     assert!(
         !accounts
             .offered_to("hold")
-            .contains(&ACCOUNT_TOOL.to_owned())
+            .contains(&format!("tools__{ACCOUNT_TOOL}"))
     );
 
     let settled = commands.settle(receipt).await.expect("the refresh settles");
@@ -382,7 +382,7 @@ async fn a_refresh_queued_during_a_turn_applies_after_its_commit_and_the_next_tu
     assert!(
         accounts
             .offered_to("after")
-            .contains(&ACCOUNT_TOOL.to_owned()),
+            .contains(&format!("tools__{ACCOUNT_TOOL}")),
         "the next turn offers the account's tool"
     );
     accounts.core.shutdown().await.expect("shutdown");

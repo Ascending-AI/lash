@@ -4,9 +4,10 @@
 
 use super::*;
 use lash::TurnInput;
-use lash_core::ToolDefinitionBindingExt as _;
 
 const SLOW: &str = "slow";
+
+const SLOW_OPERATION: &str = "tools.slow";
 
 /// A tool that answers every call at once.
 struct Answering;
@@ -14,14 +15,13 @@ struct Answering;
 fn definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{SLOW}"),
-        SLOW,
+        SLOW_OPERATION,
         "Answers at once.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], SLOW))
 }
 
 #[async_trait]
@@ -38,7 +38,7 @@ impl ToolProvider for Answering {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SLOW).then(|| Arc::new(definition().contract()))
+        (name == SLOW_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -128,7 +128,7 @@ fn deploy(
                         return Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "call-presented".to_string(),
-                                tool_name: SLOW.to_string(),
+                                tool_name: SLOW_OPERATION.replace('.', "__"),
                                 input_json: "{}".to_string(),
                                 replay: None,
                             }],
@@ -171,7 +171,7 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() -> Result<()> {
             vec![lash_core::facade_support::ModelToolReturnPart::text(
                 "plugin session error: presentation fixture failed"
             )],
-            SLOW.to_string()
+            SLOW_OPERATION.to_string()
         )],
         "the next step is handed the failed step's fallback"
     );

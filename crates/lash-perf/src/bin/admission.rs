@@ -123,12 +123,11 @@ fn main() -> Result<()> {
     )]);
     let bindings = BTreeSet::new();
     let functions = BTreeMap::new();
-    let environment = lash_kernel_dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &controls,
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+            .context("the spike's effects are operations")?;
+    let environment =
+        lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let lowered = embedding
         .lower(
             "typescript",

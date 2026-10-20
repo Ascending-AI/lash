@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
-use crate::core_support::TOOL_BINDING_KEY;
 use crate::{
     JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
     ToolCatalogBuildError, ToolDeclaration,
 };
+pub use lash_kernel_dialect::QualifiedOperation;
 
 /// The contract for executing one logical call, pinned before its first attempt.
 ///
@@ -376,17 +374,6 @@ fn is_inline(value: &bool) -> bool {
     *value
 }
 
-/// The module a tool belongs to: a grouping name the catalog and hosts
-/// present its tools under. Guidance about a module is a prompt section its
-/// plugin registers, never manifest metadata.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct ToolModule {
-    pub name: String,
-}
-
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
 /// there is no per-manifest tier. Its schemas stay in [`ToolContract`]; how
@@ -400,11 +387,14 @@ pub struct ToolManifest {
     #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
     pub inline: bool,
     pub id: ToolId,
-    pub name: String,
+    /// The operation a document performs the tool as, and the tool's key in
+    /// a catalog and a recorded surface. Its model-facing name is derived
+    /// ([`Self::standard_name`]).
+    #[schemars(with = "String")]
+    #[serde(with = "lash_kernel_dialect::operation_text")]
+    pub operation: QualifiedOperation,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module: Option<Arc<ToolModule>>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub bindings: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(
@@ -440,11 +430,10 @@ struct ManifestRecord {
     #[serde(default = "inline_default")]
     inline: bool,
     id: ToolId,
-    name: String,
+    #[serde(with = "lash_kernel_dialect::operation_text")]
+    operation: QualifiedOperation,
     #[serde(default)]
     description: String,
-    #[serde(default)]
-    module: Option<Arc<ToolModule>>,
     #[serde(default)]
     bindings: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(default)]
@@ -468,7 +457,7 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
     {
         let record = ManifestRecord::deserialize(deserializer)?;
         let missing_execution = || RegistrationRefused::MissingBound {
-            tool: record.name.clone(),
+            tool: record.operation.effect_name().to_string(),
             bound: ToolBound::Execution,
         };
         let execution = record
@@ -478,9 +467,8 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
         Self {
             inline: record.inline,
             id: record.id,
-            name: record.name,
+            operation: record.operation,
             description: record.description,
-            module: record.module,
             bindings: record.bindings,
             argument_projection: record.argument_projection,
             execution_policy: record.execution_policy,
@@ -494,7 +482,26 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
     }
 }
 
+/// The longest model-facing tool name.
+const STANDARD_NAME_BUDGET: usize = 64;
+
 impl ToolManifest {
+    /// The tool's model-facing name in Standard mode: its operation's
+    /// segments joined with `__` (`inbox__send_item`). A canonical segment
+    /// holds no `__`, so distinct operations get distinct names. A name over
+    /// the budget is truncated and ends in `_h` and eight base32 characters
+    /// of the effect name's digest.
+    #[must_use]
+    pub fn standard_name(&self) -> String {
+        standard_name(&self.operation)
+    }
+
+    /// The tool as a refusal or a log names it: its effect name.
+    #[must_use]
+    pub fn tool(&self) -> String {
+        self.operation.effect_name().to_string()
+    }
+
     /// How long one run of the tool's body may take.
     #[must_use]
     pub fn execution(&self) -> std::time::Duration {
@@ -551,14 +558,14 @@ impl ToolManifest {
         park: Option<ParkBound>,
         isolation_engine: Option<String>,
     ) -> Result<Self, RegistrationRefused> {
-        let tool = || self.name.clone();
+        let tool = || self.tool();
         declaration
             .validate()
             .map_err(|cause| RegistrationRefused::Declaration {
                 tool: tool(),
                 cause,
             })?;
-        if let Some(refused) = read_refusal(&self.name, self.execution_policy, &declaration) {
+        if let Some(refused) = read_refusal(&self.tool(), self.execution_policy, &declaration) {
             return Err(refused);
         }
         match (declaration.may_defer, park) {
@@ -595,8 +602,42 @@ impl ToolManifest {
     /// other policy. A surface refuses a tool this names.
     #[must_use]
     pub fn read_refusal(&self) -> Option<RegistrationRefused> {
-        read_refusal(&self.name, self.execution_policy, &self.declaration)
+        read_refusal(&self.tool(), self.execution_policy, &self.declaration)
     }
+}
+
+/// The Standard-mode name of `operation` ([`ToolManifest::standard_name`]).
+#[must_use]
+pub fn standard_name(operation: &QualifiedOperation) -> String {
+    let joined = operation
+        .package
+        .iter()
+        .chain(std::iter::once(&operation.name))
+        .map(|segment| segment.as_str())
+        .collect::<Vec<_>>()
+        .join("__");
+    if joined.len() <= STANDARD_NAME_BUDGET {
+        return joined;
+    }
+    let suffix = format!("_h{}", digest_tag(operation.effect_name().as_str()));
+    let mut head = joined[..STANDARD_NAME_BUDGET - suffix.len()].to_owned();
+    while head.ends_with('_') {
+        head.pop();
+    }
+    head + &suffix
+}
+
+/// Eight lower-case base32 characters of the digest of `text`: the suffix a
+/// truncated or disambiguated name ends in.
+#[must_use]
+pub fn digest_tag(text: &str) -> String {
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let digest = blake3::hash(text.as_bytes());
+    let bytes = digest.as_bytes();
+    let bits = u64::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], 0, 0, 0]);
+    (0..8)
+        .map(|index| char::from(ALPHABET[((bits >> (59 - 5 * index)) & 31) as usize]))
+        .collect()
 }
 
 /// The refusal of `declaration` under a `Read` `policy`.
@@ -644,7 +685,7 @@ pub struct ToolContract {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolContractIdentity {
     id: ToolId,
-    name: String,
+    operation: QualifiedOperation,
 }
 
 impl Default for ToolContract {
@@ -690,14 +731,14 @@ impl ToolContract {
     /// process-local identity. Standalone/deserialized contracts do not and
     /// must use a provider's authoritative by-id resolution path instead.
     pub fn matches_manifest_identity(&self, manifest: &ToolManifest) -> bool {
-        self.identity
-            .as_ref()
-            .is_some_and(|identity| identity.id == manifest.id && identity.name == manifest.name)
+        self.identity.as_ref().is_some_and(|identity| {
+            identity.id == manifest.id && identity.operation == manifest.operation
+        })
     }
 
     pub fn model_tool(&self, manifest: &ToolManifest) -> ModelTool {
         ModelTool {
-            name: manifest.name.clone(),
+            name: manifest.standard_name(),
             description: manifest.description.clone(),
             input_schema: self.input_schema.clone(),
             output_schema: self.output_schema.clone(),
@@ -727,7 +768,7 @@ pub struct ToolDefinition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolDraft {
     id: ToolId,
-    name: String,
+    operation: QualifiedOperation,
     description: String,
     bindings: std::collections::BTreeMap<String, serde_json::Value>,
     contract: ToolContract,
@@ -741,9 +782,9 @@ impl ToolDraft {
         &self.id
     }
 
-    /// Tool name.
-    pub fn name(&self) -> &str {
-        &self.name
+    /// The operation a document performs the tool as.
+    pub fn operation(&self) -> &QualifiedOperation {
+        &self.operation
     }
 
     /// The tool's canonical schema contract.
@@ -754,7 +795,7 @@ impl ToolDraft {
     /// The tool as a model is offered it.
     pub fn model_tool(&self) -> ModelTool {
         ModelTool {
-            name: self.name.clone(),
+            name: standard_name(&self.operation),
             description: self.description.clone(),
             input_schema: self.contract.input_schema.clone(),
             output_schema: self.contract.output_schema.clone(),
@@ -768,9 +809,8 @@ impl ToolDraft {
             manifest: ToolManifest {
                 inline: true,
                 id: self.id,
-                name: self.name,
+                operation: self.operation,
                 description: self.description,
-                module: None,
                 bindings: self.bindings,
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 execution_policy: default_tool_execution_policy(),
@@ -792,20 +832,71 @@ pub struct ModelTool {
     pub output_schema: SchemaContract,
 }
 
+/// What names a tool's operation: a [`QualifiedOperation`], or its effect
+/// name (`inbox.send_item`), checked canonical where it is given.
+pub trait IntoOperation {
+    /// # Errors
+    ///
+    /// Why the text names no canonical operation.
+    fn into_operation(self) -> Result<QualifiedOperation, String>;
+}
+
+impl IntoOperation for QualifiedOperation {
+    fn into_operation(self) -> Result<QualifiedOperation, String> {
+        Ok(self)
+    }
+}
+
+impl IntoOperation for &QualifiedOperation {
+    fn into_operation(self) -> Result<QualifiedOperation, String> {
+        Ok(self.clone())
+    }
+}
+
+impl IntoOperation for &str {
+    fn into_operation(self) -> Result<QualifiedOperation, String> {
+        lash_kernel_dialect::operation_text::parse(self)
+    }
+}
+
+impl IntoOperation for String {
+    fn into_operation(self) -> Result<QualifiedOperation, String> {
+        self.as_str().into_operation()
+    }
+}
+
+impl IntoOperation for &String {
+    fn into_operation(self) -> Result<QualifiedOperation, String> {
+        self.as_str().into_operation()
+    }
+}
+
 impl ToolDefinition {
+    /// A tool performed as `operation`, taking `input_schema` and giving
+    /// `output_schema`.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolCatalogBuildError`]: an operation that is not canonical, or a
+    /// schema that is not admitted.
     pub fn raw(
         id: impl Into<ToolId>,
-        name: impl Into<String>,
+        operation: impl IntoOperation,
         description: impl Into<String>,
         input_schema: serde_json::Value,
         output_schema: serde_json::Value,
     ) -> Result<ToolDraft, ToolCatalogBuildError> {
         let id = id.into();
-        let name = name.into();
+        let operation = operation.into_operation().map_err(|message| {
+            ToolCatalogBuildError::InvalidOperation {
+                tool_id: id.clone(),
+                message,
+            }
+        })?;
         let admit = |schema, purpose| {
             SchemaContract::admit(schema).map_err(|source| ToolCatalogBuildError::UnusableSchema {
                 tool_id: id.clone(),
-                name: name.clone(),
+                operation: operation.effect_name().to_string(),
                 purpose,
                 source,
             })
@@ -820,14 +911,14 @@ impl ToolDefinition {
             contract: ToolContract {
                 identity: Some(ToolContractIdentity {
                     id: id.clone(),
-                    name: name.clone(),
+                    operation: operation.clone(),
                 }),
                 input_schema,
                 output_schema,
                 ..ToolContract::default()
             },
             id,
-            name,
+            operation,
         })
     }
 
@@ -840,14 +931,14 @@ impl ToolDefinition {
     /// [`ToolCatalogBuildError`] for an input schema that is not admitted.
     pub fn control(
         id: impl Into<ToolId>,
-        name: impl Into<String>,
+        operation: impl IntoOperation,
         description: impl Into<String>,
         input_schema: serde_json::Value,
         controls: crate::TurnControls,
     ) -> Result<ToolDraft, ToolCatalogBuildError> {
         let mut draft = Self::raw(
             id,
-            name,
+            operation,
             description,
             input_schema,
             serde_json::json!({ "type": "null" }),
@@ -858,7 +949,7 @@ impl ToolDefinition {
 
     pub fn typed<Args, Output>(
         id: impl Into<ToolId>,
-        name: impl Into<String>,
+        operation: impl IntoOperation,
         description: impl Into<String>,
     ) -> Result<ToolDraft, ToolCatalogBuildError>
     where
@@ -867,7 +958,7 @@ impl ToolDefinition {
     {
         Self::raw(
             id,
-            name,
+            operation,
             description,
             schema_for::<Args>(),
             schema_for::<Output>(),
@@ -914,7 +1005,7 @@ impl ToolDefinition {
         let defined = &self.manifest.declaration.controls;
         if defined.is_empty() && !declaration.controls.is_empty() {
             return Err(RegistrationRefused::ControlDeclaresOutput {
-                tool: self.manifest.name.clone(),
+                tool: self.manifest.tool(),
             });
         }
         if let Some(finish) = defined.finish_declaration() {
@@ -930,7 +1021,7 @@ impl ToolDefinition {
     }
 
     /// This finish tool typed by `value_schema`: its input, and the value of
-    /// every Finish it emits, must match it. Its id, name, binding, bounds
+    /// every Finish it emits, must match it. Its id, operation, bounds
     /// and policy stay, so the provider that runs it runs it unchanged: a
     /// run that offers it so through its restricted tool access changes the
     /// final value's shape for that run alone. `None` when the tool declares
@@ -1028,9 +1119,9 @@ impl ToolDefinition {
         &self.manifest.id
     }
 
-    /// Tool name.
-    pub fn name(&self) -> &str {
-        &self.manifest.name
+    /// The operation a document performs the tool as.
+    pub fn operation(&self) -> &QualifiedOperation {
+        &self.manifest.operation
     }
 
     /// Tool description.
@@ -1051,7 +1142,7 @@ impl ToolDefinition {
         let mut contract = self.contract.clone();
         contract.identity = Some(ToolContractIdentity {
             id: self.manifest.id.clone(),
-            name: self.manifest.name.clone(),
+            operation: self.manifest.operation.clone(),
         });
         contract
     }
@@ -1061,14 +1152,11 @@ impl ToolDefinition {
     pub fn from_parts(manifest: ToolManifest, mut contract: ToolContract) -> Self {
         contract.identity = Some(ToolContractIdentity {
             id: manifest.id.clone(),
-            name: manifest.name.clone(),
+            operation: manifest.operation.clone(),
         });
         Self { manifest, contract }
     }
 }
-
-mod binding;
-pub use binding::{ToolBinding, ToolDefinitionBindingExt};
 
 /// The JSON Schema of `T`, as schemars generates it.
 pub fn schema_for<T>() -> serde_json::Value
@@ -1100,7 +1188,7 @@ mod authored_examples_tests {
                 "{refused}"
             );
             let definition = serde_json::json!({
-                "manifest": { "id": "tool:legacy", "name": "legacy", "execution": { "secs": 30, "nanos": 0 } },
+                "manifest": { "id": "tool:legacy", "operation": "tools.legacy", "execution": { "secs": 30, "nanos": 0 } },
                 "contract": contract,
             });
             let refused = serde_json::from_value::<ToolDefinition>(definition)
@@ -1111,7 +1199,7 @@ mod authored_examples_tests {
             );
         }
         let mut definition = serde_json::json!({
-            "manifest": { "id": "tool:legacy", "name": "legacy", "execution": { "secs": 30, "nanos": 0 } },
+            "manifest": { "id": "tool:legacy", "operation": "tools.legacy", "execution": { "secs": 30, "nanos": 0 } },
             "contract": {},
         });
         serde_json::from_value::<ToolDefinition>(definition.clone())

@@ -53,11 +53,7 @@ impl TypescriptToolPresenter {
     fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
         let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
         let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
-        let mut pool = TypescriptDefinitions::new(
-            tool.call_path
-                .split('.')
-                .chain([tool.manifest.name.as_str()]),
-        );
+        let mut pool = TypescriptDefinitions::new(tool.call_path.split('.'));
         pool.reserve_document(&input);
         pool.reserve_document(&output);
         render_tool_doc(tool, &input, &output, &mut pool)
@@ -95,11 +91,10 @@ impl ToolPresenter for TypescriptToolPresenter {
         let initial = |selected: &[bool]| {
             let mut pool = TypescriptDefinitions::new(
                 request.reserved_names.iter().map(String::as_str).chain(
-                    request.tools.iter().flat_map(|tool| {
-                        tool.call_path
-                            .split('.')
-                            .chain([tool.manifest.name.as_str()])
-                    }),
+                    request
+                        .tools
+                        .iter()
+                        .flat_map(|tool| tool.call_path.split('.')),
                 ),
             );
             for ((input, output), selected) in documents.iter().zip(selected) {
@@ -145,10 +140,7 @@ impl ToolPresenter for TypescriptToolPresenter {
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
         Self::config(config)?;
-        let mut lines = vec![
-            manifest.name.clone(),
-            manifest.description.trim().to_string(),
-        ];
+        let mut lines = vec![manifest.tool(), manifest.description.trim().to_string()];
         for schema in [
             &contract.input_schema.canonical,
             &contract.output_schema.canonical,

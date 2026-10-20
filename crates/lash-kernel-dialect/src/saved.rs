@@ -12,7 +12,7 @@ use lash_kernel_doc::snapshot::{
 };
 use lash_kernel_doc::{
     Action, Callee, Document, EffectName, Expr, Function, FunctionCatalog, FunctionId,
-    FunctionRepresentation, Name, OperationRequirement, Rhs, Signature, Site, Stmt, Unit,
+    FunctionRepresentation, Name, OperationRequirement, Rhs, Site, Stmt, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
@@ -683,8 +683,7 @@ pub fn install(
     functions: &BTreeMap<Name, SavedFunction>,
     roots: &BTreeSet<Name>,
     values: &FunctionRepresentation,
-    effects: &BTreeMap<EffectName, Signature>,
-    controls: &BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
+    namespaces: &crate::Namespaces,
     installed: &dyn Fn(&FunctionId) -> bool,
 ) -> Result<BTreeMap<Name, InstalledFunction>, Unusable> {
     let mut declarations = BTreeMap::new();
@@ -703,20 +702,20 @@ pub fn install(
             return Err(Unusable::Numbers { function: name });
         }
         for (effect, requirement) in &function.document.manifest.effects {
-            if effects.contains_key(effect) && controls.contains_key(effect) {
-                return Err(Unusable::EffectControls {
-                    function: name,
-                    effect: effect.clone(),
-                });
-            }
-            match effects.get(effect) {
+            match namespaces.operation(effect) {
+                Some((_, offered)) if !offered.controls.is_empty() => {
+                    return Err(Unusable::EffectControls {
+                        function: name,
+                        effect: effect.clone(),
+                    });
+                }
                 None => {
                     return Err(Unusable::EffectMissing {
                         function: name,
                         effect: effect.clone(),
                     });
                 }
-                Some(v) if *v != requirement.signature => {
+                Some((_, offered)) if offered.requirement.signature != requirement.signature => {
                     return Err(Unusable::EffectSignature {
                         function: name,
                         effect: effect.clone(),

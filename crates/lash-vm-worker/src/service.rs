@@ -22,8 +22,7 @@ pub(crate) fn perform(
             source,
             bindings,
             functions,
-            effects,
-            controls,
+            operations,
             helpers,
         } => {
             let library = match embedding.library_for(helpers) {
@@ -36,16 +35,15 @@ pub(crate) fn perform(
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error));
                 }
             };
+            let namespaces = match embedding.namespaces(operations) {
+                Ok(namespaces) => namespaces,
+                Err(refused) => return respond(&namespace_refused(&refused)),
+            };
             match embedding.dialects.get(&dialect) {
                 None => Response::UnknownDialect { dialect },
                 Some(package) => match package.front_end.tool_calls(
                     &source,
-                    &lash_kernel_dialect::Environment {
-                        library,
-                        effects: &effects,
-                        tool_roots: &Default::default(),
-                        controls: &controls,
-                    },
+                    &lash_kernel_dialect::Environment::new(library, &namespaces),
                     lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
                         functions: &functions
@@ -62,24 +60,20 @@ pub(crate) fn perform(
         Request::Lower {
             dialect,
             source,
-            effects,
-            tool_roots,
-            controls,
+            operations,
             bindings,
             functions,
             helpers,
-            reads,
-        } => match embedding.library_for(helpers) {
-            Err(_) => Response::HelperReleaseNotHeld { release: helpers },
-            Ok(library) => match embedding.lower(
+        } => match (
+            embedding.library_for(helpers),
+            embedding.namespaces(operations),
+        ) {
+            (Err(_), _) => Response::HelperReleaseNotHeld { release: helpers },
+            (Ok(_), Err(refused)) => namespace_refused(&refused),
+            (Ok(library), Ok(namespaces)) => match embedding.lower(
                 &dialect,
                 &source,
-                &lash_kernel_dialect::Environment {
-                    library,
-                    effects: &effects,
-                    tool_roots: &tool_roots,
-                    controls: &controls,
-                },
+                &lash_kernel_dialect::Environment::new(library, &namespaces),
                 Mode::Cell(lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
                     functions: &functions
@@ -90,7 +84,7 @@ pub(crate) fn perform(
             ) {
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
-                    reads: reached(&lowered.document, library, reads),
+                    reads: reached(&lowered.document, library, &namespaces),
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
@@ -107,17 +101,15 @@ pub(crate) fn perform(
         Request::ImportWorkflow {
             language,
             source,
-            effects,
-            tool_roots,
-            controls,
+            operations,
             limits,
         } => {
-            let environment = lash_kernel_dialect::Environment {
-                library: embedding.library(),
-                effects: &effects,
-                tool_roots: &tool_roots,
-                controls: &controls,
+            let namespaces = match embedding.namespaces(operations) {
+                Ok(namespaces) => namespaces,
+                Err(refused) => return respond(&namespace_refused(&refused)),
             };
+            let environment =
+                lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
             match import_module(embedding, language, &source, &environment, limits) {
                 None => Response::UnknownDialect {
                     dialect: dialect_name(language).into(),
@@ -173,14 +165,27 @@ pub(crate) fn perform(
             },
         },
     };
-    rmp_serde::to_vec_named(&response)
+    respond(&response)
+}
+
+fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
+    rmp_serde::to_vec_named(response)
         .map(EncodedPayload)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
 }
 
-/// Those of `reads` the cell `document`'s `main` calls or spawns; none
-/// when its linked effects cannot be certified, so every effect it performs
-/// stays recorded.
+/// A namespace tree the offered operations could not compose, as the
+/// dialect refusal of the source lowered against it.
+fn namespace_refused(refused: &lash_kernel_dialect::NamespaceRefusal) -> Response {
+    Response::DialectRefused(DialectRefusal {
+        code: "NAMESPACE_REFUSED".to_owned(),
+        message: refused.to_string(),
+        span: None,
+        unsupported: false,
+        repairs: vec!["offer the operation under another package path".to_owned()],
+    })
+}
+
 /// The installed dialect's name for source in `language`.
 fn dialect_name(language: SourceLanguage) -> &'static str {
     match language {
@@ -268,11 +273,20 @@ fn python_module(
     None
 }
 
+/// The operations offered as reads that the cell `document`'s `main` calls
+/// or spawns; none when its linked effects cannot be certified, so every
+/// effect it performs stays recorded.
 fn reached(
     document: &Document,
     library: &dyn lash_kernel_doc::FunctionCatalog,
-    mut reads: std::collections::BTreeSet<lash_kernel_doc::EffectName>,
+    namespaces: &lash_kernel_dialect::Namespaces,
 ) -> std::collections::BTreeSet<lash_kernel_doc::EffectName> {
+    let mut reads = namespaces
+        .operations()
+        .iter()
+        .filter(|(_, offered)| offered.read)
+        .map(|(operation, _)| operation.effect_name())
+        .collect::<std::collections::BTreeSet<_>>();
     if reads.is_empty() {
         return reads;
     }
@@ -324,13 +338,10 @@ mod tests {
         let lower = |functions| Request::Lower {
             dialect: "typescript".to_owned(),
             source: "function advance(value) { return value + 2; }".to_owned(),
-            effects: Default::default(),
-            tool_roots: Default::default(),
-            controls: Default::default(),
+            operations: Default::default(),
             bindings: Default::default(),
             functions,
             helpers: lash_vm_library::HELPER_RELEASE,
-            reads: Default::default(),
         };
         let encoded =
             EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));

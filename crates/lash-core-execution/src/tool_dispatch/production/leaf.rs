@@ -76,7 +76,7 @@ impl ProductionToolHandlers<'_> {
             owner: owner.clone(),
             call_id: invocation.id.clone(),
             declaration: definition.manifest.declaration().clone(),
-            tool_name: definition.manifest.name,
+            tool_name: definition.manifest.tool(),
             arguments: invocation.args.clone(),
             binding,
             cancel: ExternalCancelPolicy::CancelExternalWork,

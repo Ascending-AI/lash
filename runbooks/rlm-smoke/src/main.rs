@@ -10,8 +10,8 @@ use clap::Parser;
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::provider::ProviderHandle;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
-    ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome, ToolProvider,
 };
 use lash::{LashCore, TurnEvent, TurnInput};
 use serde::Serialize;
@@ -245,16 +245,14 @@ impl WorkspaceTools {
 impl StaticToolExecute for WorkspaceTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            let result = match call.name() {
-                "workspace_list" => self.list(optional_string(call.args, "path").unwrap_or(".")),
-                "workspace_read" => {
-                    required_string(call.args, "path").and_then(|path| self.read(path))
-                }
-                "workspace_write" => required_string(call.args, "path").and_then(|path| {
+            let result = match call.name().as_str() {
+                "files.list" => self.list(optional_string(call.args, "path").unwrap_or(".")),
+                "files.read" => required_string(call.args, "path").and_then(|path| self.read(path)),
+                "files.write" => required_string(call.args, "path").and_then(|path| {
                     required_string(call.args, "content")
                         .and_then(|content| self.write(path, content))
                 }),
-                "workspace_exec" => match required_string(call.args, "command") {
+                "exec.run" => match required_string(call.args, "command") {
                     Ok(command) => self.run(command).await,
                     Err(message) => Err(message),
                 },
@@ -330,7 +328,7 @@ fn definition<const N: usize>(
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:rlm_smoke_{name}"),
-        name,
+        format!("{}.{operation}", module.join(".")),
         description,
         input_schema,
         output_schema,
@@ -338,7 +336,6 @@ fn definition<const N: usize>(
     .expect("valid declared tool schemas")
     // Each tool reads or writes one local workspace file: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::new(module, operation))
 }
 
 fn string_fields(fields: &[&str]) -> Value {
@@ -359,10 +356,10 @@ fn string_fields(fields: &[&str]) -> Value {
 /// without decoding `graph_node_id`.
 fn required_payload_keys(tool: &str) -> Option<&'static [&'static str]> {
     match tool {
-        "workspace_list" => Some(&["path", "entries"]),
-        "workspace_read" => Some(&["path", "content"]),
-        "workspace_write" => Some(&["path", "bytes_written"]),
-        "workspace_exec" => Some(&["command", "exit_code"]),
+        "files.list" => Some(&["path", "entries"]),
+        "files.read" => Some(&["path", "content"]),
+        "files.write" => Some(&["path", "bytes_written"]),
+        "exec.run" => Some(&["command", "exit_code"]),
         _ => None,
     }
 }
@@ -732,17 +729,14 @@ mod tests {
 
     fn judgeable_records() -> Vec<Value> {
         vec![
-            tool_record("workspace_list", json!({ "path": ".", "entries": [] })),
+            tool_record("files.list", json!({ "path": ".", "entries": [] })),
+            tool_record("files.read", json!({ "path": "calc.sh", "content": "" })),
             tool_record(
-                "workspace_read",
-                json!({ "path": "calc.sh", "content": "" }),
-            ),
-            tool_record(
-                "workspace_write",
+                "files.write",
                 json!({ "path": "calc.sh", "bytes_written": 12 }),
             ),
             tool_record(
-                "workspace_exec",
+                "exec.run",
                 json!({ "command": "sh test.sh", "exit_code": 0, "stdout": "ok\n", "stderr": "" }),
             ),
             llm_record(Some("deepseek/deepseek-v4-flash")),
@@ -759,10 +753,10 @@ mod tests {
         assert_eq!(
             judgement.tools_recorded.iter().cloned().collect::<Vec<_>>(),
             vec![
-                "workspace_exec".to_string(),
-                "workspace_list".to_string(),
-                "workspace_read".to_string(),
-                "workspace_write".to_string(),
+                "exec.run".to_string(),
+                "files.list".to_string(),
+                "files.read".to_string(),
+                "files.write".to_string(),
             ]
         );
     }
@@ -770,10 +764,10 @@ mod tests {
     #[test]
     fn an_untyped_tool_payload_fails_the_row() {
         let mut records = judgeable_records();
-        records[2] = tool_record("workspace_write", json!({}));
+        records[2] = tool_record("files.write", json!({}));
         let error = judge_trace(&records).expect_err("an empty payload must fail the row");
         assert!(
-            error.contains("workspace_write") && error.contains("a judge cannot see"),
+            error.contains("files.write") && error.contains("a judge cannot see"),
             "unexpected error: {error}"
         );
     }
@@ -781,7 +775,7 @@ mod tests {
     #[test]
     fn a_write_record_without_its_byte_count_fails_the_row() {
         let mut records = judgeable_records();
-        records[2] = tool_record("workspace_write", json!({ "path": "calc.sh" }));
+        records[2] = tool_record("files.write", json!({ "path": "calc.sh" }));
         let error = judge_trace(&records).expect_err("a byteless write must fail the row");
         assert!(
             error.contains("`bytes_written`"),

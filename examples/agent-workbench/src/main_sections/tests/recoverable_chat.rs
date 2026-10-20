@@ -529,7 +529,7 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
                 Ok(match call {
                     0 => text_response(&finish_cell("old frame answer")),
                     1 => text_response(
-                        "<typescript>\nawait control.continue_as({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });\n</typescript>",
+                        "<typescript>\nawait control.continueAs({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });\n</typescript>",
                     ),
                     2 => text_response(&finish_cell("follow frame answer")),
                     other => panic!("unexpected continue_as provider call {other}"),

@@ -1488,7 +1488,7 @@ impl MemberBodies for StepBodies {
                             .entries()
                             .iter()
                             .find(|entry| entry.manifest.id == *tool)
-                            .map(|entry| entry.manifest.name.clone())
+                            .map(|entry| entry.manifest.tool())
                     })
                     .unwrap_or_else(|| tool.to_string());
                 Some(StepCall {

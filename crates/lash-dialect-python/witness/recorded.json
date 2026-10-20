@@ -36,32 +36,32 @@
   },
   {
    "name": "cancel_cleanup",
-   "source": "import asyncio\nlog = []\nasync def job(tag):\n    try:\n        log.append(await echo(tag + \":work\"))\n        await echo(tag + \":more\")\n        return \"finished\"\n    finally:\n        log.append(await echo(tag + \":cleanup\"))\n        print(tag, \"cleaned up\")\ntask = asyncio.create_task(job(\"a\"))\nawait echo(\"main:first\")\ntask.cancel()\ntry:\n    print(await task)\nexcept asyncio.CancelledError:\n    print(\"the task was cancelled\")\nprint(log)\ndone = asyncio.create_task(job(\"b\"))\nprint(await done, log)\nleftover = asyncio.create_task(job(\"c\"))\nawait echo(\"main:last\")\nprint(\"main ends\")\n",
+   "source": "import asyncio\nlog = []\nasync def job(tag):\n    try:\n        log.append(await host.echo(tag + \":work\"))\n        await host.echo(tag + \":more\")\n        return \"finished\"\n    finally:\n        log.append(await host.echo(tag + \":cleanup\"))\n        print(tag, \"cleaned up\")\ntask = asyncio.create_task(job(\"a\"))\nawait host.echo(\"main:first\")\ntask.cancel()\ntry:\n    print(await task)\nexcept asyncio.CancelledError:\n    print(\"the task was cancelled\")\nprint(log)\ndone = asyncio.create_task(job(\"b\"))\nprint(await done, log)\nleftover = asyncio.create_task(job(\"c\"))\nawait host.echo(\"main:last\")\nprint(\"main ends\")\n",
    "deliveries": [],
    "epochs": [
     {
      "delivered": [],
      "asked": [
-      "echo:main:first",
-      "echo:a:work"
+      "host.echo:main:first",
+      "host.echo:a:work"
      ],
      "logged": []
     },
     {
      "delivered": [
-      "echo:main:first"
+      "host.echo:main:first"
      ],
      "asked": [
-      "echo:a:cleanup"
+      "host.echo:a:cleanup"
      ],
      "logged": []
     },
     {
      "delivered": [
-      "echo:a:cleanup"
+      "host.echo:a:cleanup"
      ],
      "asked": [
-      "echo:b:work"
+      "host.echo:b:work"
      ],
      "logged": [
       "a cleaned up",
@@ -71,29 +71,29 @@
     },
     {
      "delivered": [
-      "echo:b:work"
+      "host.echo:b:work"
      ],
      "asked": [
-      "echo:b:more"
+      "host.echo:b:more"
      ],
      "logged": []
     },
     {
      "delivered": [
-      "echo:b:more"
+      "host.echo:b:more"
      ],
      "asked": [
-      "echo:b:cleanup"
+      "host.echo:b:cleanup"
      ],
      "logged": []
     },
     {
      "delivered": [
-      "echo:b:cleanup"
+      "host.echo:b:cleanup"
      ],
      "asked": [
-      "echo:main:last",
-      "echo:c:work"
+      "host.echo:main:last",
+      "host.echo:c:work"
      ],
      "logged": [
       "b cleaned up",
@@ -102,10 +102,10 @@
     },
     {
      "delivered": [
-      "echo:main:last"
+      "host.echo:main:last"
      ],
      "asked": [
-      "echo:c:cleanup"
+      "host.echo:c:cleanup"
      ],
      "logged": [
       "main ends"
@@ -113,7 +113,7 @@
     },
     {
      "delivered": [
-      "echo:c:cleanup"
+      "host.echo:c:cleanup"
      ],
      "asked": [],
      "logged": [
@@ -261,13 +261,13 @@
   },
   {
    "name": "exceptions",
-   "source": "class AppError(Exception):\n    pass\nclass NotFound(AppError):\n    pass\ndef risky(kind):\n    if kind == \"value\":\n        raise ValueError(\"bad value\")\n    if kind == \"found\":\n        raise NotFound(\"no such thing\", 404)\n    if kind == \"bare\":\n        raise RuntimeError\n    return \"fine\"\nfor kind in [\"ok\", \"value\", \"found\", \"bare\"]:\n    try:\n        print(risky(kind))\n    except AppError as error:\n        print(\"app\", type(error).__name__, error, error.args, repr(error))\n    except (ValueError, TypeError) as error:\n        print(\"value\", error, error.args)\n    except Exception as error:\n        print(\"other\", repr(error), str(error) == \"\")\n    else:\n        print(\"no error\")\n    finally:\n        print(\"finally\", kind)\ndef chained():\n    try:\n        {}[\"k\"]\n    except KeyError as error:\n        raise AppError(\"lookup failed\") from error\ntry:\n    chained()\nexcept AppError as error:\n    print(error, repr(error.__cause__), type(error.__cause__).__name__)\ndef reraise():\n    try:\n        raise ValueError(\"again\")\n    except ValueError:\n        print(\"seen\")\n        raise\ntry:\n    reraise()\nexcept ValueError as error:\n    print(\"outer\", error)\ndef order():\n    try:\n        return \"try\"\n    finally:\n        print(\"finally runs before the return\")\nprint(order())\ndef override():\n    for attempt in range(3):\n        try:\n            if attempt < 2:\n                continue\n            return attempt\n        finally:\n            print(\"leaving\", attempt)\nprint(override())\ndef swallow():\n    try:\n        raise ValueError(\"lost\")\n    finally:\n        return \"the return in finally wins\"\nprint(swallow())\ntry:\n    try:\n        raise NotFound(\"inner\")\n    except ValueError:\n        print(\"not here\")\nexcept Exception as error:\n    print(\"propagated\", error)\ntry:\n    int(\"x\")\nexcept ValueError as error:\n    print(error)\ntry:\n    None + 1\nexcept TypeError as error:\n    print(error)\ntry:\n    print(defined_later)\nexcept NameError as error:\n    print(error)\ndefined_later = 1\ndef unbound():\n    print(later)\n    later = 1\ntry:\n    unbound()\nexcept UnboundLocalError as error:\n    print(error)\nerror = ValueError(\"made\", \"not raised\")\nprint(repr(error), error.args, isinstance(error, int))\ntry:\n    await boom(\"tool failed\")\nexcept Exception as error:\n    print(\"tool\", type(error).__name__, error)\ntry:\n    raise AppError(\"first\")\nexcept AppError:\n    try:\n        raise ValueError(\"second\")\n    except ValueError as inner:\n        print(\"nested\", inner)\nraise NotFound(\"at the end\")\n",
+   "source": "class AppError(Exception):\n    pass\nclass NotFound(AppError):\n    pass\ndef risky(kind):\n    if kind == \"value\":\n        raise ValueError(\"bad value\")\n    if kind == \"found\":\n        raise NotFound(\"no such thing\", 404)\n    if kind == \"bare\":\n        raise RuntimeError\n    return \"fine\"\nfor kind in [\"ok\", \"value\", \"found\", \"bare\"]:\n    try:\n        print(risky(kind))\n    except AppError as error:\n        print(\"app\", type(error).__name__, error, error.args, repr(error))\n    except (ValueError, TypeError) as error:\n        print(\"value\", error, error.args)\n    except Exception as error:\n        print(\"other\", repr(error), str(error) == \"\")\n    else:\n        print(\"no error\")\n    finally:\n        print(\"finally\", kind)\ndef chained():\n    try:\n        {}[\"k\"]\n    except KeyError as error:\n        raise AppError(\"lookup failed\") from error\ntry:\n    chained()\nexcept AppError as error:\n    print(error, repr(error.__cause__), type(error.__cause__).__name__)\ndef reraise():\n    try:\n        raise ValueError(\"again\")\n    except ValueError:\n        print(\"seen\")\n        raise\ntry:\n    reraise()\nexcept ValueError as error:\n    print(\"outer\", error)\ndef order():\n    try:\n        return \"try\"\n    finally:\n        print(\"finally runs before the return\")\nprint(order())\ndef override():\n    for attempt in range(3):\n        try:\n            if attempt < 2:\n                continue\n            return attempt\n        finally:\n            print(\"leaving\", attempt)\nprint(override())\ndef swallow():\n    try:\n        raise ValueError(\"lost\")\n    finally:\n        return \"the return in finally wins\"\nprint(swallow())\ntry:\n    try:\n        raise NotFound(\"inner\")\n    except ValueError:\n        print(\"not here\")\nexcept Exception as error:\n    print(\"propagated\", error)\ntry:\n    int(\"x\")\nexcept ValueError as error:\n    print(error)\ntry:\n    None + 1\nexcept TypeError as error:\n    print(error)\ntry:\n    print(defined_later)\nexcept NameError as error:\n    print(error)\ndefined_later = 1\ndef unbound():\n    print(later)\n    later = 1\ntry:\n    unbound()\nexcept UnboundLocalError as error:\n    print(error)\nerror = ValueError(\"made\", \"not raised\")\nprint(repr(error), error.args, isinstance(error, int))\ntry:\n    await host.boom(\"tool failed\")\nexcept Exception as error:\n    print(\"tool\", type(error).__name__, error)\ntry:\n    raise AppError(\"first\")\nexcept AppError:\n    try:\n        raise ValueError(\"second\")\n    except ValueError as inner:\n        print(\"nested\", inner)\nraise NotFound(\"at the end\")\n",
    "deliveries": [],
    "epochs": [
     {
      "delivered": [],
      "asked": [
-      "boom:tool failed"
+      "host.boom:tool failed"
      ],
      "logged": [
       "fine",
@@ -299,7 +299,7 @@
     },
     {
      "delivered": [
-      "boom:tool failed"
+      "host.boom:tool failed"
      ],
      "asked": [],
      "logged": [
@@ -591,16 +591,16 @@
   },
   {
    "name": "tasks",
-   "source": "# deliver: echo:a1; echo:b1; echo:late; sleep:30; sleep:10; sleep:20\nimport asyncio\ntrace = []\nasync def step(tag, pauses):\n    trace.append(tag + \" starts\")\n    for n in range(pauses):\n        await asyncio.sleep(0)\n        trace.append(f\"{tag} resumes {n}\")\n    return tag\nfirst = asyncio.create_task(step(\"first\", 2))\nsecond = asyncio.create_task(step(\"second\", 1))\ntrace.append(\"main goes on\")\nprint(await second, trace)\nprint(await first, await first, trace)\nasync def fetch(tag):\n    return await echo(tag)\na = asyncio.create_task(fetch(\"a1\"))\nb = asyncio.create_task(fetch(\"b1\"))\nprint(await b, await a)\nasync def fail(tag):\n    await asyncio.sleep(0)\n    raise ValueError(tag)\nasync def slow(tag):\n    trace.append(await echo(tag))\n    return tag\ndoomed = asyncio.create_task(fail(\"task failed\"))\ntry:\n    await doomed\nexcept ValueError as error:\n    print(\"caught\", error)\ntry:\n    await asyncio.gather(slow(\"late\"), fail(\"gather failed\"))\nexcept ValueError as error:\n    print(\"gather raised\", error, trace[-1])\nawait asyncio.sleep(0)\nnever_awaited = asyncio.create_task(fail(\"nobody looks\"))\nasync def nap(tag, seconds):\n    await asyncio.sleep(seconds)\n    trace.append(tag)\n    return seconds\nprint(await asyncio.gather(nap(\"x\", 0.03), nap(\"y\", 0.01), nap(\"z\", 0.02)), trace[-4:])\nasync def inner():\n    return await echo(\"inner\")\nasync def outer():\n    return [await inner(), await inner()]\nprint(await outer())\ntasks = [asyncio.create_task(fetch(f\"t{n}\")) for n in range(3)]\nprint(await asyncio.gather(*tasks))\nasync def waiter(task):\n    try:\n        return await task\n    except asyncio.CancelledError:\n        print(\"waiter cancelled\")\n        raise\nsleeper = asyncio.create_task(nap(\"unreached\", 5))\nwatch = asyncio.create_task(waiter(sleeper))\nawait asyncio.sleep(0)\nawait asyncio.sleep(0)\nwatch.cancel()\ntry:\n    await watch\nexcept asyncio.CancelledError:\n    print(\"watch is cancelled\")\ntry:\n    await sleeper\nexcept asyncio.CancelledError:\n    print(\"and so is what it awaited\")\nprint(\"end of main\")\n",
+   "source": "# deliver: host.echo:a1; host.echo:b1; host.echo:late; sleep:30; sleep:10; sleep:20\nimport asyncio\ntrace = []\nasync def step(tag, pauses):\n    trace.append(tag + \" starts\")\n    for n in range(pauses):\n        await asyncio.sleep(0)\n        trace.append(f\"{tag} resumes {n}\")\n    return tag\nfirst = asyncio.create_task(step(\"first\", 2))\nsecond = asyncio.create_task(step(\"second\", 1))\ntrace.append(\"main goes on\")\nprint(await second, trace)\nprint(await first, await first, trace)\nasync def fetch(tag):\n    return await host.echo(tag)\na = asyncio.create_task(fetch(\"a1\"))\nb = asyncio.create_task(fetch(\"b1\"))\nprint(await b, await a)\nasync def fail(tag):\n    await asyncio.sleep(0)\n    raise ValueError(tag)\nasync def slow(tag):\n    trace.append(await host.echo(tag))\n    return tag\ndoomed = asyncio.create_task(fail(\"task failed\"))\ntry:\n    await doomed\nexcept ValueError as error:\n    print(\"caught\", error)\ntry:\n    await asyncio.gather(slow(\"late\"), fail(\"gather failed\"))\nexcept ValueError as error:\n    print(\"gather raised\", error, trace[-1])\nawait asyncio.sleep(0)\nnever_awaited = asyncio.create_task(fail(\"nobody looks\"))\nasync def nap(tag, seconds):\n    await asyncio.sleep(seconds)\n    trace.append(tag)\n    return seconds\nprint(await asyncio.gather(nap(\"x\", 0.03), nap(\"y\", 0.01), nap(\"z\", 0.02)), trace[-4:])\nasync def inner():\n    return await host.echo(\"inner\")\nasync def outer():\n    return [await inner(), await inner()]\nprint(await outer())\ntasks = [asyncio.create_task(fetch(f\"t{n}\")) for n in range(3)]\nprint(await asyncio.gather(*tasks))\nasync def waiter(task):\n    try:\n        return await task\n    except asyncio.CancelledError:\n        print(\"waiter cancelled\")\n        raise\nsleeper = asyncio.create_task(nap(\"unreached\", 5))\nwatch = asyncio.create_task(waiter(sleeper))\nawait asyncio.sleep(0)\nawait asyncio.sleep(0)\nwatch.cancel()\ntry:\n    await watch\nexcept asyncio.CancelledError:\n    print(\"watch is cancelled\")\ntry:\n    await sleeper\nexcept asyncio.CancelledError:\n    print(\"and so is what it awaited\")\nprint(\"end of main\")\n",
    "deliveries": [
     [
-     "echo:a1"
+     "host.echo:a1"
     ],
     [
-     "echo:b1"
+     "host.echo:b1"
     ],
     [
-     "echo:late"
+     "host.echo:late"
     ],
     [
      "sleep:30"
@@ -616,8 +616,8 @@
     {
      "delivered": [],
      "asked": [
-      "echo:a1",
-      "echo:b1"
+      "host.echo:a1",
+      "host.echo:b1"
      ],
      "logged": [
       "second ['main goes on', 'first starts', 'second starts', 'first resumes 0', 'second resumes 0', 'first resumes 1']",
@@ -626,17 +626,17 @@
     },
     {
      "delivered": [
-      "echo:a1"
+      "host.echo:a1"
      ],
      "asked": [],
      "logged": []
     },
     {
      "delivered": [
-      "echo:b1"
+      "host.echo:b1"
      ],
      "asked": [
-      "echo:late",
+      "host.echo:late",
       "sleep:30",
       "sleep:10",
       "sleep:20"
@@ -649,7 +649,7 @@
     },
     {
      "delivered": [
-      "echo:late"
+      "host.echo:late"
      ],
      "asked": [],
      "logged": []
@@ -673,7 +673,7 @@
       "sleep:20"
      ],
      "asked": [
-      "echo:inner"
+      "host.echo:inner"
      ],
      "logged": [
       "[0.03, 0.01, 0.02] ['late', 'x', 'y', 'z']"
@@ -681,21 +681,21 @@
     },
     {
      "delivered": [
-      "echo:inner"
+      "host.echo:inner"
      ],
      "asked": [
-      "echo:inner"
+      "host.echo:inner"
      ],
      "logged": []
     },
     {
      "delivered": [
-      "echo:inner"
+      "host.echo:inner"
      ],
      "asked": [
-      "echo:t0",
-      "echo:t1",
-      "echo:t2"
+      "host.echo:t0",
+      "host.echo:t1",
+      "host.echo:t2"
      ],
      "logged": [
       "['inner', 'inner']"
@@ -703,21 +703,21 @@
     },
     {
      "delivered": [
-      "echo:t0"
+      "host.echo:t0"
      ],
      "asked": [],
      "logged": []
     },
     {
      "delivered": [
-      "echo:t1"
+      "host.echo:t1"
      ],
      "asked": [],
      "logged": []
     },
     {
      "delivered": [
-      "echo:t2"
+      "host.echo:t2"
      ],
      "asked": [],
      "logged": [

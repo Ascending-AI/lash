@@ -39,7 +39,7 @@ fn expression_side_effects_follow_node_order() {
             })
             .collect();
         let program = format!(
-            "let order = ''; const m = {{{}}}; const o = {{id(value) {{ return value; }}, n: 0}}; {source} await finish(order);",
+            "let order = ''; const m = {{{}}}; const o = {{id(value) {{ return value; }}, n: 0}}; {source} await control.finish(order);",
             methods.join(",")
         );
         assert_eq!(
@@ -109,12 +109,11 @@ fn restored_session_bindings_cannot_mask_builtins() {
         );
         let bindings = [lash_kernel_doc::Name::new(name)].into_iter().collect();
         let effects = std::collections::BTreeMap::new();
-        let environment = lash_kernel_dialect::Environment {
-            library: super::library(),
-            effects: &effects,
-            controls: &BTreeMap::new(),
-            tool_roots: &std::collections::BTreeSet::new(),
-        };
+        let environment_namespaces =
+            lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+                .expect("the test's effects are operations");
+        let environment =
+            lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
         let error = crate::Parser::default()
             .lower(
                 "1;",

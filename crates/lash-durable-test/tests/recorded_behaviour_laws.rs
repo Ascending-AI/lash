@@ -83,7 +83,7 @@ fn standard_answer(rendered: &str) -> String {
 /// The looping cell when the prompt offers `continue_as` (the recorded
 /// decomposition feature), prose otherwise.
 fn rlm_answer(rendered: &str) -> String {
-    if rendered.contains("continue_as") {
+    if rendered.contains("continueAs") {
         format!(
             "<typescript>\nlet i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nawait control.finish(\"ran \" + String(i));\n</typescript>"
         )

@@ -88,7 +88,7 @@ async fn two_tools_with_recorded_session_config_are_certified() {
     let factory = examples::greetings().unwrap();
     let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
         callback: PluginCallbackIdentity::tool_provider("greetings", "tools"),
-        tool: "hello",
+        tool: "greetings__hello",
         args: serde_json::json!({}),
         support: None,
     });
@@ -116,7 +116,7 @@ async fn two_tools_with_recorded_session_config_are_certified() {
 }
 #[tokio::test]
 async fn prepared_policy_decision_replays_without_another_invocation() {
-    let write = lash::tools::ToolDefinition::raw("write", "write", "write",
+    let write = lash::tools::ToolDefinition::raw("write", "tools.write", "write",
         serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}), serde_json::json!({"type":"string"}))
         .unwrap().with_execution(std::time::Duration::from_secs(1));
     struct Write;
@@ -138,7 +138,7 @@ async fn prepared_policy_decision_replays_without_another_invocation() {
             owner: "protected-path".into(),
             key: "tool_args_check:policy".into(),
         },
-        tool: "write",
+        tool: "tools__write",
         args: serde_json::json!({"path":".env"}),
         support: Some(support),
     });
@@ -228,7 +228,7 @@ async fn unavailable_callbacks_are_partial_not_a_certification_pass() {
         async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
             let seed = CallScenario {
                 callback: self.callback(),
-                tool: "hello",
+                tool: "greetings__hello",
                 args: serde_json::json!({}),
                 support: None,
             };
@@ -432,14 +432,13 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
     fn definition() -> ToolDefinition {
         ToolDefinition::raw(
             "remote:send_email",
-            "send_email",
+            "tools.send_email",
             "send email",
             serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             serde_json::json!({"type":"string"}),
         )
         .unwrap()
         .with_execution(std::time::Duration::from_secs(1))
-        .with_tool_binding(ToolBinding::new(["tools"], "send_email"))
     }
     #[lash::async_trait]
     impl DeferredToolProvider for Resolver {
@@ -529,7 +528,7 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
                     parts: vec![lash::direct::LlmOutputPart::ToolCall {
                         call_id: "deferred-cell".into(),
                         tool_name: "execute_code".into(),
-                        input_json: serde_json::json!({"code":"await tools.send_email({});"})
+                        input_json: serde_json::json!({"code":"await tools.sendEmail({});"})
                             .to_string(),
                         replay: None,
                     }],
@@ -622,16 +621,12 @@ mod deferred_laws {
     fn definition(id: &str, name: &str) -> Result<ToolDefinition, PluginError> {
         ToolDefinition::raw(
             id,
-            name,
+            format!("tools.{name}"),
             name,
             serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             serde_json::json!({"type":"string"}),
         )
-        .map(|draft| {
-            draft
-                .with_execution(std::time::Duration::from_secs(1))
-                .with_tool_binding(ToolBinding::new(["tools"], name))
-        })
+        .map(|draft| draft.with_execution(std::time::Duration::from_secs(1)))
         .map_err(|error| PluginError::Registration(error.to_string()))
     }
     #[lash::async_trait]
@@ -669,7 +664,7 @@ mod deferred_laws {
             Ok(vec![definition("host:lookup", "lookup")?.manifest])
         }
         fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            if name != "lookup" {
+            if name != "tools.lookup" {
                 return None;
             }
             Some(Arc::new(definition("host:lookup", "lookup").ok()?.contract))
@@ -752,7 +747,7 @@ mod deferred_laws {
     async fn static_call_cannot_certify_an_empty_deferred_resolver() {
         let resolutions = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
-            code: "await tools.lookup({}); await tools.send_email({});",
+            code: "await tools.lookup({}); await tools.sendEmail({});",
         });
         let report = certify_plugin_with(
             factory(true, Arc::clone(&resolutions)).unwrap(),
@@ -857,7 +852,7 @@ fn http_lookup(stateless: bool) -> Result<Arc<dyn PluginFactory>, Box<dyn std::e
     }
     let lookup = lash::tools::ToolDefinition::raw(
         "lookup",
-        "lookup",
+        "tools.lookup",
         "Fetch the forecast",
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"string"}),
@@ -902,7 +897,7 @@ async fn tools_with_a_lifecycle_observer_certify_full() {
         .provider(lash::tool_provider_key!("http"), |_, _| {
             let definition = lash::tools::ToolDefinition::raw(
                 "lookup",
-                "lookup",
+                "tools.lookup",
                 "Fetch the forecast",
                 serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
                 serde_json::json!({"type":"string"}),
@@ -942,7 +937,7 @@ async fn tools_with_a_lifecycle_observer_certify_full() {
     ));
     let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
         callback: PluginCallbackIdentity::tool_provider("weather", "http"),
-        tool: "lookup",
+        tool: "tools__lookup",
         args: serde_json::json!({}),
         support: None,
     });
@@ -1016,7 +1011,7 @@ async fn certify_http_lookup(
 ) -> Result<PluginCertification, Box<dyn std::error::Error>> {
     let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
         callback: PluginCallbackIdentity::tool_provider("weather", "http"),
-        tool: "lookup",
+        tool: "tools__lookup",
         args: serde_json::json!({}),
         support: None,
     });

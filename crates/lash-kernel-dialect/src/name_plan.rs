@@ -11,7 +11,17 @@ impl NamePlan {
     /// First collect names in stable order: declaration names/parameters, then
     /// main and declaration bodies in Node child preorder, then metadata names.
     /// Allocate aliases only after reserving all legal original identifiers.
+    /// A name equal to the root of an operation the document performs is
+    /// renamed too: a printed operation is its dotted path, which no local
+    /// shadows, so a reader resolves it from the base manifest alone.
     pub fn new(document: &k::Document, legal: impl Fn(&str) -> bool) -> Self {
+        let roots: BTreeSet<&str> = document
+            .manifest
+            .effects
+            .keys()
+            .filter_map(|effect| effect.as_str().split('.').next())
+            .collect();
+        let legal = |name: &str| legal(name) && !roots.contains(name);
         let mut seen = BTreeSet::new();
         let mut ordered = Vec::new();
         let mut add = |name: &k::Name| {

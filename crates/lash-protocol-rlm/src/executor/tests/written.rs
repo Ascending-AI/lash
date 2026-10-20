@@ -41,7 +41,7 @@ impl Lang {
                 "const rate = 3;\nasync function scale(x: number, extra: number): Promise<number> { return x * rate + extra; }\nconst twice = async (y: number) => y * 2;\nconst plus = (z) => z + rate;\ntry {\n  await echo.say({ text: \"held\" });\n} catch (error) {}"
             }
             Self::Python => {
-                "rate = 3\nasync def scale(x: int, extra: int = 1) -> int:\n    return x * rate + extra\ntwice = lambda y: y * 2\nasync def plus(z: int) -> int:\n    return z + rate\ntry:\n    await echo_say({'text': 'held'})\nexcept Exception:\n    pass"
+                "rate = 3\nasync def scale(x: int, extra: int = 1) -> int:\n    return x * rate + extra\ntwice = lambda y: y * 2\nasync def plus(z: int) -> int:\n    return z + rate\ntry:\n    await echo.say({'text': 'held'})\nexcept Exception:\n    pass"
             }
         }
     }
@@ -53,7 +53,7 @@ impl Lang {
                 "await control.finish([await scale(2, 1), await twice(5), plus(4)]);"
             }
             Self::Python => {
-                "await control_finish([await scale(2, extra=1), twice(5), await plus(4)])"
+                "await control.finish([await scale(2, extra=1), twice(5), await plus(4)])"
             }
         }
     }
@@ -185,7 +185,7 @@ async fn a_later_cell_calls_a_resumed_cells_function_alike_with_or_without_a_map
             &mut state,
             cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
             &services,
-            "await control_finish([await scale(2, extra=4), await scale(extra=0, x=5), await scale(1)])",
+            "await control.finish([await scale(2, extra=4), await scale(extra=0, x=5), await scale(1)])",
         )
         .await;
         crate::testing::commit_working(&mut state, &host).await;

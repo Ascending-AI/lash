@@ -44,7 +44,7 @@ fn user_rows(snapshot: &StateReadSnapshot) -> Vec<String> {
 
 fn continue_as_cell(task: &str, seed: &str) -> String {
     format!(
-        "<typescript>\nawait control.continue_as({{ task: {}, seed: {{ marker: {} }} }});\n</typescript>",
+        "<typescript>\nawait control.continueAs({{ task: {}, seed: {{ marker: {} }} }});\n</typescript>",
         serde_json::to_string(task).expect("a task encodes"),
         serde_json::to_string(seed).expect("a seed encodes"),
     )

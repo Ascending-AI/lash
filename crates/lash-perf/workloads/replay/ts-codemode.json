@@ -11,7 +11,7 @@
       "replies": [
         {
           "cell": [
-            "const big = await tools.fixture_large({ key: \"corpus\", bytes: 1000000 });",
+            "const big = await tools.fixtureLarge({ key: \"corpus\", bytes: 1000000 });",
             "const describe = (record, size) => record.title + \" / \" + size + \" bytes kept\";",
             "let last = \"none\";",
             "await control.finish({ loaded: big.bytes, length: big.text.length });"
@@ -25,8 +25,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 5 });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 5 });",
             "const head = big.text.slice(0, 4096);",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, head: head.length, waited: waited.waited_ms, score: record.score });"

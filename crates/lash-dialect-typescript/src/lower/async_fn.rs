@@ -29,7 +29,8 @@
 //! Unawaited tool calls use the same adapter with an inline effect body. The
 //! actual spawn site and its occurrence name the child (`K-TASK-020`).
 
-use lash_kernel_doc::{ActKind, EffectName, Expr, Literal, Rhs, Stmt};
+use lash_kernel_dialect::{Resolution, Spelling};
+use lash_kernel_doc::{ActKind, EffectName, Expr, Literal, Rhs, Signature, Stmt};
 
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -178,7 +179,7 @@ impl Lowerer<'_> {
 
     /// Whether the wait is a call of an effect that ends the turn.
     fn control_call(&self, wait: &Wait) -> bool {
-        matches!(wait, Wait::Effect(effect) if self.controls.contains_key(effect))
+        matches!(wait, Wait::Effect(effect) if self.namespaces.controls(effect).is_some())
     }
 
     /// The refusal of a control call written where the turn cannot end on
@@ -205,17 +206,65 @@ impl Lowerer<'_> {
     /// Which wait a call of `callee` is, if the source binds none of the
     /// names it is written with.
     pub(super) fn wait_of(&self, callee: &ast::Expr) -> Option<Wait> {
-        let path = self.unbound_path(callee)?;
-        if crate::builtins::is_global(path.split('.').next()?) {
+        let (root, path) = super::calls::path_segments(callee)?;
+        if self.is_bound(root) || crate::builtins::is_global(root) {
             return None;
         }
-        if path == "sleep" {
+        if path == ["sleep"] {
             return Some(Wait::Sleep);
         }
-        let effect = EffectName::new(path.as_str()).ok()?;
-        self.effects
-            .contains_key(&effect)
-            .then_some(Wait::Effect(effect))
+        match self.namespaces.resolve(&path, Spelling::TypeScript) {
+            Resolution::Operation { operation, .. } => Some(Wait::Effect(operation.effect_name())),
+            _ => None,
+        }
+    }
+
+    /// The signature `effect`, an offered operation, is performed under.
+    fn signature_of(&self, effect: &EffectName) -> &Signature {
+        match self.namespaces.operation(effect) {
+            Some((_, offered)) => &offered.requirement.signature,
+            None => unreachable!("a wait's effect is an offered operation"),
+        }
+    }
+
+    /// The refusal of a call whose dotted path names an operation the
+    /// program cannot reach as written: its root is a binding, which
+    /// shadows the package root lexically, or it spells the operation in
+    /// another dialect's spelling (`inbox.send_item` for `inbox.sendItem`).
+    pub(super) fn operation_refusal(&self, callee: &ast::Expr, span: SourceSpan) -> Lowering<()> {
+        let Some((root, path)) = super::calls::path_segments(callee) else {
+            return Ok(());
+        };
+        if self.is_bound(root) {
+            if let Resolution::Operation { operation, .. } =
+                self.namespaces.resolve(&path, Spelling::TypeScript)
+            {
+                return Err(Diagnostic::with_repair(
+                    DiagnosticCode::OperationShadowed,
+                    format!(
+                        "`{root}` is a binding here, so `{}` calls a value, while the session offers the operation `{}`",
+                        path.join("."),
+                        operation.effect_name()
+                    ),
+                    format!("rename `{root}` and update its references"),
+                    Some(span),
+                ));
+            }
+            return Ok(());
+        }
+        if let Some(misspelled) = self.namespaces.misspelled(&path, Spelling::TypeScript) {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::OperationSpelling,
+                format!(
+                    "`{}` names the operation `{}` in another dialect's spelling",
+                    path.join("."),
+                    misspelled.operation.effect_name()
+                ),
+                format!("write `{}`", misspelled.repair),
+                Some(span),
+            ));
+        }
+        Ok(())
     }
 
     /// Whether a statement is a tool call whose promise nothing can read:
@@ -229,12 +278,6 @@ impl Lowerer<'_> {
             } => self.discards_effect(value),
             _ => false,
         }
-    }
-
-    /// `a.b.c` as a dotted path, when the source does not bind `a`.
-    pub(super) fn unbound_path(&self, expr: &ast::Expr) -> Option<String> {
-        let (root, path) = super::calls::static_path(expr)?;
-        (!self.is_bound(root)).then_some(path)
     }
 
     /// The arguments of a wait, nested in their left-to-right evaluation order.
@@ -260,7 +303,7 @@ impl Lowerer<'_> {
         let (name, least, most) = match wait {
             Wait::Sleep => ("sleep".to_string(), 1, 1),
             Wait::Effect(effect) => {
-                let params = &self.effects[effect].params;
+                let params = &self.signature_of(effect).params;
                 let required = params.iter().filter(|param| !param.optional).count();
                 (effect.to_string(), required, params.len())
             }
@@ -290,7 +333,7 @@ impl Lowerer<'_> {
     fn wait_action(&mut self, wait: Wait, args: Vec<Expr>, then_yield: bool) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
-                let signature = self.effects[&effect].clone();
+                let signature = self.signature_of(&effect).clone();
                 // The perform states the result type the tool declares, so
                 // an `Int` or a `Float` is decoded as declared, and what
                 // it gives is known to be that type.

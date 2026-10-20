@@ -82,7 +82,7 @@ struct Sample {
 
 use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
 use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp, Unit,
+    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, Unit,
 };
 use lash_kernel_vm::perf_witness::{
     GuestContext, GuestProfile, GuestSymbols, Profiling as _, WorkReport,
@@ -482,13 +482,10 @@ fn main() -> Result<(), String> {
         EffectName::new("finish").expect("a tool's name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let tool_roots: BTreeSet<Name> = ["processes", "jobs"].into_iter().map(Name::new).collect();
-    let environment = Environment {
-        library: &library,
-        effects: &effects,
-        tool_roots: &tool_roots,
-        controls: &controls,
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+            .expect("the test's effects are operations");
+    let environment = Environment::new(&library, &environment_namespaces);
     if matches!(mode, Mode::Time) {
         println!(
             "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\trun_calls\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\tsplit_helper_wall_share\tsplit_slowest_helpers\tsplit_library_body_wall_share\tsplit_program_wall_share\tresult\treceipt"
@@ -1120,12 +1117,9 @@ fn host_json_probe() -> Result<(), String> {
     let library = NamedLibrary::from_registry(&registry).unwrap();
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let effects = effects();
-    let env = Environment {
-        library: &library,
-        effects: &effects,
-        tool_roots: &BTreeSet::new(),
-        controls: &BTreeMap::new(),
-    };
+    let env_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default()).unwrap();
+    let env = Environment::new(&library, &env_namespaces);
     let selected = std::env::args().nth(2);
     let iterations: usize = std::env::args()
         .nth(3)

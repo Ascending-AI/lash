@@ -3,7 +3,7 @@ export async function demo() {
   /** Describe how to echo one value */
   let work = ["ts.function", "", "work", 1.0, async function(this3, args3) {
     return (await helper_ts_promise_start(async function(this2, args2) {
-      return k.returnVia((await (async (t1) => ((await (async (value) => ((await await tools.corpus.echo((await helper_ts_boundary(value))) as KernelType<"json">)))(t1[0.0]))))((helper_list_len(args2) < 1.0 ? (await helper_ts_pad(args2, 1.0)) : args2))), helper_ts_promise_adopt);
+      return k.returnVia((await (async (t1) => ((await (async (value) => ((await await corpus.echo((await helper_ts_boundary(value))) as KernelType<"json">)))(t1[0.0]))))((helper_list_len(args2) < 1.0 ? (await helper_ts_pad(args2, 1.0)) : args2))), helper_ts_promise_adopt);
     }, this3, helper_list_copy(args3)));
   }, {}] as const;
   /** Echo "a" and "b" side by side and wait for both */

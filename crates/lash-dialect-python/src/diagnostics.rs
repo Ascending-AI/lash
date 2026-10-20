@@ -62,6 +62,8 @@ codes! {
     AttributeUnsupported => "PY_ATTRIBUTE_UNSUPPORTED", Refusal;
     MethodUnsupported => "PY_METHOD_UNSUPPORTED", Refusal;
     ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
+    OperationShadowed => "PY_OPERATION_SHADOWED", ProgramDefect;
+    OperationSpelling => "PY_OPERATION_SPELLING", ProgramDefect;
     ControlCallPlacement => "PY_CONTROL_CALL_PLACEMENT", ProgramDefect;
     BuiltinAsValue => "PY_BUILTIN_AS_VALUE", Refusal;
     BuiltinUnsupported => "PY_BUILTIN_UNSUPPORTED", Refusal;

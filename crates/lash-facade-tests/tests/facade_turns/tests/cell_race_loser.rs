@@ -4,13 +4,14 @@
 
 use super::*;
 use lash::TurnInput;
-use lash_core::ToolDefinitionBindingExt as _;
 use std::time::{Duration, Instant};
 
 /// How long the cell sleeps after its race.
 const SLEEP_MS: u64 = 3_000;
 const FAST: &str = "fast";
+const FAST_OPERATION: &str = "tools.fast";
 const SLOW: &str = "slow";
+const SLOW_OPERATION: &str = "tools.slow";
 
 /// `fast` answers at once, noting when in `won`; `slow` opens `entered`,
 /// waits for `gate`, then opens `midpoint` and answers.
@@ -25,14 +26,13 @@ struct RaceTools {
 fn definition(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A race operand.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 #[async_trait]
@@ -54,13 +54,16 @@ impl ToolProvider for RaceTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == SLOW {
+        if call.name() == SLOW_OPERATION {
             self.entered.notify_one();
             self.gate.notified().await;
             self.midpoint.notify_one();
@@ -189,13 +192,16 @@ impl ToolProvider for ClosingTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == FAST {
+        if call.name() == FAST_OPERATION {
             let _live = self.entered.acquire().await.expect("the gate stays open");
             return lash_core::ToolOutcome::ok(serde_json::json!(FAST)).into();
         }
@@ -367,13 +373,16 @@ impl ToolProvider for BackoffTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(backoff_definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == FAST {
+        if call.name() == FAST_OPERATION {
             let _failed = self.failed.acquire().await.expect("the gate stays open");
             return lash_core::ToolOutcome::ok(serde_json::json!(FAST)).into();
         }

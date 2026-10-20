@@ -955,7 +955,7 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
 fn checkpoint_exec_code(protocol_iteration: usize) -> String {
     format!(
         r#"const benchmark_echo_process = async (value: string, ordinal: number) => {{
-  const result = await tools.benchmark_echo({{ value: value, ordinal: ordinal }});
+  const result = await tools.benchmarkEcho({{ value: value, ordinal: ordinal }});
   return result;
 }};
 

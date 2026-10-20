@@ -200,8 +200,16 @@ fn scripted(
         .into_handle()
 }
 
+/// A call of the operation `tool`. The test protocol's driver dispatches the
+/// name it is given, with no Standard-name mapping, so the call names the
+/// operation itself.
 fn call(id: &str, tool: &str) -> LlmResponse {
-    served::response(vec![served::call(id, tool, serde_json::json!({}))])
+    served::response(vec![lash_core::LlmOutputPart::ToolCall {
+        call_id: id.to_owned(),
+        tool_name: tool.to_owned(),
+        input_json: "{}".to_owned(),
+        replay: None,
+    }])
 }
 
 /// Whether `request` already carries a tool result.
@@ -372,13 +380,13 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
                 executor.dirty.store(false, Ordering::SeqCst);
                 served::text(request, "carried on")
             } else {
-                call("execution-state-switch", "switch_frame")
+                call("execution-state-switch", "tools.switch_frame")
             }
         }
     });
     let definition = lash_core::ToolDefinition::control(
         "switch_frame",
-        "switch_frame",
+        "tools.switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -428,21 +436,21 @@ fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
     let draft = match name {
         "rotate_surface" => lash_core::ToolDefinition::control(
             format!("tool:{name}"),
-            name,
+            format!("tools.{name}"),
             description,
             input,
             lash_core::TurnControls::switch_agent_frame(),
         ),
         "new_after_rotation" => lash_core::ToolDefinition::control(
             format!("tool:{name}"),
-            name,
+            format!("tools.{name}"),
             description,
             input,
             lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         ),
         _ => lash_core::ToolDefinition::raw(
             format!("tool:{name}"),
-            name,
+            format!("tools.{name}"),
             description,
             input,
             serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -482,13 +490,15 @@ impl lash_core::ToolProvider for RotatingTools {
         self.tool_manifests(config)
             .ok()?
             .into_iter()
-            .any(|manifest| manifest.name == name)
-            .then(|| Arc::new(rotating_definition(name).contract()))
+            .any(|manifest| manifest.tool() == name)
+            .then(|| name.split_once('.'))
+            .flatten()
+            .map(|(_, name)| Arc::new(rotating_definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        match call.name() {
-            "rotate_surface" => {
+        match call.name().as_str() {
+            "tools.rotate_surface" => {
                 self.rotated.store(true, Ordering::SeqCst);
                 ToolOutcome::switch_agent_frame(
                     lash_core::FrameKey::from_caller_material("rotated-surface").unwrap(),
@@ -501,9 +511,9 @@ impl lash_core::ToolProvider for RotatingTools {
                         .expect("the turn's spec encodes"),
                 )
             }
-            "new_after_rotation" => ToolOutcome::finish(lash_core::ToolValue::untrusted_json(
-                serde_json::json!("new tool executed"),
-            )),
+            "tools.new_after_rotation" => ToolOutcome::finish(
+                lash_core::ToolValue::untrusted_json(serde_json::json!("new tool executed")),
+            ),
             name => ToolOutcome::err_fmt(format_args!("`{name}` is not offered")),
         }
         .into()
@@ -526,9 +536,9 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
                 }
                 *offered.lock().unwrap() =
                     request.tools.iter().map(|tool| tool.name.clone()).collect();
-                return call("rotation-new-tool", "new_after_rotation");
+                return call("rotation-new-tool", "tools.new_after_rotation");
             }
-            call("rotation-rotate", "rotate_surface")
+            call("rotation-rotate", "tools.rotate_surface")
         })
     };
     let executor = Arc::new(Executor::default());
@@ -572,10 +582,15 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
     committed(&session, 2).await;
     let offered = offered.lock().unwrap().clone();
     assert!(
-        offered.iter().any(|name| name == "new_after_rotation"),
+        offered
+            .iter()
+            .any(|name| name == "tools__new_after_rotation"),
         "the follow-on is offered the new tool: {offered:?}"
     );
-    for absent in ["hidden_after_rotation", "curated_before_rotation"] {
+    for absent in [
+        "tools__hidden_after_rotation",
+        "tools__curated_before_rotation",
+    ] {
         assert!(
             !offered.iter().any(|name| name == absent),
             "the follow-on is not offered `{absent}`: {offered:?}"

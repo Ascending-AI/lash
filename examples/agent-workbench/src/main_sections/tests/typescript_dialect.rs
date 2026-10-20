@@ -78,45 +78,43 @@ fn prompt_programs(dialect: WorkbenchDialect) -> Vec<String> {
     programs
 }
 
-/// The effects the tutorials call, at the paths the real bindings produce.
+/// The operations the tutorials call, as both dialects spell them.
 /// `workbench.register_trigger` and the process controls carry the shipped
 /// tools' own contracts.
-fn workbench_effects(dialect: WorkbenchDialect) -> lash::vm::HostBoundary {
+fn workbench_effects() -> lash::vm::HostBoundary {
     let mut boundary = lash::vm::HostBoundary::new();
     let mut offer = |path: String, definition: Option<&lash::tools::ToolDefinition>| {
-        let (id, input, output) = match definition {
-            Some(definition) => {
-                let contract = definition.contract();
-                (
-                    definition.manifest().id.clone(),
-                    contract.input_schema.canonical.clone(),
-                    contract.output_schema.canonical.clone(),
-                )
-            }
-            None => (
-                lash::tools::ToolId::from(format!("tool:{}", path.replace('.', "/"))),
-                lash::schema::JsonSchema::any(),
-                lash::schema::JsonSchema::any(),
-            ),
-        };
-        boundary
-            .offer_tool(
-                &match dialect {
-                    WorkbenchDialect::TypeScript => path.clone(),
-                    WorkbenchDialect::Python => path.replace('.', "_"),
-                },
-                id,
-                &input,
-                &output,
-                match path.as_str() {
-                    "chat.reply" | "workbench_surface.terminal" => {
-                        lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())
-                    }
-                    "control.continue_as" => lash::tools::TurnControls::switch_agent_frame(),
-                    _ => lash::tools::TurnControls::none(),
-                },
+        let definition = definition.cloned().unwrap_or_else(|| {
+            lash::tools::ToolDefinition::raw(
+                format!("tool:{}", path.replace('.', "/")),
+                path.as_str(),
+                "",
+                serde_json::json!({}),
+                serde_json::json!({}),
             )
-            .expect("a workbench tool is offered as an effect");
+            .expect("an any-typed tutorial tool")
+            .with_execution(std::time::Duration::from_secs(30))
+        });
+        let contract = definition.contract();
+        let controls = match path.as_str() {
+            "chat.reply" | "workbench_surface.terminal" => {
+                lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())
+            }
+            "control.continue_as" => lash::tools::TurnControls::switch_agent_frame(),
+            _ => lash::tools::TurnControls::none(),
+        };
+        let offered = lash::vm::offered_tool(
+            &definition.manifest,
+            &contract.input_schema.canonical,
+            &contract.output_schema.canonical,
+            lash::dialect::OfferedSource::Catalog {
+                tool: definition.manifest.id.to_string(),
+            },
+        )
+        .with_controls(lash::vm::effect_controls(&controls));
+        boundary
+            .offer_operation(definition.operation().clone(), offered)
+            .expect("a workbench tool is offered as an operation");
     };
     offer(
         "workbench.register_trigger".to_owned(),
@@ -161,17 +159,14 @@ fn the_workbench_tutorials_lower_in_each_dialect() {
         .and_then(|embedder| embedder.finish(&packages))
         .expect("embedding");
     for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
-        let boundary = workbench_effects(dialect);
-        let effects = boundary.signatures();
-        let controls = boundary.controls();
+        let boundary = workbench_effects();
         let name = dialect.cell_dialect().name().to_owned();
         let lower = |program: &str| {
-            let environment = lash::dialect::Environment {
-                library: embedding.library(),
-                effects: &effects,
-                tool_roots: &Default::default(),
-                controls: &controls,
-            };
+            let environment_namespaces =
+                lash::dialect::Namespaces::of_operations(boundary.operations().clone())
+                    .expect("the tutorials' operations compose");
+            let environment =
+                lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
             embedding
                 .lower(
                     &name,
@@ -386,7 +381,7 @@ async fn a_python_workbench_serves_python_turns_and_records_the_dialect() {
                 served_prompts.lock_recover().push(format!("{request:?}"));
                 async {
                     Ok(text_response(
-                        "<python>\nawait chat_reply('canonical answer')\n</python>",
+                        "<python>\nawait chat.reply('canonical answer')\n</python>",
                     ))
                 }
             })

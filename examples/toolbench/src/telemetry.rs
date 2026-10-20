@@ -53,7 +53,7 @@ impl Telemetry {
                     input_json,
                     ..
                 } = part
-                    && tool_name == "submit"
+                    && tool_name == "toolbench__submit"
                 {
                     match serde_json::from_str::<Value>(input_json)
                         .ok()
@@ -451,13 +451,13 @@ mod tests {
         let telemetry = Telemetry::default();
         let malformed = lash::direct::LlmOutputPart::ToolCall {
             call_id: "malformed".into(),
-            tool_name: "submit".into(),
+            tool_name: "toolbench__submit".into(),
             input_json: "{}".into(),
             replay: None,
         };
         let valid = lash::direct::LlmOutputPart::ToolCall {
             call_id: "valid".into(),
-            tool_name: "submit".into(),
+            tool_name: "toolbench__submit".into(),
             input_json: r#"{"value":"saved"}"#.into(),
             replay: None,
         };

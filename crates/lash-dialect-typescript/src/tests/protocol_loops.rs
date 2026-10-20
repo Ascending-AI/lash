@@ -27,7 +27,7 @@ fn passes_continue_break_return_and_throw() {
         for (const a of [1, 2]) {\n\
           for (const x of [1, 2, 3, 4]) {\n\
             if (x === 2 || x === 4) { continue; }\n\
-            out.push(await echo(x * a));\n\
+            out.push(await host.echo(x * a));\n\
             if (a === 2 && x === 3) { break; }\n\
           }\n\
         }\n\
@@ -35,7 +35,7 @@ fn passes_continue_break_return_and_throw() {
         for (const x of [1, , 3]) { out.push(x === undefined ? \"hole\" : x); }\n\
         try { for (const x of 5) { out.push(x); } } catch (e) { out.push(\"refused\"); }\n\
         out.push(firstBig([1, 3, 5]));\n\
-        await finish(out.join(\",\"));";
+        await control.finish(out.join(\",\"));";
     assert_eq!(
         finished(source),
         Datum::Text("1,3,2,6,inside,1,hole,3,refused,3".into())
@@ -48,18 +48,18 @@ fn passes_continue_break_return_and_throw() {
 #[test]
 fn collections_walk_live_and_iterators_step_through_next() {
     let source = "const out = [];\n\
-        for (const c of \"a\u{e9}\u{1f600}\") { out.push(await echo(c)); }\n\
+        for (const c of \"a\u{e9}\u{1f600}\") { out.push(await host.echo(c)); }\n\
         const m = new Map([[\"a\", 1], [\"b\", 2], [\"c\", 3]]);\n\
         for (const [key, v] of m) {\n\
           if (key === \"a\") { m.delete(\"b\"); m.set(\"d\", 4); }\n\
-          await echo(key);\n\
+          await host.echo(key);\n\
           out.push(key + v);\n\
         }\n\
         const s = new Set([1, 2]);\n\
         for (const x of s) { if (x === 1) { s.add(3); } out.push(x); }\n\
-        for (const x of [10, 20].values()) { out.push(await echo(x)); }\n\
+        for (const x of [10, 20].values()) { out.push(await host.echo(x)); }\n\
         for (const [i, x] of [\"p\", \"q\"].entries()) { out.push(i + x); }\n\
-        await finish(out.join(\",\"));";
+        await control.finish(out.join(\",\"));";
     assert_eq!(
         finished(source),
         Datum::Text("a,\u{e9},\u{1f600},a1,c3,d4,1,2,3,10,20,0p,1q".into())
@@ -75,12 +75,12 @@ fn guest_conversions_run_once_and_mutated_collections_walk_live_across_parks() {
     let source = "let calls = 0;\n\
         const n = { valueOf() { calls = calls + 1; return 2; } };\n\
         const out = [];\n\
-        out.push(n * 3 + await echo(1));\n\
+        out.push(n * 3 + await host.echo(1));\n\
         const a = [1, 2, 3, 4];\n\
-        for (const x of a) { out.push(await echo(x)); if (x === 1) { a.splice(1, 1); } }\n\
+        for (const x of a) { out.push(await host.echo(x)); if (x === 1) { a.splice(1, 1); } }\n\
         const s = new Set([1, 2, 3]);\n\
-        for (const x of s) { if (x === 1) { s.delete(2); } out.push(await echo(x)); }\n\
-        await finish(out.join(\",\") + \":\" + calls);";
+        for (const x of s) { if (x === 1) { s.delete(2); } out.push(await host.echo(x)); }\n\
+        await control.finish(out.join(\",\") + \":\" + calls);";
     assert_eq!(finished(source), Datum::Text("7,1,3,4,1,3:1".into()));
 }
 
@@ -91,7 +91,7 @@ fn a_declared_array_is_walked_as_what_it_holds() {
     let source = "const xs: number[] = 'ab' as any;\n\
         let n = 0;\n\
         for (const x of xs) { n = n + 1; }\n\
-        await finish(n);";
+        await control.finish(n);";
     assert_eq!(finished(source), Datum::Float(Float::new(2.0)));
 }
 
@@ -102,8 +102,9 @@ fn a_declared_array_is_walked_as_what_it_holds() {
 #[test]
 fn list_item_charge_does_not_walk_graphs_behind_the_element() {
     let added_charge = |bindings: &str| {
-        let base = format!("{bindings}\nawait finish(0);");
-        let walked = format!("{bindings}\nfor (const item of [raw]) {{}}\nawait finish(0);");
+        let base = format!("{bindings}\nawait control.finish(0);");
+        let walked =
+            format!("{bindings}\nfor (const item of [raw]) {{}}\nawait control.finish(0);");
         let plain = plain_record_resume(&base, u64::MAX, false);
         let looped = plain_record_resume(&walked, u64::MAX, false);
         assert_eq!(plain.0, looped.0);

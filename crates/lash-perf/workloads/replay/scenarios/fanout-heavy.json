@@ -11,126 +11,126 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-0Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-1Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-2Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-3Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-4Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-5Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-6Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-7Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-8Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-9Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-10Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-11Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-12Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-13Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-14Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-15Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-16Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-17Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Sy",
                 "bytes": 3370

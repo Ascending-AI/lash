@@ -120,7 +120,7 @@ fn scripts(width: usize) -> Arc<served::Scripts> {
                     .map(|index| {
                         served::call(
                             &format!("declared-start-spawn-{index}"),
-                            "spawn_agent",
+                            "agents.spawn",
                             serde_json::json!({ "task": child_task(index) }),
                         )
                     })
@@ -146,23 +146,22 @@ fn scripts(width: usize) -> Arc<served::Scripts> {
 
 /// The echo the migrated-tools law's `batch` calls.
 const ECHO: &str = "migrated_echo";
+const ECHO_OPERATION: &str = "tools.migrated_echo";
 
 /// The values the migrated-tools law's `batch` echoes.
 const ECHOED: [&str; 2] = ["migrated-alpha", "migrated-beta"];
 
 fn echo_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{ECHO}"),
-        ECHO,
+        ECHO_OPERATION,
         "Answers the value it is given.",
         object.clone(),
         object,
     )
     .expect("the echo's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], ECHO))
 }
 
 /// Counts the echo bodies it runs, across every node.
@@ -185,7 +184,7 @@ impl lash_core::ToolProvider for Echo {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == ECHO).then(|| Arc::new(echo_definition().contract()))
+        (name == ECHO_OPERATION).then(|| Arc::new(echo_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -201,12 +200,12 @@ fn migrated_parent(target: &ProcessId) -> Vec<lash_core::LlmResponse> {
         served::response(vec![
             served::call(
                 "migrated-cancel",
-                "cancel_process",
+                "processes.cancel",
                 serde_json::json!({ "process_id": target.to_string() }),
             ),
             served::call(
                 "declared-start-spawn-0",
-                "spawn_agent",
+                "agents.spawn",
                 serde_json::json!({ "task": child_task(0) }),
             ),
             served::call(
@@ -215,7 +214,7 @@ fn migrated_parent(target: &ProcessId) -> Vec<lash_core::LlmResponse> {
                 serde_json::json!({
                     "tool_calls": ECHOED
                         .iter()
-                        .map(|value| serde_json::json!({ "tool": ECHO, "parameters": { "value": value } }))
+                        .map(|value| serde_json::json!({ "tool": format!("tools__{ECHO}"), "parameters": { "value": value } }))
                         .collect::<Vec<_>>(),
                 }),
             ),

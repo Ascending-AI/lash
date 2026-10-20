@@ -37,7 +37,7 @@ where
             let manifest = entry.manifest;
             let mut projected = serde_json::json!({
                 "id": manifest.id,
-                "name": manifest.name,
+                "name": manifest.tool(),
                 "description": manifest.description,
                 "bindings": manifest.bindings,
                 "inline": manifest.inline,
@@ -50,8 +50,6 @@ where
         })
         .collect()
 }
-
-pub use lash_core_store::tool_surface::effect_path_of;
 
 /// The tool providers of one session or process env, by declared key, and
 /// its deferred provider, if any.
@@ -187,7 +185,7 @@ impl ToolRegistry {
                     return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
                         source: Box::new(
                             lash_protocol_types::RegistrationRefused::ReadWithoutReader {
-                                tool: manifest.name.clone(),
+                                tool: manifest.tool(),
                                 provider: key.to_string(),
                             },
                         ),
@@ -231,7 +229,7 @@ fn served_definition(
         .ok_or_else(|| {
             lash_execution_contracts::plugin_error::PluginError::ResidentToolContractUnavailable {
                 tool_id: manifest.id.clone(),
-                name: manifest.name.clone(),
+                operation: manifest.tool(),
             }
         })?;
     Ok(ToolDefinition {
@@ -489,7 +487,7 @@ impl SurfaceTools {
     fn by_name(&self, name: &str) -> Option<&SurfaceEntry> {
         self.routes
             .values()
-            .find(|entry| entry.definition.manifest.name == name)
+            .find(|entry| entry.definition.manifest.tool() == name)
     }
 
     /// The handle of the provider `tool` routes to under `route`.

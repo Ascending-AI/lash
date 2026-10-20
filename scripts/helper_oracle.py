@@ -6,6 +6,7 @@ import json
 import math
 import struct
 import sys
+import types
 
 
 def tag(value):
@@ -36,7 +37,7 @@ async def run(case):
     async def observe(value):
         values.append(tag(value))
 
-    namespace = {"observe": observe, "print": lambda *args, **kwargs: None}
+    namespace = {"host": types.SimpleNamespace(observe=observe), "print": lambda *args, **kwargs: None}
     try:
         code = compile(case["source"], case["id"], "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
         pending = eval(code, namespace)

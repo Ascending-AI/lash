@@ -39,7 +39,7 @@ const kept = xs.filter((x) => { log.push(x); return x > 1; });
 const doubled = xs.map((x) => { const y = x * 2; log.push(y); return y; });
 xs.forEach((x, i) => { const y = x * i; log.push(y); });
 const sum = xs.reduce((acc, x) => { log.push(acc); return acc + x; }, 10);
-await observe([kept, doubled, sum, log]);"#,
+await host.observe([kept, doubled, sum, log]);"#,
     ),
     (
         "search",
@@ -49,7 +49,7 @@ const at = xs.findIndex((x) => { log.push(x); return x === 5; });
 const every = xs.every((x) => { log.push(-x); return x > 0; });
 const some = xs.some((x) => { log.push(x * 10); return x > 4; });
 const flat = xs.flatMap((x) => { log.push(x + 100); return [x, -x]; });
-await observe([at, every, some, flat, log]);"#,
+await host.observe([at, every, some, flat, log]);"#,
     ),
     (
         "compare",
@@ -57,14 +57,14 @@ await observe([at, every, some, flat, log]);"#,
 const log = [];
 const sorted = xs.toSorted((a, b) => { log.push(a * 10 + b); return a - b; });
 xs.sort((a, b) => { log.push(-(a * 10 + b)); return b - a; });
-await observe([sorted, xs, log]);"#,
+await host.observe([sorted, xs, log]);"#,
     ),
     (
         "nested",
         r#"const xs = [1, 2];
 const log = [];
 xs.forEach((x) => { const ys = [x, x + 1].filter((y) => { log.push(x * 10 + y); return y > 1; }); log.push(ys.length); });
-await observe(log);"#,
+await host.observe(log);"#,
     ),
     (
         "coerce",
@@ -72,7 +72,7 @@ await observe(log);"#,
 const o = { valueOf() { log.push("valueOf"); return 5; } };
 const scaled = o * 2;
 const less = o < 7;
-await observe([scaled, less, log]);"#,
+await host.observe([scaled, less, log]);"#,
     ),
     (
         "raise",
@@ -84,7 +84,7 @@ try {
 } catch (e) {
   caught = e.message;
 }
-await observe([caught, log]);"#,
+await host.observe([caught, log]);"#,
     ),
 ];
 
@@ -93,15 +93,15 @@ await observe([caught, log]);"#,
 const PYTHON: &[(&str, &str)] = &[
     (
         "sort",
-        "def key(x):\n    print(\"key\", x)\n    return -x\nxs = [3, 1, 2]\nxs.sort(key=key)\nprint(xs)\nys = sorted(xs, key=lambda x: x % 3)\nawait observe([xs, ys])\n",
+        "def key(x):\n    print(\"key\", x)\n    return -x\nxs = [3, 1, 2]\nxs.sort(key=key)\nprint(xs)\nys = sorted(xs, key=lambda x: x % 3)\nawait host.observe([xs, ys])\n",
     ),
     (
         "raise",
-        "def bad(x):\n    print(\"bad\", x)\n    if x == 1:\n        raise ValueError(\"one\")\n    return x\nxs = [3, 1, 2]\ntry:\n    xs.sort(key=bad)\nexcept ValueError as e:\n    print(\"caught\", str(e))\nawait observe(xs)\n",
+        "def bad(x):\n    print(\"bad\", x)\n    if x == 1:\n        raise ValueError(\"one\")\n    return x\nxs = [3, 1, 2]\ntry:\n    xs.sort(key=bad)\nexcept ValueError as e:\n    print(\"caught\", str(e))\nawait host.observe(xs)\n",
     ),
     (
         "convert",
-        "xs = [1, \"a\", [2]]\nprint(str(xs))\ntry:\n    xs.index(9)\nexcept ValueError as e:\n    print(str(e))\nn = int(\"42\") + int(\"-0x1f\", 0)\nf = float(\"2.5\")\ntry:\n    int(\"nope\")\nexcept ValueError as e:\n    print(\"bad\", str(e))\nawait observe([str(xs), n, f])\n",
+        "xs = [1, \"a\", [2]]\nprint(str(xs))\ntry:\n    xs.index(9)\nexcept ValueError as e:\n    print(str(e))\nn = int(\"42\") + int(\"-0x1f\", 0)\nf = float(\"2.5\")\ntry:\n    int(\"nope\")\nexcept ValueError as e:\n    print(\"bad\", str(e))\nawait host.observe([str(xs), n, f])\n",
     ),
 ];
 
@@ -148,7 +148,7 @@ fn finish<M: Machine>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(effect.effect.as_str(), "observe");
+                            assert_eq!(effect.effect.as_str(), "host.observe");
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
                         Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
@@ -349,9 +349,9 @@ fn every_installed_segment_resolves_against_its_body() {
             id: format!("{dialect}/empty"),
             dialect: dialect.into(),
             source: if dialect == "python" {
-                "await observe(None)"
+                "await host.observe(None)"
             } else {
-                "await observe(null)"
+                "await host.observe(null)"
             }
             .into(),
             bits: 0,

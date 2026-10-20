@@ -1,5 +1,4 @@
 use super::*;
-use lash_protocol_types::ToolDefinitionBindingExt as _;
 const RECORDED: crate::ProcessConfigKey<()> =
     crate::ProcessConfigKey::new("z-recorded", crate::FormatVersion::ONE);
 const OTHER: crate::ProcessConfigKey<()> =
@@ -8,14 +7,13 @@ const OTHER: crate::ProcessConfigKey<()> =
 fn tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "search",
-        "search",
+        "search.run",
         "Search",
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["q"], "properties":{"q":{"type":"string"}}}),
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}}}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(60))
-    .with_tool_binding(lash_protocol_types::ToolBinding::new(["search"], "run"))
 }
 struct Answer(crate::ToolDefinition);
 #[async_trait::async_trait]
@@ -31,7 +29,7 @@ impl crate::ToolProvider for Answer {
         name: &str,
         _: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == self.0.manifest.name).then(|| Arc::new(self.0.contract.clone()))
+        (name == self.0.manifest.tool()).then(|| Arc::new(self.0.contract.clone()))
     }
     async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         crate::ToolOutcome::ok(serde_json::json!({})).into()
@@ -205,11 +203,10 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
     let scope = crate::ExecutionScope::runtime_operation("exact-link-law");
     let target = target();
     let wider = crate::ToolDefinition::raw(
-        "search", "search", "Search",
+        "search", "search.run", "Search",
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["q"], "properties":{"q":{"type":"string"}, "limit":{"type":"integer"}}}),
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}, "extra":{"type":"string"}}}),
-    ).unwrap().with_execution(std::time::Duration::from_secs(60))
-        .with_tool_binding(lash_protocol_types::ToolBinding::new(["search"], "run"));
+    ).unwrap().with_execution(std::time::Duration::from_secs(60));
     let engines = registry_of(false, true, wider.clone());
     let effect = crate::EffectName::new("search.run").unwrap();
     let env = ProcessEnv::builder(crate::MaxToolCalls::new(4))

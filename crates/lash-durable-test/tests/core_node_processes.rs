@@ -224,11 +224,12 @@ fn text(request: &LlmRequest, text: &str) -> LlmResponse {
 }
 
 /// One native tool call.
+/// A model call of the operation `tool`, by its Standard-mode name.
 fn call(id: &str, tool: &str, input: serde_json::Value) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: id.to_owned(),
-            tool_name: tool.to_owned(),
+            tool_name: tool.replace('.', "__"),
             input_json: input.to_string(),
             replay: None,
         }],
@@ -323,7 +324,7 @@ async fn spawn_agent_child_runs_and_answers_its_parent(tier: Tier) {
             if seen.is_empty() {
                 return call(
                     "core-node-spawn",
-                    "spawn_agent",
+                    "agents.spawn",
                     serde_json::json!({ "task": CHILD_TASK }),
                 );
             }
@@ -440,7 +441,7 @@ async fn assert_child_creation_plan(
             if transcript.contains(PARENT_INPUT) && results(request).is_empty() {
                 return call(
                     "prompt-plan-spawn",
-                    "spawn_agent",
+                    "agents.spawn",
                     serde_json::json!({ "task": CHILD_TASK }),
                 );
             }
@@ -803,17 +804,15 @@ impl lash::tools::StaticToolExecute for WriteAttachment {
 
 /// The host tool `write_attachment`.
 fn write_attachment_tool() -> Arc<dyn lash_core::ToolProvider> {
-    use lash_core::ToolDefinitionBindingExt as _;
     let definition = lash_core::ToolDefinition::raw(
         "write_attachment",
-        "write_attachment",
+        "tools.write_attachment",
         "Writes a small image attachment.",
         serde_json::json!({ "type": "object", "additionalProperties": false }),
         serde_json::json!({}),
     )
     .expect("the attachment tool's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "write_attachment"));
+    .with_execution(std::time::Duration::from_secs(120));
     Arc::new(lash::tools::StaticToolProvider::new(
         vec![definition],
         WriteAttachment,
@@ -828,7 +827,7 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
         if results(request).is_empty() {
             call(
                 "child-attachment-call",
-                "write_attachment",
+                "tools.write_attachment",
                 serde_json::json!({}),
             )
         } else {
@@ -957,7 +956,7 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
                 return reporting(
                     call(
                         "usage-spawn",
-                        "spawn_agent",
+                        "agents.spawn",
                         serde_json::json!({ "task": CHILD_TASK }),
                     ),
                     &parent_spawns,
@@ -1057,7 +1056,7 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
                 reporting(
                     call(
                         "report-usage-tool",
-                        "write_attachment",
+                        "tools.write_attachment",
                         serde_json::json!({}),
                     ),
                     &first,
@@ -1328,6 +1327,7 @@ fn settled(outcome: &lash_core_store::tool_run::SettledOutput) -> serde_json::Va
 
 /// The host tool a tool step runs.
 const WRITE_TOOL: &str = "core_node_write";
+const WRITE_TOOL_OPERATION: &str = "tools.core_node_write";
 
 /// The outside world: what the write tool wrote, per call, and a signal
 /// each held write raises. It outlives every node, as the world outside a
@@ -1365,10 +1365,9 @@ const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
 
 /// The `Once` write tool's definition.
 fn write_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         WRITE_TOOL,
-        WRITE_TOOL,
+        WRITE_TOOL_OPERATION,
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -1381,7 +1380,6 @@ fn write_definition() -> lash_core::ToolDefinition {
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL))
 }
 
 /// The `Once` host tool that writes to `world`.
@@ -1931,7 +1929,7 @@ on_every_tier!(lash_vm_process_runs_to_its_terminal);
 /// The engine an isolated call binds: it ends with the payload it started
 /// on.
 const ISOLATED_ENGINE: &str = "core-node-isolated-engine";
-const ISOLATED_TOOL: &str = "iso_run";
+const ISOLATED_TOOL: &str = "iso.run";
 
 fn isolated_engine_advance(
     _state: &mut serde_json::Value,
@@ -1955,7 +1953,6 @@ struct IsolatedTools {
 }
 
 fn isolated_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         "tool:iso_run",
         ISOLATED_TOOL,
@@ -1970,7 +1967,6 @@ fn isolated_definition() -> lash_core::ToolDefinition {
     )
     .expect("the isolated tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["iso"], "run"))
     .isolated_in(ISOLATED_ENGINE)
     .expect("an isolated tool names its engine")
 }

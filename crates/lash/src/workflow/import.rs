@@ -1,6 +1,5 @@
 //! Whole workflow import in any installed dialect: lowering under the
 //! shared workflow contract, then admission, without publication.
-use lash_kernel_dialect::Environment;
 use lash_kernel_dialect::workflow::WorkflowSourceLimits;
 use lash_kernel_doc::{Captions, DocumentBytes, SourceLanguage, SourceMap};
 
@@ -52,20 +51,18 @@ pub enum WorkflowImportUnsupported {
     EngineUnavailable,
     /// The registered worker does not install the requested dialect.
     DialectUnavailable { dialect: String },
-    /// The worker registry cannot resolve one library definition per name.
-    LibraryUnavailable(lash_kernel_dialect::LibraryError),
 }
 
 pub(crate) async fn import(
     workers: &lash_vm_client::service::Service,
     language: SourceLanguage,
     source: &str,
-    dialect: &Environment<'_>,
+    operations: &lash_kernel_dialect::Operations,
     checker: &lash_kernel_check::Environment<'_>,
     limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
     let (document, source_map, captions) = match workers
-        .import_workflow(language, source, dialect, limits)
+        .import_workflow(language, source, operations, limits)
         .await
     {
         Ok(imported) => imported,

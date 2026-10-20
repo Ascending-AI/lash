@@ -8,11 +8,11 @@ Usage: python3 record.py               rewrite recorded.json from cases/*.py
                                       verify the corpus and its pass ratchet
 
 A case is a cell of the dialect: Python that may `await` at its top level
-and call the tools `echo(x)`, which answers `x`, and `boom(x)`, which fails
-with an error of class `boom` whose message is `x`. A case's first line may
-script the order outcomes are delivered in:
+and call the tools `host.echo(x)`, which answers `x`, and `host.boom(x)`,
+which fails with an error of class `boom` whose message is `x`. A case's
+first line may script the order outcomes are delivered in:
 
-    # deliver: echo:b0, echo:a0; sleep:50; echo:a1
+    # deliver: host.echo:b0, host.echo:a0; sleep:50; host.echo:a1
 
 Each `;` ends the batch delivered at one park. Once the script is used up
 the oldest pending request is delivered, one per park.
@@ -40,6 +40,7 @@ import pathlib
 import platform
 import subprocess
 import sys
+import types
 
 HERE = pathlib.Path(__file__).parent
 
@@ -70,11 +71,13 @@ class Recorder:
         self.epoch["logged"].append(sep.join(str(arg) for arg in args))
 
     async def echo(self, x):
-        return await self.request(f"echo:{shown(x)}", lambda future: future.set_result(x))
+        return await self.request(
+            f"host.echo:{shown(x)}", lambda future: future.set_result(x)
+        )
 
     async def boom(self, x):
         return await self.request(
-            f"boom:{shown(x)}", lambda future: future.set_exception(boom(shown(x)))
+            f"host.boom:{shown(x)}", lambda future: future.set_exception(boom(shown(x)))
         )
 
     async def sleep(self, seconds, result=None):
@@ -131,8 +134,7 @@ def run_case(source, deliveries):
     namespace = {
         "__name__": "__main__",
         "print": recorder.print,
-        "echo": recorder.echo,
-        "boom": recorder.boom,
+        "host": types.SimpleNamespace(echo=recorder.echo, boom=recorder.boom),
         "boom_error": boom,
     }
     code = compile(source, "<case>", "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)

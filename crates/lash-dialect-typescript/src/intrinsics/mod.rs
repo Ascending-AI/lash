@@ -31,6 +31,9 @@ pub(crate) struct Reader {
     limits: k::KernelDataLimits,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
+    /// The base document's effects, by the dotted path each prints as: a
+    /// call of one is a perform.
+    effects: BTreeMap<String, k::EffectName>,
     operators: crate::generated_operators::Operators,
     types: lash_kernel_dialect::source_types::Types,
 }
@@ -250,6 +253,12 @@ fn read_module(
             .helpers
             .into_iter()
             .map(|(id, alias)| (alias, id))
+            .collect(),
+        effects: base
+            .manifest
+            .effects
+            .keys()
+            .map(|effect| (crate::printer::operation_path(effect), effect.clone()))
             .collect(),
         operators: crate::generated_operators::bindings(&base.manifest),
         types: Default::default(),

@@ -4,7 +4,7 @@
 //! errors, prints, tool calls and each callback's receiver and arguments, in
 //! order, are the same; only the charge, which bounds the work done, drops.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Library, NamedLibrary};
@@ -215,12 +215,12 @@ fn observe(program: Program, relay: bool) -> Observed {
 
 /// Lowers a TypeScript cell against `kernel`'s library.
 fn lowered(kernel: &Kernel, source: &str) -> Program {
-    let environment = Environment {
-        tool_roots: &BTreeSet::new(),
-        library: &kernel.library,
-        effects: &super::machine::effects(),
-        controls: super::controls(),
-    };
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+        &super::machine::effects(),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
+    let environment = Environment::new(&kernel.library, &environment_namespaces);
     let lowered = crate::lower(
         source,
         &environment,
@@ -347,7 +347,7 @@ for (const receiver of [null, undefined]) {{
   try {{ log.push(describe(Array.prototype.{helper}.call(receiver, () => true))); }} catch (e) {{ log.push("threw " + String(e)); }}
 }}
 console.log(log.join("\n"));
-await finish(log);
+await control.finish(log);
 "##
     )
 }
@@ -391,7 +391,7 @@ fn throwing_and_waiting_callbacks_match_their_replaced_definitions() {
         let source = format!(
             "const a = [1, , 3, 4]; let seen = '';\n\
              a.{helper}(function(x: any, y: any) {{ seen += String(x) + String(y); if (seen.length > 4) {{ throw new TypeError(seen); }} return {answer}; }});\n\
-             await finish(seen);"
+             await control.finish(seen);"
         );
         let observed = same_on_both(&source);
         assert!(
@@ -401,13 +401,16 @@ fn throwing_and_waiting_callbacks_match_their_replaced_definitions() {
         );
         let source = format!(
             "const a: any = [1, , 3, 4]; const log: any[] = [];\n\
-             const out = a.{helper}(async function(x: any, y: any) {{ log.push(String(x) + String(y)); await echo(x); log.push(await echo(y)); a.length = 3; return x; }});\n\
+             const out = a.{helper}(async function(x: any, y: any) {{ log.push(String(x) + String(y)); await host.echo(x); log.push(await host.echo(y)); a.length = 3; return x; }});\n\
              await sleep(5);\n\
-             await finish({{ log: log, kind: typeof out }});"
+             await control.finish({{ log: log, kind: typeof out }});"
         );
         let observed = same_on_both(&source);
         assert!(
-            observed.requests.iter().any(|(name, _)| name == "echo"),
+            observed
+                .requests
+                .iter()
+                .any(|(name, _)| name == "host.echo"),
             "{helper}: {:?}",
             observed.requests
         );
@@ -448,7 +451,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
         let answer = helper == "every";
         let program = |kernel: &Kernel| {
             let mut header =
-                String::from("kernel 1\nnumbers by_spelling\neffect echo(x?: Any) -> Any\n");
+                String::from("kernel 1\nnumbers by_spelling\neffect host.echo(x?: Any) -> Any\n");
             for (id, used) in manifest(kernel, &[name.as_str(), "list.len", "same"]) {
                 header.push_str(&format!("use {used} = @{id}\n"));
             }
@@ -457,7 +460,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
                  let log = []\n\
                  let xs = [1, (), 3, 4, 5]\n\
                  let f = fn(receiver, passed) {{\n\
-                   let r = perform echo(passed) as Any\n\
+                   let r = perform host.echo(passed) as Any\n\
                    set log[list.len(log)] = (passed, r)\n\
                    if same(list.len(log), 2) {{ set xs[3] = () }}\n\
                    return {answer}\n\
@@ -504,12 +507,12 @@ fn direct_map_calls_account_for_their_work_and_resume_at_every_statement() {
         after(),
         r#"
         const m = new Map();
-        m.set('key', await echo(7));
+        m.set('key', await host.echo(7));
         const alias = m;
         const read = () => alias.get('key');
         console.log(read(), alias.has('key'), m.get('missing'));
         const generic = (o, key) => o.get(key);
-        console.log(generic(m, await echo('key')));
+        console.log(generic(m, await host.echo('key')));
     "#,
     );
     let straight = observe(program.clone(), false);
@@ -530,7 +533,7 @@ fn primitive_method_regions_charge_only_executed_work_and_resume_exactly() {
         const e = fields.text.slice(1, 4);
         const f = fields.items.slice(1, 3);
         const text = 'old';
-        await finish([a, b, c, d, e, f, text.trim('ignored')]);
+        await control.finish([a, b, c, d, e, f, text.trim('ignored')]);
     "#;
     let program = lowered(after(), source);
     let straight = observe(program.clone(), false);
@@ -701,10 +704,10 @@ fn primitive_method_regions_keep_alias_invalidation_and_argument_order() {
     assert_eq!(actual.printed, generic.printed);
     assert_eq!(actual.requests, generic.requests);
     assert_eq!(observe(lowered(after(), source), true), actual);
-    let source = "let awaited = ' before '; console.log(awaited.trim(await echo((awaited = 'after'))), awaited);";
+    let source = "let awaited = ' before '; console.log(awaited.trim(await host.echo((awaited = 'after'))), awaited);";
     let generic = source.replace(
-        "awaited.trim(await echo((awaited = 'after')))",
-        "((s, x) => s.trim(x))(awaited, await echo((awaited = 'after')))",
+        "awaited.trim(await host.echo((awaited = 'after')))",
+        "((s, x) => s.trim(x))(awaited, await host.echo((awaited = 'after')))",
     );
     let actual = observe(lowered(after(), source), false);
     let generic = observe(lowered(after(), &generic), false);

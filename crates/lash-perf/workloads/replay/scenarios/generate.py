@@ -14,7 +14,7 @@ def write(shape,tier,protocol,turns,note,**params):
     d=dict(format='lash-perf-replay/1',name=name,description='Explore only. provenance: '+note,protocol=protocol,turns=turns)
     (out/(name+'.json')).write_text(json.dumps(d,indent=2)+'\n')
     matrix.append(dict(name=name,protocol=protocol,turns=sum(g['repeat'] for g in turns),steady_turns=sum(g['repeat'] for g in turns if not g.get('setup')),**params))
-def tool(key,n,inp=0):return dict(tool='fixture_large',args=dict(key=key+fill(inp),bytes=n))
+def tool(key,n,inp=0):return dict(tool='tools.fixture_large',args=dict(key=key+fill(inp),bytes=n))
 def seq(calls,n,inp,key='read-{turn}'):
     return [dict(tool_calls=[tool(key+f'-{i}',n,inp)]) for i in range(calls)]
 for tier,p in [('small',10),('typical',50),('heavy',99)]:
@@ -34,11 +34,11 @@ for tier,p in [('small',10),('typical',50),('heavy',99)]:
     for lang,protocol in [('ts','typescript'),('py','python')]:
         if lang=='ts':
             setup=['let chunks = [];','let retained = 0;','await control.finish({ ready: true });']
-            source=[f'const chunk = await tools.fixture_large({{ key: "data-{{turn}}", bytes: {b} }});','chunks.push(chunk.text);','retained = retained + chunk.text.length;','await control.finish({ retained: retained, chunks: chunks.length, preview: chunk.text.slice(0, '+str(preview)+') });']
+            source=[f'const chunk = await tools.fixtureLarge({{ key: "data-{{turn}}", bytes: {b} }});','chunks.push(chunk.text);','retained = retained + chunk.text.length;','await control.finish({ retained: retained, chunks: chunks.length, preview: chunk.text.slice(0, '+str(preview)+') });']
             comment='// '
         else:
-            setup=['chunks = []','retained = 0','await control_finish({"ready": True})']
-            source=[f'chunk = await tools_fixture_large({{"key": "data-{{turn}}", "bytes": {b}}})','chunks.append(chunk["text"])','retained = retained + len(chunk["text"])','await control_finish({"retained": retained, "chunks": len(chunks), "preview": chunk["text"][:'+str(preview)+']})']
+            setup=['chunks = []','retained = 0','await control.finish({"ready": True})']
+            source=[f'chunk = await tools.fixture_large({{"key": "data-{{turn}}", "bytes": {b}}})','chunks.append(chunk["text"])','retained = retained + len(chunk["text"])','await control.finish({"retained": retained, "chunks": len(chunks), "preview": chunk["text"][:'+str(preview)+']})']
             comment='# '
         # Pad source with synthetic comments to the measured cell length where it fits.
         missing=length-len('\n'.join(source))-1
@@ -46,7 +46,7 @@ for tier,p in [('small',10),('typical',50),('heavy',99)]:
         write('analysis-'+lang,tier,protocol,[group(1,[dict(cell=setup)],setup=True),group(n,[dict(cell=source)])],f'Jupyter agent {stats["jupyter"]["revision"]} non_thinking p{p} model calls mapped to turns, visible output bytes as previews, and code bytes (minimum executable source may exceed small cells). Growing synthetic table = 8 bytes per printed dataframe cell at p{state_p}, divided across turns. Native dataframe heap size is unobserved; backing chunks model file data, not logged tool output.',calls_per_turn=1,output_bytes=b,retained_bytes=n*b,preview_bytes=preview,state_percentile=state_p,cell_bytes=len('\n'.join(source)))
     n=q('tau','user_turns',p);calls={'small':1,'typical':2,'heavy':6}[tier]
     source=[]
-    for i in range(calls):source.append(f'const phase{i} = await tools.fixture_slow({{ key: "phase-{{turn}}-{i}", ms: 5 }});')
+    for i in range(calls):source.append(f'const phase{i} = await tools.fixtureSlow({{ key: "phase-{{turn}}-{i}", ms: 5 }});')
     source+=['progress.push({turn});','await control.finish({ completed: progress.length });']
     write('workflow',tier,'typescript',[group(1,[dict(cell=['let progress = [];','await control.finish({ ready: true });'])],setup=True),group(n,[dict(cell=source)])],f'tau-bench {stats["tau"]["revision"]} p{p} user turns. Sequential cell parks represent asynchronous workflow steps, compressed to 5 ms each. Steps/turn = 1/2/6 (small floor, p90/p99 calls/user turn); no real multi-day waits or owner crashes are claimed.',calls_per_turn=calls,delay_ms=5)
     fan=q('tau','tool_calls_session',p);b=q('tau','tool_output_bytes',p);inp=q('tau','tool_input_bytes',p)

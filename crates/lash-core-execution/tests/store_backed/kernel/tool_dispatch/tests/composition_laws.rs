@@ -68,7 +68,7 @@ fn contract_from(
 ) -> Option<Arc<crate::ToolContract>> {
     definitions
         .into_iter()
-        .find(|tool| tool.name() == name)
+        .find(|tool| tool.manifest.tool() == name)
         .map(|tool| Arc::new(tool.contract()))
 }
 
@@ -102,10 +102,14 @@ fn session(tools: &CountingTools, mut plugins: Vec<Arc<dyn PluginFactory>>) -> A
 /// place, as a round member's does.
 async fn dispatch(plugins: Arc<PluginSession>, value: &str) -> crate::ToolCallOutput {
     let context = refusing_dispatch_context(plugins).await;
-    dispatch_tool_call(&context, "beta".to_string(), json!({ "value": value }))
-        .await
-        .record
-        .output
+    dispatch_tool_call(
+        &context,
+        "tools.beta".to_string(),
+        json!({ "value": value }),
+    )
+    .await
+    .record
+    .output
 }
 
 /// An argument transform that appends `suffix` and counts its invocations.
@@ -543,7 +547,7 @@ async fn result_checks_without_a_decision_record_publish_no_state_before_settlem
             let pending = crate::sansio::PendingToolCall {
                 call_id: crate::ToolCallId::fixture("c1"),
                 provider_call_id: None,
-                tool_name: "beta".into(),
+                tool_name: "tools.beta".into(),
                 args: json!({"value": "x"}),
                 replay: None,
             };
@@ -751,7 +755,7 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
-    let _ = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "x" })).await;
+    let _ = dispatch_tool_call(&context, "tools.beta".to_string(), json!({ "value": "x" })).await;
 
     let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
         .await

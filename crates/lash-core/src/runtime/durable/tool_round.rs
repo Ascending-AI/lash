@@ -639,9 +639,7 @@ async fn named_members(
             let name = surface
                 .as_ref()
                 .and_then(|surface| surface.entry_for(member.tool()))
-                .map(|entry| {
-                    lash_trace::TraceToolName::Name(entry.definition.manifest.name.clone())
-                })
+                .map(|entry| lash_trace::TraceToolName::Name(entry.definition.manifest.tool()))
                 .unwrap_or_else(|| lash_trace::TraceToolName::Identity {
                     tool_id: member.tool().clone(),
                 });

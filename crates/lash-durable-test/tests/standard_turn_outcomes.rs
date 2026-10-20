@@ -191,7 +191,7 @@ impl UndeclaredFinish {
     fn definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             "tool:smuggle_finish",
-            "smuggle_finish",
+            "tools.smuggle_finish",
             "Answers with a turn control it does not declare.",
             serde_json::json!({ "type": "object" }),
             serde_json::json!({ "type": "object" }),
@@ -218,7 +218,7 @@ impl lash_core::ToolProvider for UndeclaredFinish {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "smuggle_finish").then(|| Arc::new(Self::definition().contract()))
+        (name == "tools.smuggle_finish").then(|| Arc::new(Self::definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -238,7 +238,7 @@ async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(
         vec![
             answer(vec![tool_call(
                 "tool-1",
-                "smuggle_finish",
+                "tools__smuggle_finish",
                 serde_json::json!({}),
             )]),
             answer(vec![text("answered after the refusal")]),
@@ -295,8 +295,8 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
         tier,
         vec![
             answer(vec![
-                tool_call("tool-1", "terminal_tool_0", serde_json::json!({})),
-                tool_call("tool-2", "terminal_tool_1", serde_json::json!({})),
+                tool_call("tool-1", "terminal__tool0", serde_json::json!({})),
+                tool_call("tool-2", "terminal__tool1", serde_json::json!({})),
             ]),
             answer(vec![text("unexpected follow-up")]),
         ],
@@ -328,7 +328,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
 
     assert_eq!(
         output.finished(),
-        Some(("terminal_tool_0", &serde_json::json!("first"))),
+        Some(("terminal.tool0", &serde_json::json!("first"))),
         "outcome={:?} calls={:?}",
         output.outcome,
         output_tool_calls
@@ -338,7 +338,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
     // second control call is found by its tool.
     let second_call = output_tool_calls
         .iter()
-        .find(|call| call.tool == "terminal_tool_1")
+        .find(|call| call.tool == "terminal.tool1")
         .expect("the second control call is recorded");
     assert!(
         matches!(
@@ -356,11 +356,11 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
             .position(|activity| matches(&activity.event))
     };
     let first = position(&|event| {
-        matches!(event, TurnEvent::ToolCallCompleted { name, .. } if name == "terminal_tool_0")
+        matches!(event, TurnEvent::ToolCallCompleted { name, .. } if name == "terminal.tool0")
     })
     .expect("the first call completed");
     let second = position(&|event| {
-        matches!(event, TurnEvent::ToolCallCompleted { name, .. } if name == "terminal_tool_1")
+        matches!(event, TurnEvent::ToolCallCompleted { name, .. } if name == "terminal.tool1")
     })
     .expect("the second call completed");
     let terminal = position(&|event| matches!(event, TurnEvent::Finished { .. }))
@@ -373,7 +373,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
     assert!(matches!(
         &output.activities[terminal].event,
         TurnEvent::Finished { tool_name, value }
-            if tool_name == "terminal_tool_0" && *value == serde_json::json!("first")
+            if tool_name == "terminal.tool0" && *value == serde_json::json!("first")
     ));
     let view = session.read().await.expect("committed read").expect("head");
     let replies = view
@@ -400,7 +400,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
         vec![
             answer(vec![tool_call(
                 "tool-1",
-                "terminal_tool_0",
+                "terminal__tool0",
                 serde_json::json!({}),
             )]),
             answer(vec![text("unexpected follow-up")]),
@@ -430,7 +430,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
             lash_core::facade_support::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ToolError {
                 tool_name,
                 value,
-            }) if tool_name == "terminal_tool_0"
+            }) if tool_name == "terminal.tool0"
                 && value["code"] == "terminal_control_failed"
                 && value["message"] == "failed"
         ),
@@ -460,7 +460,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
                 stream_events: vec![
                     LlmStreamEvent::Part(tool_call(
                         "tool-1",
-                        "echo_tool",
+                        "tools__echo_tool",
                         serde_json::json!({"value": "sample"}),
                     )),
                     LlmStreamEvent::Usage(usage(12, 3, 0)),
@@ -649,7 +649,7 @@ async fn cumulative_usage_overflow_publishes_no_turn_terminal_or_usage(tier: Tie
                 response: Ok(LlmResponse {
                     parts: vec![tool_call(
                         "overflow-tool-call",
-                        "echo_tool",
+                        "tools__echo_tool",
                         serde_json::json!({"value": "continue"}),
                     )],
                     ..LlmResponse::default()
@@ -729,7 +729,7 @@ struct AttachmentResultTool {
 fn attachment_result_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:attachment_result",
-        "attachment_result",
+        "tools.attachment_result",
         "Return one stored attachment.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -755,7 +755,7 @@ impl lash_core::ToolProvider for AttachmentResultTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "attachment_result")
+        (name == "tools.attachment_result")
             .then(|| Arc::new(attachment_result_tool_definition().contract()))
     }
 
@@ -828,7 +828,7 @@ fn attachment_model(asked: Arc<Asked>) -> lash_core::facade_support::ProviderHan
                     return Ok(LlmResponse {
                         parts: vec![tool_call(
                             "attachment-result-call",
-                            "attachment_result",
+                            "tools__attachment_result",
                             serde_json::json!({}),
                         )],
                         ..LlmResponse::default()
@@ -1207,7 +1207,7 @@ struct ArrayAttachmentTool;
 fn array_attachment_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:array_attachment",
-        "array_attachment",
+        "tools.array_attachment",
         "Return an array embedding one stored image.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "array" }),
@@ -1233,7 +1233,7 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "array_attachment")
+        (name == "tools.array_attachment")
             .then(|| Arc::new(array_attachment_tool_definition().contract()))
     }
 
@@ -1284,7 +1284,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
                 let array_call = |call_id: &str| LlmResponse {
                     parts: vec![tool_call(
                         call_id,
-                        "array_attachment",
+                        "tools__array_attachment",
                         serde_json::json!({}),
                     )],
                     ..LlmResponse::default()
@@ -1478,7 +1478,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         mock_provider(vec![
             answer(vec![tool_call(
                 "finish-1",
-                "terminal_tool_0",
+                "terminal__tool0",
                 serde_json::json!({}),
             )]),
             answer(vec![text("unexpected follow-up")]),

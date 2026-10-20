@@ -23,7 +23,7 @@ use lash::tools::{StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, Too
 
 const PLUGIN: &str = "purpose-probe";
 const MODEL: &str = "purpose-probe-model";
-const TOOL: &str = "purpose_probe";
+const TOOL_OPERATION: &str = "tools.purpose_probe";
 const DIRECT: &str = "purpose-probe-direct";
 const TURN_TEXT: &str = "turn section 41d2";
 const COMPACTION_TEXT: &str = "compaction section 9b07";
@@ -132,7 +132,7 @@ impl Probe {
             .provider(lash::tool_provider_key!("tools"), move |_this, _state| {
                 let definition = lash::tools::ToolDefinition::raw(
                     "purpose:probe",
-                    TOOL,
+                    TOOL_OPERATION,
                     "Asks the model a direct question",
                     serde_json::json!({"type":"object","additionalProperties":false}),
                     serde_json::json!({"type":"string"}),
@@ -219,7 +219,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
                         // The turn's first call asks for the probe.
                         answer(vec![lash::direct::LlmOutputPart::ToolCall {
                             call_id: "probe-1".to_owned(),
-                            tool_name: TOOL.to_owned(),
+                            tool_name: TOOL_OPERATION.replace('.', "__"),
                             input_json: "{}".to_owned(),
                             replay: None,
                         }])
@@ -337,9 +337,10 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         "every call composed the sections of exactly one purpose: {seen:?}"
     );
     assert!(
-        turns
+        turns.iter().all(|turn| turn
+            .tools
             .iter()
-            .all(|turn| turn.tools.iter().any(|tool| tool == TOOL)),
+            .any(|tool| *tool == TOOL_OPERATION.replace('.', "__"))),
         "the turn offers the probe: {turns:?}"
     );
     assert_eq!(compactions[0].instructions, COMPACTION_TEXT);

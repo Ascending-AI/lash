@@ -2,7 +2,6 @@ use super::*;
 
 use lash::TurnEvent;
 use lash::{TurnActivity, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{TurnActivitySink, TurnOutcome};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +21,7 @@ struct CompletedCalls(AtomicUsize);
 #[async_trait]
 impl TurnActivitySink for CompletedCalls {
     async fn emit(&self, activity: TurnActivity) {
-        if matches!(&activity.event, TurnEvent::ToolCallCompleted { name, .. } if name != "finish")
+        if matches!(&activity.event, TurnEvent::ToolCallCompleted { name, .. } if name != "control.finish")
         {
             self.0.fetch_add(1, Ordering::SeqCst);
         }
@@ -45,7 +44,7 @@ impl ToolProvider for RetailTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "retail_order").then(|| Arc::new(retail_order_definition().contract()))
+        (name == "retail.order").then(|| Arc::new(retail_order_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -71,7 +70,7 @@ impl ToolProvider for RetailTools {
 fn retail_order_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:retail_order",
-        "retail_order",
+        "retail.order",
         "Look up one retail order by id.",
         serde_json::json!({
             "type": "object",
@@ -83,7 +82,6 @@ fn retail_order_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["retail"], "order"))
 }
 
 const TICKET_CELL: &str = r#"

@@ -40,15 +40,15 @@ const SESSION_TOOLS: &str = "own-env-session-tools";
 const SESSION_ONLY: &str = "probe_session_only";
 
 const CELL: &str = r#"const body = async () => {
-  await tools.probe_wait({});
-  await tools.probe_later({ who: "later" });
-  const own = await tools.probe_read({ who: "parent" });
+  await tools.probeWait({});
+  await tools.probeLater({ who: "later" });
+  const own = await tools.probeRead({ who: "parent" });
   const inherited = await processes.start({
-    definition: async () => await tools.probe_read({ who: "inherit" }),
+    definition: async () => await tools.probeRead({ who: "inherit" }),
     label: "inherit",
   });
   const fresh = await processes.start({
-    definition: async () => await tools.probe_read({ who: "new" }),
+    definition: async () => await tools.probeRead({ who: "new" }),
     label: "new",
   });
   return { own, inherited: await inherited, fresh: await fresh };
@@ -73,13 +73,12 @@ fn granted() -> BTreeMap<lash::SlotId, lash::CapabilityRef> {
 }
 
 fn probe_definition(name: &str) -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let output = serde_json::json!({ "type": "string" });
-    let definition = lash_core::ToolDefinition::raw(name, name, "The probe.", object, output)
-        .expect("the probe's schemas")
-        .with_execution(Duration::from_secs(120))
-        .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    let definition =
+        lash_core::ToolDefinition::raw(name, format!("tools.{name}"), "The probe.", object, output)
+            .expect("the probe's schemas")
+            .with_execution(Duration::from_secs(120));
     if name == WAIT {
         definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(4).unwrap(),
@@ -170,7 +169,7 @@ impl lash::tools::StaticToolExecute for ProbeBody {
                 .clone(),
             run: call.context.logical_run(),
         });
-        if call.name() == WAIT {
+        if call.name() == format!("tools.{WAIT}") {
             if self.holds {
                 self.seen.entered.notify_one();
                 std::future::pending::<()>().await;

@@ -107,7 +107,7 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts,
     DialectRefusal as DialectPromptRefusal, DialectRefusalKind, ExecutionSection,
-    ExecutionSectionRequest, PythonPrompts, ResolvedToolBinding, TypescriptPrompts,
+    ExecutionSectionRequest, PythonPrompts, TypescriptPrompts,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`], a durable session extension the

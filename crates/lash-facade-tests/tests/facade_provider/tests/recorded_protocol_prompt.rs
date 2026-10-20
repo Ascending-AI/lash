@@ -146,7 +146,7 @@ fn scripted_provider(served: &Served, script: &Arc<Script>) -> ProviderHandle {
                     return Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "call-1".to_string(),
-                            tool_name: "app_lookup".to_string(),
+                            tool_name: "tools__app_lookup".to_string(),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],

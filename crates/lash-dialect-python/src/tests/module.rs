@@ -3,7 +3,7 @@
 //! annotation means; the twin cases that compare entry names and refusal
 //! codes with TypeScript run through the host's import.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
@@ -13,12 +13,10 @@ use super::machine;
 
 fn module(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     let effects = machine::effects();
-    let environment = Environment {
-        library: machine::library(),
-        effects: &effects,
-        controls: machine::controls(),
-        tool_roots: &BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, machine::controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, machine::library())
         .unwrap_or_else(|invalid| panic!("{invalid}"));
@@ -153,12 +151,10 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
             result: Type::Any,
         },
     )]);
-    let environment = Environment {
-        library: machine::library(),
-        effects: &effects,
-        controls: &BTreeMap::new(),
-        tool_roots: &BTreeSet::from([Name::new("display")]),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(
         "async def demo():\n    return await display.show_message(text=\"hi\")\n",
         &environment,
@@ -193,12 +189,10 @@ fn tool_keywords_name_the_declared_input_fields() {
         lash_kernel_doc::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
-    let environment = Environment {
-        library: machine::library(),
-        effects: &effects,
-        controls: machine::controls(),
-        tool_roots: &BTreeSet::from([Name::new("display")]),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, machine::controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(machine::library(), &environment_namespaces);
     for (call, expected) in [
         (
             "display.show_message(text='hi')",
@@ -223,10 +217,10 @@ fn tool_keywords_name_the_declared_input_fields() {
         admission.effects = effects.clone();
         lash_kernel_check::admit(&lowered.document, &admission).expect("valid tool input");
         let mut calls = 0;
-        // Cells use the catalog's flat name; modules use its dotted path.
-        let cell_effect = EffectName::new("show_message").expect("a tool's name");
+        // Cells and modules both call it by its dotted path.
+        let cell_effect = show.clone();
         let (_, end) = machine::drive(
-            &format!("await {}\n", call.replace("display.", "")),
+            &format!("await {call}\n"),
             BTreeMap::from([(cell_effect.clone(), signature.clone())]),
             super::pages::Session::default(),
             |_, park, _| {

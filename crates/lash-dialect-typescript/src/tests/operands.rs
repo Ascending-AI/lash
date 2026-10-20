@@ -6,7 +6,7 @@ use lash_kernel_doc::Datum;
 #[test]
 fn compound_assignment_reads_before_its_rhs_writes() {
     assert_eq!(
-        end("const o = { n: 1 }; o.n += (o.n = 2); await finish(o.n);"),
+        end("const o = { n: 1 }; o.n += (o.n = 2); await control.finish(o.n);"),
         Ended::Finished(Datum::Float(3.0.into()))
     );
 }
@@ -14,7 +14,7 @@ fn compound_assignment_reads_before_its_rhs_writes() {
 #[test]
 fn array_reads_before_its_next_element_writes() {
     assert_eq!(
-        end("const o = { x: 1 }; const r = [o.x, (o.x = 2)]; await finish(r);"),
+        end("const o = { x: 1 }; const r = [o.x, (o.x = 2)]; await control.finish(r);"),
         Ended::Finished(Datum::List(vec![
             Datum::Float(1.0.into()),
             Datum::Float(2.0.into())
@@ -25,7 +25,7 @@ fn array_reads_before_its_next_element_writes() {
 #[test]
 fn null_read_raises_before_the_next_operand_performs() {
     let result = run(
-        "const n = null; function tool() { return echo('issued'); } [n.x, tool()];",
+        "const n = null; function tool() { return host.echo('issued'); } [n.x, tool()];",
         &[],
     );
     assert!(result.end.starts_with("error type_error:"), "{result:?}");
@@ -52,12 +52,11 @@ fn native_expression_depth_respects_the_document_limit() {
         captions: Default::default(),
         comments: Vec::new(),
     };
-    let environment = lash_kernel_dialect::Environment {
-        tool_roots: &Default::default(),
-        library: super::library(),
-        effects: &Default::default(),
-        controls: &Default::default(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
+    let environment =
+        lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower::lower(
         &program,
         "",
@@ -73,26 +72,35 @@ fn native_expression_depth_respects_the_document_limit() {
 fn reads_precede_later_statements_in_constructions_and_updates() {
     for (source, expected) in [
         (
-            "const o = {x: 1}; const r = [o.x, , (o.x = 2)]; await finish(r[0]);",
+            "const o = {x: 1}; const r = [o.x, , (o.x = 2)]; await control.finish(r[0]);",
             1.0,
         ),
         (
-            "const o = {x: 1}; const r = [o.x, ...[o.x = 2]]; await finish(r[0]);",
+            "const o = {x: 1}; const r = [o.x, ...[o.x = 2]]; await control.finish(r[0]);",
             1.0,
         ),
         (
-            "const o = {x: 1}; const r = {a: o.x, b: (o.x = 2)}; await finish(r.a);",
+            "const o = {x: 1}; const r = {a: o.x, b: (o.x = 2)}; await control.finish(r.a);",
             1.0,
         ),
-        ("const o = {x: 1}; const r = o.x++; await finish(r);", 1.0),
-        ("const o = {x: 1}; const r = ++o.x; await finish(r);", 2.0),
         (
-            "const a = [1]; a.push(a.length, a.length); await finish(a[2]);",
+            "const o = {x: 1}; const r = o.x++; await control.finish(r);",
             1.0,
         ),
-        ("let x = 1; const r = x + (x = 2); await finish(r);", 3.0),
         (
-            "const a = [0, 0]; let index = 0; a[index] = (index = 1); await finish(a[0]);",
+            "const o = {x: 1}; const r = ++o.x; await control.finish(r);",
+            2.0,
+        ),
+        (
+            "const a = [1]; a.push(a.length, a.length); await control.finish(a[2]);",
+            1.0,
+        ),
+        (
+            "let x = 1; const r = x + (x = 2); await control.finish(r);",
+            3.0,
+        ),
+        (
+            "const a = [0, 0]; let index = 0; a[index] = (index = 1); await control.finish(a[0]);",
             1.0,
         ),
     ] {
@@ -103,20 +111,24 @@ fn reads_precede_later_statements_in_constructions_and_updates() {
         );
     }
     assert_eq!(
-        end("const o = {x: 'a'}; const r = `${o.x}${o.x = 'b'}`; await finish(r);"),
+        end("const o = {x: 'a'}; const r = `${o.x}${o.x = 'b'}`; await control.finish(r);"),
         Ended::Finished(Datum::Text("ab".into()))
     );
     // Evaluating an argument precedes checking whether the callee is callable.
     assert_eq!(
-        end("try { (1 as any)(('x' as number) + 1); } catch (e) { await finish(e.message); }"),
-        end("try { const r = ('x' as number) + 1; } catch (e) { await finish(e.message); }")
+        end(
+            "try { (1 as any)(('x' as number) + 1); } catch (e) { await control.finish(e.message); }"
+        ),
+        end(
+            "try { const r = ('x' as number) + 1; } catch (e) { await control.finish(e.message); }"
+        )
     );
     // Both operand values are read before a trusted numeric coercion can fail.
     assert_eq!(
         end(
-            "try { const r = ('x' as number) + ((!(123 as boolean)) as number); } catch (e) { await finish(e.message); }"
+            "try { const r = ('x' as number) + ((!(123 as boolean)) as number); } catch (e) { await control.finish(e.message); }"
         ),
-        end("try { const r = !(123 as boolean); } catch (e) { await finish(e.message); }")
+        end("try { const r = !(123 as boolean); } catch (e) { await control.finish(e.message); }")
     );
 }
 
@@ -125,7 +137,7 @@ fn reads_precede_later_statements_in_constructions_and_updates() {
 fn continue_leaves_only_the_switch() {
     assert_eq!(
         end(
-            "var x = 0; while (x < 2) { switch (x) { case 0: x++; continue; } x++; } await finish(x);"
+            "var x = 0; while (x < 2) { switch (x) { case 0: x++; continue; } x++; } await control.finish(x);"
         ),
         Ended::Finished(Datum::Float(2.0.into()))
     );

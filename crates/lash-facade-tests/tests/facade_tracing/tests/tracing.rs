@@ -366,7 +366,7 @@ async fn composition_trace_fires_once_when_the_tool_selection_changes_with_full_
     let initial_tools = changes[0]["tool_schemas"]
         .as_array()
         .expect("initial ordered tool schemas");
-    let echo = composition_tool_contract(changes[0], "echo_tool");
+    let echo = composition_tool_contract(changes[0], "tools__echo_tool");
     assert_eq!(echo["input_schema"]["canonical"]["required"][0], "value");
     assert!(echo["output_schema"]["canonical"].is_object());
     let changed_tools = changes[1]["tool_schemas"]
@@ -374,7 +374,9 @@ async fn composition_trace_fires_once_when_the_tool_selection_changes_with_full_
         .expect("changed ordered tool schemas");
     assert_eq!(initial_tools.len(), changed_tools.len() + 1);
     assert!(
-        changed_tools.iter().all(|tool| tool["name"] != "echo_tool"),
+        changed_tools
+            .iter()
+            .all(|tool| tool["name"] != "tools__echo_tool"),
         "the changed snapshot must carry the complete catalog without the removed member"
     );
     assert_ne!(changes[0]["fingerprint"], changes[1]["fingerprint"]);
@@ -396,7 +398,7 @@ impl SchemaChangingTool {
         };
         lash_core::ToolDefinition::raw(
             "tool:schema_changing",
-            "schema_changing",
+            "tools.schema_changing",
             "A stable member whose contract can refresh",
             serde_json::json!({
                 "type": "object",
@@ -425,7 +427,7 @@ impl ToolProvider for SchemaChangingTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
+        (name == "tools.schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -469,13 +471,13 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() -> 
     let changes = of_type(&entries, "composition_changed");
     assert_eq!(changes.len(), 2, "one schema change emits exactly once");
     assert_eq!(
-        composition_tool_contract(changes[0], "schema_changing")["input_schema"]["canonical"]["required"]
-            [0],
+        composition_tool_contract(changes[0], "tools__schema_changing")["input_schema"]["canonical"]
+            ["required"][0],
         "first_value"
     );
     assert_eq!(
-        composition_tool_contract(changes[1], "schema_changing")["input_schema"]["canonical"]["required"]
-            [0],
+        composition_tool_contract(changes[1], "tools__schema_changing")["input_schema"]["canonical"]
+            ["required"][0],
         "second_value"
     );
     assert_ne!(changes[0]["fingerprint"], changes[1]["fingerprint"]);
@@ -582,7 +584,7 @@ async fn assert_standard_tool_lifecycle(
     let calls = &turn_tool_calls;
     assert_eq!(calls.len(), 1, "one accounting record per call");
     assert_eq!(calls[0].provider_call_id.as_deref(), Some(call_id));
-    assert_eq!(calls[0].tool, tool_name);
+    assert_eq!(calls[0].tool, tool_name.replace("__", "."));
     assert_eq!(calls[0].output.is_success(), expected_success);
 
     let lash_call_id = turn
@@ -659,7 +661,10 @@ async fn assert_standard_tool_lifecycle(
         1,
         "expected exactly one ToolCallCompleted trace: {entries:?}"
     );
-    assert_eq!(started[0].1["name"].as_str(), Some(tool_name));
+    assert_eq!(
+        started[0].1["name"].as_str(),
+        Some(tool_name.replace("__", ".").as_str())
+    );
     assert!(
         started[0].0 < completions[0].0,
         "Started must precede Completed: {entries:?}"
@@ -687,7 +692,7 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() -> Result
     // not duplicate the start batch execution already wrote.
     assert_standard_tool_lifecycle(
         "call-success",
-        "echo_tool",
+        "tools__echo_tool",
         r#"{"value":"sample"}"#,
         true,
         Vec::new(),
@@ -711,7 +716,7 @@ async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() -> Result<()> {
 async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() -> Result<()> {
     assert_standard_tool_lifecycle(
         "call-invalid-args",
-        "echo_tool",
+        "tools__echo_tool",
         r#"{"other":true}"#,
         false,
         Vec::new(),
@@ -740,7 +745,7 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() -> Result<()
     ));
     assert_standard_tool_lifecycle(
         "call-hook-refusal",
-        "echo_tool",
+        "tools__echo_tool",
         r#"{"value":"blocked"}"#,
         false,
         vec![refusal],
@@ -767,7 +772,7 @@ impl ToolProvider for PendingEchoTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
+        (name == "tools.echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -789,7 +794,7 @@ impl ToolProvider for PendingEchoTool {
 fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:echo_tool",
-        "echo_tool",
+        "tools.echo_tool",
         "Return a tool payload",
         serde_json::json!({
             "type": "object",
@@ -816,7 +821,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() -> R
     let (keys, mut published) = tokio::sync::mpsc::unbounded_channel();
     let traced = Traced::new(
         mock_provider(vec![
-            tool_call(call_id, "echo_tool", r#"{"value":"pending"}"#),
+            tool_call(call_id, "tools__echo_tool", r#"{"value":"pending"}"#),
             text_call("done"),
         ])
         .into_handle(),
@@ -1340,7 +1345,7 @@ const TREE_TURN: &str = "golden-tree-turn";
 
 fn tree_provider() -> ProviderHandle {
     mock_provider(vec![
-        tool_call("call-tree", "echo_tool", r#"{"value":"tree"}"#),
+        tool_call("call-tree", "tools__echo_tool", r#"{"value":"tree"}"#),
         text_call("done"),
     ])
     .into_handle()

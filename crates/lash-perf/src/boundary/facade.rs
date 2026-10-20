@@ -55,7 +55,7 @@ pub(super) fn provider(meter: &Meter, pending: bool) -> ProviderHandle {
                 let result = if pending && !request.messages.iter().any(|m|
                     m.blocks.iter().any(|b| matches!(b, LlmContentBlock::ToolResult { .. }))) {
                     LlmResponse { parts: vec![LlmOutputPart::ToolCall {
-                        call_id: "boundary-deferred".into(), tool_name: "boundary_wait".into(),
+                        call_id: "boundary-deferred".into(), tool_name: "tools__boundary_wait".into(),
                         input_json: "{}".into(), replay: None }], ..Default::default() }
                 } else { response("boundary answered".into()) };
                 meter.operation("provider.complete", &request.scope.request_id, "ok", start);
@@ -97,7 +97,7 @@ pub(super) fn build(
 fn definition() -> Result<lash_core::ToolDefinition> {
     Ok(lash_core::ToolDefinition::raw(
         "tool:boundary_wait",
-        "boundary_wait",
+        "tools.boundary_wait",
         "Synthetic deferred call",
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"object"}),
@@ -125,7 +125,7 @@ impl lash_core::ToolProvider for DeferredTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "boundary_wait").then(|| Arc::new(self.0.contract()))
+        (name == "tools.boundary_wait").then(|| Arc::new(self.0.contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()

@@ -19,7 +19,7 @@ impl ToolProvider for ProgressTools {
         name: &str,
         _: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let live = call.context.live();
@@ -65,7 +65,7 @@ async fn a_host_executed_tool_publishes_progress_without_any_durable_tool_live_f
                 let part = if call == 0 {
                     LlmOutputPart::ToolCall {
                         call_id: "host-progress".into(),
-                        tool_name: "app_lookup".into(),
+                        tool_name: "tools__app_lookup".into(),
                         input_json: "{}".into(),
                         replay: None,
                     }
@@ -302,7 +302,7 @@ impl ToolProvider for LongTool {
         name: &str,
         _: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let live = call.context.live();
@@ -338,7 +338,7 @@ async fn a_host_subscribes_by_owner_before_the_first_committed_turn() -> Result<
                 let part = if call == 0 {
                     LlmOutputPart::ToolCall {
                         call_id: "first-long-tool".into(),
-                        tool_name: "app_lookup".into(),
+                        tool_name: "tools__app_lookup".into(),
                         input_json: "{}".into(),
                         replay: None,
                     }
@@ -528,7 +528,7 @@ impl ToolProvider for TimedLiveTool {
         name: &str,
         _: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let live = call.context.live().clone();
@@ -614,7 +614,7 @@ fn selected_write_timeout_and_completed_linger_govern_delivery_without_changing_
                             let part = if call == 0 {
                                 LlmOutputPart::ToolCall {
                                     call_id: "timed-tool".into(),
-                                    tool_name: "app_lookup".into(),
+                                    tool_name: "tools__app_lookup".into(),
                                     input_json: "{}".into(),
                                     replay: None,
                                 }

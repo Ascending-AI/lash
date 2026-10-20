@@ -43,8 +43,8 @@ reserved port.
 judge reads. Each row fails unless its trace carries both readings:
 
 - Every workspace tool call carries a typed payload on `tool_call_completed`, under
-  `output.outcome.payload`: `{path, entries}` for `workspace_list`, `{path, content}` for
-  `workspace_read`, `{path, bytes_written}` for `workspace_write`, and
+  `output.outcome.payload`: `{path, entries}` for `files.list`, `{path, content}` for
+  `files.read`, `{path, bytes_written}` for `files.write`, and
   `{command, exit_code, stdout, stderr}` for `workspace_exec`. The path or command is read
   off the record, never decoded out of `graph_node_id`.
 - The configured driver model is recorded separately from the provider-reported served

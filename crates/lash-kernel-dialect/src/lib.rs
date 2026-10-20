@@ -20,6 +20,7 @@ mod library;
 mod metadata;
 mod name_plan;
 mod names;
+mod namespaces;
 mod notes;
 pub mod readability;
 mod saved;
@@ -31,6 +32,8 @@ mod written;
 #[cfg(test)]
 mod names_laws;
 #[cfg(test)]
+mod namespaces_laws;
+#[cfg(test)]
 mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind};
@@ -39,8 +42,8 @@ pub use dialect::{
     Printer, ReadSource,
 };
 pub use exports::{
-    BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, OperationExport, TypeMember, ValueType,
-    Visibility, brand_tuple, brand_type,
+    BRAND_FIELD, BUILT_FIELD, Export, ExportView, Intent, Member, NoPackages, OperationExport,
+    Reserving, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
 };
 pub use lash_kernel_state::WaitId;
 pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
@@ -49,6 +52,10 @@ pub use name_plan::NamePlan;
 pub use names::{
     EmptyPath, InvalidOperation, InvalidSegment, MemberPath, PackagePath, QualifiedOperation,
     Segment, Vec1,
+};
+pub use namespaces::{
+    Misspelled, NamespaceRefusal, Namespaces, Offered, OfferedSource, Operations, Resolution,
+    operation_keys, operation_text, spell_operation,
 };
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{

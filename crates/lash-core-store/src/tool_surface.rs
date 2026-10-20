@@ -20,6 +20,7 @@ use lash_core_ids::FormatVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::{ToolDefinition, ToolId};
+use lash_protocol_types::QualifiedOperation;
 
 /// The static, author-declared key a tool provider is registered under: the
 /// identity of its owning plugin or process component and the key it
@@ -32,11 +33,6 @@ pub type ProviderKey = crate::plugin_registrations::ToolProviderHandle;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReconfigureError {
-    /// A tool namespace root would hide a top-level session binding.
-    #[error(
-        "tool namespace `{root}` conflicts with top-level binding `{binding}`; rename `{binding}` to `{binding}_` before offering these tools"
-    )]
-    ToolNamespaceCollision { root: String, binding: String },
     #[error("validation error: {0}")]
     Validation(String),
 }
@@ -57,31 +53,36 @@ impl SurfaceEntry {
     }
 }
 
-/// The tool surface a session run recorded: each model-facing tool name
-/// with the tool and provider it is matched to, and the deferred provider
-/// that resolves call paths the surface does not offer. A content-addressed
-/// TurnContent node of its run; no hash of it is stored.
+/// The tool surface a session run recorded: each tool, by its operation,
+/// with the provider it is matched to, and the deferred provider that
+/// resolves call paths the surface does not offer. A tool's model-facing
+/// name is derived from its operation. A content-addressed TurnContent node
+/// of its run; no hash of it is stored.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedSurface {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    tools: BTreeMap<String, SurfaceEntry>,
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "lash_protocol_types::operation_keys"
+    )]
+    tools: BTreeMap<QualifiedOperation, SurfaceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     deferred: Option<ProviderKey>,
 }
 
-/// Two tools a surface would offer under one model-facing name: refused,
-/// naming both tools and both providers. The host fixes it by reconfiguring
-/// one provider.
+/// Two tools a surface would offer as one operation: refused, naming both
+/// tools and both providers. The host fixes it by reconfiguring one
+/// provider.
 #[derive(
     Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[error(
-    "tool name `{name}` is advertised by tool `{first_tool}` of provider `{first_provider}` \
+    "operation `{operation}` is advertised by tool `{first_tool}` of provider `{first_provider}` \
      and by tool `{second_tool}` of provider `{second_provider}`; reconfigure one provider"
 )]
 pub struct SurfaceCollision {
-    pub name: String,
+    pub operation: String,
     pub first_tool: ToolId,
     pub first_provider: ProviderKey,
     pub second_tool: ToolId,
@@ -120,7 +121,7 @@ impl RecordedSurface {
     ///
     /// # Errors
     ///
-    /// Two entries share a model-facing name, or a tool id.
+    /// Two entries share an operation, or a tool id.
     #[expect(
         clippy::result_large_err,
         reason = "a refusal is built once, at surface assembly; it is boxed where it is carried"
@@ -129,7 +130,7 @@ impl RecordedSurface {
         entries: impl IntoIterator<Item = SurfaceEntry>,
         deferred: Option<ProviderKey>,
     ) -> Result<Self, SurfaceRefusal> {
-        let mut tools = BTreeMap::<String, SurfaceEntry>::new();
+        let mut tools = BTreeMap::<QualifiedOperation, SurfaceEntry>::new();
         let mut ids = BTreeMap::<ToolId, ProviderKey>::new();
         for entry in entries {
             if let Some(first) = ids.get(entry.tool()) {
@@ -139,10 +140,10 @@ impl RecordedSurface {
                     second_provider: entry.provider.clone(),
                 }));
             }
-            let name = entry.definition.manifest.name.clone();
-            if let Some(first) = tools.get(&name) {
+            let operation = entry.definition.manifest.operation.clone();
+            if let Some(first) = tools.get(&operation) {
                 return Err(SurfaceRefusal::Collision(SurfaceCollision {
-                    name,
+                    operation: operation.effect_name().to_string(),
                     first_tool: first.tool().clone(),
                     first_provider: first.provider.clone(),
                     second_tool: entry.tool().clone(),
@@ -150,19 +151,27 @@ impl RecordedSurface {
                 }));
             }
             ids.insert(entry.tool().clone(), entry.provider.clone());
-            tools.insert(name, entry);
+            tools.insert(operation, entry);
         }
         Ok(Self { tools, deferred })
     }
 
-    /// The offered tools, by model-facing name.
-    pub fn tools(&self) -> &BTreeMap<String, SurfaceEntry> {
+    /// The offered tools, by operation.
+    pub fn tools(&self) -> &BTreeMap<QualifiedOperation, SurfaceEntry> {
         &self.tools
     }
 
-    /// The entry offered under `name`.
-    pub fn entry(&self, name: &str) -> Option<&SurfaceEntry> {
-        self.tools.get(name)
+    /// The entry offered as `operation`.
+    pub fn entry(&self, operation: &QualifiedOperation) -> Option<&SurfaceEntry> {
+        self.tools.get(operation)
+    }
+
+    /// The entry a Standard-mode model calls as `name`, its derived
+    /// model-facing name ([`lash_protocol_types::ToolManifest::standard_name`]).
+    pub fn entry_named(&self, name: &str) -> Option<&SurfaceEntry> {
+        self.tools
+            .values()
+            .find(|entry| entry.definition.manifest.standard_name() == name)
     }
 
     /// The entry that offers `tool`.
@@ -176,7 +185,7 @@ impl RecordedSurface {
         self.deferred.as_ref()
     }
 
-    /// The offered definitions, in model-facing name order.
+    /// The offered definitions, in operation order.
     pub fn definitions(&self) -> impl Iterator<Item = &ToolDefinition> {
         self.tools.values().map(|entry| &entry.definition)
     }
@@ -225,24 +234,6 @@ impl ProcessSurface {
     }
 }
 
-/// The effect path a code document performs `manifest`'s tool under: its
-/// binding's module path and operation, dotted. `None` for a tool with no
-/// usable binding, which no document can perform.
-pub fn effect_path_of(manifest: &crate::ToolManifest) -> Option<String> {
-    let binding: lash_protocol_types::ToolBinding = serde_json::from_value(
-        manifest
-            .bindings
-            .get(lash_protocol_types::core_support::TOOL_BINDING_KEY)?
-            .clone(),
-    )
-    .ok()?;
-    let operation = binding.operation?;
-    if binding.module_path.is_empty() {
-        return None;
-    }
-    Some(format!("{}.{operation}", binding.module_path.join(".")))
-}
-
 /// The effect path a process performs the `call_dynamic` endpoint
 /// under (P6, R9).
 pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
@@ -286,10 +277,9 @@ impl Default for DeferredResolutionPolicy {
     reason = "the endpoint's schemas are fixed literals the schema admission accepts"
 )]
 pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition {
-    use lash_protocol_types::ToolDefinitionBindingExt as _;
     ToolDefinition::raw(
         "lash:call_dynamic",
-        "call_dynamic",
+        CALL_DYNAMIC_EFFECT,
         "Calls the tool the process env's deferred provider resolves `path` to, with `args`.",
         serde_json::json!({
             "type": "object",
@@ -303,10 +293,6 @@ pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition
         serde_json::json!({}),
     )
     .expect("the call_dynamic endpoint's schemas admit")
-    .with_tool_binding(lash_protocol_types::ToolBinding::new(
-        ["lash"],
-        "call_dynamic",
-    ))
     .with_execution(policy.execution)
     .with_execution_policy(policy.execution_policy)
 }

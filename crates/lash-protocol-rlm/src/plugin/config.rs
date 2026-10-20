@@ -49,8 +49,9 @@ impl RlmPresentationConfig {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmDiscovery {
-    /// The discovery tool's call path, as a cell writes it. The tool is
-    /// always listed.
+    /// The discovery tool's operation, by its effect name
+    /// (`tools.search`); a cell calls it as its dialect spells it. The tool
+    /// is always listed.
     pub operation: String,
     /// The bytes the listed tools' docs take together, the discovery tool's
     /// included; module headings and separators are not counted.

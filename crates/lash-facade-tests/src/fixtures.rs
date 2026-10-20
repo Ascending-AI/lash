@@ -88,7 +88,7 @@ impl ToolProvider for LongTextTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(long_text_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(long_text_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -97,22 +97,19 @@ impl ToolProvider for LongTextTools {
 }
 
 fn long_text_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            "tool:app_lookup",
-            "app_lookup",
-            "Look up verbose app state.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120)),
-        "app_lookup",
+    lash_core::ToolDefinition::raw(
+        "tool:app_lookup",
+        "tools.app_lookup",
+        "Look up verbose app state.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A committed message as the store-level laws compare it: its role's name
@@ -138,7 +135,7 @@ pub const DIRECT_PROMPT: &str = "raw prompt";
 fn direct_probe_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:direct_probe",
-        "direct_probe",
+        "tools.direct_probe",
         "Ask the model directly and answer what it said.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -164,7 +161,7 @@ impl ToolProvider for DirectProbe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "direct_probe").then(|| Arc::new(direct_probe_definition().contract()))
+        (name == "tools.direct_probe").then(|| Arc::new(direct_probe_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

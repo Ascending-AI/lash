@@ -195,7 +195,7 @@ async fn run_task_with_shutdown_witness(
         .iter()
         .filter(|activity| matches!(activity.event, TurnEvent::CodeBlockStarted { .. }))
         .count();
-    let tool_call_count = activities.iter().filter(|activity| matches!(&activity.event, TurnEvent::ToolCallStarted { name, .. } if name != "submit")).count();
+    let tool_call_count = activities.iter().filter(|activity| matches!(&activity.event, TurnEvent::ToolCallStarted { name, .. } if name != "toolbench.submit")).count();
     let failed_execution_errors = activities
         .iter()
         .filter_map(|activity| match &activity.event {

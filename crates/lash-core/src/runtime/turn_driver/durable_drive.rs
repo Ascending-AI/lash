@@ -481,7 +481,7 @@ async fn open_cell_calls(
             let name = manifests
                 .iter()
                 .find(|manifest| &manifest.id == draft.tool())
-                .map(|manifest| lash_trace::TraceToolName::Name(manifest.name.clone()))
+                .map(|manifest| lash_trace::TraceToolName::Name(manifest.tool()))
                 .unwrap_or_else(|| lash_trace::TraceToolName::Identity {
                     tool_id: draft.tool().clone(),
                 });

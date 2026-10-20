@@ -1,7 +1,6 @@
 //! One durable turn grows across two owner handoffs and closes.
 use anyhow::{Context as _, Result, ensure};
 use clap::{Parser, ValueEnum};
-use lash::tools::ToolDefinitionBindingExt as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmRole, LlmStreamEvent, StreamBlockIdentity,
@@ -123,8 +122,8 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                 let text = if done == rounds { "growing turn complete".to_owned() } else {
                     let next = done + 1;
                     let park = handoffs && (next == rounds / 2 || next == rounds * 3 / 4);
-                    format!("<typescript>\n/*growturn:{next}*/\nconst payload = await tools.grow_payload({{round:{next}}});\nif (payload.length !== {bytes}) throw new Error(\"wrong payload size\");\nconsole.log(\"grow-done:{next}:\");\nconsole.log(payload);\n{}\n</typescript>",
-                        if park { "await tools.grow_wait({});" } else { "" }, bytes = meter.bytes)
+                    format!("<typescript>\n/*growturn:{next}*/\nconst payload = await tools.growPayload({{round:{next}}});\nif (payload.length !== {bytes}) throw new Error(\"wrong payload size\");\nconsole.log(\"grow-done:{next}:\");\nconsole.log(payload);\n{}\n</typescript>",
+                        if park { "await tools.growWait({});" } else { "" }, bytes = meter.bytes)
                 };
                 if let Some(stream) = &request.stream_events {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
@@ -144,7 +143,7 @@ struct Tools {
 #[async_trait::async_trait]
 impl StaticToolExecute for Tools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == "grow_wait" {
+        if call.name() == "tools.grow_wait" {
             return lash::tools::ToolOutcome::pending(lash::tools::PendingCompletion::new()).into();
         }
         let Some(round) = call.args["round"].as_f64().filter(|n| {
@@ -167,14 +166,13 @@ impl StaticToolExecute for Tools {
 }
 
 fn tools(args: &Args, meter: Arc<measure::Meter>) -> Result<Arc<dyn lash::tools::ToolProvider>> {
-    let payload = lash::tools::ToolDefinition::raw("grow_payload", "grow_payload", "Return one sized payload.",
+    let payload = lash::tools::ToolDefinition::raw("grow_payload", "tools.grow_payload", "Return one sized payload.",
         serde_json::json!({"type":"object","properties":{"round":{"type":"integer"}},"required":["round"],"additionalProperties":false}),
         serde_json::json!({"type":"string"}))?
-        .with_execution(Duration::from_secs(120)).with_execution_policy(lash::tools::ExecutionPolicy::Once)
-        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "grow_payload"));
+        .with_execution(Duration::from_secs(120)).with_execution_policy(lash::tools::ExecutionPolicy::Once);
     let wait = lash::tools::ToolDefinition::raw(
         "grow_wait",
-        "grow_wait",
+        "tools.grow_wait",
         "Park until explicit completion.",
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"object"}),
@@ -183,8 +181,7 @@ fn tools(args: &Args, meter: Arc<measure::Meter>) -> Result<Arc<dyn lash::tools:
     .with_declaration(
         lash::tools::ToolDeclaration::deferring(),
         Some(lash::tools::ParkBound::Within(LIMIT)),
-    )?
-    .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "grow_wait"));
+    )?;
     Ok(Arc::new(StaticToolProvider::new(
         vec![payload, wait],
         Tools {

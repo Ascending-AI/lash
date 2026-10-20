@@ -472,7 +472,7 @@ fn check_rlm_exec_result_no_tool_call_replay(
 ) -> Result<Value, String> {
     require_rlm_exec_code(
         result,
-        "const x = await tools.read_file({ path: \"foo\" });",
+        "const x = await tools.readFile({ path: \"foo\" });",
         contract,
     )?;
     require_checkpoint(result, "after_work", contract)?;
@@ -480,7 +480,7 @@ fn check_rlm_exec_result_no_tool_call_replay(
     require_rlm_trajectory_omits(result, "rlm-call-1", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
-        "exec_code": "const x = await tools.read_file({ path: \"foo\" });",
+        "exec_code": "const x = await tools.readFile({ path: \"foo\" });",
         "checkpoint": "after_work",
         "tool_call_event": true,
         "trajectory_omits_tool_call_id": "rlm-call-1",
@@ -492,14 +492,14 @@ fn check_rlm_exec_tool_control_frame_switch_terminal(
     contract: &'static str,
 ) -> Result<Value, String> {
     require_bool(result, "/done", true, contract)?;
-    require_rlm_exec_code(result, "await tools.custom_frame_switch({});", contract)?;
+    require_rlm_exec_code(result, "await tools.customFrameSwitch({});", contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     require_rlm_tool_call_event(result, contract)?;
     require_rlm_agent_frame_switch(result, "next-frame", "continue", 1, contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "done": true,
-        "exec_code": "await tools.custom_frame_switch({});",
+        "exec_code": "await tools.customFrameSwitch({});",
         "checkpoint": "before_completion",
         "agent_frame_switch": {
             "frame_key_material": "next-frame",
@@ -515,14 +515,14 @@ fn check_rlm_exec_tool_control_fail_terminal(
     contract: &'static str,
 ) -> Result<Value, String> {
     require_bool(result, "/done", true, contract)?;
-    require_rlm_exec_code(result, "const x = await tools.custom_fail({});", contract)?;
+    require_rlm_exec_code(result, "const x = await tools.customFail({});", contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     require_rlm_tool_call_event(result, contract)?;
     require_rlm_tool_error(result, "custom_fail", "no valid result", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "done": true,
-        "exec_code": "const x = await tools.custom_fail({});",
+        "exec_code": "const x = await tools.customFail({});",
         "checkpoint": "before_completion",
         "tool_error": { "tool_name": "custom_fail", "message": "no valid result" },
         "tool_call_event": true,

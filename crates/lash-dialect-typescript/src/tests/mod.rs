@@ -20,6 +20,7 @@ mod json;
 mod language;
 mod machine;
 mod module;
+mod naming;
 mod operands;
 mod package;
 mod pages;
@@ -60,7 +61,7 @@ pub(crate) fn library() -> &'static NamedLibrary {
 /// Lowers a first cell and checks what every lowered document must hold:
 /// it is admitted, its annotations are its own, and it survives kernel
 /// text.
-/// The test host's turn-ending tool: `await finish(x)` ends the turn with `x`.
+/// The test host's turn-ending tool: `await control.finish(x)` ends the turn with `x`.
 /// The laws' cells end through it as a model's cells end through
 /// `control.finish`.
 pub(crate) fn controls()
@@ -69,7 +70,7 @@ pub(crate) fn controls()
         OnceLock::new();
     CONTROLS.get_or_init(|| {
         BTreeMap::from([(
-            EffectName::new("finish").expect("a tool's name"),
+            EffectName::new("control.finish").expect("a tool's name"),
             BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )])
     })
@@ -95,12 +96,10 @@ fn lower_against(
     effects: &BTreeMap<EffectName, Signature>,
 ) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
-    let environment = Environment {
-        tool_roots: &std::collections::BTreeSet::new(),
-        library: library(),
-        effects,
-        controls: controls(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(effects, controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library(), &environment_namespaces);
     let lowered = crate::lower(
         source,
         &environment,
@@ -159,12 +158,10 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
 #[test]
 fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment = Environment {
-        tool_roots: &BTreeSet::new(),
-        library: library(),
-        effects: &BTreeMap::new(),
-        controls: &BTreeMap::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(library(), &environment_namespaces);
     let cell = Mode::Cell(CellEnvironment::first());
     assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();

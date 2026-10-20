@@ -59,7 +59,8 @@ struct ToolCatalogArtifact {
 #[derive(serde::Serialize, PartialEq)]
 pub struct ToolDispatchSurface<'a> {
     id: &'a crate::ToolId,
-    name: &'a str,
+    /// The tool's operation, by its effect name.
+    operation: String,
     bindings: &'a std::collections::BTreeMap<String, serde_json::Value>,
     argument_projection: &'a crate::ToolArgumentProjectionPolicy,
     execution_policy: &'a crate::ExecutionPolicy,
@@ -76,7 +77,7 @@ pub fn tool_dispatch_surface<'a>(
 ) -> ToolDispatchSurface<'a> {
     ToolDispatchSurface {
         id: &manifest.id,
-        name: &manifest.name,
+        operation: manifest.tool(),
         bindings: &manifest.bindings,
         argument_projection: &manifest.argument_projection,
         execution_policy: &manifest.execution_policy,
@@ -510,17 +511,11 @@ impl Session {
         self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
-    /// Build the surface a sync records (S4) and judge it against the
-    /// protocol before anything records it.
-    pub async fn admit_tool_surface(
+    /// Build the surface a sync records (S4).
+    pub fn admit_tool_surface(
         &self,
     ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
-        let surface = self.build_tool_surface(&self.plugins().admitted_plugin_config())?;
-        self.plugins()
-            .protocol_session()
-            .validate_tool_catalog(&surface.tool_catalog(), None)
-            .await?;
-        Ok(surface)
+        self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
     pub fn resolved_tool_catalog(

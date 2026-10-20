@@ -26,7 +26,7 @@ impl PluginScenario for Scenario {
             lash::provider::LlmResponse {
                 parts: vec![lash::direct::LlmOutputPart::ToolCall {
                     call_id: "echo".into(),
-                    tool_name: "echo".into(),
+                    tool_name: "tools__echo".into(),
                     input_json: "{}".into(),
                     replay: None,
                 }],
@@ -43,7 +43,7 @@ impl PluginScenario for Scenario {
 async fn selected_tools_pass_certification() {
     let definition = lash_core::ToolDefinition::raw(
         "echo",
-        "echo",
+        "tools.echo",
         "echo",
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"string"}),

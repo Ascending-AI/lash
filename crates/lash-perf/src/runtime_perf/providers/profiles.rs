@@ -36,7 +36,7 @@ pub(super) fn benchmark_stream_profile_for_request(
             return text_profile(typescript_block(
                 r#"
 await sleep(0);
-const result = await tools.benchmark_async({ value: chunk.length, delay_ms: 0 });
+const result = await tools.benchmarkAsync({ value: chunk.length, delay_ms: 0 });
 await control.finish({ len: result.value });"#,
             ));
         }
@@ -102,42 +102,42 @@ await control.finish({ len: result.value });"#,
                     serde_json::json!({
                         "tool_calls": [
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 1,
                                 }
                             },
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 2,
                                 }
                             },
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 3,
                                 }
                             },
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 4,
                                 }
                             },
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 5,
                                 }
                             },
                             {
-                                "tool": "benchmark_echo",
+                                "tool": "tools__benchmark_echo",
                                 "parameters": {
                                     "value": "runtime perf benchmark ok",
                                     "ordinal": 6,
@@ -154,7 +154,7 @@ await control.finish({ len: result.value });"#,
             } else {
                 tool_call_profile(
                     "standard-async-completion-call",
-                    "benchmark_async",
+                    "tools__benchmark_async",
                     serde_json::json!({
                         "value": "runtime perf benchmark ok"
                     }),
@@ -284,7 +284,7 @@ const payload = {
   }
 };
 
-const result = await tools.benchmark_echo({ value: payload, ordinal: 1 });
+const result = await tools.benchmarkEcho({ value: payload, ordinal: 1 });
 console.log(JSON.stringify(result));
 await control.finish("runtime perf benchmark ok");"#,
             );
@@ -293,10 +293,10 @@ await control.finish("runtime perf benchmark ok");"#,
         RuntimePerfScenario::RlmToolCalls | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite => {
             let text = typescript_block(
                 r#"
-const first = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
-const second = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 2 });
-const third = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 3 });
-const fourth = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 4 });
+const first = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 1 });
+const second = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 2 });
+const third = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 3 });
+const fourth = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 4 });
 await control.finish(first.value);"#,
             );
             text_profile(text)
@@ -304,8 +304,8 @@ await control.finish(first.value);"#,
         RuntimePerfScenario::RlmAsyncToolCompletion => {
             let text = typescript_block(
                 r#"
-const first = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
-const second = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
+const first = await tools.benchmarkAsync({ value: "runtime perf benchmark ok", delay_ms: 0 });
+const second = await tools.benchmarkAsync({ value: "runtime perf benchmark ok", delay_ms: 0 });
 await control.finish(first.value);"#,
             );
             text_profile(text)
@@ -314,11 +314,11 @@ await control.finish(first.value);"#,
             let text = typescript_block(
                 r#"
 const benchmarkEchoProcess = async (value: string, ordinal: number) => {
-  return await tools.benchmark_echo({ value: value, ordinal: ordinal });
+  return await tools.benchmarkEcho({ value: value, ordinal: ordinal });
 };
 
 const benchmarkSlowProcess = async (value: string, delay_ms: number) => {
-  return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
+  return await tools.benchmarkSlow({ value: value, delay_ms: delay_ms });
 };
 
 const first = await processes.start({ definition: benchmarkEchoProcess, args: { value: "runtime perf benchmark ok", ordinal: 1 } });
@@ -336,7 +336,7 @@ await control.finish(first_result.value);"#,
             let text = typescript_block(
                 r#"
 const benchmarkAsyncProcess = async (value: string) => {
-  return await tools.benchmark_async({ value: value, delay_ms: 0 });
+  return await tools.benchmarkAsync({ value: value, delay_ms: 0 });
 };
 
 const first = await processes.start({ definition: benchmarkAsyncProcess, args: { value: "runtime perf benchmark ok" } });
@@ -363,7 +363,7 @@ await control.finish(first_result.value);"#,
             let text = typescript_block(&format!(
                 r#"
 const settlementChild = async (value: string) => {{
-  return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
+  return await tools.benchmarkAsync({{ value: value, delay_ms: 0 }});
 }};
 
 {starts}
@@ -428,8 +428,8 @@ for (const match of second_pool.matches) {
 }
 
 const subagent_handle = await processes.start({ definition: explore });
-const handles = await obliq.list_async_handles({});
-const judged = await obliq.judge_candidates({
+const handles = await obliq.listAsyncHandles({});
+const judged = await obliq.judgeCandidates({
   verifier_predicate: "documents share the same abstract proof strategy, not topic words",
   candidate_doc_ids: candidate_ids,
   surface_bait: ["same vocabulary", "same topic"]
@@ -468,7 +468,7 @@ await control.finish("runtime perf benchmark ok");"#,
             let text = typescript_block(
                 r#"
 const deepChild = async () => {
-  const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
+  const pending = await tools.benchmarkAsync({ value: "parent tool loop", delay_ms: 0 });
   await sleep(0);
   const child = await agents.spawn({
     task: "Use the seeded chunk and return its length after the durable waits.",
@@ -503,7 +503,7 @@ pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStre
     let kind = high_traffic_operation_kind(request);
     if kind == Some(HighTrafficOperationKind::Tool) {
         return text_profile(typescript_block(
-            r#"const result = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
+            r#"const result = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 1 });
 await control.finish(result.value);"#,
         ));
     }

@@ -64,7 +64,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
@@ -175,38 +174,38 @@ enum Cell {
 impl Cell {
     fn source(self) -> String {
         let body = match self {
-            Self::Identity => "const a = await tools.ext_write({ x: 1 });\n\
-                 const b = await tools.ext_write({ x: 2 });\n\
+            Self::Identity => "const a = await tools.extWrite({ x: 1 });\n\
+                 const b = await tools.extWrite({ x: 2 });\n\
                  console.log([a, b]);"
                 .to_owned(),
             Self::Sleep => format!("await sleep({SLEEP_MS});\nconsole.log(\"woke\");"),
             Self::Repeatable => {
-                "const a = await tools.ext_retry({ x: 1 });\nconsole.log(a);".to_owned()
+                "const a = await tools.extRetry({ x: 1 });\nconsole.log(a);".to_owned()
             }
-            Self::Race => "const w = await Promise.race([tools.ext_fast({ x: 1 }), \
-                 tools.ext_slow({ x: 2 })]);\nconsole.log(w);"
+            Self::Race => "const w = await Promise.race([tools.extFast({ x: 1 }), \
+                 tools.extSlow({ x: 2 })]);\nconsole.log(w);"
                 .to_owned(),
-            Self::AwaitProcess => "const h = await tools.ext_handle({});\n\
+            Self::AwaitProcess => "const h = await tools.extHandle({});\n\
                  const r = await processes.await({ handle: h });\n\
                  console.log(r);"
                 .to_owned(),
             Self::Deferred => format!(
-                "let r = ''; try {{ await tools.{REFUSED}({{}}); }} catch (e) {{ r = String(e); }}\n\
-                 let u = ''; try {{ await tools.{MISSING}({{}}); }} catch (e) {{ u = String(e); }}\n\
-                 const a = await tools.{GRANTED}({{ x: 1 }});\n\
+                "let r = ''; try {{ await tools.extRefused({{}}); }} catch (e) {{ r = String(e); }}\n\
+                 let u = ''; try {{ await tools.extMissing({{}}); }} catch (e) {{ u = String(e); }}\n\
+                 const a = await tools.extGranted({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
-                 let r2 = ''; try {{ await tools.{REFUSED}({{}}); }} catch (e) {{ r2 = String(e); }}\n\
-                 let u2 = ''; try {{ await tools.{MISSING}({{}}); }} catch (e) {{ u2 = String(e); }}\n\
-                 const b = await tools.{GRANTED}({{ x: 2 }});\n\
+                 let r2 = ''; try {{ await tools.extRefused({{}}); }} catch (e) {{ r2 = String(e); }}\n\
+                 let u2 = ''; try {{ await tools.extMissing({{}}); }} catch (e) {{ u2 = String(e); }}\n\
+                 const b = await tools.extGranted({{ x: 2 }});\n\
                  console.log([a, b, r, u, r2, u2]);"
             ),
             Self::CancelledBeforeSave => {
-                format!("const a = await tools.{GRANTED}({{ x: 1 }});\nconsole.log(a);")
+                "const a = await tools.extGranted({ x: 1 });\nconsole.log(a);".to_owned()
             }
             Self::LongStretch => format!(
                 "let n = 0;\n\
                  for (let i = 0; i < {STRETCH}; i++) {{ n = n + i; }}\n\
-                 const a = await tools.ext_write({{ x: 1 }});\n\
+                 const a = await tools.extWrite({{ x: 1 }});\n\
                  console.log([n, a]);"
             ),
         };
@@ -267,8 +266,8 @@ impl StaticToolExecute for ExtTools {
             .lock_recover()
             .entry(call.context.call_id().clone())
             .or_default()
-            .push((call.name().to_owned(), call.args.clone()));
-        match call.name() {
+            .push((call.tool_id().as_str().to_owned(), call.args.clone()));
+        match call.tool_id().as_str() {
             SLOW => {
                 // Runs until its call is cancelled.
                 match call.context.cancellation_token() {
@@ -298,9 +297,19 @@ impl StaticToolExecute for ExtTools {
 }
 
 fn definition(name: &str, policy: ExecutionPolicy, output: Value) -> lash_core::ToolDefinition {
+    definition_at(name, &format!("tools.{name}"), policy, output)
+}
+
+/// The tool `name` at `operation`.
+fn definition_at(
+    name: &str,
+    operation: &str,
+    policy: ExecutionPolicy,
+    output: Value,
+) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         name,
-        name,
+        operation,
         "A host call the cell restore laws watch.",
         json!({
             "type": "object",
@@ -312,14 +321,17 @@ fn definition(name: &str, policy: ExecutionPolicy, output: Value) -> lash_core::
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(policy)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 /// The definition the resolver grants for `tools.ext_granted`, or the one
 /// a redeployed catalog binds there.
 fn granted(name: &str) -> lash_core::ToolDefinition {
-    definition(name, ExecutionPolicy::Once, json!({ "type": "object" }))
-        .with_tool_binding(lash_core::ToolBinding::new(["tools"], GRANTED))
+    definition_at(
+        name,
+        &format!("tools.{GRANTED}"),
+        ExecutionPolicy::Once,
+        json!({ "type": "object" }),
+    )
 }
 
 /// The host tools of the deferred cell: the listed ones, the grant's body,
@@ -369,8 +381,8 @@ impl lash_core::ToolProvider for DeferredTools {
         name: &str,
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        if [GRANTED, AMBIENT].contains(&name) {
-            return Some(Arc::new(granted(name).contract()));
+        if name == format!("tools.{GRANTED}") {
+            return Some(Arc::new(granted(GRANTED).contract()));
         }
         self.listed.resolve_contract(name, config)
     }

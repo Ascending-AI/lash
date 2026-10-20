@@ -10,20 +10,14 @@ use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
 use lash_rlm_types::RlmCreateExtras;
-use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
 use super::*;
 
-fn tool(
-    name: &str,
-    module: &'static str,
-    operation: &'static str,
-    description: &str,
-) -> lash_core::ToolDefinition {
+fn tool(name: &str, operation: &str, description: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        operation,
         description,
         serde_json::json!({
             "type": "object",
@@ -34,22 +28,14 @@ fn tool(
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new([module], operation))
 }
 
-/// Two tools of one MCP-style module, and one tool of no module.
+/// Two tools of one MCP-style package, and one of another.
 fn catalog() -> lash_core::ToolCatalog {
-    let module = Arc::new(lash_core::ToolModule {
-        name: "tracker".to_string(),
-    });
-    let mut search = tool("tracker_search", "tracker", "search", "Search issues.");
-    search.manifest.module = Some(Arc::clone(&module));
-    let mut open = tool("tracker_open", "tracker", "open", "Open an issue.");
-    open.manifest.module = Some(module);
     lash_core::ToolCatalog::from_tool_definitions(vec![
-        tool("grep", "files", "grep", "Search file contents."),
-        search,
-        open,
+        tool("grep", "files.grep", "Search file contents."),
+        tool("tracker_search", "tracker.search", "Search issues."),
+        tool("tracker_open", "tracker.open", "Open an issue."),
     ])
 }
 
@@ -129,8 +115,6 @@ const DECLARATIONS: &str = r##"### Tools
 `files.grep({ query: string }): Promise<string>`
 Search file contents.
 
-#### tracker
-
 `tracker.search({ query: string }): Promise<string>`
 Search issues.
 
@@ -193,20 +177,6 @@ fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
     );
 }
 
-/// A module's tools render under one heading, however many tools it has
-/// (FIG-4548).
-#[test]
-fn a_modules_tools_render_under_one_heading() {
-    let catalog = catalog();
-    let composed = compose_rlm(sections(&catalog), turn(catalog));
-    let rendered = initial(&composed);
-    assert_eq!(rendered.matches("#### tracker").count(), 1);
-    let module = rendered.find("#### tracker").expect("module heading");
-    for call in ["tracker.search(", "tracker.open("] {
-        assert!(rendered.find(call).expect("declared tool") > module);
-    }
-}
-
 /// OFFERED (FIG-5257): the declarations describe exactly the call's offered
 /// callable surface. A tool the call does not offer is not declared; a
 /// discovery session declares only its inline tools and says how to find
@@ -217,8 +187,7 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
     let full = catalog();
     let narrowed = lash_core::ToolCatalog::from_tool_definitions(vec![tool(
         "grep",
-        "files",
-        "grep",
+        "files.grep",
         "Search file contents.",
     )]);
     let rendered = compose_rlm(sections(&full), turn(narrowed));
@@ -226,10 +195,10 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
     assert!(rendered.contains("files.grep("), "{rendered}");
     assert!(!rendered.contains("tracker.search("), "{rendered}");
 
-    let mut hidden = tool("hidden", "files", "hidden", "A tool found by search.");
+    let mut hidden = tool("hidden", "files.hidden", "A tool found by search.");
     hidden.manifest.inline = false;
     let discovering = lash_core::ToolCatalog::from_tool_definitions(vec![
-        tool("search_tools", "tools", "search", "Find tools."),
+        tool("search_tools", "tools.search", "Find tools."),
         hidden,
     ]);
     let discovery = RlmSections {
@@ -639,8 +608,7 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
 fn an_ask_tool_declares_its_surface_without_interaction_policy() {
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool(
         "ask",
-        "user",
-        "ask",
+        "user.ask",
         "Collect a response.",
     )]);
     for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {

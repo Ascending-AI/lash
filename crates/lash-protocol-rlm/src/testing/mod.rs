@@ -249,7 +249,7 @@ impl lash_core::ToolProvider for WithFinish {
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
         let finish = self.finish.manifest();
-        if name == finish.name || name == finish.id.as_str() {
+        if name == finish.tool() || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
         }
         self.tools.resolve_contract(name, config)
@@ -279,7 +279,7 @@ pub(crate) fn with_finish(
             .into_iter()
             .filter_map(|manifest| {
                 let contract = provider
-                    .resolve_contract(&manifest.name, &lash_core::OwnerConfigView::default())?;
+                    .resolve_contract(&manifest.tool(), &lash_core::OwnerConfigView::default())?;
                 Some(lash_core::ToolDefinition::from_parts(
                     manifest,
                     contract.as_ref().clone(),

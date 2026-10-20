@@ -12,6 +12,30 @@ pub(crate) use discovery::{printed_source_reference, tool_calls};
 
 /// A statically spelled path and its root, before lexical resolution.
 /// Computed properties and expression receivers are value operations.
+/// `expr` as the segments of a dotted path from its root identifier.
+/// `object["name"]` is the qualified escape, a segment written as a string
+/// key, for a name the dialect cannot write as a property.
+pub(super) fn path_segments(expr: &ast::Expr) -> Option<(&str, Vec<&str>)> {
+    match expr {
+        ast::Expr::Ident(name, _) => Some((name, vec![name.as_str()])),
+        ast::Expr::Member {
+            object, property, ..
+        } => {
+            let segment = match property {
+                ast::MemberProperty::Field(field) => field.as_str(),
+                ast::MemberProperty::Index(index) => match index.as_ref() {
+                    ast::Expr::String(key) => key.as_str(),
+                    _ => return None,
+                },
+            };
+            let (root, mut path) = path_segments(object)?;
+            path.push(segment);
+            Some((root, path))
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn static_path(expr: &ast::Expr) -> Option<(&str, String)> {
     match expr {
         ast::Expr::Ident(name, _) => Some((name, name.clone())),
@@ -932,20 +956,7 @@ impl Lowerer<'_> {
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }
-        if let Some(path) = self.unbound_path(callee)
-            && path.starts_with("control.")
-            && self
-                .effects
-                .keys()
-                .any(|effect| effect.as_str().starts_with("control."))
-        {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::UnknownBinding,
-                format!("the tool `{path}` is not granted in this session"),
-                "use a control tool listed in the session's offered catalog",
-                Some(span),
-            ));
-        }
+        self.operation_refusal(callee, span)?;
         if let Some(refused) = self.reflective_call(callee, args) {
             return Err(refused);
         }

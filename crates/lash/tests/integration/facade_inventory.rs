@@ -217,7 +217,6 @@ mod rlm_host_wrapping_inventory {
     use lash::rlm::RlmSeedPluginBody as _;
     use lash::rlm::UnsetChannel as _;
     use lash::tools::DeferredResolutionError as _;
-    use lash::vm::ToolBindingError as _;
 }
 
 // --- `codemode`: workflow documents, kernel processes and host boundaries ---
@@ -267,7 +266,6 @@ mod rlm_inventory {
     use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::ProjectedBindingError as _;
     use lash::rlm::PythonPrompts as _;
-    use lash::rlm::ResolvedToolBinding as _;
     use lash::rlm::TypescriptPrompts as _;
     use lash::rlm::python_tool_presenter as _;
     use lash::rlm::typescript_tool_presenter as _;
@@ -907,13 +905,12 @@ pub(super) mod whole_module_coverage {
 ))]
 #[test]
 fn loaded_tool_signature_example_matches_the_loaded_documentation() {
-    use lash::tools::ToolBinding;
-    use lash::tools::{ToolDefinition, ToolDefinitionBindingExt};
+    use lash::tools::ToolDefinition;
     use serde_json::json;
 
     let tool = ToolDefinition::raw(
         "lookup",
-        "lookup",
+        "tools.lookup",
         "Find a record.",
         json!({
             "type": "object",
@@ -924,8 +921,7 @@ fn loaded_tool_signature_example_matches_the_loaded_documentation() {
         json!({ "type": "string" }),
     )
     .expect("valid tool schemas")
-    .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::from_path("tools.lookup"));
+    .with_execution(std::time::Duration::from_secs(30));
     let presentation = json!({});
     for dialect in [
         lash::rlm::CellDialect::typescript(),

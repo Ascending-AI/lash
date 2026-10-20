@@ -96,7 +96,7 @@ fn positional_built_ins_agree_with_their_list_helpers() {
       const general = [String.call(undefined, o, tick("b")), Number.call(undefined, o, tick("c")),
         Math.pow.call(undefined, o, 2, tick("d"))];
       same("extra", JSON.stringify([extra, direct]), JSON.stringify([general, log]));
-      await finish(JSON.stringify({
+      await control.finish(JSON.stringify({
         mismatches,
         sample: [String(-0), String(1e21 * 1), String(), Number(), Number(" 3 "), Boolean(),
           Math.pow(2), Math.pow(2, 10)],
@@ -138,7 +138,7 @@ fn text_plus_a_float_and_two_part_templates_agree_with_the_general_forms() {
       };
       same("template object", `k${o}`, `k${o}${""}`);
       same("template both", `${o}${o}`, `${o}${o}${""}`);
-      await finish(JSON.stringify({
+      await control.finish(JSON.stringify({
         mismatches,
         sample: ["k" + (-0 * 1), (1e21 * 1) + "k", `k${0.5 * 1}`],
         log,

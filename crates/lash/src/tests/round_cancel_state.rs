@@ -5,24 +5,23 @@
 use super::*;
 
 use crate::{TurnCancelMode, TurnEvent, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
 
 const STATE_PLUGIN: &str = "round-cancel-state";
 const SET: &str = "state_set";
+const SET_OPERATION: &str = "tools.state_set";
 
 fn set_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{SET}"),
-        SET,
+        SET_OPERATION,
         "Sets the plugin's key to the call's symbol.",
         object.clone(),
         object,
     )
     .expect("the state tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], SET))
 }
 
 /// When the cancelled member `A` answers.
@@ -109,7 +108,7 @@ impl ToolProvider for StatePlugin {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SET).then(|| Arc::new(set_definition().contract()))
+        (name == SET_OPERATION).then(|| Arc::new(set_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -198,7 +197,7 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
                     .into_iter()
                     .map(|(symbol, key)| LlmOutputPart::ToolCall {
                         call_id: format!("call-{symbol}"),
-                        tool_name: SET.to_string(),
+                        tool_name: SET_OPERATION.replace('.', "__"),
                         input_json: serde_json::json!({ "symbol": symbol, "key": key }).to_string(),
                         replay: None,
                     })

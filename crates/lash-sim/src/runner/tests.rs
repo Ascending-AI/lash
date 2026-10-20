@@ -196,7 +196,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
         matches!(
             tool_response.parts.as_slice(),
             [LlmOutputPart::ToolCall { call_id, tool_name, input_json, .. }]
-                if call_id == "call-1" && tool_name == "app_lookup" && input_json == "{}"
+                if call_id == "call-1" && tool_name == "tools.app_lookup" && input_json == "{}"
         ),
         "pending tool provider must start with the concrete tool-call part"
     );
@@ -1441,7 +1441,7 @@ async fn pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary() 
     assert_eq!(proof.session_id, "sim-pending-tool-session");
     assert_eq!(proof.turn_index, 1);
     assert_eq!(proof.assistant_message, "done");
-    assert_eq!(proof.tool_name, "app_lookup");
+    assert_eq!(proof.tool_name, "tools.app_lookup");
     assert!(proof.scheduler_controlled);
     assert!(proof.turn_suspended_before_completion);
     assert_eq!(proof.completed_event_count_before_resolution, 0);

@@ -450,7 +450,7 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
                 if call == 0 {
                     response.parts.push(served::call(
                         "check",
-                        "echo_tool",
+                        "tools.echo_tool",
                         serde_json::json!({ "value": "check" }),
                     ));
                 }

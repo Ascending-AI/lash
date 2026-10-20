@@ -69,7 +69,7 @@ macro_rules! attempt {
         let tools = tools();
         let definition = crate::processes_tool_definitions(true)
             .into_iter()
-            .find(|definition| definition.name() == $tool)
+            .find(|definition| definition.manifest.tool() == $tool)
             .expect("process-controls manifest resolves");
         let (manifest, contract) = (definition.manifest(), definition.contract());
         tools
@@ -94,7 +94,7 @@ fn definition() -> Value {
 #[tokio::test]
 async fn start_and_get_accept_only_the_exact_definition_contracts() {
     let (slot, get) = intents(attempt!(
-        "get_process_definition",
+        "processes.get",
         serde_json::json!({"definition_id": id(1).to_tagged_json()})
     ));
     assert_eq!(slot, lash_protocol_types::handle::definition_slot_json(0));
@@ -108,7 +108,7 @@ async fn start_and_get_accept_only_the_exact_definition_contracts() {
         serde_json::json!({"definition": {"$lash_process": true, "process_name": "legacy"}}),
         serde_json::json!({"definition_id": id(1).to_tagged_json(), "args": []}),
     ] {
-        refusal(attempt!("start_process", args));
+        refusal(attempt!("processes.start", args));
     }
     for key in [
         "engine",
@@ -120,10 +120,10 @@ async fn start_and_get_accept_only_the_exact_definition_contracts() {
     ] {
         let mut args = serde_json::json!({"definition": definition()});
         args[key] = serde_json::json!("forbidden");
-        assert!(refusal(attempt!("start_process", args)).contains("unknown"));
+        assert!(refusal(attempt!("processes.start", args)).contains("unknown"));
         let mut args = serde_json::json!({"definition_id": id(1).to_tagged_json()});
         args[key] = serde_json::json!("forbidden");
-        refusal(attempt!("get_process_definition", args));
+        refusal(attempt!("processes.get", args));
     }
 }
 
@@ -138,7 +138,7 @@ async fn an_unusable_declared_label_is_refused() {
     ] {
         assert!(
             refusal(attempt!(
-                "start_process",
+                "processes.start",
                 serde_json::json!({"definition": definition(), "label": label})
             ))
             .contains("label")

@@ -70,6 +70,7 @@ const RUN: &str = "steering-turn";
 /// The steer's host id: the run it opens when no running turn takes it.
 const STEER_RUN: &str = "steering-follow-on";
 const TOOL: &str = "steer_round";
+const TOOL_OPERATION: &str = "tools.steer_round";
 /// The control tool of the completion scenario: it finishes with its label.
 const FINISH_TOOL: &str = "finish_round";
 /// The control tool the completion scenario's model finishes with once it
@@ -193,7 +194,7 @@ fn steer_round(
 ) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Answers its label; the first round's call sends the steer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "object" }),
@@ -239,7 +240,7 @@ fn finish_value_schema(tool: &str) -> serde_json::Value {
 fn finish_definition(tool: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         tool,
-        tool,
+        format!("tools.{tool}"),
         "Finishes the turn with its label; the first round's call sends the steer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         lash_core::TurnControls::finish(
@@ -289,14 +290,14 @@ fn text(request: &LlmRequest, text: &str) -> LlmResponse {
 }
 
 fn round(call: &str, label: &str) -> LlmResponse {
-    call_tool(TOOL, call, label)
+    call_tool(TOOL_OPERATION, call, label)
 }
 
 fn call_tool(tool: &str, call: &str, label: &str) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: call.to_owned(),
-            tool_name: tool.to_owned(),
+            tool_name: tool.replace('.', "__"),
             input_json: serde_json::json!({ "label": label }).to_string(),
             replay: None,
         }],
@@ -326,9 +327,17 @@ fn model(
                     // The finish the steer supersedes, then the one that
                     // answers once the model has read it.
                     if delivered {
-                        call_tool(FINISH_STEERED, "finish-call-2", SECOND_ROUND)
+                        call_tool(
+                            &format!("tools.{FINISH_STEERED}"),
+                            "finish-call-2",
+                            SECOND_ROUND,
+                        )
                     } else {
-                        call_tool(FINISH_TOOL, "finish-call-1", FIRST_ROUND)
+                        call_tool(
+                            &format!("tools.{FINISH_TOOL}"),
+                            "finish-call-1",
+                            FIRST_ROUND,
+                        )
                     }
                 } else if arrival.at_work() {
                     if delivered && rendered.contains(SECOND_ROUND) {
@@ -765,7 +774,7 @@ fn second_finish_laws(cause: &lash_core_store::store::RunTerminalCause) -> Vec<S
                     value_schema: Some(schema),
                 },
             ..
-        } if tool_name == FINISH_STEERED
+        } if *tool_name == format!("tools.{FINISH_STEERED}")
             && *value == serde_json::json!(SECOND_ROUND)
             && schema.as_value() == &finish_value_schema(FINISH_STEERED) =>
         {

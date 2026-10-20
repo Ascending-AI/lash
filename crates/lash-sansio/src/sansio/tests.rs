@@ -868,7 +868,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                 PendingToolCall {
                     call_id: lash_protocol_types::ToolCallId::fixture("call-slow"),
                     provider_call_id: None,
-                    tool_name: "slow_tool".to_string(),
+                    tool_name: "tools.slow_tool".to_string(),
                     args: serde_json::json!({}),
                     replay: None,
                 },
@@ -1881,6 +1881,7 @@ fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
             .expect("valid declared schema"),
         }]),
         turn_controls: Default::default(),
+        truncated_names: Default::default(),
     }
 }
 

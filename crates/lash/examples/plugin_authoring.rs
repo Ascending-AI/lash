@@ -46,7 +46,7 @@ pub fn greetings() -> Result<Arc<dyn PluginFactory>, PluginError> {
         .map(|name| {
             ToolDefinition::raw(
                 format!("greetings.{name}"),
-                name,
+                format!("greetings.{name}"),
                 name,
                 json!({"type":"object","properties":{},"additionalProperties":false}),
                 json!({"type":"string"}),
@@ -90,7 +90,7 @@ pub fn protected_path() -> Arc<dyn PluginFactory> {
             lash::hook_key!("policy"),
             Arc::new(|input| {
                 Box::pin(async move {
-                    let blocked = input.prepared.tool_name() == "write"
+                    let blocked = input.prepared.tool_name() == "tools.write"
                         && input
                             .prepared
                             .args()

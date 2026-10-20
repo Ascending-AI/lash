@@ -6,12 +6,12 @@ export async function summarize_inbox() {
       task: "Summarize this email",
       inputs: { snippet: email.snippet },
     });
-    await display.show_message({ text: summary });
+    await display.showMessage({ text: summary });
     return summary;
   }
 
   /** Get the three newest emails */
-  const emails = await gmail.list_recent({ count: 3 });
+  const emails = await gmail.listRecent({ count: 3 });
   /** Start an empty list of summaries */
   const summaries = [];
   /** Go through each email */

@@ -68,7 +68,7 @@ pub fn router(factory: Arc<McpPluginFactory>) -> Router {
 fn views(factory: &McpPluginFactory) -> Vec<Value> {
     factory.server_statuses().into_iter().map(|status| json!({
         "name": status.server_name, "connected": status.health.is_connected(),
-        "tools": factory.pool().advertised_tools_for_server(&status.server_name).into_iter().map(|tool| tool.name().to_owned()).collect::<Vec<_>>()
+        "tools": factory.pool().advertised_tools_for_server(&status.server_name).into_iter().map(|tool| tool.manifest.tool()).collect::<Vec<_>>()
     })).collect()
 }
 async fn list(State(factory): State<Arc<McpPluginFactory>>) -> Json<Value> {

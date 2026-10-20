@@ -24,13 +24,11 @@ use lash::tools::StaticToolExecute;
 use lash::tools::StaticToolProvider;
 use lash::tools::ToolArgumentProjectionPolicy;
 use lash::tools::ToolAttemptOutcome;
-use lash::tools::ToolBinding;
 use lash::tools::ToolCall;
 use lash::tools::ToolCallOutput;
 use lash::tools::ToolControl;
 use lash::tools::ToolDeclaration;
 use lash::tools::ToolDefinition;
-use lash::tools::ToolDefinitionBindingExt;
 use lash::tools::ToolFailure;
 use lash::tools::ToolFailureCause;
 use lash::tools::ToolFailureClass;
@@ -83,13 +81,14 @@ pub(crate) fn submit_error_provider(offered: bool) -> Arc<dyn ToolProvider> {
 )]
 fn tool_definition(
     name: &str,
+    operation: &str,
     description: impl Into<String>,
     input_schema: Value,
     output_schema: Value,
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        operation,
         description,
         input_schema,
         output_schema,
@@ -108,6 +107,7 @@ fn tool_definition(
 pub fn spawn_agent_tool_definition() -> ToolDefinition {
     tool_definition(
         "spawn_agent",
+        "agents.spawn",
         "Run one subagent on a task and return its final result. Spawns awaited together, with `Promise.all` or in one batch, run at once.\
         \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals.\
         \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error.",
@@ -136,7 +136,6 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
     ))
-    .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
     // The call waits for its child, however long the child's own bounds let
@@ -159,11 +158,11 @@ pub fn submit_error_tool_definition() -> ToolDefinition {
     });
     tool_definition(
         "submit_error",
+        "task.fail",
         "End the current subagent task as a terminal failure with a concise reason. Use this when the child cannot produce a valid result.",
         reason.clone(),
         reason,
     )
-    .with_tool_binding(ToolBinding::new(["task"], "fail"))
 }
 
 /// What a spawn's preparation records for its body: the child's whole

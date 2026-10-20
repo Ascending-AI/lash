@@ -490,17 +490,18 @@ fn decode_expiry_checks<V: serde::de::DeserializeOwned + lash_core::tool_run::Ra
     Ok(checks)
 }
 
-// Cell reports and catalogue keys retain model-facing names, never ToolIds.
-// Construct this identity only from those two typed records: a ToolId cannot
-// participate in the membership comparison by exposing its string spelling.
+// Cell reports and catalogue keys retain the tools' operations, by effect
+// name, never ToolIds. Construct this identity only from those two typed
+// records: a ToolId cannot participate in the membership comparison by
+// exposing its string spelling.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct RecordedToolName<'a>(&'a str);
+struct RecordedToolName<'a>(std::borrow::Cow<'a, str>);
 impl<'a> RecordedToolName<'a> {
     fn catalogue(entry: &'a crate::tools::SurfaceEntry) -> Self {
-        Self(&entry.definition.manifest.name)
+        Self(std::borrow::Cow::Owned(entry.definition.manifest.tool()))
     }
     fn call(record: &'a lash_core::ToolCallRecord) -> Self {
-        Self(&record.tool)
+        Self(std::borrow::Cow::Borrowed(&record.tool))
     }
 }
 

@@ -1,7 +1,5 @@
-use lash::tools::ToolBinding;
-
-fn rlm_tool_types_are_nameable(binding: ToolBinding) {
-    let _ = binding;
+fn rlm_tool_types_are_nameable(operation: lash::tools::QualifiedOperation) {
+    let _ = operation;
 }
 
 fn rlm_core_type_is_nameable(core: lash::LashCore) {

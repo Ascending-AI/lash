@@ -24,7 +24,7 @@
       "replies": [
         {
           "cell": [
-            "const chunk = await tools.fixture_large({ key: \"data-{turn}\", bytes: 2667 });",
+            "const chunk = await tools.fixtureLarge({ key: \"data-{turn}\", bytes: 2667 });",
             "chunks.push(chunk.text);",
             "retained = retained + chunk.text.length;",
             "await control.finish({ retained: retained, chunks: chunks.length, preview: chunk.text.slice(0, 95) });"

@@ -553,8 +553,8 @@ impl PromptSectionSource for ModuleGuidance {
     fn sections(&self, offered: &OfferedTools) -> Vec<PromptFamilySection> {
         let modules = offered
             .manifests()
-            .filter_map(|manifest| manifest.module.as_deref())
-            .map(|module| module.name.clone())
+            .filter_map(|manifest| manifest.operation.package.iter().next())
+            .map(ToString::to_string)
             .collect::<BTreeSet<_>>();
         modules
             .into_iter()
@@ -569,19 +569,15 @@ impl PromptSectionSource for ModuleGuidance {
 }
 
 fn module_tool(name: &str, module: &str) -> crate::ToolDefinition {
-    let mut tool = crate::ToolDefinition::raw(
+    crate::ToolDefinition::raw(
         name,
-        name,
+        format!("{module}.{name}"),
         "",
         serde_json::json!({"type": "object"}),
         serde_json::json!({}),
     )
     .expect("tool schema admits")
-    .with_execution(std::time::Duration::from_secs(120));
-    tool.manifest.module = Some(Arc::new(crate::ToolModule {
-        name: module.into(),
-    }));
-    tool
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A call offering `tools` natively, from their pinned catalog.
@@ -700,14 +696,16 @@ fn discovery_hidden_tools_are_absent_from_the_offered_surface() {
     assert_eq!(
         offered
             .manifests()
-            .map(|manifest| manifest.name.as_str())
+            .map(crate::ToolManifest::tool)
             .collect::<Vec<_>>(),
-        vec!["search"]
+        vec!["github.search".to_owned()]
     );
-    assert!(offered.offers("search"));
-    assert!(!offered.offers("private_search"));
+    assert!(offered.offers("github.search"));
+    assert!(!offered.offers("slack.private_search"));
     assert!(
-        offered.catalog().has_callable_tool("private_search"),
+        offered.catalog().has_callable_tool(
+            &crate::IntoOperation::into_operation("slack.private_search").unwrap()
+        ),
         "discovery retains execution authority"
     );
     assert_eq!(
@@ -720,7 +718,7 @@ fn discovery_hidden_tools_are_absent_from_the_offered_surface() {
     );
     let undiscovered = OfferedTools::new(catalog, false);
     assert!(
-        undiscovered.offers("private_search"),
+        undiscovered.offers("slack.private_search"),
         "without discovery every member is inline"
     );
 }

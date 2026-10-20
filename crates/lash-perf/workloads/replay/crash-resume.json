@@ -11,7 +11,7 @@
       "replies": [
         {
           "cell": [
-            "const big = await tools.fixture_large({ key: \"corpus\", bytes: 1000000 });",
+            "const big = await tools.fixtureLarge({ key: \"corpus\", bytes: 1000000 });",
             "const describe = (record, size) => record.title + \" / \" + size + \" bytes kept\";",
             "let last = \"none\";",
             "await control.finish({ loaded: big.bytes, length: big.text.length });"
@@ -25,8 +25,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 20 });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -39,8 +39,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -53,8 +53,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 20 });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -67,8 +67,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -81,8 +81,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 20 });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -95,8 +95,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"crash-{turn}\", ms: 20, kill_workers: true });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]
@@ -109,8 +109,8 @@
       "replies": [
         {
           "cell": [
-            "const record = await tools.fixture_lookup({ key: \"item-{turn}\" });",
-            "const waited = await tools.fixture_slow({ key: \"wait-{turn}\", ms: 20 });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 20 });",
             "last = describe(record, big.text.length);",
             "await control.finish({ turn: {turn}, last: last, waited: waited.waited_ms });"
           ]

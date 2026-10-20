@@ -57,7 +57,7 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
                     1 => cell("console.log(\"warning observed\");", 8),
                     2 => cell(
                         &format!(
-                            "await control.continue_as({{ task: \"answer from the baton\", seed: {{ baton: \"{BATON}\" }} }});"
+                            "await control.continueAs({{ task: \"answer from the baton\", seed: {{ baton: \"{BATON}\" }} }});"
                         ),
                         8,
                     ),
@@ -126,7 +126,7 @@ async fn a_budget_warning_reaches_the_model_and_continue_as_carries_only_the_see
         requests[1]
     );
     assert!(
-        requests[1].contains("control.continue_as"),
+        requests[1].contains("control.continueAs"),
         "{}",
         requests[1]
     );

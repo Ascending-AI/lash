@@ -692,19 +692,9 @@ impl ProcessEnvBuilder {
             surface: crate::tool_surface::ProcessSurface::of(definition),
             kind: crate::tool_surface::LinkKind::Tool,
         };
-        match crate::tool_surface::effect_path_of(&definition.manifest)
-            .and_then(|path| EffectName::new(path.as_str()).ok())
-        {
-            Some(effect) => {
-                self.env.effects.insert(effect, link);
-            }
-            None => {
-                self.refusal
-                    .get_or_insert(ProcessEnvRefusal::EffectNotLinked {
-                        effect: definition.manifest.name.clone(),
-                    });
-            }
-        }
+        self.env
+            .effects
+            .insert(definition.manifest.operation.effect_name(), link);
         self
     }
 

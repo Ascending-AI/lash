@@ -74,13 +74,8 @@ pub(super) fn register_rlm_protocol_plugin(
         .contribute(lash_core::hook_key!("rlm-catalog"), move |owner, _| {
             let catalog_dialect = Arc::clone(&owner.dialect);
             let discovery = owner.config.discovery.clone();
-            let discovery_dialect = Arc::clone(&owner.dialect);
             Ok(Arc::new(move |ctx| {
-                crate::tool_catalog::validate_discovery(
-                    &ctx.tools,
-                    discovery.as_ref(),
-                    discovery_dialect.as_ref(),
-                )?;
+                crate::tool_catalog::validate_discovery(&ctx.tools, discovery.as_ref())?;
                 crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
             }))
         })?;

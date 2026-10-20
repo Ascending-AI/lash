@@ -11,14 +11,14 @@ export async function resilient_search() {
       /** Search the web for workflow engines */
       const found = await web.search({ query: "workflow engines", limit });
       /** Show the top result's title */
-      await display.show_message({ text: found.results[0].title });
+      await display.showMessage({ text: found.results[0].title });
     }
     /** If the search fails */
     catch (error) {
       /** Count the failure */
       failures = failures + 1;
       /** Say that a search failed */
-      await display.set_status({ key: "search", value: "A search failed" });
+      await display.setStatus({ key: "search", value: "A search failed" });
     }
   }
   /** Report how many searches failed */

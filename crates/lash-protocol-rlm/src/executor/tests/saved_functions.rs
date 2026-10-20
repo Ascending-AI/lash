@@ -4,8 +4,6 @@
 
 use std::sync::Arc;
 
-use lash_vm_runtime::ToolDefinitionBindingExt as _;
-
 use super::{
     CellTools, SESSION, TURN, finish_of, open_host, typescript_services, typescript_state,
 };
@@ -504,14 +502,13 @@ impl EchoEndsTheTurn {
     fn definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::control(
             "tool:echo",
-            "echo",
+            "echo.say",
             "Echo the text back, ending the turn",
             lash_core::ToolDefinition::default_input_schema(),
             lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         )
         .expect("valid declared tool schema")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash_vm_runtime::ToolBinding::new(["echo"], "say"))
     }
 }
 
@@ -532,7 +529,7 @@ impl lash_core::ToolProvider for EchoEndsTheTurn {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "echo" || name == "tool:echo").then(|| Arc::new(Self::definition().contract()))
+        (name == "echo.say" || name == "tool:echo").then(|| Arc::new(Self::definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

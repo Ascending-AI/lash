@@ -599,7 +599,7 @@ pub(crate) fn validate_runtime_perf_turn(
             );
         }
         TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
-            if tool_name == "finish" =>
+            if tool_name == "control.finish" =>
         {
             if value.as_str() == Some(expected) {
                 return Ok(());

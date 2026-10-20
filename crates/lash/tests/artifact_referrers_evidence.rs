@@ -246,7 +246,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
         &fixture,
         vec![
             response(
-                "const old = async () => 5; await control.continue_as({ task: 'next frame' });",
+                "const old = async () => 5; await control.continueAs({ task: 'next frame' });",
             ),
             response("await control.finish('next frame');"),
         ],
@@ -380,7 +380,7 @@ await control.finish({ h, empty, byFunction, byHandle });",
         (
             lash_protocol_rlm::CellDialect::python(),
             "limit = 3\nasync def w(n: int):\n    return limit\nasync def quiet():\n    pass\n",
-            "h = await processes_start({'definition': w, 'args': {'n': 1}})\nempty = await processes_start({'definition': quiet})\nbyFunction = await processes_list({'definition': w, 'status': 'any'})\nbyHandle = await processes_list({'definition_id': h['definition_id'], 'status': 'any'})\nawait control_finish({'h': h, 'empty': empty, 'byFunction': byFunction, 'byHandle': byHandle})",
+            "h = await processes.start({'definition': w, 'args': {'n': 1}})\nempty = await processes.start({'definition': quiet})\nbyFunction = await processes.list({'definition': w, 'status': 'any'})\nbyHandle = await processes.list({'definition_id': h['definition_id'], 'status': 'any'})\nawait control.finish({'h': h, 'empty': empty, 'byFunction': byFunction, 'byHandle': byHandle})",
         ),
     ] {
         let fixture = Fixture::new(Backend::Sqlite).await;
@@ -676,8 +676,8 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
 /// its detached process finishes after the originating session is deleted.
 async fn a_python_saved_function_process_outlives_its_session(backend: Backend) {
     saved_function_process(backend, lash_protocol_rlm::CellDialect::python(),
-        "import asyncio\nfactor = 2\nasync def work(n: int = 21) -> int:\n    await asyncio.sleep(1.5)\n    return n * factor\nawait control_finish('bound')",
-        "run = await processes_start({'definition': work, 'args': {}})\nawait control_finish(run)",
+        "import asyncio\nfactor = 2\nasync def work(n: int = 21) -> int:\n    await asyncio.sleep(1.5)\n    return n * factor\nawait control.finish('bound')",
+        "run = await processes.start({'definition': work, 'args': {}})\nawait control.finish(run)",
         serde_json::json!(42)).await;
 }
 

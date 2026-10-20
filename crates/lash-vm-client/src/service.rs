@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_kernel_doc::{EffectName, Name, Signature, Site};
+use lash_kernel_doc::{EffectName, Name, Site};
 use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
 use serde::{Deserialize, Serialize};
 
@@ -24,20 +24,21 @@ pub enum Request {
         source: String,
         bindings: BTreeSet<Name>,
         functions: BTreeMap<Name, LowerFunction>,
-        effects: BTreeMap<EffectName, Signature>,
-        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        /// The operations the cell is offered.
+        #[serde(with = "lash_kernel_dialect::operation_keys")]
+        operations: lash_kernel_dialect::Operations,
         helpers: u32,
     },
     /// Lower `source`, written in `dialect`, to a kernel document against
-    /// the effects the host supplies and the session bindings in scope.
+    /// the operations the host offers and the session bindings in scope.
     Lower {
         dialect: String,
         source: String,
-        effects: BTreeMap<EffectName, Signature>,
-        /// Namespace roots from the catalog, before flattening tool names.
-        tool_roots: BTreeSet<Name>,
-        /// The turn controls each control-declaring effect declares.
-        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        /// The operations the cell is offered: each a catalog tool, a
+        /// deferred grant or an unavailable note. The worker composes the
+        /// cell's namespaces from them.
+        #[serde(with = "lash_kernel_dialect::operation_keys")]
+        operations: lash_kernel_dialect::Operations,
         bindings: BTreeSet<Name>,
         /// The functions the session holds: the document declares the
         /// ones the source names.
@@ -45,10 +46,6 @@ pub enum Request {
         /// The helper release whose names the source resolves against: the
         /// newest every live node holds (FIG-5799).
         helpers: u32,
-        /// The offered effects the host would perform as reads: the
-        /// response names those the cell's `main` can reach.
-        #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-        reads: BTreeSet<EffectName>,
     },
     /// Lower a host-authored workflow module in the worker, in the dialect
     /// of `language`, under the shared workflow contract. Without `limits`
@@ -56,9 +53,9 @@ pub enum Request {
     ImportWorkflow {
         language: lash_kernel_doc::SourceLanguage,
         source: String,
-        effects: BTreeMap<EffectName, Signature>,
-        tool_roots: BTreeSet<Name>,
-        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        /// The operations the workflow is offered.
+        #[serde(with = "lash_kernel_dialect::operation_keys")]
+        operations: lash_kernel_dialect::Operations,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,
@@ -236,8 +233,8 @@ pub enum Response {
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Dialect::function_values`]).
         function_values: Option<lash_kernel_doc::FunctionRepresentation>,
-        /// Those of the request's `reads` the document's `main` calls or
-        /// spawns, as the checked document's linked effects count them;
+        /// Those of the request's operations offered as reads the
+        /// document's `main` calls or spawns, as the checked document's linked effects count them;
         /// none when they cannot be certified (`lash_kernel_check::main_effects`).
         #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
         reads: BTreeSet<EffectName>,

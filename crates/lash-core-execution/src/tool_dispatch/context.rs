@@ -163,7 +163,7 @@ impl<'run> ToolDispatchContext<'run> {
         let entry = self
             .routes
             .entries()
-            .find(|entry| entry.definition.manifest.name == name)?;
+            .find(|entry| entry.definition.manifest.tool() == name)?;
         self.routes.drift(entry.tool(), &self.config)
     }
 

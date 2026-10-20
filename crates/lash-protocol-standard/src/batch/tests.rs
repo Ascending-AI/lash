@@ -272,6 +272,7 @@ fn expand_plain(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> Round
             batch: crate::BatchSugar::Enabled { max_members },
             listed: None,
             ends_the_turn: &|_| false,
+            operation: &str::to_owned,
         },
     )
 }

@@ -26,7 +26,7 @@ const OWNER: &str = "extension-laws";
 fn spanning_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:spanning",
-        "spanning",
+        "tools.spanning",
         "Open extension and tracing spans",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -62,7 +62,7 @@ impl ToolProvider for Spanning {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "spanning").then(|| Arc::new(spanning_definition().contract()))
+        (name == "tools.spanning").then(|| Arc::new(spanning_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -141,7 +141,7 @@ async fn spanning_turn(
         ))
         .serve_test_llm_profile(
             mock_provider(vec![
-                tool_call("call-spanning", "spanning", "{}"),
+                tool_call("call-spanning", "tools__spanning", "{}"),
                 text_call("done"),
             ])
             .into_handle(),
@@ -432,7 +432,7 @@ async fn tracing_spans_in_a_tool_body_nest_under_its_tool_span() -> Result<()> {
 fn nesting_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:nesting",
-        "nesting",
+        "tools.nesting",
         "Open an extension span with a point and a direct completion under it",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -460,7 +460,7 @@ impl ToolProvider for Nesting {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "nesting").then(|| Arc::new(nesting_definition().contract()))
+        (name == "tools.nesting").then(|| Arc::new(nesting_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -526,7 +526,7 @@ async fn nesting_turn(
     ))
     .serve_test_llm_profile(
         mock_provider(vec![
-            tool_call("call-nesting", "nesting", "{}"),
+            tool_call("call-nesting", "tools__nesting", "{}"),
             text_call("nested answer"),
             text_call("done"),
         ])

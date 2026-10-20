@@ -178,20 +178,19 @@ pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
 /// The corpus and the example offer precisely this tool declaration. Its
 /// module/operation path is the public facade import contract.
 pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
-    use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+    use lash::tools::ToolDefinition;
     Ok(vec![
         ToolDefinition::raw(
             "tool:corpus_echo",
-            "corpus_echo",
+            "corpus.echo",
             "Echo a corpus value and display it.",
             serde_json::json!({}),
             serde_json::json!({}),
         )?
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["corpus"], "echo")),
+        .with_execution(std::time::Duration::from_secs(120)),
         ToolDefinition::raw(
             "tool:corpus_capture",
-            "corpus_capture",
+            "corpus.capture",
             "Capture a function nested in a corpus value and display it.",
             serde_json::json!({
                 "type": "object",
@@ -206,8 +205,7 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
             }),
             serde_json::json!({}),
         )?
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["corpus"], "capture")),
+        .with_execution(std::time::Duration::from_secs(120)),
     ])
 }
 
@@ -225,13 +223,22 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in tools()? {
-        boundary.offer_bound_tool(
+        boundary.offer_tool(
             &tool.manifest,
             &tool.contract.input_schema.canonical,
             &tool.contract.output_schema.canonical,
         )?;
     }
-    let mut effects = boundary.signatures();
+    let mut effects = boundary
+        .operations()
+        .iter()
+        .map(|(operation, offered)| {
+            (
+                operation.effect_name(),
+                offered.requirement.signature.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     // The original source-shape probes name these host effects. They are
     // fixture declarations; the example's offered toolbox stays in tools().
     for name in [
@@ -256,7 +263,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     }
     // Finish belongs only to cells; it is not a process tool offered by the example.
     effects.insert(
-        k::EffectName::new("finish")?,
+        k::EffectName::new("control.finish")?,
         k::Signature {
             params: vec![k::Param {
                 name: Name::new("input"),
@@ -266,17 +273,12 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
             result: k::Type::Any,
         },
     );
-    let tool_roots = BTreeSet::from([Name::new("corpus")]);
     let controls = BTreeMap::from([(
-        k::EffectName::new("finish")?,
+        k::EffectName::new("control.finish")?,
         BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env = Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &tool_roots,
-        controls: &controls,
-    };
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)?;
+    let env = Environment::new(embedding.library(), &env_namespaces);
     let mut checker = Checker::new(registry.as_ref());
     checker.effects = effects.clone();
     let mut outputs = BTreeMap::new();

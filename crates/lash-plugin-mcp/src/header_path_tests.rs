@@ -82,12 +82,12 @@ async fn http_pool_lists_nested_header_tool_and_mirrors_its_exact_path() {
             "only the properties-chain tool is valid"
         );
         assert_eq!(
-            advertised[0].name(),
+            advertised[0].manifest.tool(),
             crate::mcp_tool_names("headers", &["nested"])["nested"]
         );
         let result = pool
             .call_tool(
-                advertised[0].name(),
+                &advertised[0].manifest.tool(),
                 &json!({"location":{"region":"eu"}}),
                 &lash_core::testing::mock_attempt_context(),
             )

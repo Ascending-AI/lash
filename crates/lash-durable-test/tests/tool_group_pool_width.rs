@@ -21,7 +21,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
@@ -40,6 +39,7 @@ use lash_protocol_types::{SessionId, TurnId};
 const SESSION: &str = "pool-width-session";
 const RUN: &str = "pool-width-turn";
 const TOOL: &str = "touch";
+const TOOL_OPERATION: &str = "tools.touch";
 const MODEL: &str = "pool-width-model";
 /// The group's width: four times the default pool, 32 times this one.
 const WIDTH: usize = 64;
@@ -102,7 +102,7 @@ impl StaticToolExecute for Touch {
 fn touch(touched: Arc<Mutex<Vec<u64>>>) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Answers the number it is given.",
         serde_json::json!({
             "type": "object",
@@ -114,8 +114,7 @@ fn touch(touched: Arc<Mutex<Vec<u64>>>) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("touch's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    .with_execution_policy(ExecutionPolicy::Once);
     Arc::new(StaticToolProvider::new(vec![definition], Touch { touched }))
 }
 
@@ -152,7 +151,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Vec<(String, bool)>>>) -> ProviderH
                         parts: (0..WIDTH)
                             .map(|x| LlmOutputPart::ToolCall {
                                 call_id: format!("call-{x}"),
-                                tool_name: TOOL.to_owned(),
+                                tool_name: TOOL_OPERATION.replace('.', "__"),
                                 input_json: format!(r#"{{"x":{x}}}"#),
                                 replay: None,
                             })

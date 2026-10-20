@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
@@ -33,11 +32,12 @@ pub const SESSION: &str = "workers-session";
 pub const RUN: &str = "workers-turn";
 /// The `Once` tool the cell calls.
 pub const TOOL: &str = "ext_write";
+pub const TOOL_OPERATION: &str = "tools.ext_write";
 /// The scripted model's name.
 const MODEL: &str = "workers-model";
 
 /// The cell the model writes: one `Once` tool call, and what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\n</typescript>";
+const CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\n</typescript>";
 /// What the final answer starts with.
 pub const FINAL_PREFIX: &str = "final answer from ";
 
@@ -117,7 +117,7 @@ impl StaticToolExecute for ExtWrite {
 fn ext_write(witness: Witness, hold: Hold) -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -129,8 +129,7 @@ fn ext_write(witness: Witness, hold: Hold) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("ext_write's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
+    .with_execution_policy(ExecutionPolicy::Once);
     Arc::new(StaticToolProvider::new(
         vec![definition],
         ExtWrite { witness, hold },

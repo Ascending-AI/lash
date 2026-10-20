@@ -16,7 +16,6 @@ mod sim;
 
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -26,6 +25,7 @@ use served::{Tier, World};
 const PROBE: &str = "process_probe";
 /// The probe that parks on its completion key and resolves it itself.
 const DEFERRED: &str = "process_deferred";
+const DEFERRED_OPERATION: &str = "tools.process_deferred";
 
 /// One execution of the probe's body.
 #[derive(Clone, Debug)]
@@ -82,14 +82,13 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Records its call and answers its label; a held call waits for the law.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    .with_execution(std::time::Duration::from_secs(120));
     if name != DEFERRED {
         return definition;
     }
@@ -130,6 +129,9 @@ impl lash_core::ToolProvider for Probe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [PROBE, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
@@ -137,7 +139,7 @@ impl lash_core::ToolProvider for Probe {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
-        let completion_key = (call.name() == DEFERRED).then(|| {
+        let completion_key = (call.name() == DEFERRED_OPERATION).then(|| {
             call.context
                 .completion_key()
                 .expect("a deferring call's completion wait is pinned")
@@ -220,9 +222,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
 /// is started with, and starts it once per label. The cell answers every
 /// terminal.
 fn process_cell(labels: &[&str]) -> lash_core::llm::types::LlmResponse {
-    let body = format!(
-        "const body = async (label: string) => {{\n  return await tools.{PROBE}({{ label: label }});\n}};"
-    );
+    let body = "const body = async (label: string) => {\n  return await tools.processProbe({ label: label });\n};".to_owned();
     let starts = labels
         .iter()
         .enumerate()
@@ -296,13 +296,12 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
     let Some(world) = world(tier, &witness).await else {
         return;
     };
-    let body = format!(
-        "const body = async () => {{\n  \
-           const raced = await Promise.race([tools.{PROBE}({{ label: \"winner\" }}), \
-           tools.{PROBE}({{ label: \"loser\", hold: true }})]);\n  \
-           await tools.{PROBE}({{ label: \"refused\" }});\n  \
-           return raced;\n}};"
-    );
+    let body = "const body = async () => {\n  \
+           const raced = await Promise.race([tools.processProbe({ label: \"winner\" }), \
+           tools.processProbe({ label: \"loser\", hold: true })]);\n  \
+           await tools.processProbe({ label: \"refused\" });\n  \
+           return raced;\n};"
+        .to_owned();
     let cell = served::cell(&format!(
         "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
@@ -371,7 +370,7 @@ fn groups_cell(groups: &[&[&str]]) -> lash_core::llm::types::LlmResponse {
         .map(|group| {
             let calls = group
                 .iter()
-                .map(|label| format!("tools.{PROBE}({{ label: \"{label}\" }})"))
+                .map(|label| format!("tools.processProbe({{ label: \"{label}\" }})"))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("  await Promise.all([{calls}]);\n")
@@ -540,11 +539,9 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
     let Some(world) = world(tier, &witness).await else {
         return;
     };
-    let body = format!(
-        "const body = async (label: string) => {{\n  return await tools.{DEFERRED}({{ label: label }});\n}};\n\
-         const handle = await processes.start({{ definition: body, args: {{ label: \"pruned\" }} }});\n\
-         await control.finish(await handle);"
-    );
+    let body = "const body = async (label: string) => {\n  return await tools.processDeferred({ label: label });\n};\n\
+         const handle = await processes.start({ definition: body, args: { label: \"pruned\" } });\n\
+         await control.finish(await handle);".to_owned();
     let output = world
         .run(
             "pruned-process",
@@ -786,12 +783,10 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
 
 /// The all-optional tool the omission law calls: no field is required, and
 /// one declares a default that an omitted input must not be given.
-const SEARCH: &str = "search";
-
 fn search_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:workflows_search",
-        SEARCH,
+        "workflows.search",
         "Answers the input it was called with.",
         serde_json::json!({
             "type": "object",
@@ -805,7 +800,6 @@ fn search_definition() -> lash_core::ToolDefinition {
     )
     .expect("the search tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["workflows"], "search"))
 }
 
 /// The inputs the search tool was prepared and executed with, each execution
@@ -835,7 +829,7 @@ impl lash_core::ToolProvider for Search {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SEARCH).then(|| Arc::new(search_definition().contract()))
+        (name == "workflows.search").then(|| Arc::new(search_definition().contract()))
     }
 
     async fn prepare_tool_call(
@@ -917,8 +911,7 @@ async fn search_world(
 /// the provider's prepare and execute with the same input, and the guest
 /// reads the same answer from both: inline in a TypeScript and a Python
 /// cell, and in a TypeScript process whose body first parks on a durable
-/// sleep and resumes from its saved run. (A Python process body links no
-/// catalog tool: its effect `workflows_search` is not the binding's path.)
+/// sleep and resumes from its saved run.
 async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
     let typescript = (
         lash::rlm::CellDialect::typescript(),
@@ -933,8 +926,8 @@ async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
     );
     let python = (
         lash::rlm::CellDialect::python(),
-        "cell = [await workflows_search(), await workflows_search({})]\n\
-         await control_finish({'cell': cell})",
+        "cell = [await workflows.search(), await workflows.search({})]\n\
+         await control.finish({'cell': cell})",
         false,
     );
     for (dialect, source, process) in [typescript, python] {

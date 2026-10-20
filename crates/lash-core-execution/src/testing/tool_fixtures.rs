@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use crate::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider};
 
-/// Name of the fixture's echo tool.
-pub const FIXTURE_ECHO_TOOL: &str = "fixture_echo";
+/// The operation of the fixture's echo tool. A Standard-mode model calls it
+/// `tools__fixture_echo`.
+pub const FIXTURE_ECHO_TOOL: &str = "tools.fixture_echo";
 
 /// The fixture's echo tool definition: echo `value` back as `echo`.
 pub fn fixture_echo_definition() -> ToolDefinition {

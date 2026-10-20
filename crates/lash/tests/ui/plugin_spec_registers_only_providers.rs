@@ -4,7 +4,7 @@
 fn main() {
     let definition = lash::tools::ToolDefinition::raw(
         "tool:bare",
-        "bare",
+        "tools.bare",
         "a definition with no provider",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),

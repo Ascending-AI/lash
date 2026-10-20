@@ -319,15 +319,8 @@ impl Renderer<'_> {
                 result,
                 then_yield,
             } => {
-                self.out.write("await tools");
-                if effect.as_str().split('.').all(attribute_identifier) {
-                    self.out.write(".");
-                    self.out.write(effect.as_str());
-                } else {
-                    self.out.write("[");
-                    self.out.json(effect);
-                    self.out.write("]");
-                }
+                self.out.write("await ");
+                self.operation_path(effect.as_str());
                 self.out.write("(");
                 for (i, arg) in act.args.iter().enumerate() {
                     if i > 0 {
@@ -661,5 +654,22 @@ impl Renderer<'_> {
             self.out.write(": ");
             self.out.write(annotation);
         }
+    }
+
+    /// An operation as its dotted path: Python spells canonical names
+    /// verbatim, and a name it cannot write as an attribute (a keyword)
+    /// goes through the qualified escape, `getattr(path, "name")`.
+    pub(super) fn operation_path(&mut self, effect: &str) {
+        let mut segments = effect.split('.');
+        let mut path = segments.next().unwrap_or_default().to_owned();
+        for segment in segments {
+            if attribute_identifier(segment) {
+                path.push('.');
+                path.push_str(segment);
+            } else {
+                path = format!("getattr({path}, {})", serde_json::Value::from(segment));
+            }
+        }
+        self.out.write(&path);
     }
 }

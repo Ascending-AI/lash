@@ -224,7 +224,7 @@ fn answer(
 fn tool_call() -> Result<LlmResponse, LlmTransportError> {
     Ok(response(vec![LlmOutputPart::ToolCall {
         call_id: "latency-echo-call".to_string(),
-        tool_name: "benchmark_echo".to_string(),
+        tool_name: "tools__benchmark_echo".to_string(),
         input_json: serde_json::json!({
             "value": "latency gate tool reply",
             "ordinal": 1,
@@ -264,7 +264,7 @@ fn cell_text(request: &LlmRequest) -> String {
     let first =
         crate::runtime_perf::providers::latest_request_item_contains(request, CELL_SAMPLE_TEXT);
     let source = if first {
-        r#"const echoed = await tools.benchmark_echo({ value: "latency cell", ordinal: 1 });
+        r#"const echoed = await tools.benchmarkEcho({ value: "latency cell", ordinal: 1 });
 console.log(echoed.value);"#
     } else {
         r#"await control.finish("latency cell done");"#

@@ -11,7 +11,7 @@ struct KeepsArgs {
 }
 
 fn search() -> lash_core::ToolDefinition {
-    definition("tool:search_run", "search_run", "search", "run")
+    definition("tool:search_run", "search.run")
 }
 
 #[async_trait::async_trait]
@@ -31,7 +31,7 @@ impl lash_core::ToolProvider for KeepsArgs {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        matches!(name, "search_run" | "tool:search_run").then(|| Arc::new(search().contract()))
+        matches!(name, "search.run" | "tool:search_run").then(|| Arc::new(search().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -61,7 +61,7 @@ async fn a_whole_number_reaches_a_tool_as_a_json_integer() {
         ),
         (
             CellDialect::python(),
-            "await search_run({'limit': 5.0, 'half': 2.5, 'edge': 2**53})",
+            "await search.run({'limit': 5.0, 'half': 2.5, 'edge': 2**53})",
             [
                 ("limit", "5"),
                 ("half", "2.5"),

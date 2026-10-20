@@ -52,9 +52,7 @@ fn keep() -> lash_core::ToolDefinition {
     properties.insert("forged".to_owned(), serde_json::json!({ "type": "object" }));
     typed_definition(
         "tool:keep_run",
-        "keep_run",
-        "keep",
-        "run",
+        "keep.run",
         serde_json::json!({
             "type": "object",
             "properties": properties,
@@ -81,7 +79,8 @@ impl lash_core::ToolProvider for Keeps {
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
         let tool = (self.tool)();
-        (name == tool.name() || name == tool.id().as_str()).then(|| Arc::new(tool.contract()))
+        (name == tool.manifest.tool() || name == tool.id().as_str())
+            .then(|| Arc::new(tool.contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -165,7 +164,7 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
         ),
         (
             CellDialect::python(),
-            "limit = 3\n\n\nasync def add(x: int):\n    return x + limit\n\n\nawait keep_run({'nested': {'list': [1, add]}})",
+            "limit = 3\n\n\nasync def add(x: int):\n    return x + limit\n\n\nawait keep.run({'nested': {'list': [1, add]}})",
         ),
     ];
     for (dialect, code) in cases {
@@ -250,9 +249,7 @@ async fn a_function_that_cannot_cross_raises_before_the_call() {
 fn slots() -> lash_core::ToolDefinition {
     typed_definition(
         "tool:slots_take",
-        "slots_take",
-        "slots",
-        "take",
+        "slots.take",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -280,9 +277,7 @@ fn slots() -> lash_core::ToolDefinition {
 fn open_take() -> lash_core::ToolDefinition {
     typed_definition(
         "tool:model_take",
-        "model_take",
-        "model",
-        "take",
+        "model.take",
         serde_json::json!({
             "$defs": {
                 "Handler": { "x-lash": { "kind": "function" }, "title": "Handler" }
@@ -320,7 +315,7 @@ async fn take_raised(
 ) -> (String, Vec<serde_json::Value>) {
     let code = if dialect.name() == CellDialect::python().name() {
         format!(
-            "async def f():\n    return 1\n\n\nasync def take(value):\n    return await {module}_take(value)\n\n\nraised = 'none'\ntry:\n    await take({input})\nexcept Exception as error:\n    raised = str(error)\nawait control_finish(raised)"
+            "async def f():\n    return 1\n\n\nasync def take(value):\n    return await {module}.take(value)\n\n\nraised = 'none'\ntry:\n    await take({input})\nexcept Exception as error:\n    raised = str(error)\nawait control.finish(raised)"
         )
     } else {
         format!(
@@ -650,6 +645,6 @@ async fn a_typescript_cell_function_keeps_its_statement_captions_at_crossing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_python_cell_function_keeps_its_statement_captions_at_crossing() {
     captioned_function(CellDialect::python(),
-        "offset = 3\nasync def run(x: int):\n    #: Remember input\n    result = x + offset\n    #: Return result\n    return result\nawait keep_run({'run': run})",
-        "await keep_run({'run': run})").await;
+        "offset = 3\nasync def run(x: int):\n    #: Remember input\n    result = x + offset\n    #: Return result\n    return result\nawait keep.run({'run': run})",
+        "await keep.run({'run': run})").await;
 }

@@ -78,12 +78,10 @@ pub(super) fn main() -> Result<(), String> {
         EffectName::new("finish").expect("tool name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let environment = Environment {
-        library: &library,
-        effects: &effects,
-        tool_roots: &BTreeSet::new(),
-        controls: &controls,
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+            .expect("the test's effects are operations");
+    let environment = Environment::new(&library, &environment_namespaces);
     let registry_ns = began.elapsed().as_nanos();
     let lower = Instant::now();
     let mode = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());

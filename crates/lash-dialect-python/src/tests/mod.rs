@@ -8,6 +8,7 @@ mod deviations;
 mod fstrings;
 mod machine;
 mod module;
+mod naming;
 mod pages;
 mod protocol_loops;
 mod refusals;

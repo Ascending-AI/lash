@@ -89,7 +89,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ToolCall, ToolOutcome};
@@ -114,6 +113,7 @@ use served::Tier;
 const SESSION: &str = "tool-crash-session";
 const INPUT: &str = "tool-crash-turn";
 const PROBE: &str = "crash_probe";
+const PROBE_OPERATION: &str = "tools.crash_probe";
 /// The label of the [`Turn::Activity`] call.
 const ACTIVITY: &str = "activity";
 /// The label of the [`Turn::Trace`] call.
@@ -124,14 +124,18 @@ const CELL_TRACE: &str = "cell-trace";
 const STATE_PLUGIN: &str = "crash-state-law";
 /// The plugin's tool that sets the namespace's key to its entry's value.
 const STATE_SET: &str = "state_set";
+const STATE_SET_OPERATION: &str = "tools.state_set";
 /// The plugin's tool that first looks for the other member's value.
 const STATE_OBSERVE: &str = "state_observe";
+const STATE_OBSERVE_OPERATION: &str = "tools.state_observe";
 /// The key both tools set.
 const STATE_KEY: &str = "t";
 /// The host finish tool of [`Turn::Finish`].
 const SUBMIT: &str = "crash_submit";
+const SUBMIT_OPERATION: &str = "tools.crash_submit";
 /// The tool that puts [`KEPT`] and [`SCRATCH`] and answers [`KEPT`].
 const PUT: &str = "crash_put";
+const PUT_OPERATION: &str = "tools.crash_put";
 /// The blob the [`PUT`] call answers, which the turn's commit names.
 const KEPT: &str = "crash-put-kept";
 /// The blob the [`PUT`] call puts and answers nothing of.
@@ -223,7 +227,7 @@ impl Turn {
     }
 
     fn script(self) -> Vec<LlmResponse> {
-        let call = |label: &str| format!("tools.{PROBE}({{ label: \"{label}\" }})");
+        let call = |label: &str| format!("tools.crashProbe({{ label: \"{label}\" }})");
         let leaves = |range: std::ops::Range<usize>| {
             range.map(|leaf| format!("leaf-{leaf}")).collect::<Vec<_>>()
         };
@@ -237,7 +241,7 @@ impl Turn {
                             .map(|label| {
                                 served::call(
                                     &format!("call-{label}"),
-                                    PROBE,
+                                    PROBE_OPERATION,
                                     serde_json::json!({ "label": label }),
                                 )
                             })
@@ -264,41 +268,49 @@ impl Turn {
             }
             Self::Activity => vec![served::response(vec![served::call(
                 &format!("call-{ACTIVITY}"),
-                PROBE,
+                PROBE_OPERATION,
                 serde_json::json!({ "label": ACTIVITY }),
             )])],
             Self::Put => vec![served::response(vec![served::call(
                 "call-put",
-                PUT,
+                PUT_OPERATION,
                 serde_json::json!({}),
             )])],
             Self::Trace => vec![served::response(vec![served::call(
                 &format!("call-{TRACE}"),
-                PROBE,
+                PROBE_OPERATION,
                 serde_json::json!({ "label": TRACE }),
             )])],
             Self::CellTrace => vec![served::cell(&format!("await {};", call(CELL_TRACE)))],
             Self::Finish => vec![served::response(vec![served::call(
                 "call-submit",
-                SUBMIT,
+                SUBMIT_OPERATION,
                 serde_json::json!({ "answer": 7 }),
             )])],
             Self::State => vec![served::response(vec![served::call(
                 "call-state",
-                STATE_SET,
+                STATE_SET_OPERATION,
                 serde_json::json!({ "label": "T" }),
             )])],
             Self::StatePair => vec![served::response(vec![
-                served::call("call-a", STATE_SET, serde_json::json!({ "label": "A" })),
-                served::call("call-b", STATE_OBSERVE, serde_json::json!({ "label": "B" })),
+                served::call(
+                    "call-a",
+                    STATE_SET_OPERATION,
+                    serde_json::json!({ "label": "A" }),
+                ),
+                served::call(
+                    "call-b",
+                    STATE_OBSERVE_OPERATION,
+                    serde_json::json!({ "label": "B" }),
+                ),
             ])],
-            Self::StateCell => vec![served::cell(&format!(
-                "const c = await tools.{STATE_SET}({{ label: \"C\" }});\nconsole.log(c);"
-            ))],
-            Self::StatePairCell => vec![served::cell(&format!(
-                "const both = await Promise.all([tools.{STATE_SET}({{ label: \"A\" }}), \
-                 tools.{STATE_OBSERVE}({{ label: \"B\" }})]);\nconsole.log(both);"
-            ))],
+            Self::StateCell => vec![served::cell(
+                "const c = await tools.stateSet({ label: \"C\" });\nconsole.log(c);",
+            )],
+            Self::StatePairCell => vec![served::cell(
+                "const both = await Promise.all([tools.stateSet({ label: \"A\" }), \
+                 tools.stateObserve({ label: \"B\" })]);\nconsole.log(both);",
+            )],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
@@ -421,14 +433,13 @@ fn probe_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{PROBE}"),
-        PROBE,
+        PROBE_OPERATION,
         "Records each body entry's call id and answers its label.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
     // A call a kill interrupted runs again at its ordinal, so every call
     // the turn makes is answered and the turn reaches the call past the
     // limit whatever was cut.
@@ -460,7 +471,7 @@ impl lash_core::ToolProvider for Probe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == PROBE).then(|| Arc::new(probe_definition().contract()))
+        (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -494,7 +505,7 @@ fn submit_value_schema(retyped: bool) -> serde_json::Value {
 fn submit_definition(retyped: bool) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
-        SUBMIT,
+        SUBMIT_OPERATION,
         "Finishes the turn with its answer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         lash_core::TurnControls::finish(
@@ -543,7 +554,7 @@ impl lash_core::ToolProvider for Submit {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SUBMIT).then(|| Arc::new(self.definition().contract()))
+        (name == SUBMIT_OPERATION).then(|| Arc::new(self.definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -559,14 +570,13 @@ fn put_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{PUT}"),
-        PUT,
+        PUT_OPERATION,
         "Puts two blobs and answers the first.",
         object.clone(),
         object,
     )
     .expect("the put tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PUT))
     // A put a kill interrupted runs again at its ordinal and puts the same
     // bytes again.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
@@ -603,7 +613,7 @@ impl lash_core::ToolProvider for Puts {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == PUT).then(|| Arc::new(put_definition().contract()))
+        (name == PUT_OPERATION).then(|| Arc::new(put_definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -652,14 +662,13 @@ fn state_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Sets the plugin's key to its entry's value.",
         object.clone(),
         object,
     )
     .expect("the state tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     // A call a kill interrupted runs again at its ordinal and sets a value
     // of its own entry.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
@@ -820,6 +829,9 @@ impl lash_core::ToolProvider for StateTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [STATE_SET, STATE_OBSERVE]
             .contains(&name)
             .then(|| Arc::new(state_definition(name).contract()))
@@ -829,7 +841,7 @@ impl lash_core::ToolProvider for StateTools {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
         let value = self.world.enter(&label, call.context.call_id());
         let mut answer = serde_json::json!({ "value": value });
-        if call.name() == STATE_OBSERVE {
+        if call.name() == STATE_OBSERVE_OPERATION {
             // Look for the other member's value while it runs, and note
             // whether its outcome had committed by the time it showed.
             let mut seen = None;
@@ -1247,7 +1259,7 @@ impl Crash {
                         ..
                     },
                 ..
-            })) if tool_name == SUBMIT
+            })) if tool_name == SUBMIT_OPERATION
                 && value == serde_json::json!(7)
                 && schema.as_value() == &submit_value_schema(false) =>
             {

@@ -1526,7 +1526,7 @@ async fn retried_and_cancelled_calls_keep_each_attempts_provider_evidence() {
                         2 => Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "evidence-lookup".into(),
-                                tool_name: "app_lookup".into(),
+                                tool_name: "tools__app_lookup".into(),
                                 input_json: "{}".into(),
                                 replay: None,
                             }],

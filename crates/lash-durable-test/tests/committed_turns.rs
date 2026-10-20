@@ -21,7 +21,6 @@ use lash::transcript::{
     CellOutcome, CommittedTurn, SessionTranscript, ToolResultBlock, TranscriptBlock,
     TranscriptEntry, TranscriptItem, TranscriptRole,
 };
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::store::TurnCommitOutcome;
 use lash_core::{ToolCall, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
@@ -127,6 +126,8 @@ async fn assert_turns_hold_every_user_row(session: &lash::DurableSession, turns:
 }
 
 const SWITCH_TOOL: &str = "switch_frame";
+
+const SWITCH_TOOL_OPERATION: &str = "tools.switch_frame";
 const SWITCH: &str = "switch frames, then carry on";
 const TASK: &str = "summarise where the work stands";
 
@@ -157,7 +158,7 @@ impl StaticToolExecute for SwitchFrame {
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::control(
         SWITCH_TOOL,
-        SWITCH_TOOL,
+        SWITCH_TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -187,7 +188,7 @@ async fn a_cursor_reads_on_across_compaction_and_a_frame_switch(tier: Tier) {
         SWITCH,
         vec![served::response(vec![served::call(
             "switch-call",
-            SWITCH_TOOL,
+            SWITCH_TOOL_OPERATION,
             serde_json::json!({}),
         )])],
     );
@@ -559,6 +560,8 @@ async fn a_coalesced_turns_rows_include_every_user_row(tier: Tier) {
 
 const ECHO_TOOL: &str = "echo";
 
+const ECHO_TOOL_OPERATION: &str = "tools.echo";
+
 /// `echo`'s body: it answers every call.
 struct Echo;
 
@@ -572,14 +575,13 @@ impl StaticToolExecute for Echo {
 fn echo() -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::raw(
         ECHO_TOOL,
-        ECHO_TOOL,
+        ECHO_TOOL_OPERATION,
         "Answers every call.",
         serde_json::json!({ "type": "object", "properties": { "n": { "type": "integer" } } }),
         serde_json::json!({ "type": "object" }),
     )
     .expect("echo's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], ECHO_TOOL));
+    .with_execution(std::time::Duration::from_secs(120));
     Arc::new(StaticToolProvider::new(vec![definition], Echo))
 }
 
@@ -823,7 +825,7 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
         vec![
             served::response(vec![served::call(
                 "echo-call",
-                ECHO_TOOL,
+                ECHO_TOOL_OPERATION,
                 serde_json::json!({ "n": 1 }),
             )]),
             served::response(vec![lash_core::LlmOutputPart::Text {
@@ -841,13 +843,14 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
     assert!(
         standard
             .iter()
-            .any(|line| line.starts_with("Assistant: ") && line.contains("call:echo{\"n\":1}")),
+            .any(|line| line.starts_with("Assistant: ")
+                && line.contains("call:tools__echo{\"n\":1}")),
         "the tool call renders: {standard:#?}"
     );
     assert!(
         standard
             .iter()
-            .any(|line| line.starts_with("Tool: result:echo:") && line.contains("echoed")),
+            .any(|line| line.starts_with("Tool: result:tools__echo:") && line.contains("echoed")),
         "the provider's user-role tool result renders as the tool's: {standard:#?}"
     );
     assert_eq!(

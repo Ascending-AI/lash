@@ -32,6 +32,7 @@ const RUNTIME_EFFECT_CONTROLLER: &str = "runtime_effect_controller";
 
 /// The tool a durable-effect boundary's turn calls.
 const OPAQUE_EFFECT_TOOL: &str = "sim_opaque_effect";
+const OPAQUE_EFFECT_TOOL_OPERATION: &str = "tools.sim_opaque_effect";
 
 /// How long a durable-effect turn may take to reach its cut.
 const DURABLE_EFFECT_BOUND: std::time::Duration = std::time::Duration::from_secs(60);
@@ -531,7 +532,11 @@ fn cut_provider(
     cut_reached: Arc<tokio::sync::Notify>,
 ) -> ProviderHandle {
     let calls = Arc::new(AtomicUsize::new(0));
-    let effect_call = tool_call_llm_response(effect_id, OPAQUE_EFFECT_TOOL, &args.to_string());
+    let effect_call = tool_call_llm_response(
+        effect_id,
+        &OPAQUE_EFFECT_TOOL_OPERATION.replace('.', "__"),
+        &args.to_string(),
+    );
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-durable-effect-first")
         .complete(move |_request| {
@@ -578,7 +583,7 @@ impl OpaqueEffectTool {
     fn definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             format!("tool:{OPAQUE_EFFECT_TOOL}"),
-            OPAQUE_EFFECT_TOOL,
+            OPAQUE_EFFECT_TOOL_OPERATION,
             "Run an opaque durable effect.",
             json!({"type": "object"}),
             json!({"type": "object"}),
@@ -605,11 +610,11 @@ impl lash_core::ToolProvider for OpaqueEffectTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == OPAQUE_EFFECT_TOOL).then(|| Arc::new(Self::definition().contract()))
+        (name == OPAQUE_EFFECT_TOOL_OPERATION).then(|| Arc::new(Self::definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() != OPAQUE_EFFECT_TOOL {
+        if call.name() != OPAQUE_EFFECT_TOOL_OPERATION {
             return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
                 .into();
         }

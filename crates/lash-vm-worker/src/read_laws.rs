@@ -11,12 +11,12 @@
     reason = "a law fails on a broken fixture assumption"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageId;
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{
     CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
     Request, Step, Target,
@@ -166,8 +166,8 @@ fn run(
 }
 
 /// The cell `source`, written in `dialect`, lowered against one tool,
-/// `effect`, under `root`.
-fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>) -> Program {
+/// `effect`.
+fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
     let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
@@ -181,7 +181,6 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
                 .expect("an admissible result schema"),
         ),
     )]);
-    let tool_roots = root.into_iter().map(Name::new).collect::<BTreeSet<_>>();
     let library = embedding
         .library_for(lash_vm_library::HELPER_RELEASE)
         .expect("the build's helper release");
@@ -189,12 +188,11 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
         .lower(
             dialect,
             source,
-            &lash_kernel_dialect::Environment {
+            &lash_kernel_dialect::Environment::new(
                 library,
-                effects: &effects,
-                tool_roots: &tool_roots,
-                controls: &BTreeMap::new(),
-            },
+                &lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+                    .expect("the test's effects are operations"),
+            ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .expect("the dialect is installed")
@@ -219,16 +217,14 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
          try { r = await tools.look({ x: 1 }); } catch (e) { r = -1; }\n\
          console.log(r);",
         "tools.look",
-        Some("tools"),
     );
     let python = (
         "python",
         "r = 0\n\
-         try:\n    r = await tools_look({\"x\": 1})\n\
+         try:\n    r = await tools.look({\"x\": 1})\n\
          except Exception as e:\n    r = -1\n\
          print(r)",
-        "tools_look",
-        None,
+        "tools.look",
     );
     let answers = [
         ("an answer", Ok(Datum::Int(Integer::from(7)))),
@@ -245,9 +241,9 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
             Ok(Datum::Text("seven".to_owned())),
         ),
     ];
-    for (dialect, source, effect, root) in [typescript, python] {
+    for (dialect, source, effect) in [typescript, python] {
         let effect = EffectName::new(effect).expect("a tool's effect name");
-        let program = lowered(dialect, source, &effect, root);
+        let program = lowered(dialect, source, &effect);
         for (what, answer) in &answers {
             let read = run(&program, &effect, true, answer);
             let recorded = run(&program, &effect, false, answer);

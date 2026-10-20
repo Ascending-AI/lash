@@ -279,11 +279,11 @@ pub fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
     }
 }
 
-/// A native tool call.
+/// A native tool call of the operation `tool`, by its Standard-mode name.
 pub fn call(call_id: &str, tool: &str, args: serde_json::Value) -> LlmOutputPart {
     LlmOutputPart::ToolCall {
         call_id: call_id.to_owned(),
-        tool_name: tool.to_owned(),
+        tool_name: tool.replace('.', "__"),
         input_json: args.to_string(),
         replay: None,
     }

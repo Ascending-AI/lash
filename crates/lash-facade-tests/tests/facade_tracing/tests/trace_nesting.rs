@@ -37,7 +37,7 @@ async fn sent(
         ))
         .serve_test_llm_profile(
             mock_provider(vec![
-                tool_call("call-echo", "echo_tool", r#"{"value":"nested"}"#),
+                tool_call("call-echo", "tools__echo_tool", r#"{"value":"nested"}"#),
                 text_call("done"),
             ])
             .into_handle(),

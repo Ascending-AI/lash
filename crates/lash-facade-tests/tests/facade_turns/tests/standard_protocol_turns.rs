@@ -124,7 +124,7 @@ fn malformed_then_done(n: usize) -> LlmResponse {
         return LlmResponse {
             parts: vec![LlmOutputPart::ToolCall {
                 call_id: "malformed-call".to_string(),
-                tool_name: "status".to_string(),
+                tool_name: "tools__status".to_string(),
                 input_json: MALFORMED_ARGS.to_string(),
                 replay: None,
             }],
@@ -142,7 +142,7 @@ struct CountingTools {
 fn status_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:status",
-        "status",
+        "tools.status",
         "",
         serde_json::json!({
             "type": "object",
@@ -171,7 +171,7 @@ impl ToolProvider for CountingTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "status").then(|| Arc::new(status_tool().contract()))
+        (name == "tools.status").then(|| Arc::new(status_tool().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -235,7 +235,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
         panic!("malformed arguments are a typed refusal: {call:?}");
     };
-    assert_eq!(call.tool, "status");
+    assert_eq!(call.tool, "tools.status");
     assert_eq!(failure.code, "invalid_tool_call_json");
     assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
     assert_eq!(
@@ -260,7 +260,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         results,
         vec![(
             "malformed-call",
-            Some("status"),
+            Some("tools__status"),
             lash_protocol_types::ToolCallStatus::Failure
         )]
     );
@@ -283,7 +283,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
 
 /// The refusal the Standard protocol's discovery answers for a call to a
 /// tool its request did not list.
-const DISCOVERY_REFUSAL: &str = "Tool `catalog_only` was not listed in this request; use a listed discovery operation or batch.";
+const DISCOVERY_REFUSAL: &str = "Tool `tools__catalog_only` was not listed in this request; use a listed discovery operation or batch.";
 
 /// The first request calls the unlisted `catalog_only` and, when `mixed`,
 /// the listed `tools.search`; every later one answers `done`.
@@ -303,14 +303,14 @@ fn discovery_response(n: usize, mixed: bool) -> LlmResponse {
     }
     let mut parts = vec![LlmOutputPart::ToolCall {
         call_id: "refused-call".to_string(),
-        tool_name: "catalog_only".to_string(),
+        tool_name: "tools__catalog_only".to_string(),
         input_json: r#"{"probe":"refused"}"#.to_string(),
         replay: None,
     }];
     if mixed {
         parts.push(LlmOutputPart::ToolCall {
             call_id: "admitted-call".to_string(),
-            tool_name: "tools.search".to_string(),
+            tool_name: "tools__search".to_string(),
             input_json: r#"{"probe":"admitted"}"#.to_string(),
             replay: None,
         });
@@ -356,7 +356,7 @@ impl ToolProvider for DiscoveryTools {
         Ok({
             vec![
                 discovery_tool("tools.search", true).manifest(),
-                discovery_tool("catalog_only", false).manifest(),
+                discovery_tool("tools.catalog_only", false).manifest(),
             ]
         })
     }
@@ -368,18 +368,18 @@ impl ToolProvider for DiscoveryTools {
     ) -> Option<Arc<lash_core::ToolContract>> {
         match name {
             "tools.search" => Some(Arc::new(discovery_tool(name, true).contract())),
-            "catalog_only" => Some(Arc::new(discovery_tool(name, false).contract())),
+            "tools.catalog_only" => Some(Arc::new(discovery_tool(name, false).contract())),
             _ => None,
         }
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        match call.name() {
+        match call.name().as_str() {
             "tools.search" => {
                 self.admitted.fetch_add(1, Ordering::SeqCst);
                 lash_core::ToolOutcome::ok(serde_json::json!("admitted")).into()
             }
-            "catalog_only" => {
+            "tools.catalog_only" => {
                 self.refused.fetch_add(1, Ordering::SeqCst);
                 lash_core::ToolOutcome::ok(serde_json::json!("must not run")).into()
             }
@@ -586,7 +586,7 @@ fn tool_calling_provider_response(n: usize) -> LlmResponse {
     let mut parts = provider_parts();
     parts.push(LlmOutputPart::ToolCall {
         call_id: "call-1".to_string(),
-        tool_name: "lookup".to_string(),
+        tool_name: "tools__lookup".to_string(),
         input_json: "{}".to_string(),
         replay: None,
     });
@@ -601,7 +601,7 @@ struct LookupTool;
 fn lookup_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:lookup",
-        "lookup",
+        "tools.lookup",
         "",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "string" }),
@@ -624,7 +624,7 @@ impl ToolProvider for LookupTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "lookup").then(|| Arc::new(lookup_tool().contract()))
+        (name == "tools.lookup").then(|| Arc::new(lookup_tool().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -719,7 +719,7 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
     assert_eq!(final_calls, 1);
     assert_eq!(tool_calls, 2);
     assert_eq!(tool_parts[2].provider_call_id(), Some("call-1"));
-    assert_eq!(tool_parts[2].tool_name(), Some("lookup"));
+    assert_eq!(tool_parts[2].tool_name(), Some("tools__lookup"));
 
     let origin = lash_core::ProviderRouteIdentity::new("stub", "stub", "mock-model");
     let expected_reasoning = lash_core::llm::types::ProviderReasoningReplay {
@@ -749,7 +749,7 @@ fn prose_then_finish(n: usize) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: format!("finish-call-{n}"),
-            tool_name: "finish".to_string(),
+            tool_name: "control__finish".to_string(),
             input_json: r#"{"answer":42}"#.to_string(),
             replay: None,
         }],
@@ -795,18 +795,21 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
         .expect("the turn answers");
     assert_eq!(
         output.finished(),
-        Some(("finish", &serde_json::json!({ "answer": 42 }))),
+        Some(("control.finish", &serde_json::json!({ "answer": 42 }))),
         "{:?}",
         output.outcome
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2, "the prose reply was repaired once");
     assert!(
-        requests[0].tools.iter().any(|tool| tool.name == "finish"),
-        "the session is offered `finish`"
+        requests[0]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "control__finish"),
+        "the session is offered `control__finish`"
     );
     let repaired = format!("{:?}", requests[1].messages);
     assert!(repaired.contains("the answer is 42"), "{repaired}");
-    assert!(repaired.contains("`finish`"), "{repaired}");
+    assert!(repaired.contains("`control__finish`"), "{repaired}");
     core.shutdown().await.expect("shutdown");
 }

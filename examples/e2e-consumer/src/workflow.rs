@@ -84,37 +84,35 @@ struct Tools {
     reason = "the host declares valid schemas and bindings"
 )]
 fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::{ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt};
+    use lash::tools::{ToolDeclaration, ToolDefinition};
     vec![
         ToolDefinition::raw(
             "tool:review_request",
-            "review_request",
+            "review.request",
             "Park until a reviewer decides on the item.",
             json!({"type":"object","properties":{"item":{"type":"string"}},"required":["item"],"additionalProperties":false}),
             json!({"type":"object","properties":{"approved":{"type":"boolean"}},"required":["approved"],"additionalProperties":false}),
         )
         .expect("review schema")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["review"], "request"))
         .with_declaration(ToolDeclaration::deferring(), Some(lash::tools::ParkBound::UntilScopeEnd))
         .expect("a deferring tool declares its park bound"),
         ToolDefinition::raw(
             "tool:ledger_record",
-            "ledger_record",
+            "ledger.record",
             "Record one entry and answer it.",
             json!({"type":"object","properties":{"entry":{"type":"string"}},"required":["entry"],"additionalProperties":false}),
             json!({"type":"string"}),
         )
         .expect("ledger schema")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["ledger"], "record")),
+        .with_execution(std::time::Duration::from_secs(120)),
     ]
 }
 
 impl Tools {
     fn attempt(&self, call: &lash::tools::ToolCall<'_>) -> Result<lash::tools::ToolAttemptOutcome> {
         use lash::tools::{PendingCompletion, ToolAttemptOutcome, ToolOutcome};
-        let deferred = call.name() == "review_request";
+        let deferred = call.name() == "review.request";
         let completion = deferred
             .then(|| call.context.completion_key())
             .transpose()?
@@ -335,7 +333,7 @@ async fn read_environment(State(host): State<Host>) -> ApiResult {
         .map(|(id, function)| (function.definition().name.to_string(), id.to_string()))
         .collect();
     Ok(Json(json!({
-        "effects": serde_json::to_value(environment.effects()).map_err(api_error)?,
+        "effects": serde_json::to_value(environment.checker().effects).map_err(api_error)?,
         "functions": functions,
     })))
 }
@@ -1272,7 +1270,7 @@ mod tests {
             let records = bodies(&bodies_at)
                 .into_iter()
                 .filter(|body| {
-                    body["process"] == process.as_str() && body["tool"] == "ledger_record"
+                    body["process"] == process.as_str() && body["tool"] == "ledger.record"
                 })
                 .count();
             assert_eq!(

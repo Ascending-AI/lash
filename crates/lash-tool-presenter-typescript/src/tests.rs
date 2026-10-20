@@ -6,7 +6,7 @@ use serde_json::json;
 fn recursive_filter_has_one_named_body_and_a_recursive_array() {
     let tool = ToolDefinition::raw(
         "filter",
-        "filter",
+        "host.filter",
         "Filter records.",
         json!({
             "$defs": {"Filter": {
@@ -42,7 +42,7 @@ fn recursive_filter_has_one_named_body_and_a_recursive_array() {
 fn definition(name: &str, input: Value) -> lash_protocol_types::ToolDefinition {
     ToolDefinition::raw(
         name,
-        name,
+        format!("host.{name}"),
         "Select records.",
         input,
         json!({"type":"string"}),
@@ -81,13 +81,18 @@ fn explicit_shared_enum_is_declared_once_across_six_operands_and_tools() {
         definition("second", input),
     ];
     let contracts = tools.iter().map(|tool| tool.contract()).collect::<Vec<_>>();
+    let paths = tools
+        .iter()
+        .map(|tool| tool.operation().name.to_string())
+        .collect::<Vec<_>>();
     let entries = tools
         .iter()
         .zip(&contracts)
-        .map(|(tool, contract)| ToolPresentationEntry {
+        .zip(&paths)
+        .map(|((tool, contract), call_path)| ToolPresentationEntry {
             manifest: &tool.manifest,
             contract,
-            call_path: &tool.manifest.name,
+            call_path,
             pinned: false,
         })
         .collect::<Vec<_>>();
@@ -262,13 +267,18 @@ fn catalogue_budget_charges_a_shared_closure_once() {
         definition("second", schema),
     ];
     let contracts = tools.iter().map(|tool| tool.contract()).collect::<Vec<_>>();
+    let paths = tools
+        .iter()
+        .map(|tool| tool.operation().name.to_string())
+        .collect::<Vec<_>>();
     let entries = tools
         .iter()
         .zip(&contracts)
-        .map(|(tool, contract)| ToolPresentationEntry {
+        .zip(&paths)
+        .map(|((tool, contract), call_path)| ToolPresentationEntry {
             manifest: &tool.manifest,
             contract,
-            call_path: &tool.manifest.name,
+            call_path,
             pinned: false,
         })
         .collect::<Vec<_>>();

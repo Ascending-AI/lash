@@ -1682,11 +1682,11 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             vec![call(
                 "terminal",
                 "execute_code",
-                r#"{"code":"await tools.app_lookup({});"}"#,
+                r#"{"code":"await tools.appLookup({});"}"#,
             )]
         } else {
             vec![text(
-                "<typescript>\nawait tools.app_lookup({});\n</typescript>",
+                "<typescript>\nawait tools.appLookup({});\n</typescript>",
             )]
         };
         machine.handle_response(Response::LlmComplete {

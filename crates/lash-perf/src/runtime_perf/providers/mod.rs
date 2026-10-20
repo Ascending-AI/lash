@@ -20,7 +20,6 @@ use lash_core::{
     facade_support::DirectRequest,
 };
 use lash_protocol_types::sync::MutexExt;
-use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::scenarios::RuntimePerfScenario;
 

@@ -659,15 +659,8 @@ impl Renderer<'_> {
                 result,
                 then_yield,
             } => {
-                self.out.write("await tools");
-                if effect.as_str().split('.').all(attribute_identifier) {
-                    self.out.write(".");
-                    self.out.write(effect.as_str());
-                } else {
-                    self.out.write("[");
-                    self.out.json(effect);
-                    self.out.write("]");
-                }
+                self.out.write("await ");
+                self.operation_path(effect.as_str());
                 self.out.write("(");
                 self.call_atoms(args);
                 // Authored lowering performs as `any`; only another result is spelled.

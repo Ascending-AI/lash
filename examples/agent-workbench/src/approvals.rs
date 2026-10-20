@@ -19,14 +19,15 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lash::tools::{
-    PendingCompletion, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
+    PendingCompletion, ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest,
+    ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-pub(crate) const APPROVAL_TOOL_NAME: &str = "workbench_ops_apply_change";
+/// The operation the approval tool is performed as.
+pub(crate) const APPROVAL_TOOL_NAME: &str = "ops.apply_change";
 pub(crate) const APPROVAL_TOOL_ID: &str = "tool:workbench_ops_apply_change";
 
 #[derive(Clone)]
@@ -340,9 +341,6 @@ impl ApprovalToolProvider {
         ).expect("valid declared tool schemas")
         // The body only records its request and parks: a short bound.
         .with_execution(std::time::Duration::from_secs(30))
-        .with_tool_binding(
-            ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
-        )
         // The attempt parks on a human decision, so admission records that it
         // may defer and its round pins the completion wait, whose key the
         // host reads from `Completions::parked` when the operator decides.

@@ -32,7 +32,6 @@ mod sim;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_protocol_types::sync::MutexExt as _;
@@ -69,6 +68,20 @@ impl Route {
             Self::Leaf => LEAF,
             Self::Deferred => DEFERRED_LEAF,
             Self::Granted => GRANTED_LEAF,
+        }
+    }
+
+    /// The leaf's operation.
+    fn operation(self) -> String {
+        format!("tools.{}", self.tool())
+    }
+
+    /// The leaf's operation as a TypeScript cell writes it.
+    fn spelled(self) -> &'static str {
+        match self {
+            Self::Leaf => "tools.leaf",
+            Self::Deferred => "tools.leafDeferred",
+            Self::Granted => "tools.leafGranted",
         }
     }
 }
@@ -211,14 +224,13 @@ fn leaf_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A rendezvous leaf: answers once its whole group has started.",
         object.clone(),
         object,
     )
     .expect("the leaf's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    .with_execution(std::time::Duration::from_secs(120));
     if name == DEFERRED_LEAF {
         definition
             .with_declaration(
@@ -279,6 +291,7 @@ impl lash_core::ToolProvider for Leaves {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let (_, name) = name.split_once('.')?;
         [LEAF, DEFERRED_LEAF, GRANTED_LEAF]
             .contains(&name)
             .then(|| Arc::new(leaf_definition(name).contract()))
@@ -299,7 +312,7 @@ impl lash_core::ToolProvider for Leaves {
         let scenario = self.rendezvous.scenario(&name);
         scenario.record(Event::Started(position));
         let required = scenario.required(position);
-        if call.name() == DEFERRED_LEAF {
+        if call.name() == format!("tools.{DEFERRED_LEAF}") {
             // It joins the rendezvous like any leaf: its start is recorded,
             // and the task that resolves it holds its slot until the width
             // has started.
@@ -455,7 +468,7 @@ fn leaf_args(name: &str, position: usize) -> serde_json::Value {
 fn native(name: &str, position: usize, route: Route) -> lash_core::LlmOutputPart {
     served::call(
         &format!("call-{position}"),
-        route.tool(),
+        &route.operation(),
         leaf_args(name, position),
     )
 }
@@ -468,7 +481,7 @@ fn wrapper(call_id: &str, name: &str, members: &[(usize, Route)]) -> lash_core::
             "tool_calls": members
                 .iter()
                 .map(|(position, route)| serde_json::json!({
-                    "tool": route.tool(),
+                    "tool": route.operation().replace('.', "__"),
                     "parameters": leaf_args(name, *position),
                 }))
                 .collect::<Vec<_>>()
@@ -481,8 +494,8 @@ fn aggregate(name: &str, aggregate: &str, leaves: &[(usize, Route)]) -> String {
         .iter()
         .map(|(position, route)| {
             format!(
-                "  tools.{}({{ scenario: \"{name}\", position: {position} }})",
-                route.tool()
+                "  {}({{ scenario: \"{name}\", position: {position} }})",
+                route.spelled()
             )
         })
         .collect::<Vec<_>>()
@@ -1119,7 +1132,9 @@ impl Witness {
     fn executed(&self, tool: &str, value: &str) -> usize {
         self.executions()
             .iter()
-            .filter(|execution| execution.tool == tool && execution.value == value)
+            .filter(|execution| {
+                execution.tool == format!("tools.{tool}") && execution.value == value
+            })
             .count()
     }
 
@@ -1133,7 +1148,7 @@ const SUGAR_TOOLS: [&str; 2] = ["echo", "guarded"];
 fn sugar_tool(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Records each execution and answers its value.",
         serde_json::json!({
             "type": "object",
@@ -1174,6 +1189,7 @@ impl lash_core::ToolProvider for SugarTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let (_, name) = name.split_once('.')?;
         SUGAR_TOOLS
             .contains(&name)
             .then(|| Arc::new(sugar_tool(name).contract()))
@@ -1205,7 +1221,7 @@ fn sugar_plugin(witness: Arc<Witness>) -> Arc<dyn lash_core::facade_support::Plu
                 let tool = input.prepared.tool_name().to_owned();
                 hooked.hooked.lock_recover().push(tool.clone());
                 Box::pin(async move {
-                    Ok(if tool == "guarded" {
+                    Ok(if tool == "tools.guarded" {
                         lash_core::facade_support::BeforeToolDecision::Deny(
                             lash_core::ToolFailure::tool(
                                 lash_core::ToolFailureClass::PermissionDenied,
@@ -1246,7 +1262,11 @@ async fn sugar_world(tier: Tier, batch: bool, witness: &Arc<Witness>) -> Option<
 }
 
 fn echo(call_id: &str, tool: &str, value: &str) -> lash_core::LlmOutputPart {
-    served::call(call_id, tool, serde_json::json!({ "value": value }))
+    served::call(
+        call_id,
+        &format!("tools.{tool}"),
+        serde_json::json!({ "value": value }),
+    )
 }
 
 fn sugar(call_id: &str, members: serde_json::Value) -> lash_core::LlmOutputPart {
@@ -1262,7 +1282,7 @@ fn sugar(call_id: &str, members: serde_json::Value) -> lash_core::LlmOutputPart 
 }
 
 fn member(tool: &str, value: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({ "tool": tool, "parameters": { "value": value } })
+    serde_json::json!({ "tool": format!("tools__{tool}"), "parameters": { "value": value } })
 }
 
 fn members(tool: &str, values: &[&str]) -> serde_json::Value {
@@ -1444,11 +1464,11 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         "{context}: a schema failure never runs"
     );
     assert!(
-        !witness.hooked("batch"),
+        !witness.hooked("standard.batch"),
         "{context}: the wrapper is not a tool invocation and runs no hook, so it grants nothing"
     );
     assert!(
-        witness.hooked("guarded"),
+        witness.hooked("tools.guarded"),
         "{context}: every member is admitted on its own"
     );
 
@@ -1460,7 +1480,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         wfull_rows
             .iter()
             .enumerate()
-            .all(|(index, (row, tool, ok))| *row == index as u64 && tool == "echo" && *ok),
+            .all(|(index, (row, tool, ok))| *row == index as u64 && tool == "tools.echo" && *ok),
         "{context}: every full row answers in member order: {wfull_rows:?}"
     );
     for refused in ["wover", "wempty", "wmalformed", "wbadmember", "wbadtool"] {
@@ -1483,22 +1503,22 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         rows(&mixed[0]),
         vec![
             (0, "batch".to_owned(), false),
-            (1, "ghost".to_owned(), false),
-            (2, "echo".to_owned(), false),
-            (3, "guarded".to_owned(), false),
-            (4, "echo".to_owned(), true),
-            (5, "echo".to_owned(), true),
+            (1, "tools.ghost".to_owned(), false),
+            (2, "tools.echo".to_owned(), false),
+            (3, "tools.guarded".to_owned(), false),
+            (4, "tools.echo".to_owned(), true),
+            (5, "tools.echo".to_owned(), true),
         ],
         "{context}: refused members are rows at their index, in member order, and the wrapper succeeds"
     );
-    assert_eq!(rows(&mixed[1]), vec![(0, "echo".to_owned(), true)]);
+    assert_eq!(rows(&mixed[1]), vec![(0, "tools.echo".to_owned(), true)]);
     // ADR 0117 §8: a provider id repeated within one response is repaired at
     // the boundary: the first call keeps it, the later takes a correlation
     // id, and both are recorded.
     let same = ["native-1", "native-2"].map(|value| {
         let called = served::calls(&view)
             .into_iter()
-            .filter(|call| call.tool == "echo" && call.args["value"] == value)
+            .filter(|call| call.tool == "tools__echo" && call.args["value"] == value)
             .collect::<Vec<_>>();
         assert_eq!(called.len(), 1, "{context}: `{value}` is recorded once");
         called[0].provider_call_id.clone()
@@ -1644,11 +1664,11 @@ async fn standard_rounds_and_batches_use_the_run(tier: Tier) {
     assert_eq!(
         rows(&wrapper[0]),
         vec![
-            (0, "echo".to_owned(), true),
-            (1, "echo".to_owned(), false),
-            (2, "guarded".to_owned(), false),
-            (3, "echo".to_owned(), true),
-            (4, "echo".to_owned(), true),
+            (0, "tools.echo".to_owned(), true),
+            (1, "tools.echo".to_owned(), false),
+            (2, "tools.guarded".to_owned(), false),
+            (3, "tools.echo".to_owned(), true),
+            (4, "tools.echo".to_owned(), true),
         ],
         "{context}: preparation failures keep their original source slots"
     );
@@ -1682,7 +1702,7 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
             .map(|call| (call.provider_call_id, call.tool, call.replay_item))
             .collect::<Vec<_>>(),
         vec![
-            ("native".to_owned(), "echo".to_owned(), None),
+            ("native".to_owned(), "tools__echo".to_owned(), None),
             (
                 "wrapper".to_owned(),
                 "batch".to_owned(),
@@ -1698,7 +1718,7 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
             .map(|answered| (answered.provider_call_id.clone(), answered.tool.clone()))
             .collect::<Vec<_>>(),
         vec![
-            ("native".to_owned(), "echo".to_owned()),
+            ("native".to_owned(), "tools__echo".to_owned()),
             ("wrapper".to_owned(), "batch".to_owned()),
         ],
         "{context}: one result per call, the wrapper's under its own id"

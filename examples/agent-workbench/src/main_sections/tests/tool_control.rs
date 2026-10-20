@@ -11,27 +11,29 @@ struct WorkbenchControlTools;
 impl lash::tools::StaticToolExecute for WorkbenchControlTools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         (async {
-            match call.name() {
-                "workbench_cancel" => lash::tools::ToolOutcome::from_output(
+            match call.name().as_str() {
+                "workbench_control.cancel" => lash::tools::ToolOutcome::from_output(
                     lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
                         "the operator cancelled the workbench action",
                     )),
                 ),
-                "workbench_finish" => {
+                "workbench_control.finish" => {
                     lash::tools::ToolOutcome::from_output(lash::tools::ToolCallOutput::finish(
                         lash::tools::ToolValue::untrusted_json(json!({
                             "finished_by": "workbench_finish"
                         })),
                     ))
                 }
-                "workbench_fail" => lash::tools::ToolOutcome::ok(json!({ "accepted": false }))
-                    .with_control(lash::tools::ToolControl::Fail {
-                        failure: lash::tools::ToolFailure::tool(
-                            lash::tools::ToolFailureClass::Execution,
-                            "workbench_action_rejected",
-                            "the workbench action was rejected",
-                        ),
-                    }),
+                "workbench_control.fail" => lash::tools::ToolOutcome::ok(
+                    json!({ "accepted": false }),
+                )
+                .with_control(lash::tools::ToolControl::Fail {
+                    failure: lash::tools::ToolFailure::tool(
+                        lash::tools::ToolFailureClass::Execution,
+                        "workbench_action_rejected",
+                        "the workbench action was rejected",
+                    ),
+                }),
                 other => lash::tools::ToolOutcome::err_fmt(format_args!(
                     "unknown workbench control tool `{other}`"
                 )),
@@ -43,8 +45,6 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
 }
 
 fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
-    use lash::tools::ToolDefinitionBindingExt as _;
-
     let empty_input = json!({
         "type": "object",
         "properties": {},
@@ -53,40 +53,31 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
     let definitions = vec![
         lash::tools::ToolDefinition::raw(
             "tool:workbench_cancel",
-            "workbench_cancel",
+            "workbench_control.cancel",
             "Cancel the current workbench action with a typed cancellation.",
             empty_input.clone(),
             json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash::tools::ToolBinding::new(
-            ["workbench_control"],
-            "cancel",
-        )),
+        .with_execution(std::time::Duration::from_secs(120)),
         lash::tools::ToolDefinition::control(
             "tool:workbench_finish",
-            "workbench_finish",
+            "workbench_control.finish",
             "Finish the turn directly from a workbench tool.",
             empty_input.clone(),
             lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash::tools::ToolBinding::new(
-            ["workbench_control"],
-            "finish",
-        )),
+        .with_execution(std::time::Duration::from_secs(120)),
         lash::tools::ToolDefinition::raw(
             "tool:workbench_fail",
-            "workbench_fail",
+            "workbench_control.fail",
             "Stop the turn with a typed workbench tool error.",
             empty_input,
             json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash::tools::ToolBinding::new(["workbench_control"], "fail")),
+        .with_execution(std::time::Duration::from_secs(120)),
     ];
     Arc::new(lash::tools::StaticToolProvider::new(
         definitions,
@@ -174,7 +165,7 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         matches!(
             &finished,
             lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
-                if tool_name == "workbench_finish"
+                if tool_name == "workbench_control.finish"
                     && value == &json!({ "finished_by": "workbench_finish" })
         ),
         "{:?}",
@@ -191,7 +182,7 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         matches!(
             &failed,
             lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })
-                if tool_name == "workbench_fail"
+                if tool_name == "workbench_control.fail"
                     && value["code"] == "workbench_action_rejected"
         ),
         "{:?}",

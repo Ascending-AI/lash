@@ -374,7 +374,7 @@ fn call(tool: &str, input: &str) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: format!("{tool}-call"),
-            tool_name: tool.to_owned(),
+            tool_name: format!("tools__{tool}"),
             input_json: input.to_owned(),
             replay: None,
         }],
@@ -933,7 +933,7 @@ async fn a_cancel_completes_under_drift_and_keeps_its_committed_calls_on_sqlite_
             .iter()
             .map(|call| call.tool.as_str())
             .collect::<Vec<_>>(),
-        [TOOL],
+        [format!("tools.{TOOL}")],
         "the cancelled run keeps the call its committed round made"
     );
     assert_eq!(first.resolutions(), 1, "the cancel resolved nothing");
@@ -942,7 +942,10 @@ async fn a_cancel_completes_under_drift_and_keeps_its_committed_calls_on_sqlite_
 }
 
 const SWITCH_TOOL: &str = "switch_frame";
+
+const SWITCH_TOOL_OPERATION: &str = "tools.switch_frame";
 const PROBE_TOOL: &str = "probe";
+const PROBE_TOOL_OPERATION: &str = "tools.probe";
 
 /// `switch_frame`'s body: it records its turn's spec and switches frames,
 /// handing the follow-on that spec, or `other` when the call asks for it.
@@ -1002,7 +1005,7 @@ impl StaticToolExecute for Probe {
 fn switch_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         SWITCH_TOOL,
-        SWITCH_TOOL,
+        SWITCH_TOOL_OPERATION,
         "Switches the agent frame, under this run's spec or another.",
         serde_json::json!({
             "type": "object",
@@ -1018,7 +1021,7 @@ fn switch_definition() -> lash_core::ToolDefinition {
 fn probe_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         PROBE_TOOL,
-        PROBE_TOOL,
+        PROBE_TOOL_OPERATION,
         "Reads the run's spec.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
@@ -1132,17 +1135,17 @@ async fn a_frame_switch_hands_its_follow_on_the_recorded_spec_or_the_one_it_stat
     assert_eq!(
         observed.offered(),
         [
-            vec!["batch".to_owned(), SWITCH_TOOL.to_owned()],
-            vec!["batch".to_owned(), SWITCH_TOOL.to_owned()],
+            vec!["batch".to_owned(), format!("tools__{SWITCH_TOOL}")],
+            vec!["batch".to_owned(), format!("tools__{SWITCH_TOOL}")],
             vec![
                 "batch".to_owned(),
-                PROBE_TOOL.to_owned(),
-                SWITCH_TOOL.to_owned()
+                format!("tools__{PROBE_TOOL}"),
+                format!("tools__{SWITCH_TOOL}")
             ],
             vec![
                 "batch".to_owned(),
-                PROBE_TOOL.to_owned(),
-                SWITCH_TOOL.to_owned()
+                format!("tools__{PROBE_TOOL}"),
+                format!("tools__{SWITCH_TOOL}")
             ],
         ],
         "the follow-on keeps the narrowed selection (beside the protocol's own `batch`); the \
@@ -1265,13 +1268,14 @@ async fn queued_sends_run_their_own_options_over_the_sticky_config_on_sqlite_mem
         "each run reads its own options over the sticky audience; the default run none"
     );
     let offered = observed.offered();
+    let tool = format!("tools__{TOOL}");
     assert!(
-        !offered[0].contains(&TOOL.to_owned()),
+        !offered[0].contains(&tool),
         "the first send's narrowed selection offers no host tool: {:?}",
         offered[0]
     );
-    assert!(offered[1].contains(&TOOL.to_owned()), "{:?}", offered[1]);
-    assert!(offered[2].contains(&TOOL.to_owned()), "{:?}", offered[2]);
+    assert!(offered[1].contains(&tool), "{:?}", offered[1]);
+    assert!(offered[2].contains(&tool), "{:?}", offered[2]);
 }
 
 const STABLE_TOOL: &str = "stable_tool";
@@ -1283,7 +1287,7 @@ fn surface_tool(name: &str, revision: u8) -> lash_core::ToolDefinition {
     let input = if revision == 1 { "number" } else { "string" };
     lash_core::ToolDefinition::raw(
         name,
-        name,
+        format!("tools.{name}"),
         format!("{name} revision {revision}"),
         serde_json::json!({
             "type": "object",
@@ -1471,7 +1475,7 @@ async fn a_resume_offers_the_recorded_surface_and_runs_an_unchanged_call_on_sqli
         "the next iteration's fresh sync offers the live surface: {}",
         offered[1]
     );
-    assert_eq!(*law.ran.lock_recover(), [STABLE_TOOL]);
+    assert_eq!(*law.ran.lock_recover(), [format!("tools.{STABLE_TOOL}")]);
 }
 
 /// RESUME-USES-RECORDED-SURFACE (law 3), the changed tool: the resumed
@@ -1519,7 +1523,7 @@ async fn a_replayed_sync_after_a_committed_response_installs_the_recorded_surfac
             "{specs}"
         );
     }
-    assert_eq!(*law.ran.lock_recover(), [STABLE_TOOL]);
+    assert_eq!(*law.ran.lock_recover(), [format!("tools.{STABLE_TOOL}")]);
 }
 
 /// REQUEST-CONFIG-SHARING (FIG-6956): distinct sends retain one copy of
@@ -1675,7 +1679,7 @@ async fn two_sends_store_the_same_request_config_once_on_sqlite_memory() {
             .map(|tool| {
                 lash_core::ToolDefinition::raw(
                     tool.name.as_str(),
-                    tool.name.as_str(),
+                    format!("tools.{}", tool.name),
                     tool.description,
                     tool.input_schema,
                     tool.output_schema,

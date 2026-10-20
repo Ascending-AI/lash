@@ -102,10 +102,7 @@ pub fn lower_with_limits(
 ) -> Result<Lowered, Diagnostic> {
     match mode {
         Mode::Cell(cell) => {
-            lower::check_binding_names(
-                cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
-                environment.effects,
-            )?;
+            lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
             let program = adapter::parse_with_limits(source, limits)?;
             lower::lower(&program, source, environment, mode)
         }
@@ -159,12 +156,12 @@ impl Parser {
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
     ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
-        lower::check_binding_names(
-            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
-            environment.effects,
-        )?;
+        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
         let program = self.parser.parse(source)?;
-        Ok(lower::tool_calls(&program, cell.bindings))
+        lower::tool_calls(&program, cell.bindings)
+            .into_iter()
+            .filter_map(|path| candidate(&path, environment).transpose())
+            .collect()
     }
 
     /// Lowers as [`lower`] does. A cell reuses the parser thread; a module,
@@ -178,10 +175,7 @@ impl Parser {
         let Mode::Cell(cell) = mode else {
             return lower_with_limits(source, environment, mode, self.parser.limits());
         };
-        lower::check_binding_names(
-            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
-            environment.effects,
-        )?;
+        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
         let program = self.parser.parse(source)?;
         lower::lower(&program, source, environment, mode)
     }
@@ -219,5 +213,61 @@ impl FrontEnd for TypeScript {
         mode: Mode<'_>,
     ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
         lower_with_limits(source, environment, mode, self.limits).map_err(Into::into)
+    }
+
+    fn reserves(&self, root: &str) -> Option<String> {
+        if builtins::is_global(root) {
+            Some("a TypeScript global".to_owned())
+        } else if !printer::legal_identifier(root) {
+            Some("a name the TypeScript printer generates".to_owned())
+        } else {
+            None
+        }
+    }
+}
+
+/// The canonical operation a free dotted call `path` would name, as a
+/// candidate for the run's deferred provider: each segment unspelled, so
+/// `inbox.sendItem` is `inbox.send_item`. `None` for a path that names no
+/// operation. A path that spells an operation in another dialect's spelling
+/// is refused with the spelling a cell writes.
+fn candidate(path: &str, environment: &Environment<'_>) -> Result<Option<String>, Diagnostic> {
+    use lash_kernel_dialect::{Segment, SpellKind, Spelling};
+    let segments = path.split('.').collect::<Vec<_>>();
+    let Some((name, package)) = segments.split_last() else {
+        return Ok(None);
+    };
+    if package.is_empty() || !package.iter().all(|segment| Segment::is_canonical(segment)) {
+        return Ok(None);
+    }
+    if let Some(misspelled) = environment
+        .namespaces
+        .misspelled(&segments, Spelling::TypeScript)
+    {
+        return Err(Diagnostic::with_repair(
+            DiagnosticCode::OperationSpelling,
+            format!(
+                "`{path}` names the operation `{}` in another dialect's spelling",
+                misspelled.operation.effect_name()
+            ),
+            format!("write `{}`", misspelled.repair),
+            None,
+        ));
+    }
+    if let Some(canonical) = Spelling::TypeScript.unspell(SpellKind::Member, name) {
+        return Ok(Some(format!("{}.{canonical}", package.join("."))));
+    }
+    match Segment::new(*name) {
+        Ok(canonical) => Err(Diagnostic::with_repair(
+            DiagnosticCode::OperationSpelling,
+            format!("`{path}` spells an operation name in another dialect's spelling"),
+            format!(
+                "write `{}.{}`",
+                package.join("."),
+                Spelling::TypeScript.spell(SpellKind::Member, &canonical)
+            ),
+            None,
+        )),
+        Err(_) => Ok(None),
     }
 }

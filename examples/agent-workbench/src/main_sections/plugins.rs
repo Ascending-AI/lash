@@ -567,14 +567,13 @@ impl AppState {
 /// reply. Prose still ends a turn.
 #[expect(clippy::expect_used, reason = "a fixed string schema is admitted")]
 pub(crate) fn chat_reply_tool() -> lash::tools::ToolDefinition {
-    use lash::tools::ToolDefinitionBindingExt as _;
-    let tool = lash::tools::finish_tool(
-        "reply",
+    lash::tools::finish_tool(
+        "chat.reply",
         "Reply to the user with this text and end the turn. It returns nothing.",
         lash::schema::JsonSchema::admit(json!({ "type": "string" }))
             .expect("a string schema is admitted"),
-    );
-    tool.with_tool_binding(lash::tools::ToolBinding::new(["chat"], "reply"))
+    )
+    .expect("a canonical operation")
 }
 
 /// The workbench's host prompt, stated in each session's creation spec. On

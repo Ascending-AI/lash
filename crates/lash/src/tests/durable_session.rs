@@ -13,7 +13,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
                 text_provider(
                     "all-cell-calls",
                     typescript_block(
-                        "for (let i = 0; i < 129; i++) { await tools.app_lookup({}); }\n\
+                        "for (let i = 0; i < 129; i++) { await tools.appLookup({}); }\n\
                          await control.finish(\"all calls\");",
                     ),
                 ),
@@ -111,7 +111,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         assert_eq!(call.call_id.as_ref(), Some(&record.call_id));
         assert!(record.output.is_success());
         if call.operation == "tools.app_lookup" {
-            assert_eq!(record.tool, "app_lookup");
+            assert_eq!(record.tool, "tools.app_lookup");
             assert_eq!(record.args, serde_json::json!({}));
         }
     }

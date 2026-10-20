@@ -198,7 +198,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                         return Ok(lash_core::llm::types::LlmResponse {
                             parts: vec![lash_core::llm::types::LlmOutputPart::ToolCall {
                                 call_id: "section-leak-ping".to_string(),
-                                tool_name: "ping".to_string(),
+                                tool_name: "tools__ping".to_string(),
                                 input_json: "{}".to_string(),
                                 replay: None,
                             }],
@@ -242,7 +242,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                 vec![
                     lash::tools::ToolDefinition::raw(
                         "ping",
-                        "ping",
+                        "tools.ping",
                         "Ping",
                         serde_json::json!({"type":"object"}),
                         serde_json::json!({"type":"string"}),

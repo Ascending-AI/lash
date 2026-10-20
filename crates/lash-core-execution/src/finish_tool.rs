@@ -25,43 +25,58 @@ use crate::{
     ToolProvider, TurnControls,
 };
 
-/// The id [`finish_tool`] gives the tool named `name`.
+/// The id [`finish_tool`] gives the tool performed as `operation`.
 #[must_use]
-pub fn finish_tool_id(name: &str) -> crate::ToolId {
-    crate::ToolId::from(format!("tool:{name}"))
+pub fn finish_tool_id(operation: &crate::QualifiedOperation) -> crate::ToolId {
+    crate::ToolId::from(format!("tool:{}", operation.effect_name()))
 }
 
-/// A finish tool named `name`: its call ends the turn with its whole input
-/// as the turn's value, so its input and its value are both `value_schema`.
-/// The caller owns its description. It returns nothing. Its body reads its argument and nothing else, so a
-/// call a crash cut off runs again on the owner that resumes it; a value
-/// its schema refuses is never run again.
-#[must_use]
+/// A finish tool performed as `operation`: its call ends the turn with its
+/// whole input as the turn's value, so its input and its value are both
+/// `value_schema`. The caller owns its description. It returns nothing. Its
+/// body reads its argument and nothing else, so a call a crash cut off runs
+/// again on the owner that resumes it; a value its schema refuses is never
+/// run again.
+///
+/// # Errors
+///
+/// [`crate::ToolCatalogBuildError`] for an operation that is not canonical.
 #[expect(
     clippy::expect_used,
     reason = "an admitted schema is an admitted input schema"
 )]
 pub fn finish_tool(
-    name: impl Into<String>,
+    operation: impl crate::IntoOperation,
     description: impl Into<String>,
     value_schema: JsonSchema,
-) -> ToolDefinition {
-    let name = name.into();
-    ToolDefinition::control(
-        finish_tool_id(&name),
-        name,
+) -> Result<ToolDefinition, crate::ToolCatalogBuildError> {
+    let operation = operation.into_operation().map_err(|message| {
+        crate::ToolCatalogBuildError::InvalidOperation {
+            tool_id: crate::ToolId::from("tool:finish"),
+            message,
+        }
+    })?;
+    let draft = ToolDefinition::control(
+        finish_tool_id(&operation),
+        operation,
         description,
         value_schema.as_value().clone(),
         TurnControls::finish(value_schema),
-    )
-    .expect("an admitted schema is an admitted input schema")
-    // No work of its own: the call is its control.
-    .with_execution(std::time::Duration::from_secs(30))
-    .with_execution_policy(ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(3).expect("three is non-zero"),
-        100,
-        1_000,
-    ))
+    );
+    let draft = match draft {
+        Err(crate::ToolCatalogBuildError::UnusableSchema { .. }) | Ok(_) => {
+            draft.expect("an admitted schema is an admitted input schema")
+        }
+        Err(refused) => return Err(refused),
+    };
+    Ok(draft
+        // No work of its own: the call is its control.
+        .with_execution(std::time::Duration::from_secs(30))
+        .with_execution_policy(ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("three is non-zero"),
+            100,
+            1_000,
+        )))
 }
 
 /// Provides finish tools ([`finish_tool`]): each call ends the turn with
@@ -98,7 +113,7 @@ impl ToolProvider for FinishToolProvider {
     ) -> Option<Arc<ToolContract>> {
         self.tools
             .iter()
-            .find(|tool| tool.manifest.name == name)
+            .find(|tool| tool.manifest.tool() == name)
             .map(|tool| Arc::new(tool.contract()))
     }
 
@@ -139,7 +154,7 @@ pub fn suppress_default_finish(
                 .contains(crate::TurnControlKind::Finish)
     });
     if host_finish {
-        crate::plugin::ToolCatalogContribution::remove_tools([default_tool.name.clone()])
+        crate::plugin::ToolCatalogContribution::remove_tools([default_tool.operation.clone()])
     } else {
         crate::plugin::ToolCatalogContribution::default()
     }

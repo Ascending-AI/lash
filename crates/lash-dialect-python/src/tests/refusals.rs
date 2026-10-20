@@ -10,9 +10,12 @@ const REFUSED: &[(&str, Code)] = &[
     ("def f(:\n", Code::Syntax),
     ("print(nowhere)\n", Code::UnknownName),
     ("len(1, 2)\n", Code::Arguments),
-    ("def f():\n    await echo(1)\n", Code::AwaitOutsideAsync),
+    (
+        "def f():\n    await host.echo(1)\n",
+        Code::AwaitOutsideAsync,
+    ),
     ("return 1\n", Code::ReturnOutsideFunction),
-    ("x = echo('a')\n", Code::CoroutineNotAwaited),
+    ("x = host.echo('a')\n", Code::CoroutineNotAwaited),
     (
         "async def f():\n    return 1\nx = f()\n",
         Code::CoroutineNotAwaited,
@@ -46,7 +49,7 @@ const REFUSED: &[(&str, Code)] = &[
     ("w = 5\nx = f'{1:{w}}'\n", Code::FormatSpecUnsupported),
     ("x = 1\ny = f'{x=}'\n", Code::FormatSpecUnsupported),
     (
-        "import asyncio\nawait asyncio.wait_for(echo(1), 1)\n",
+        "import asyncio\nawait asyncio.wait_for(host.echo(1), 1)\n",
         Code::AsyncUnsupported,
     ),
     (
@@ -141,12 +144,10 @@ fn a_missing_helper_is_named() {
     let library = lash_kernel_dialect::NamedLibrary::new();
     let effects = std::collections::BTreeMap::new();
     let bindings = std::collections::BTreeSet::new();
-    let environment = lash_kernel_dialect::Environment {
-        library: &library,
-        effects: &effects,
-        controls: &std::collections::BTreeMap::new(),
-        tool_roots: &std::collections::BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = lash_kernel_dialect::Environment::new(&library, &environment_namespaces);
     let diagnostic = crate::lower(
         "print(1)\n",
         &environment,
@@ -177,7 +178,7 @@ fn every_advertised_repair_form_lowers() {
         (ShadowsBuiltin, "len_ = 1\nlen_\n"),
         (
             CoroutineNotAwaited,
-            "import asyncio\nasync def load_invoice(invoice):\n    return invoice\nawait load_invoice(42)\njob = asyncio.create_task(load_invoice(43))\nawait job\nawait echo(1)\nawait asyncio.sleep(0)\nawait asyncio.gather(echo(2))",
+            "import asyncio\nasync def load_invoice(invoice):\n    return invoice\nawait load_invoice(42)\njob = asyncio.create_task(load_invoice(43))\nawait job\nawait host.echo(1)\nawait asyncio.sleep(0)\nawait asyncio.gather(host.echo(2))",
         ),
         (
             ClassUnsupported,
@@ -201,7 +202,7 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             ImportUnsupported,
-            "import asyncio\nawait asyncio.sleep(0)\nawait echo(1)",
+            "import asyncio\nawait asyncio.sleep(0)\nawait host.echo(1)",
         ),
         (
             RegexUnsupported,
@@ -209,7 +210,7 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             StarUnsupported,
-            "def collect(items, options):\n    return items\nxs = [1, 2]\nfirst, rest = xs[0], xs[1:]\nys = xs + [3]\nfields = {'total': 1}\nfields.update({'paid': True})\ncollect(xs, fields)\nprint(first, rest)\nimport asyncio\ntasks = [asyncio.create_task(echo(1))]\nawait asyncio.gather(*tasks)",
+            "def collect(items, options):\n    return items\nxs = [1, 2]\nfirst, rest = xs[0], xs[1:]\nys = xs + [3]\nfields = {'total': 1}\nfields.update({'paid': True})\ncollect(xs, fields)\nprint(first, rest)\nimport asyncio\ntasks = [asyncio.create_task(host.echo(1))]\nawait asyncio.gather(*tasks)",
         ),
         (KeywordCallDynamic, "fs = [lambda a: a]\nfs[0](1)"),
         (
@@ -238,7 +239,7 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             AsyncUnsupported,
-            "import asyncio\nasync def load_invoice():\n    return await echo(1)\nasyncio.run(load_invoice())\nfor invoice in [1, 2]:\n    await echo(invoice)\njob = asyncio.create_task(load_invoice())\nawait job",
+            "import asyncio\nasync def load_invoice():\n    return await host.echo(1)\nasyncio.run(load_invoice())\nfor invoice in [1, 2]:\n    await host.echo(invoice)\njob = asyncio.create_task(load_invoice())\nawait job",
         ),
         (
             DeleteUnsupported,
@@ -301,9 +302,9 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             "invoice_number = 42\n",
-            "echo(invoice_number)",
+            "host.echo(invoice_number)",
             CoroutineNotAwaited,
-            "await echo(invoice_number)",
+            "await host.echo(invoice_number)",
         ),
         (
             "import asyncio\ndelay = 0\n",
@@ -313,9 +314,9 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             "import asyncio\n",
-            "asyncio.gather(echo(1), echo(2))",
+            "asyncio.gather(host.echo(1), host.echo(2))",
             CoroutineNotAwaited,
-            "await asyncio.gather(echo(1), echo(2))",
+            "await asyncio.gather(host.echo(1), host.echo(2))",
         ),
         (
             "invoices = [1, 2]\n",
@@ -456,14 +457,12 @@ fn every_advertised_repair_form_lowers() {
 /// SOURCE-ADMISSION-POLICY: a host can raise source bytes without changing the native nesting ceiling.
 #[test]
 fn a_host_source_policy_allows_a_larger_python_cell() {
-    use std::collections::{BTreeMap, BTreeSet};
     let source = format!("#{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment = lash_kernel_dialect::Environment {
-        tool_roots: &BTreeSet::new(),
-        library: machine::library(),
-        effects: &BTreeMap::new(),
-        controls: &BTreeMap::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
+    let environment =
+        lash_kernel_dialect::Environment::new(machine::library(), &environment_namespaces);
     let cell = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());
     assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), 96).unwrap();

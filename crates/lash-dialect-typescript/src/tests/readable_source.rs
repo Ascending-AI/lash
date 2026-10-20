@@ -288,7 +288,7 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
         ("return", "kernel_name_1"),
         ("k", "kernel_name_1"),
         ("main", "kernel_name_1"),
-        ("tools", "kernel_name_1"),
+        ("tools", "tools"),
         ("finish", "kernel_name_1"),
         ("declared", "kernel_name_1"),
         ("console", "kernel_name_1"),
@@ -445,11 +445,11 @@ fn native_near_misses_refuse_without_authored_lowering() {
 // The independently pinned spelling is also a production-reader witness.
 const ORDINARY_WORKFLOW: &str = r#"export async function deep_research() {
   let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
-  let evidence = await tools.research.search(search_input);
+  let evidence = await research.search(search_input);
   let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
-  let synthesis = await tools.research.synthesize(synthesis_input);
+  let synthesis = await research.synthesize(synthesis_input);
   let message = {text: synthesis.summary};
-  await tools.display.show_message(message);
+  await display.showMessage(message);
   return synthesis;
 }
 async function main() {
@@ -509,11 +509,11 @@ fn deep_research_agent_cell_prints_as_plain_typescript_and_reads_back_exactly() 
         source,
         r#"export async function deep_research() {
   let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
-  let evidence = await tools.research.search(search_input);
+  let evidence = await research.search(search_input);
   let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
-  let report = await tools.research.synthesize(synthesis_input);
+  let report = await research.synthesize(synthesis_input);
   let display_input = {text: report.summary};
-  await tools.display.show_message(display_input);
+  await display.showMessage(display_input);
   return report;
 }
 async function main() {
@@ -718,7 +718,7 @@ fn authored_typescript_corpus_reprints_without_generic_body_forms() {
         "let rows = [{name: 'first'}, {name: 'second'}]; for (const row of rows) { console.log(row.name); }",
         "let i = 0; while (i < 3) { i = i + 1; if (i === 2) { continue; } console.log(i); }",
         "try { throw 'bad'; } catch (error) { console.log(error); } finally { console.log('done'); }",
-        "let result = await echo(4); console.log(result);",
+        "let result = await host.echo(4); console.log(result);",
     ].into_iter().map(|source| lash_kernel_dialect::readability::Case { name: "authored-typescript", document: super::lower_with_effects(source).unwrap().document.into_document() }).collect();
     let report = lash_kernel_dialect::readability::check(
         &cases,
@@ -853,28 +853,19 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
         });
     }
     let printed = roundtrip(&document, true).source;
+    assert!(printed.contains("await research.search();"), "{printed}");
     assert!(
-        printed.contains("await tools.research.search();"),
+        printed.contains("await research.search(\"topic\");"),
         "{printed}"
     );
     assert!(
-        printed.contains("await tools.research.search(\"topic\");"),
+        printed
+            .contains("await research.search(first, second) as KernelType<{\"list\":\"text\"}>;"),
         "{printed}"
     );
-    assert!(
-        printed.contains(
-            "await tools.research.search(first, second) as KernelType<{\"list\":\"text\"}>;"
-        ),
-        "{printed}"
-    );
-    // The manifest is the base document's: without a signature an `any`
-    // result still needs no annotation.
-    document.manifest.effects.clear();
-    let missing = roundtrip(&document, true).source;
-    assert_eq!(missing, printed, "{missing}");
     for expression in [
         "await sleep()",
-        "await tools.research.search() as string",
+        "await research.search() as string",
         "await (first + second)()",
         "spawn(first, [1,,2])",
     ] {

@@ -11,42 +11,42 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-0Synthetic payload for replay m",
                 "bytes": 686
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-1Synthetic payload for replay m",
                 "bytes": 686
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-2Synthetic payload for replay m",
                 "bytes": 686
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-3Synthetic payload for replay m",
                 "bytes": 686
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-4Synthetic payload for replay m",
                 "bytes": 686
               }
             },
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "branch-5Synthetic payload for replay m",
                 "bytes": 686

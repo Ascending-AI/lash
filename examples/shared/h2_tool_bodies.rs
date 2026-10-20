@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::{Context, Result, anyhow, ensure};
 use lash::tools::{
     CancelHint, PendingCompletion, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome,
-    ToolCall, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolIntent, ToolIntents,
-    ToolOutcome, ToolOutcomeDone, ToolProvider,
+    ToolCall, ToolDeclaration, ToolDefinition, ToolIntent, ToolIntents, ToolOutcome,
+    ToolOutcomeDone, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ impl ToolBodies {
                 };
                 let definition = ToolDefinition::raw(
                     format!("tool:e2e.h2.{label}"),
-                    label,
+                    format!("tools.{label}"),
                     "A controlled body for the named real-host scenario.",
                     serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
                     output,
@@ -112,7 +112,6 @@ impl ToolBodies {
                     .may_defer
                     .then_some(lash::tools::ParkBound::UntilScopeEnd);
                 Ok(definition
-                    .with_tool_binding(lash::tools::ToolBinding::new(["tools"], label))
                     .with_declaration(declaration, park)?)
             })
             .collect::<Result<Vec<_>>>()?;

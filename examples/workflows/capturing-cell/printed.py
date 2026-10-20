@@ -14,5 +14,5 @@ async def main():
             [1, add]
             with k.bind("t3"):
                 record({"list": t2})
-                (await helper_py_reply((await tools.corpus.capture(t3, result="json"))))
+                (await helper_py_reply((await corpus.capture(t3, result="json"))))
     await helper_py_setitem(shared, 0, 9)

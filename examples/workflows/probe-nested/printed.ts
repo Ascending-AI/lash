@@ -1,7 +1,7 @@
 /** File emails into lists */
 export async function file_emails() {
   /** Get the three newest emails */
-  let emails = (await await tools.gmail.list_recent((await helper_ts_boundary({count: 3.0}))));
+  let emails = (await await gmail.listRecent((await helper_ts_boundary({count: 3.0}))));
   /** Name the lists to file into */
   let lists = ["today", "this week"];
   /** Start counting at zero */
@@ -21,7 +21,7 @@ export async function file_emails() {
         t3 = await helper_ts_read(email, "subject");
       }
       /** Add the email's subject to the list */
-      await await tools.display.add_item((await helper_ts_boundary({list: list, item: t3})));
+      await await display.addItem((await helper_ts_boundary({list: list, item: t3})));
       /** Count the email as filed */
       filed = filed + 1.0;
     }

@@ -301,7 +301,7 @@ mod tests {
     fn validation_allows_unknown_property_when_additional_properties_is_omitted() {
         let tool = ToolDefinition::raw(
             "tool:mcp__appworld__venmo_show_transactions",
-            "mcp__appworld__venmo_show_transactions",
+            "appworld.venmo_show_transactions",
             "",
             serde_json::json!({
                 "type": "object",
@@ -331,7 +331,7 @@ mod tests {
     fn validation_allows_unknown_property_when_additional_properties_is_true() {
         let tool = ToolDefinition::raw(
             "tool:open",
-            "open",
+            "tools.open",
             "",
             serde_json::json!({
                 "type": "object",

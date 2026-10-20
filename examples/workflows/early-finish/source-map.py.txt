@@ -1,7 +1,7 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [0..20] "await finish(\"done\")"
-main/0/0/0 [0..20] "await finish(\"done\")"
-main/1 [21..53] "await corpus.echo(\"unreachable\")"
-main/1/0 [21..53] "await corpus.echo(\"unreachable\")"
-main/1/0/0 [21..53] "await corpus.echo(\"unreachable\")"
+main/0 [0..28] "await control.finish(\"done\")"
+main/0/0/0 [0..28] "await control.finish(\"done\")"
+main/1 [29..61] "await corpus.echo(\"unreachable\")"
+main/1/0 [29..61] "await corpus.echo(\"unreachable\")"
+main/1/0/0 [29..61] "await corpus.echo(\"unreachable\")"

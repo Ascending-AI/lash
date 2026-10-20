@@ -23,7 +23,8 @@ pub struct CellFailureDiagnostic<'a> {
     pub span: Option<(usize, usize)>,
     /// The name at the span for an unknown-name diagnostic, otherwise absent.
     pub unknown_name: Option<&'a str>,
-    /// Grant registry name to the callable spelling in this cell's dialect.
+    /// Each offered operation, by its effect name (`tools.lookup`), to its
+    /// callable spelling in this cell's dialect.
     pub grants: &'a std::collections::BTreeMap<String, String>,
     /// The run's available deferred provider's searchable names to its resolver
     /// call paths, under the run's configuration and capabilities. Names only:

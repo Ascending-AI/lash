@@ -24,11 +24,11 @@ The real `deep_research` agent cell prints as:
 ```python
 async def deep_research():
     search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
-    evidence = await tools.research.search(search_input)
+    evidence = await research.search(search_input)
     synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
-    report = await tools.research.synthesize(synthesis_input)
+    report = await research.synthesize(synthesis_input)
     display_input = record({"text": report.summary})
-    await tools.display.show_message(display_input)
+    await display.show_message(display_input)
     return report
 def main():
     return None
@@ -80,7 +80,7 @@ ordered tables and output uses the shared append-only writer.
 | Expression helper call | `helper_name(expressions)` reconstructs Expr::Call with the full identity the base holds for that spelling | Foreign helper and empty args / a child block expression requires an invocation suite |
 | Operators and comparisons | Native operators with minimal parentheses by precedence reconstruct exactly one full identity through an unambiguous base manifest label | `add` becomes `x + y`, `eq` becomes `x == y`, `bool.not` becomes `not x`, `(a + b) * c` and `a ** (b ** c)` group only where precedence or associativity needs it, a negated numeric literal is `-(7)` / chained comparisons, an ungrouped unary base of `**` and ambiguous identities refuse or keep the helper call; `python_operators_print_minimal_parentheses_with_an_exact_inverse` |
 | Action Call | Builtins `len(x)`, `range(a, b)`, `abs`, `all`, `any`, `chr`, `dict`, `divmod`, `int`, `list`, `ord`, `repr`, `reversed`, `round`, `set`, `sum`, `tuple`; methods `xs.append(v)`, `"a b".split()`; slices `x[a:b:c]`; `type(x).__name__`; otherwise `await helper_name(atoms)`; `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls. An authored spelling applies only when the base labels that helper once | All callee kinds remain distinct; computed arguments reconstruct a nested action and Spawn remains separate |
-| Perform | `await tools.research.search(atoms)` preserves the effect name; unannotated it reads as `result: any`, which authored lowering stores; bracket names and `result=` cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata refuses; computed arguments retain their expression nodes |
+| Perform | `await research.search(atoms)` is the operation's canonical path, read back against the base document's manifest effects; unannotated it reads as `result: any`, which authored lowering stores; `getattr(path, "name")` escapes a keyword segment and `result=` covers other types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata refuses; computed arguments retain their expression nodes |
 | If / Elif / Else | Direct clauses preserve both Blocks; elif is exactly one If in an else Block | Singleton nested If / extra statement requires an explicit else and nested if |
 | For / While | `for item in values:` is the loop through the base's `py.for_in` protocol, `for item in d.items():` (`.keys()`, `.values()`) the loop through that view's protocol over `d`, and `while ready:`; in a base that labels no `py.for_in` protocol, `for item in values:` is the kernel's own loop, as operator syntax binds the labels the base holds. Each retains the exact binding, iterable, condition and body, and a non-empty `else:` is the loop's `else` block | The loop the base's labels do not give `for` (the kernel's own loop beside `py.for_in`, or another protocol), or a header block expression, requires the `k.for_(item[, open, next, item, check])` suite, `None` for an omitted hook, with the `else` block after the body |
 | Try / Except / Finally | `try:`, optional `except BaseException as error:`, optional `finally:` retain handler presence and empty blocks | Catch-only or finally-only / handlerless Try requires an explicit kernel form |
@@ -192,7 +192,7 @@ prints as `async def`, because those calls are stored Actions.
 
 Nested actions use parenthesized native calls and effects with expression
 arguments: `(await declared.worker(record({"n": 1})))`,
-`(await tools.echo(record({"text": "inline"})))`,
+`(await host.echo(record({"text": "inline"})))`,
 `(spawn(declared.worker, [record({"n": 1})]))`, and `(await sleep(value))`.
 Calls preserve Library, Declared and Value callees. Effects preserve `result=`
 and `then_yield=True`; sleep also retains `then_yield=True`. Joins retain their

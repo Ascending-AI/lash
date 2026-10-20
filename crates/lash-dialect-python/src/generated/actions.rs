@@ -1,6 +1,33 @@
 //! Native nested actions share the expression grammar and its depth accounting.
 use super::{Cursor, Reader, Result, invalid, k};
 
+/// The dotted path a printed operation is written as, from `c`: names
+/// joined by `.`, where `getattr(path, "name")` is the escape for a name
+/// Python cannot write as an attribute. `None` when `c` holds no such path.
+fn operation_path(c: &mut Cursor<'_>) -> Option<String> {
+    let mut path = if c.take("getattr(") {
+        let mut path = operation_path(c)?;
+        if !c.take(",") {
+            return None;
+        }
+        let name = c.string().ok()?;
+        if !c.take(")") {
+            return None;
+        }
+        path.push('.');
+        path.push_str(&name);
+        path
+    } else {
+        c.word().ok()?.to_owned()
+    };
+    while c.text.starts_with('.') {
+        c.text = &c.text[1..];
+        path.push('.');
+        path.push_str(c.word().ok()?);
+    }
+    Some(path)
+}
+
 impl Reader<'_> {
     pub(super) fn nested_action_suite(
         &mut self,
@@ -83,21 +110,12 @@ impl Reader<'_> {
                 height + 1,
             ));
         }
-        if c.text.trim_start().starts_with("tools.") || c.text.trim_start().starts_with("tools[") {
-            c.expect("tools")?;
-            let name = if c.take("[") {
-                let name = c.string()?;
-                c.expect("]")?;
-                name
-            } else {
-                c.expect(".")?;
-                let mut name = c.word()?.to_owned();
-                while c.take(".") {
-                    name.push('.');
-                    name.push_str(c.word()?);
-                }
-                name
-            };
+        let mut probe = Cursor::new(c.text);
+        if let Some(name) = operation_path(&mut probe)
+            && probe.text.trim_start_matches(' ').starts_with('(')
+            && self.effects.contains(&name)
+        {
+            c.text = probe.text;
             let effect = k::EffectName::new(name).map_err(|e| invalid(e.to_string()))?;
             let mut result = None;
             let mut then_yield = false;

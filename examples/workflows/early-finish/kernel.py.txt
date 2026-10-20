@@ -1,7 +1,7 @@
 kernel 1
 numbers by_spelling
+effect control.finish(input: Any) -> Any
 effect corpus.echo(input?: Json) -> Json
-effect finish(input: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
@@ -9,7 +9,7 @@ use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b49
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 
 main {
-  finish let(t1 = perform finish("done") as Any, null)
+  finish let(t1 = perform control.finish("done") as Any, null)
   do invoke py.reply(perform corpus.echo("unreachable") as Json)
 }
 

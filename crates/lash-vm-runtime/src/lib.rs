@@ -16,7 +16,6 @@
 
 #![deny(clippy::future_not_send)]
 
-mod binding;
 mod boundary;
 mod formats;
 mod host;
@@ -24,14 +23,9 @@ mod process;
 mod process_plugin;
 mod projection;
 
-pub use binding::{
-    ResolvedToolBinding, ToolBinding, ToolBindingError, ToolBindingResolutionExt,
-    ToolDefinitionBindingExt, ToolManifestBindingExt, required_tool_binding,
-    required_tool_executable,
-};
 pub use boundary::{
-    BoundaryError, HostBoundary, HostEffect, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
-    SchemaConflict, SchemaProjectionRefusal, tool_input, type_of_schema,
+    BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
+    SchemaProjectionRefusal, effect_controls, offered_tool, tool_input, type_of_schema,
 };
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,

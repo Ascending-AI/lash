@@ -9,7 +9,7 @@ use lash_core::facade_support::TurnOutcome;
 fn echo_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:echo_tool",
-        "echo_tool",
+        "tools.echo_tool",
         "Echo the value.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -34,7 +34,7 @@ impl ToolProvider for EchoTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "echo_tool").then(|| Arc::new(echo_definition().contract()))
+        (name == "tools.echo_tool").then(|| Arc::new(echo_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -93,7 +93,7 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))
-    .serve_test_llm_profile(one_tool_call("echo_tool"), mock_llm_profile_spec())
+    .serve_test_llm_profile(one_tool_call("tools__echo_tool"), mock_llm_profile_spec())
     .tools(lash::tool_provider_key!("tools"), Arc::new(EchoTool))
     .plugin(abort)
     .build(lash_facade_tests::runtime_lease_owner())?;
@@ -132,7 +132,7 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
 fn attachment_put_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:attachment_put",
-        "attachment_put",
+        "tools.attachment_put",
         "Write an attachment through the active runtime facade.",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -158,7 +158,7 @@ impl ToolProvider for AttachmentPutTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "attachment_put").then(|| Arc::new(attachment_put_definition().contract()))
+        (name == "tools.attachment_put").then(|| Arc::new(attachment_put_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -192,7 +192,10 @@ impl ToolProvider for AttachmentPutTool {
 async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(one_tool_call("attachment_put"), mock_llm_profile_spec())
+        .serve_test_llm_profile(
+            one_tool_call("tools__attachment_put"),
+            mock_llm_profile_spec(),
+        )
         .tools(
             lash::tool_provider_key!("tools"),
             Arc::new(AttachmentPutTool),

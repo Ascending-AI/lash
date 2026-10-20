@@ -57,16 +57,15 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, String> {
 /// their bodies is mapped.
 #[test]
 fn every_entry_body_statement_and_action_is_mapped() {
-    let source = "export async function grüße(name: string): Promise<string> {\n  const said = await echo(`héllo ${name}`);\n  if (said === \"ß\") {\n    return \"ok\";\n  }\n  return said;\n}\nconst twice = async (n: number): Promise<number> => {\n  const helper = async (m: number) => m * 2;\n  return await helper(n);\n};\n";
+    let source = "export async function grüße(name: string): Promise<string> {\n  const said = await host.echo(`héllo ${name}`);\n  if (said === \"ß\") {\n    return \"ok\";\n  }\n  return said;\n}\nconst twice = async (n: number): Promise<number> => {\n  const helper = async (m: number) => m * 2;\n  return await helper(n);\n};\n";
     let effects = super::machine::effects();
     let lowered = crate::lower(
         source,
-        &lash_kernel_dialect::Environment {
-            library: super::library(),
-            effects: &effects,
-            controls: super::controls(),
-            tool_roots: &BTreeSet::new(),
-        },
+        &lash_kernel_dialect::Environment::new(
+            super::library(),
+            &lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+                .expect("the test's effects are operations"),
+        ),
         lash_kernel_dialect::Mode::Module,
     )
     .unwrap();
@@ -78,7 +77,7 @@ fn every_entry_body_statement_and_action_is_mapped() {
 /// every statement is mapped.
 #[test]
 fn every_cell_statement_and_action_is_mapped() {
-    let source = "const ünïcode = \"日本\";\nlet total = 0;\nfor (const item of [1, 2]) {\n  try {\n    total += await echo(item);\n  } catch (error) {\n    total -= 1;\n  }\n}\nconst add = async (x: number) => x + total;\nawait finish(await add(1));\n";
+    let source = "const ünïcode = \"日本\";\nlet total = 0;\nfor (const item of [1, 2]) {\n  try {\n    total += await host.echo(item);\n  } catch (error) {\n    total -= 1;\n  }\n}\nconst add = async (x: number) => x + total;\nawait control.finish(await add(1));\n";
     let lowered = super::lower_with_effects(source).unwrap();
     assert_eq!(unmapped(&lowered), BTreeMap::new());
 }

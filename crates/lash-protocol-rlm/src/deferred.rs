@@ -24,14 +24,16 @@ const DEFERRED_MATCH_PREFIX_VERSION: &str = "deferred_match:v1:";
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::{DeferredMatch, DeferredOutcome, DeferredResolveContext};
-use lash_vm_runtime::{HostBoundary, ToolBindingError};
+use lash_vm_runtime::{BoundaryError, HostBoundary};
 
-/// Signatures for refused and unavailable paths with notes let a cell reach
-/// the host's explanation at the call, in either dialect. They grant no tool
-/// authority.
+/// Every refused or unavailable path with a note as an operation of
+/// `boundary` whose call raises the note, so a cell reaches the host's
+/// explanation at the call, in either dialect. They grant no tool
+/// authority. A path that is no canonical operation, or that an offered
+/// operation answers, takes no note.
 pub(crate) fn offer_unavailable_notes(
     matches: &BTreeMap<String, DeferredMatch>,
-    effects: &mut BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
+    boundary: &mut HostBoundary,
 ) -> BTreeMap<String, String> {
     let mut notes = BTreeMap::new();
     for (path, matched) in matches {
@@ -42,18 +44,24 @@ pub(crate) fn offer_unavailable_notes(
                 continue;
             }
         };
-        if let Ok(name) = lash_kernel_doc::EffectName::new(path.as_str()) {
-            effects.insert(
-                name,
-                lash_kernel_doc::Signature {
-                    params: vec![lash_kernel_doc::Param {
-                        name: lash_kernel_doc::Name::new("input"),
-                        ty: lash_kernel_doc::Type::Any,
-                        optional: true,
-                    }],
-                    result: lash_kernel_doc::Type::Any,
-                },
-            );
+        let Ok(operation) = lash_kernel_dialect::operation_text::parse(path) else {
+            continue;
+        };
+        let signature = lash_kernel_doc::Signature {
+            params: vec![lash_kernel_doc::Param {
+                name: lash_kernel_doc::Name::new("input"),
+                ty: lash_kernel_doc::Type::Any,
+                optional: true,
+            }],
+            result: lash_kernel_doc::Type::Any,
+        };
+        let offered = lash_kernel_dialect::Offered {
+            requirement: lash_kernel_doc::OperationRequirement::of_signature(signature),
+            controls: BTreeSet::new(),
+            read: false,
+            source: lash_kernel_dialect::OfferedSource::Unavailable { note: note.clone() },
+        };
+        if boundary.offer_operation(operation, offered).is_ok() {
             notes.insert(path.clone(), note.clone());
         }
     }
@@ -87,7 +95,7 @@ pub enum DeferredResolutionError {
     Offer {
         path: String,
         #[source]
-        source: Box<ToolBindingError>,
+        source: Box<BoundaryError>,
     },
 }
 
@@ -205,9 +213,10 @@ pub(crate) async fn journal_deferred_matches(
     ))
 }
 
-/// `offer`: every resolved match of `matches` as an effect of `boundary`
-/// under its binding's call path, and the grant its calls execute under:
-/// the matched tool, on the provider the match names, with its binding.
+/// `offer`: every resolved match of `matches` as an operation of
+/// `boundary`, the matched tool's own, and the grant its calls execute
+/// under: the matched tool, on the provider the match names, with its
+/// binding.
 pub(crate) fn offer_deferred_matches(
     boundary: &mut HostBoundary,
     matches: &BTreeMap<String, DeferredMatch>,
@@ -243,10 +252,16 @@ pub(crate) fn offer_deferred_matches(
             })?;
         }
         boundary
-            .offer_bound_tool(
-                &definition.manifest,
-                &definition.contract.input_schema.canonical,
-                &definition.contract.output_schema.canonical,
+            .offer_operation(
+                definition.manifest.operation.clone(),
+                lash_vm_runtime::offered_tool(
+                    &definition.manifest,
+                    &definition.contract.input_schema.canonical,
+                    &definition.contract.output_schema.canonical,
+                    lash_kernel_dialect::OfferedSource::Deferred {
+                        tool: definition.manifest.id.to_string(),
+                    },
+                ),
             )
             .map_err(|source| DeferredResolutionError::Offer {
                 path: path.clone(),

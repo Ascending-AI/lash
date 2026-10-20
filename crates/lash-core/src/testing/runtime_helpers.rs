@@ -922,7 +922,7 @@ pub struct EchoTool;
 fn echo_tool_definition() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:echo_tool",
-        "echo_tool",
+        "tools.echo_tool",
         "Return a tool payload",
         serde_json::json!({
             "type": "object",
@@ -953,11 +953,11 @@ impl crate::ToolProvider for EchoTool {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
+        (name == "tools.echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        assert_eq!(call.name(), "echo_tool");
+        assert_eq!(call.name(), "tools.echo_tool");
         let value = call
             .args
             .get("value")
@@ -999,21 +999,21 @@ impl crate::ToolProvider for TerminalControlTool {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        name.strip_prefix("terminal_tool_")
+        name.strip_prefix("terminal.tool")
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|index| *index < self.controls.len())
             .map(|index| Arc::new(self.definition(index).contract()))
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        self.result_for(call.name()).into()
+        self.result_for(&call.name()).into()
     }
 }
 
 impl TerminalControlTool {
     fn result_for(&self, name: &str) -> crate::ToolOutcome {
         let index = name
-            .strip_prefix("terminal_tool_")
+            .strip_prefix("terminal.tool")
             .and_then(|value| value.parse::<usize>().ok())
             .expect("known terminal test tool");
         match &self.controls[index] {
@@ -1027,7 +1027,7 @@ impl TerminalControlTool {
 
     fn definition(&self, index: usize) -> crate::ToolDefinition {
         let id = format!("tool:terminal_tool_{index}");
-        let name = format!("terminal_tool_{index}");
+        let name = format!("terminal.tool{index}");
         let description = "Return a terminal control result";
         let input = crate::ToolDefinition::default_input_schema();
         match &self.controls[index] {
@@ -1086,7 +1086,7 @@ impl crate::ToolProvider for SlowTool {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
+        (name == "tools.slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -1113,7 +1113,7 @@ impl crate::ToolProvider for SlowTool {
 fn slow_tool_definition() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:slow_tool",
-        "slow_tool",
+        "tools.slow_tool",
         "Sleep for a long time; respects cancellation.",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -1141,7 +1141,7 @@ impl crate::ToolProvider for MemoryProbeTool {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
+        (name == "tools.memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -1152,7 +1152,7 @@ impl crate::ToolProvider for MemoryProbeTool {
 fn memory_probe_tool_definition() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:memory_probe",
-        "memory_probe",
+        "tools.memory_probe",
         "probe",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),

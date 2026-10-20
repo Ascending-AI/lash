@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
-    ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -138,7 +138,7 @@ impl SharedWorld {
     )]
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions(self.snapshot().catalog);
-        tools.push(ToolDefinition::control("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120)));
+        tools.push(ToolDefinition::control("tool:toolbench_submit", "toolbench.submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120)));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 
@@ -165,7 +165,7 @@ impl SharedWorld {
 impl StaticToolExecute for SharedWorld {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            if call.name() == "submit" {
+            if call.name() == "toolbench.submit" {
                 return self.submit(call.args);
             }
             match execute_call(
@@ -182,8 +182,8 @@ impl StaticToolExecute for SharedWorld {
 }
 
 pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Value, String> {
-    match call.name() {
-        "weather_lookup" => {
+    match call.name().as_str() {
+        "weather.lookup" => {
             let city = required_string(call.args, "city")?;
             world
                 .weather
@@ -191,7 +191,7 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
                 .map(|report| json!(report))
                 .ok_or_else(|| format!("unknown city `{city}`"))
         }
-        "kv_get" => {
+        "kv.get" => {
             let key = required_string(call.args, "key")?;
             world
                 .kv
@@ -199,13 +199,13 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
                 .map(|value| json!({ "key": key, "value": value }))
                 .ok_or_else(|| format!("unknown key `{key}`"))
         }
-        "kv_put" => {
+        "kv.put" => {
             let key = required_string(call.args, "key")?.to_string();
             let value = required_string(call.args, "value")?.to_string();
             world.kv.insert(key.clone(), value.clone());
             Ok(json!({ "key": key, "value": value }))
         }
-        "notes_render" => {
+        "notes.render" => {
             let id = required_string(call.args, "id")?;
             world
                 .rendered_notes
@@ -213,8 +213,8 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
                 .map(|note| json!(note))
                 .ok_or_else(|| format!("unknown note `{id}`"))
         }
-        "mail_list" => Ok(json!({ "messages": world.mail })),
-        "mail_send" => {
+        "mail.list" => Ok(json!({ "messages": world.mail })),
+        "mail.send" => {
             let recipient = required_string(call.args, "recipient")?.to_string();
             let subject = required_string(call.args, "subject")?.to_string();
             let body = required_string(call.args, "body")?.to_string();
@@ -229,7 +229,7 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
             world.mail.push(message.clone());
             Ok(json!(message))
         }
-        "contacts_get" => {
+        "contacts.get" => {
             let id = required_string(call.args, "id")?;
             world
                 .contacts
@@ -237,7 +237,7 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
                 .map(|contact| json!(contact))
                 .ok_or_else(|| format!("unknown contact `{id}`"))
         }
-        _ => hard_call(world, call.name(), call.args),
+        _ => hard_call(world, &call.name(), call.args),
     }
 }
 
@@ -260,13 +260,13 @@ fn definitions(catalog: Catalog) -> Vec<ToolDefinition> {
         Catalog::Easy => easy_definitions(),
         Catalog::Retail | Catalog::Ops => {
             let prefix = if catalog == Catalog::Retail {
-                "retail_"
+                "retail."
             } else {
-                "ops_"
+                "ops."
             };
             hard_definitions()
                 .into_iter()
-                .filter(|d| d.manifest.name.starts_with(prefix))
+                .filter(|d| d.manifest.tool().starts_with(prefix))
                 .collect()
         }
     }
@@ -403,14 +403,13 @@ fn definition<const N: usize>(
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:toolbench_{name}"),
-        name,
+        format!("{}.{operation}", module.join(".")),
         description,
         input_schema,
         output_schema,
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(module, operation))
 }
 
 fn object_schema(fields: &[(&str, &str)]) -> Value {
@@ -654,7 +653,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
     let definitions = hard_definitions();
     let definition = definitions
         .iter()
-        .find(|d| d.manifest.name == name)
+        .find(|d| d.manifest.tool() == name)
         .ok_or_else(|| format!("unknown tool `{name}`"))?;
     let schema = definition.contract.input_schema.canonical();
     let object = args.as_object().ok_or("arguments must be an object")?;
@@ -673,7 +672,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
         return Err("arguments must match the strict tool schema".into());
     }
     match name {
-        "retail_customer" => {
+        "retail.customer" => {
             let name = required_string(args, "name")?;
             world
                 .retail
@@ -683,7 +682,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|c| json!(c))
                 .ok_or_else(|| "unknown customer".into())
         }
-        "retail_orders" => {
+        "retail.orders" => {
             let id = required_string(args, "customer_id")?;
             Ok(json!(
                 world
@@ -695,7 +694,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                     .collect::<Vec<_>>()
             ))
         }
-        "retail_order" => {
+        "retail.order" => {
             let id = required_string(args, "id")?;
             world
                 .retail
@@ -705,7 +704,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|o| json!(o))
                 .ok_or_else(|| "unknown order".into())
         }
-        "retail_products" => {
+        "retail.products" => {
             let category = required_string(args, "category")?;
             Ok(json!(
                 world
@@ -716,7 +715,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                     .collect::<Vec<_>>()
             ))
         }
-        "retail_product" => {
+        "retail.product" => {
             let sku = required_string(args, "sku")?;
             world
                 .retail
@@ -726,7 +725,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|p| json!(p))
                 .ok_or_else(|| "unknown product".into())
         }
-        "retail_exchange" => {
+        "retail.exchange" => {
             let id = required_string(args, "order_id")?;
             let sku = required_string(args, "sku")?;
             let order = world
@@ -777,7 +776,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             world.retail.orders[order].sku = sku.into();
             Ok(json!({"order_id":id}))
         }
-        "retail_refund" => {
+        "retail.refund" => {
             let id = required_string(args, "order_id")?;
             let order = world
                 .retail
@@ -791,7 +790,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             order.refunded_cents = order.paid_cents;
             Ok(json!({"order_id":id}))
         }
-        "retail_reschedule" => {
+        "retail.reschedule" => {
             let id = required_string(args, "order_id")?;
             let day = args
                 .get("day")
@@ -821,7 +820,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             order.delivery_day = day;
             Ok(json!({"order_id":id}))
         }
-        "ops_service" => {
+        "ops.service" => {
             let name = required_string(args, "name")?;
             world
                 .ops
@@ -831,7 +830,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|s| json!(s))
                 .ok_or_else(|| "unknown service".into())
         }
-        "ops_tickets" => {
+        "ops.tickets" => {
             let id = required_string(args, "service_id")?;
             Ok(json!(
                 world
@@ -843,7 +842,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                     .collect::<Vec<_>>()
             ))
         }
-        "ops_ticket" => {
+        "ops.ticket" => {
             let id = required_string(args, "id")?;
             world
                 .ops
@@ -853,7 +852,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|t| json!(t))
                 .ok_or_else(|| "unknown ticket".into())
         }
-        "ops_releases" => {
+        "ops.releases" => {
             let id = required_string(args, "service_id")?;
             Ok(json!(
                 world
@@ -865,7 +864,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                     .collect::<Vec<_>>()
             ))
         }
-        "ops_release" => {
+        "ops.release" => {
             let id = required_string(args, "id")?;
             world
                 .ops
@@ -875,7 +874,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|r| json!(r))
                 .ok_or_else(|| "unknown release".into())
         }
-        "ops_team" => {
+        "ops.team" => {
             let id = required_string(args, "id")?;
             world
                 .ops
@@ -885,7 +884,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .map(|t| json!(t))
                 .ok_or_else(|| "unknown team".into())
         }
-        "ops_deploy" => {
+        "ops.deploy" => {
             let service_id = required_string(args, "service_id")?;
             let release_id = required_string(args, "release_id")?;
             let service = world
@@ -912,7 +911,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
             service.deployed_release = release_id.into();
             Ok(json!({"service_id":service_id}))
         }
-        "ops_resolve" => {
+        "ops.resolve" => {
             let id = required_string(args, "ticket_id")?;
             let index = world
                 .ops
@@ -1154,7 +1153,7 @@ mod catalog_tests {
                 .expect("fixture provider advertises");
             assert_eq!(rlm.len(), count);
             let submit = standard.pop().unwrap();
-            assert_eq!(submit.name, "submit");
+            assert_eq!(submit.tool(), "toolbench.submit");
             assert_eq!(
                 submit.declaration().controls,
                 lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),

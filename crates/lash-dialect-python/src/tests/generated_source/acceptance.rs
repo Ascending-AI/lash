@@ -113,11 +113,11 @@ fn deep_research_agent_cell_prints_as_plain_python_and_reads_back_exactly() {
         printed.source,
         r#"async def deep_research():
     search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
-    evidence = await tools.research.search(search_input)
+    evidence = await research.search(search_input)
     synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
-    report = await tools.research.synthesize(synthesis_input)
+    report = await research.synthesize(synthesis_input)
     display_input = record({"text": report.summary})
-    await tools.display.show_message(display_input)
+    await display.show_message(display_input)
     return report
 def main():
     return None
@@ -161,11 +161,11 @@ fn shared_ordinary_corpus_has_only_named_distinctions_and_exact_bytes() {
                 printed.source,
                 r#"async def deep_research():
     search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
-    evidence = await tools.research.search(search_input)
+    evidence = await research.search(search_input)
     synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
-    synthesis = await tools.research.synthesize(synthesis_input)
+    synthesis = await research.synthesize(synthesis_input)
     message = record({"text": synthesis.summary})
-    await tools.display.show_message(message)
+    await display.show_message(message)
     return synthesis
 def main():
     return None
@@ -568,7 +568,7 @@ fn nested_actions_use_child_suites_only_without_an_inline_inverse() {
         k::ActKind::Spawn(k::Callee::Declared("worker".into())),
         k::ActKind::Spawn(k::Callee::Library(id)),
         k::ActKind::Perform {
-            effect: k::EffectName::new("echo").unwrap(),
+            effect: k::EffectName::new("host.echo").unwrap(),
             result: k::Type::Text,
             then_yield: true,
         },

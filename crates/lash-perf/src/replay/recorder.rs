@@ -166,7 +166,7 @@ pub fn script<'a>(
                     "the session ran code cells; record it with its cell dialect's protocol"
                 );
                 let turn = turn.with_context(|| format!("cell `{}` is in no turn", cell.id))?;
-                capture.cell(turn, cell);
+                capture.cell(protocol, turn, cell);
             }
             TranscriptItem::Suppressed(_) => {}
         }
@@ -281,7 +281,7 @@ impl Capture {
                         calls
                             .iter()
                             .map(|(_, tool)| ToolCallSpec {
-                                tool: LARGE.to_owned(),
+                                tool: format!("tools.{LARGE}"),
                                 // `answer` sizes it; an unanswered call refuses the capture.
                                 args: serde_json::json!({ "key": tool, "bytes": 0 }),
                             })
@@ -302,11 +302,11 @@ impl Capture {
         Ok(())
     }
 
-    fn cell(&mut self, turn: &TurnId, cell: &CellRecord) {
+    fn cell(&mut self, protocol: Protocol, turn: &TurnId, cell: &CellRecord) {
         let index = self.turn(turn);
         let turn = &mut self.turns[index];
         turn.replies
-            .push(Reply::Cell(Source(redact_code(&cell.code))));
+            .push(Reply::Cell(Source(redact_code(protocol, &cell.code))));
         turn.finished_by_cell = matches!(
             cell.result,
             CellOutcome::Controlled {
@@ -360,8 +360,9 @@ fn filler(role: &str, bytes: usize) -> String {
 }
 
 /// Replace secret- and PII-shaped tokens in cell source, and point its tool
-/// calls at the fixture that accepts any arguments.
-pub fn redact_code(code: &str) -> String {
+/// calls at the fixture that accepts any arguments, spelled as `protocol`'s
+/// dialect writes it.
+pub fn redact_code(protocol: Protocol, code: &str) -> String {
     let mut out = String::with_capacity(code.len());
     let mut token = String::new();
     let flush = |token: &mut String, out: &mut String| {
@@ -381,7 +382,11 @@ pub fn redact_code(code: &str) -> String {
         }
     }
     flush(&mut token, &mut out);
-    rewrite_tools(&out)
+    let lookup = match protocol {
+        Protocol::Typescript => "fixtureLookup",
+        _ => LOOKUP,
+    };
+    rewrite_tools(&out, lookup)
 }
 
 /// An email address, a long key- or token-like run, or a long digit run (a
@@ -394,8 +399,8 @@ fn looks_sensitive(token: &str) -> bool {
         || digits >= 9
 }
 
-/// `tools.<name>(` becomes `tools.fixture_lookup(`.
-fn rewrite_tools(code: &str) -> String {
+/// `tools.<name>(` becomes `tools.<lookup>(`.
+fn rewrite_tools(code: &str, lookup: &str) -> String {
     let mut out = String::with_capacity(code.len());
     let mut rest = code;
     while let Some(at) = rest.find("tools.") {
@@ -405,7 +410,7 @@ fn rewrite_tools(code: &str) -> String {
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
             .unwrap_or(rest.len());
         if rest[name_len..].starts_with('(') {
-            out.push_str(LOOKUP);
+            out.push_str(lookup);
             rest = &rest[name_len..];
         }
     }
@@ -524,14 +529,17 @@ mod tests {
         assert_eq!(
             turn.replies[0],
             Reply::ToolCalls(vec![ToolCallSpec {
-                tool: LARGE.to_owned(),
+                tool: format!("tools.{LARGE}"),
                 args: serde_json::json!({ "key": "crm_lookup", "bytes": 4096 }),
             }])
         );
         assert!(matches!(&turn.replies[1], Reply::Text(body) if body.len() == 6 + secret.len()));
         assert_eq!(
-            redact_code("const r = await tools.crm_lookup({ q: \"bob@corp.io\", n: 5551234567 });"),
-            "const r = await tools.fixture_lookup({ q: \"xxxxxxxxxxx\", n: xxxxxxxxxx });"
+            redact_code(
+                Protocol::Typescript,
+                "const r = await tools.crmLookup({ q: \"bob@corp.io\", n: 5551234567 });"
+            ),
+            "const r = await tools.fixtureLookup({ q: \"xxxxxxxxxxx\", n: xxxxxxxxxx });"
         );
     }
 

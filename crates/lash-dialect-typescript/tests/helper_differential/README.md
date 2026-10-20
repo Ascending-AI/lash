@@ -1,7 +1,7 @@
 # Helper differential corpus (FIG-6372)
 
 `cases.json` holds small real-language programs for both dialects. Each calls
-`await observe(value)` for its answer. `typescript.expected.json` and
+`await host.observe(value)` for its answer. `typescript.expected.json` and
 `python.expected.json` contain only observations from the pinned Node v25.2.1
 and CPython 3.12.3 engines. Re-record both with one command:
 

@@ -17,7 +17,7 @@ export async function digest(items) {
       t3 = await helper_ts_read(item, "title");
     }
     /** Show the item's title */
-    await await tools.display.show_message((await helper_ts_boundary({text: t3})));
+    await await display.showMessage((await helper_ts_boundary({text: t3})));
     /** Count the item as sent */
     sent = sent + 1.0;
   }

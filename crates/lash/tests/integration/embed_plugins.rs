@@ -218,14 +218,14 @@ impl ToolProvider for TestTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
-        (name == "typed_probe").then(|| Arc::new(typed_probe_definition().contract()))
+        (name == "tools.typed_probe").then(|| Arc::new(typed_probe_definition().contract()))
     }
 
     async fn prepare_tool_call(
         &self,
         call: lash::tools::ToolPrepareCall<'_>,
     ) -> Result<lash::tools::PreparedToolCall, ToolOutcome> {
-        if call.pending.tool_name != "typed_probe" {
+        if call.pending.tool_name != "tools.typed_probe" {
             return Ok(lash::tools::PreparedToolCall::identity(
                 call.tool_id,
                 call.pending,
@@ -245,7 +245,7 @@ impl ToolProvider for TestTools {
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
-            assert_eq!(call.name(), "typed_probe");
+            assert_eq!(call.name(), "tools.typed_probe");
             let input = match call.context.decode_prepared_payload::<serde_json::Value>() {
                 Ok(input) => input,
                 Err(err) => {
@@ -268,7 +268,7 @@ impl ToolProvider for TestTools {
 fn typed_probe_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:typed_probe",
-        "typed_probe",
+        "tools.typed_probe",
         "Probe typed turn input.",
         json!({
             "type": "object",
@@ -296,7 +296,7 @@ fn response_tool_call() -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: "tool-1".to_string(),
-            tool_name: "typed_probe".to_string(),
+            tool_name: "tools__typed_probe".to_string(),
             input_json: "{}".to_string(),
             replay: None,
         }],
@@ -432,6 +432,6 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
     assert!(
         definitions
             .iter()
-            .all(|definition| definition.name != "typed_probe")
+            .all(|definition| definition.tool() != "tools.typed_probe")
     );
 }

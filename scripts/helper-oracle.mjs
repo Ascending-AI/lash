@@ -24,7 +24,7 @@ for await (const line of readline.createInterface({input:process.stdin})) {
     ['bits', 'stride', 'nanoseconds'].includes(key) && typeof value === 'number'
       ? context.source : value);
   const values = [];
-  const context = vm.createContext({observe:v=>{values.push(tag(v)); return null;}, console:{log:()=>{},debug:()=>{},info:()=>{},warn:()=>{},error:()=>{}}, URL, URLSearchParams});
+  const context = vm.createContext({host:{observe:v=>{values.push(tag(v)); return null;}}, console:{log:()=>{},debug:()=>{},info:()=>{},warn:()=>{},error:()=>{}}, URL, URLSearchParams});
   // Only these explicit host reads are deterministic. All other semantics
   // remain Node's. UTC is a property of the oracle process (TZ=UTC).
   vm.runInContext(`{

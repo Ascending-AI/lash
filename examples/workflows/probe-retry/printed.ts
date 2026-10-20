@@ -9,7 +9,7 @@ export async function resilient_search() {
     /** Search and show the top result */
     try {
       /** Search the web for workflow engines */
-      let found = (await await tools.web.search((await helper_ts_boundary({query: "workflow engines", limit: limit}))));
+      let found = (await await web.search((await helper_ts_boundary({query: "workflow engines", limit: limit}))));
       let t2 = undefined;
       if (helper_same(helper_kind(found), "record")) {
         if (!(helper_record_contains(found, "__lash_brand"))) {
@@ -44,14 +44,14 @@ export async function resilient_search() {
         t4 = await helper_ts_read(t3, "title");
       }
       /** Show the top result's title */
-      await await tools.display.show_message((await helper_ts_boundary({text: t4})));
+      await await display.showMessage((await helper_ts_boundary({text: t4})));
     }
     /** If the search fails */
     catch (error) {
       /** Count the failure */
       failures = failures + 1.0;
       /** Say that a search failed */
-      await await tools.display.set_status((await helper_ts_boundary({key: "search", value: "A search failed"})));
+      await await display.setStatus((await helper_ts_boundary({key: "search", value: "A search failed"})));
     }
   }
   /** Report how many searches failed */

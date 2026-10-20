@@ -252,12 +252,6 @@
       "p99_anon_peak_bytes": 191733760,
       "samples": 25
     },
-    "lash-internal-protocol-standard/native_tools": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 53665792,
-      "samples": 6
-    },
     "lash-internal-protocol-standard/protocol_scenarios": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -811,12 +805,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 771104768,
       "samples": 178
-    },
-    "lash-internal-protocol-standard/native_tools": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 294408192,
-      "samples": 14
     },
     "lash-internal-protocol-standard/protocol_scenarios": {
       "legacy_peak_bytes": 0,

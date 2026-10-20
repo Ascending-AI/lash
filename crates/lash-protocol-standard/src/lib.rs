@@ -735,10 +735,8 @@ impl StandardProtocolPlugin {
             lash_core::hook_key!("standard-catalog"),
             move |this, _state| {
                 let discovery = this.config.discovery.clone();
-                let batch = this.config.batch;
                 Ok(Arc::new(move |ctx| {
                     validate_discovery(&ctx.tools, discovery.as_ref())?;
-                    validate_batch_name(&ctx.tools, batch)?;
                     // A host's own finish tool takes the place of `finish`.
                     Ok(lash_core::suppress_default_finish(
                         &ctx,
@@ -758,28 +756,10 @@ fn validate_discovery(
     if let Some(discovery) = discovery
         && !tools
             .iter()
-            .any(|tool| tool.inline && tool.name == discovery.operation)
+            .any(|tool| tool.inline && tool.tool() == discovery.operation)
     {
         return Err(PluginError::InvalidToolDiscovery {
             operation: discovery.operation.clone(),
-        });
-    }
-    Ok(())
-}
-
-/// While the sugar is offered, `batch` names it in every request, so a
-/// catalogue tool of that name could never be called: it is refused.
-fn validate_batch_name(
-    tools: &[lash_core::ToolManifest],
-    batch: BatchSugar,
-) -> Result<(), PluginError> {
-    if matches!(batch, BatchSugar::Enabled { .. })
-        && let Some(tool) = tools
-            .iter()
-            .find(|tool| tool.name == batch::BATCH_TOOL_NAME)
-    {
-        return Err(PluginError::ResidentToolDuplicateName {
-            name: tool.name.clone(),
         });
     }
     Ok(())
@@ -873,7 +853,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
                 let model_tool = batch_tool_definition(max_members).model_tool();
                 let mut specs = catalog_specs.as_ref().clone();
                 specs.push(lash_core::llm::types::LlmToolSpec {
-                    name: model_tool.name,
+                    name: batch::BATCH_TOOL_NAME.to_owned(),
                     description: model_tool.description,
                     input_schema: model_tool.input_schema,
                     output_schema: model_tool.output_schema,
@@ -1197,12 +1177,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
 
         let listed = |name: &str| request.tools.iter().any(|tool| tool.name == name);
         let ends_the_turn = |name: &str| ctx.ends_the_turn(name);
+        let operation = |name: &str| ctx.operation_named(name);
         let round = round::plan_round(
             reassembled_calls,
             &round::RoundRules {
                 batch: self.batch,
                 listed: self.discovery.then_some(&listed as &dyn Fn(&str) -> bool),
                 ends_the_turn: &ends_the_turn,
+                operation: &operation,
             },
         );
         let calls = round.calls;
@@ -1222,7 +1204,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             }
             let mut parts: Vec<Part> = completed
                 .into_iter()
-                .map(|outcome| tool_result_part(outcome.call_id, outcome.model_return))
+                .map(|outcome| {
+                    let name = ctx.standard_name_of(&outcome.model_return.tool_name);
+                    tool_result_part(outcome.call_id, name, outcome.model_return)
+                })
                 .collect();
             let message_id =
                 standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
@@ -1305,7 +1290,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 }
             }
 
-            result_parts.push(tool_result_part(outcome.call_id, outcome.model_return));
+            let name = ctx.standard_name_of(&outcome.model_return.tool_name);
+            result_parts.push(tool_result_part(
+                outcome.call_id,
+                name,
+                outcome.model_return,
+            ));
         }
 
         if !result_parts.is_empty() {
@@ -1445,7 +1435,7 @@ fn finish_required_repair(ctx: &DriverContextView<'_>) -> Vec<DriverAction> {
     );
     let tools = ctx
         .finishing_tools()
-        .map(|name| format!("`{name}`"))
+        .map(|operation| format!("`{}`", ctx.standard_name_of(operation)))
         .collect::<Vec<_>>()
         .join(", ");
     actions.push(DriverAction::AppendEvents(vec![conversation_event(
@@ -1532,11 +1522,13 @@ fn standard_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &st
 }
 
 /// The one transcript part answering a tool call: the model return's text
-/// and attachment blocks in the tool value's order, under the call's id.
-/// Empty text blocks carry nothing and are dropped; a call whose return is
-/// empty is still answered, so the transcript stays resume-safe.
+/// and attachment blocks in the tool value's order, under the call's id and
+/// the `name` the model called it by. Empty text blocks carry nothing and
+/// are dropped; a call whose return is empty is still answered, so the
+/// transcript stays resume-safe.
 fn tool_result_part(
     call_id: lash_core::ToolCallId,
+    name: String,
     model_return: lash_core::facade_support::ModelToolReturn,
 ) -> Part {
     let content = model_return
@@ -1553,7 +1545,7 @@ fn tool_result_part(
         String::new(),
         content,
         call_id,
-        model_return.tool_name,
+        name,
         model_return.outcome.status(),
     )
 }

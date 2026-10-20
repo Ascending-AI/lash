@@ -6,7 +6,6 @@
 use super::*;
 
 use lash::{TurnEvent, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{TurnFinish, TurnOutcome};
 
 /// `answer.submit`: the host's own finish tool, whose value
@@ -14,11 +13,11 @@ use lash_core::facade_support::{TurnFinish, TurnOutcome};
 #[cfg(feature = "rlm")]
 fn answer_tool(value_schema: serde_json::Value) -> lash_core::ToolDefinition {
     lash_core::finish_tool(
-        "answer",
+        "answer.submit",
         "End the turn with this call's input as its answer. It returns nothing, and nothing after the call runs: call it once every other piece of work has finished.",
         lash_core::JsonSchema::admit(value_schema).expect("valid value schema"),
     )
-    .with_tool_binding(lash_core::ToolBinding::new(["answer"], "submit"))
+    .expect("a canonical operation")
 }
 
 /// A model that answers each request with the next of `cells`, recording
@@ -87,7 +86,7 @@ async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> 
     assert_eq!(
         typed.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "answer".to_string(),
+            tool_name: "answer.submit".to_string(),
             value: serde_json::json!(7),
         })
     );
@@ -169,14 +168,14 @@ async fn a_run_retypes_the_finish_value_for_itself_alone() -> Result<()> {
     assert_eq!(
         retyped.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_string(),
+            tool_name: "control.finish".to_string(),
             value: serde_json::json!("seven"),
         })
     );
     assert_eq!(
         typed.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_string(),
+            tool_name: "control.finish".to_string(),
             value: serde_json::json!(7),
         })
     );
@@ -207,7 +206,7 @@ struct SubmitTool {
 fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
-        SUBMIT,
+        format!("tools.{}", SUBMIT),
         "Submit the answer and end the turn.",
         serde_json::json!({
             "type": "object",
@@ -219,7 +218,6 @@ fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition 
     )
     .expect("valid declared tool schema")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], SUBMIT))
 }
 
 #[async_trait]
@@ -236,7 +234,8 @@ impl ToolProvider for SubmitTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SUBMIT).then(|| Arc::new(submit_definition(self.value.clone()).contract()))
+        (name == format!("tools.{SUBMIT}"))
+            .then(|| Arc::new(submit_definition(self.value.clone()).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -274,7 +273,7 @@ async fn run_submit_turn(
                         return Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "call-submit".to_string(),
-                                tool_name: SUBMIT.to_string(),
+                                tool_name: format!("tools__{SUBMIT}"),
                                 input_json: r#"{"answer":42}"#.to_string(),
                                 replay: None,
                             }],
@@ -364,7 +363,7 @@ async fn a_result_transform_cannot_add_an_acknowledgement_to_a_finish() -> Resul
     assert_eq!(
         turn.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: SUBMIT.to_string(),
+            tool_name: format!("tools.{SUBMIT}"),
             value: serde_json::json!(42),
         })
     );
@@ -454,7 +453,7 @@ fn batch_submit(call: usize, answer: serde_json::Value) -> LlmResponse {
             call_id: format!("call-batch-{call}"),
             tool_name: "batch".to_string(),
             input_json: serde_json::json!({
-                "tool_calls": [{ "tool": SUBMIT, "parameters": { "answer": answer } }]
+                "tool_calls": [{ "tool": format!("tools__{SUBMIT}"), "parameters": { "answer": answer } }]
             })
             .to_string(),
             replay: None,
@@ -526,7 +525,7 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
     assert_eq!(
         report.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: SUBMIT.to_string(),
+            tool_name: format!("tools.{SUBMIT}"),
             value: serde_json::json!(42),
         })
     );
@@ -552,7 +551,7 @@ async fn finish_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
     let provider = scripted_cells(
         "finish-mixed",
         vec![typescript_block(
-            "const answer = await tools.app_lookup({}); await control.finish(answer);",
+            "const answer = await tools.appLookup({}); await control.finish(answer);",
         )],
         Arc::clone(&requests),
     );
@@ -572,7 +571,7 @@ async fn finish_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
     assert_eq!(
         serde_json::to_string(&report.outcome).expect("outcome encodes"),
         serde_json::to_string(&TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_owned(),
+            tool_name: "control.finish".to_owned(),
             value: serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789")
         }))
         .expect("original outcome encodes")

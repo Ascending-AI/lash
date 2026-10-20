@@ -7,6 +7,8 @@ use lash_kernel_doc::{
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
+use lash_kernel_dialect::{Resolution, Spelling};
+
 use super::{Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
 use crate::scope::Ty;
@@ -245,36 +247,146 @@ impl Lowerer<'_> {
         )
     }
 
-    /// The tool a call names, if it names one: by its one name, or, for a
-    /// tool whose name has namespaces (a workflow's `display.show_message`),
-    /// by that dotted path from a root that is no variable.
+    /// The operation a call names, if it names one: the dotted path of its
+    /// callee, from a root that is no variable, resolved through the
+    /// namespaces (`web.fetch(...)`, `getattr(processes, "await")(...)`).
     pub(super) fn effect(&self, call: &ast::ExprCall) -> Option<(EffectName, Signature)> {
-        let path = self.tool_path(call.func.as_ref())?;
-        self.effects
-            .iter()
-            .find(|(effect, _)| effect.as_str() == path)
-            .map(|(effect, signature)| (effect.clone(), signature.clone()))
+        let (path, bound) = self.call_path(call.func.as_ref())?;
+        if bound {
+            return None;
+        }
+        let written = path.iter().map(String::as_str).collect::<Vec<_>>();
+        match self.namespaces.resolve(&written, Spelling::Python) {
+            Resolution::Operation { operation, offered } => Some((
+                operation.effect_name(),
+                offered.requirement.signature.clone(),
+            )),
+            _ => None,
+        }
     }
 
-    /// `expr` as a dotted name whose root names no variable.
+    /// `expr` as a dotted path whose root names no variable: a free
+    /// candidate for the run's deferred provider.
     fn tool_path(&self, expr: &PyExpr) -> Option<String> {
+        let (path, bound) = self.call_path(expr)?;
+        (!bound).then(|| path.join("."))
+    }
+
+    /// `expr` as the segments of a dotted path, with whether its root is a
+    /// variable. `getattr(path, "name")` is the qualified escape: the path
+    /// with `name` after it, for a name Python cannot write as an attribute.
+    fn call_path(&self, expr: &PyExpr) -> Option<(Vec<String>, bool)> {
         match expr {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
-                (self.variable(id).is_none()
-                    && !is_builtin(id)
-                    && !crate::exceptions::is_builtin(id)
-                    && id != "asyncio")
-                    .then(|| id.to_owned())
+                if self.variable(id).is_some() {
+                    return Some((vec![id.to_owned()], true));
+                }
+                (!is_builtin(id) && !crate::exceptions::is_builtin(id) && id != "asyncio")
+                    .then(|| (vec![id.to_owned()], false))
             }
             PyExpr::Attribute(attribute) => {
-                let mut path = self.tool_path(&attribute.value)?;
-                path.push('.');
-                path.push_str(attribute.attr.id.as_str());
-                Some(path)
+                let (mut path, bound) = self.call_path(&attribute.value)?;
+                path.push(attribute.attr.id.as_str().to_owned());
+                Some((path, bound))
+            }
+            PyExpr::Call(escape) => {
+                let PyExpr::Name(getattr) = escape.func.as_ref() else {
+                    return None;
+                };
+                if getattr.id.as_str() != "getattr"
+                    || self.variable("getattr").is_some()
+                    || !escape.arguments.keywords.is_empty()
+                {
+                    return None;
+                }
+                let [receiver, PyExpr::StringLiteral(name)] = &escape.arguments.args[..] else {
+                    return None;
+                };
+                let (mut path, bound) = self.call_path(receiver)?;
+                if path.len() < 2 && !bound && !self.namespaces.is_root(&path[0]) {
+                    return None;
+                }
+                path.push(name.value.to_str().to_owned());
+                Some((path, bound))
             }
             _ => None,
         }
+    }
+
+    /// The canonical operation a free dotted `path` would name, as a
+    /// candidate for the run's deferred provider: `None` for a path that
+    /// names no operation. A path that spells one in another dialect's
+    /// spelling is refused with the spelling Python writes.
+    fn candidate(&self, path: &str, call: &ast::ExprCall) -> Lowering<Option<String>> {
+        let segments = path.split('.').collect::<Vec<_>>();
+        let Some((name, package)) = segments.split_last() else {
+            return Ok(None);
+        };
+        if package.is_empty()
+            || !package
+                .iter()
+                .all(|segment| lash_kernel_dialect::Segment::is_canonical(segment))
+        {
+            return Ok(None);
+        }
+        if lash_kernel_dialect::Segment::is_canonical(name) {
+            return Ok(Some(path.to_owned()));
+        }
+        let Some(canonical) =
+            Spelling::TypeScript.unspell(lash_kernel_dialect::SpellKind::Member, name)
+        else {
+            return Ok(None);
+        };
+        let repair = format!("{}.{canonical}", package.join("."));
+        Err(diagnostics::with_repair(
+            Code::OperationSpelling,
+            format!("`{path}` spells an operation name in another dialect's spelling"),
+            call.func.range(),
+            format!("write `{repair}`"),
+        ))
+    }
+
+    /// The refusal of a call whose dotted path names an operation the
+    /// program cannot reach as written: its root is a variable, which
+    /// shadows the package root lexically, or it spells the operation in
+    /// another dialect's spelling.
+    fn operation_refusal(&self, call: &ast::ExprCall) -> Lowering<()> {
+        let Some((path, bound)) = self.call_path(call.func.as_ref()) else {
+            return Ok(());
+        };
+        let written = path.iter().map(String::as_str).collect::<Vec<_>>();
+        if bound {
+            if let Resolution::Operation { operation, .. } =
+                self.namespaces.resolve(&written, Spelling::Python)
+            {
+                let binding = &path[0];
+                return Err(diagnostics::with_repair(
+                    Code::OperationShadowed,
+                    format!(
+                        "`{binding}` is a variable here, so `{}` calls a value, while the session offers the operation `{}`",
+                        path.join("."),
+                        operation.effect_name()
+                    ),
+                    call.func.range(),
+                    format!("rename `{binding}` and update its references"),
+                ));
+            }
+            return Ok(());
+        }
+        if let Some(misspelled) = self.namespaces.misspelled(&written, Spelling::Python) {
+            return Err(diagnostics::with_repair(
+                Code::OperationSpelling,
+                format!(
+                    "`{}` names the operation `{}` in another dialect's spelling",
+                    path.join("."),
+                    misspelled.operation.effect_name()
+                ),
+                call.func.range(),
+                format!("write `{}`", misspelled.repair),
+            ));
+        }
+        Ok(())
     }
 
     /// Refuses `*args` and `**kwargs` at a call.
@@ -318,10 +430,15 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
-        if let Some(path) = self.tool_path(&call.func)
-            && let Some(calls) = &mut self.calls
+        self.operation_refusal(call)?;
+        if self.calls.is_some()
+            && let Some(path) = self.tool_path(&call.func)
         {
-            calls.insert(path);
+            if let Some(candidate) = self.candidate(&path, call)?
+                && let Some(calls) = &mut self.calls
+            {
+                calls.insert(candidate);
+            }
             for argument in &call.arguments.args {
                 self.expr(argument)?;
             }
@@ -367,19 +484,6 @@ impl Lowerer<'_> {
                         repair,
                     ));
                 }
-                if id.starts_with("control_")
-                    && self
-                        .effects
-                        .keys()
-                        .any(|effect| effect.as_str().starts_with("control_"))
-                {
-                    return Err(diagnostics::with_repair(
-                        Code::UnknownName,
-                        format!("the tool `{id}` is not granted in this session"),
-                        call.range(),
-                        "use a control tool listed in the session's offered catalog",
-                    ));
-                }
                 Err(self.not_a_variable(id, name.range))
             }
             PyExpr::Attribute(attribute) => self.method(attribute, call),
@@ -407,7 +511,7 @@ impl Lowerer<'_> {
                 ),
             ));
         }
-        let control = self.controls.contains_key(effect);
+        let control = self.namespaces.controls(effect).is_some();
         if control && !self.in_module() {
             return Err(self.control_placement(effect, call));
         }
@@ -974,7 +1078,7 @@ impl Lowerer<'_> {
             Some(_) => return Err(refusal(call.range())),
             None => {
                 if let Some((effect, signature)) = self.effect(call) {
-                    if self.controls.contains_key(&effect) {
+                    if self.namespaces.controls(&effect).is_some() {
                         return Err(self.control_placement(&effect, call));
                     }
                     self.perform(&effect, &signature, call)?

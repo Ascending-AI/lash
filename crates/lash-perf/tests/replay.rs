@@ -142,7 +142,7 @@ fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
                 "user": "Read and print a host value",
                 "replies": [
                     {"cell": [
-                        "const result = await tools.fixture_lookup({key: \"json\"});",
+                        "const result = await tools.fixtureLookup({key: \"json\"});",
                         "console.log(JSON.stringify(result));"
                     ]},
                     {"text": "done"}
@@ -356,11 +356,11 @@ const WINDOW_BOUND: u64 = 15;
 #[test]
 fn a_recorded_code_mode_session_keeps_its_cells() {
     use lash_perf::replay::recorder::redact_code;
-    use lash_perf::replay::script::{Reply, Source, Workload};
+    use lash_perf::replay::script::{Protocol, Reply, Source, Workload};
 
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("cells.json");
-    let first = "const result = await tools.fixture_lookup({key: \"json\"});\nconsole.log(JSON.stringify(result));";
+    let first = "const result = await tools.fixtureLookup({key: \"json\"});\nconsole.log(JSON.stringify(result));";
     let second = "console.log(\"bob@corp.io\".length);";
     std::fs::write(
         &script,
@@ -414,7 +414,7 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
         .iter()
         .map(|turn| turn.replies.clone())
         .collect();
-    let cell = |code: &str| Reply::Cell(Source(redact_code(code)));
+    let cell = |code: &str| Reply::Cell(Source(redact_code(Protocol::Typescript, code)));
     let text = |bytes| Reply::Text(lash_perf::replay::provider::large_text("reply", bytes));
     assert_eq!(
         replies,

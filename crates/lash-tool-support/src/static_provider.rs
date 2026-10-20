@@ -120,7 +120,7 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
     fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
         self.manifests
             .iter()
-            .find(|manifest| manifest.name == name && self.offers(&manifest.id, config))
+            .find(|manifest| manifest.tool() == name && self.offers(&manifest.id, config))
             .cloned()
     }
 

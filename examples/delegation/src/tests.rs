@@ -107,7 +107,7 @@ fn spawn_call() -> PendingToolCall {
     PendingToolCall {
         call_id: ToolCallId::fixture("spawn"),
         provider_call_id: None,
-        tool_name: "spawn_agent".to_owned(),
+        tool_name: "agents.spawn".to_owned(),
         args: json!({ "task": "count the chunk", "output": { "len": "int" } }),
         replay: None,
     }
@@ -311,16 +311,19 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
 fn a_delegated_child_may_fail_its_task_and_may_not_delegate() {
     let delegator = offered(None);
     assert!(
-        delegator.iter().any(|name| name == "spawn_agent"),
+        delegator.iter().any(|name| name == "agents.spawn"),
         "{delegator:?}"
     );
     assert!(
-        !delegator.iter().any(|name| name == "submit_error"),
+        !delegator.iter().any(|name| name == "task.fail"),
         "{delegator:?}"
     );
     let child = offered(Some(DelegatedChild {
         task: "count".to_string(),
     }));
-    assert!(child.iter().any(|name| name == "submit_error"), "{child:?}");
-    assert!(!child.iter().any(|name| name == "spawn_agent"), "{child:?}");
+    assert!(child.iter().any(|name| name == "task.fail"), "{child:?}");
+    assert!(
+        !child.iter().any(|name| name == "agents.spawn"),
+        "{child:?}"
+    );
 }

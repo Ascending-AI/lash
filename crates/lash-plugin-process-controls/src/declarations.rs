@@ -26,7 +26,6 @@ use lash_core::ToolOutcome;
 use lash_core::ToolOutcomeDone;
 use lash_execution_contracts::tool_intent::ToolIntent;
 use lash_execution_contracts::tool_intent::ToolIntents;
-use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 use crate::done_without_intents;
 
@@ -49,7 +48,7 @@ pub fn definition_id_schema() -> Value {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub fn process_start_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process from an inline function or a published workflow ID and return its handle, including definition_id. Pass exactly one of `definition` or `definition_id`. Function captures are copied when passed to the tool; args key by parameter name.",
+    ToolDefinition::raw("tool:start_process", "processes.start", "Start a durable process from an inline function or a published workflow ID and return its handle, including definition_id. Pass exactly one of `definition` or `definition_id`. Function captures are copied when passed to the tool; args key by parameter name.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -64,7 +63,6 @@ pub fn process_start_tool_definition() -> ToolDefinition {
         .with_execution(std::time::Duration::from_secs(30))
         .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]), None)
         .expect("a valid tool declaration")
-        .with_tool_binding(ToolBinding::new(["processes"], "start"))
 }
 
 #[expect(
@@ -72,13 +70,12 @@ pub fn process_start_tool_definition() -> ToolDefinition {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub fn process_get_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw("tool:get_process_definition", "get_process_definition", "Resolve a tagged definition ID and retain its definition in this execution.",
+    ToolDefinition::raw("tool:get_process_definition", "processes.get", "Resolve a tagged definition ID and retain its definition in this execution.",
         serde_json::json!({"type": "object", "properties": {"definition_id": definition_id_schema()}, "required": ["definition_id"], "additionalProperties": false}),
         serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false})).expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(30))
         .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::GetDefinition]), None)
         .expect("a valid tool declaration")
-        .with_tool_binding(ToolBinding::new(["processes"], "get"))
 }
 
 pub fn execute_process_get_tool_call(

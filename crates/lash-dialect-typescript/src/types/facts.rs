@@ -22,7 +22,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use lash_kernel_doc::{EffectName, Name, Signature};
+use lash_kernel_doc::{Name, Signature};
 
 use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{
@@ -145,7 +145,7 @@ impl Facts {
         program: &Program,
         session: &BTreeSet<Name>,
         terminal: &BTreeSet<String>,
-        effects: &BTreeMap<EffectName, Signature>,
+        effects: &BTreeMap<String, &Signature>,
     ) -> Self {
         let mut collector = Collector::default();
         collector.scopes.push(HashMap::new());
@@ -169,14 +169,12 @@ impl Facts {
             effect_results: effects
                 .iter()
                 .filter(|(name, _)| {
-                    let root = name.as_str().split('.').next().unwrap_or_default();
+                    let root = name.split('.').next().unwrap_or_default();
                     !crate::builtins::is_global(root)
                         && !collector.names.contains_key(root)
                         && !session.contains(&Name::new(root))
                 })
-                .map(|(name, signature)| {
-                    (name.as_str().to_string(), Ty::decoded(&signature.result))
-                })
+                .map(|(name, signature)| (name.clone(), Ty::decoded(&signature.result)))
                 .collect(),
             direct_calls: collector
                 .direct_calls

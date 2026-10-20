@@ -304,48 +304,15 @@ impl HostArtifacts {
         environment: &ProcessEnv,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        use crate::workflow::{
-            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
-        };
-        let (catalog, boundary, checked) = match self.import_context(environment).await? {
+        let checked = match self.import_context(environment).await? {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
-        };
-        let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
-            Ok(library) => library,
-            Err(refusal) => {
-                return Ok(WorkflowImport::Unsupported(
-                    WorkflowImportUnsupported::LibraryUnavailable(refusal),
-                ));
-            }
-        };
-        let mut tool_roots = std::collections::BTreeSet::new();
-        for tool in catalog.entries() {
-            let binding = match lash_vm_runtime::required_tool_executable(&tool.manifest) {
-                Ok(binding) => binding,
-                Err(error) => {
-                    return Ok(WorkflowImport::Admission(
-                        WorkflowAdmissionRefusal::Boundary {
-                            message: error.to_string(),
-                        },
-                    ));
-                }
-            };
-            if let Some(root) = binding.module_path.first() {
-                tool_roots.insert(lash_kernel_doc::Name::new(root));
-            }
-        }
-        let dialect = lash_kernel_dialect::Environment {
-            library: &library,
-            effects: checked.effects(),
-            tool_roots: &tool_roots,
-            controls: &boundary.controls(),
         };
         crate::workflow::import::import(
             checked.worker_service(),
             language,
             source,
-            &dialect,
+            checked.operations(),
             &checked.checker(),
             limits,
         )
@@ -370,7 +337,7 @@ impl HostArtifacts {
         base: &crate::workflow::document::Document,
         environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let (_, _, checked) = match self.import_context(environment).await? {
+        let checked = match self.import_context(environment).await? {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };
@@ -397,14 +364,7 @@ impl HostArtifacts {
         &self,
         environment: &ProcessEnv,
     ) -> Result<
-        std::result::Result<
-            (
-                Arc<lash_core::ToolCatalog>,
-                lash_vm_runtime::HostBoundary,
-                crate::workflow::WorkflowEnvironment,
-            ),
-            crate::workflow::WorkflowImport,
-        >,
+        std::result::Result<crate::workflow::WorkflowEnvironment, crate::workflow::WorkflowImport>,
     > {
         use crate::workflow::{
             WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
@@ -419,16 +379,13 @@ impl HostArtifacts {
             )));
         }
         let catalog = self.core.process_tool_catalog(environment)?;
-        let boundary = match lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
-            Ok(boundary) => boundary,
-            Err(error) => {
-                return Ok(Err(WorkflowImport::Admission(
-                    WorkflowAdmissionRefusal::Boundary {
-                        message: error.to_string(),
-                    },
-                )));
-            }
-        };
+        if let Err(error) = lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
+            return Ok(Err(WorkflowImport::Admission(
+                WorkflowAdmissionRefusal::Boundary {
+                    message: error.to_string(),
+                },
+            )));
+        }
         let Some(checked) = self
             .workflow_environment_from_catalog(Arc::clone(&catalog))
             .await?
@@ -437,7 +394,7 @@ impl HostArtifacts {
                 WorkflowImportUnsupported::EngineUnavailable,
             )));
         };
-        Ok(Ok((catalog, boundary, checked)))
+        Ok(Ok(checked))
     }
 
     /// Validate opaque `document` bytes, admit their entry `entry`, and hold them

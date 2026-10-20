@@ -6,7 +6,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 
 /// The deferred tool a cell reaches as `web.fetch`, granted on first use.
@@ -14,14 +13,13 @@ pub fn fetch_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         "tool:web_fetch",
-        "web_fetch",
+        "web.fetch",
         "Fetches a url.",
         object.clone(),
         object,
     )
     .expect("the fetch tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["web"], "fetch"))
 }
 
 /// Serves `web.fetch`, which is never listed: only the resolver's grant
@@ -54,7 +52,7 @@ impl lash_core::ToolProvider for Fetch {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "web_fetch").then(|| Arc::new(fetch_definition().contract()))
+        (name == "web.fetch").then(|| Arc::new(fetch_definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

@@ -25,8 +25,9 @@ pub struct ToolCatalogBuildInput {
 /// a [`crate::ToolProvider`] including them in its manifest list.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ToolCatalogContribution {
-    /// Names of tools to remove from the catalog (non-membership).
-    pub remove: Vec<String>,
+    /// The operations of the tools to remove from the catalog
+    /// (non-membership).
+    pub remove: Vec<crate::QualifiedOperation>,
 }
 
 impl ToolCatalogContribution {
@@ -34,9 +35,9 @@ impl ToolCatalogContribution {
         self.remove.is_empty()
     }
 
-    pub fn remove_tools(tools: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn remove_tools(tools: impl IntoIterator<Item = crate::QualifiedOperation>) -> Self {
         Self {
-            remove: tools.into_iter().map(Into::into).collect(),
+            remove: tools.into_iter().collect(),
         }
     }
 }
@@ -112,16 +113,6 @@ impl ToolCatalog {
     /// The members, in admission order.
     pub fn entries(&self) -> &[ToolCatalogEntry] {
         &self.0.tools
-    }
-
-    /// Module metadata from this catalog's recorded members, once per name.
-    /// Filtering membership also filters modules; no live provider is read.
-    pub fn modules(&self) -> impl Iterator<Item = &crate::ToolModule> {
-        let mut names = std::collections::BTreeSet::new();
-        self.entries().iter().filter_map(move |entry| {
-            let module = entry.manifest.module.as_deref()?;
-            names.insert(module.name.as_str()).then_some(module)
-        })
     }
 
     /// Prompt-only projection. The original catalogue retains execution authority.
@@ -202,16 +193,31 @@ impl ToolCatalog {
 
     /// Membership test: a tool is in the catalog (callable) or it does not
     /// exist to the model.
-    pub fn has_callable_tool(&self, tool_name: &str) -> bool {
-        self.callable_tools_iter()
-            .any(|manifest| manifest.name == tool_name)
+    pub fn has_callable_tool(&self, operation: &crate::QualifiedOperation) -> bool {
+        self.entry(operation).is_some()
     }
 
+    /// The member performed as `operation`.
+    pub fn entry(&self, operation: &crate::QualifiedOperation) -> Option<&ToolCatalogEntry> {
+        self.entries()
+            .iter()
+            .find(|entry| entry.manifest.operation == *operation)
+    }
+
+    /// The member a Standard-mode model calls as `name`
+    /// ([`ToolManifest::standard_name`]).
+    pub fn entry_named(&self, name: &str) -> Option<&ToolCatalogEntry> {
+        self.entries()
+            .iter()
+            .find(|entry| entry.manifest.standard_name() == name)
+    }
+
+    /// The members' Standard-mode names, in admission order.
     pub fn tool_names(&self) -> Arc<Vec<String>> {
         Arc::clone(self.0.tool_names.get_or_init(|| {
             Arc::new(
                 self.callable_tools_iter()
-                    .map(|manifest| manifest.name.clone())
+                    .map(ToolManifest::standard_name)
                     .collect(),
             )
         }))
@@ -239,21 +245,29 @@ impl ToolCatalog {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub enum ToolCatalogBuildError {
+    /// A tool's operation is no canonical operation.
+    InvalidOperation {
+        tool_id: crate::ToolId,
+        message: String,
+    },
     UnusableSchema {
         tool_id: crate::ToolId,
-        name: String,
+        operation: String,
         purpose: crate::SchemaPurpose,
         source: crate::SchemaAdmissionError,
     },
     MissingContract {
         tool_id: crate::ToolId,
-        name: String,
+        operation: String,
     },
     DuplicateId {
         tool_id: crate::ToolId,
     },
-    DuplicateName {
-        name: String,
+    /// Two tools are performed as one operation.
+    DuplicateOperation {
+        operation: String,
+        first_tool: crate::ToolId,
+        second_tool: crate::ToolId,
     },
     /// A member is refused against the deployment it registers in.
     RegistrationRefused {
@@ -264,28 +278,38 @@ pub enum ToolCatalogBuildError {
 impl std::fmt::Display for ToolCatalogBuildError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidOperation { tool_id, message } => {
+                write!(formatter, "tool `{tool_id}` names no operation: {message}")
+            }
             Self::UnusableSchema {
                 tool_id,
-                name,
+                operation,
                 purpose,
                 source,
             } => {
                 write!(
                     formatter,
-                    "tool `{name}` ({tool_id}) has unusable {purpose:?} schema: {source}"
+                    "tool `{operation}` ({tool_id}) has unusable {purpose:?} schema: {source}"
                 )
             }
-            Self::MissingContract { tool_id, name } => {
+            Self::MissingContract { tool_id, operation } => {
                 write!(
                     formatter,
-                    "resident tool `{name}` ({tool_id}) has no contract"
+                    "resident tool `{operation}` ({tool_id}) has no contract"
                 )
             }
             Self::DuplicateId { tool_id } => {
                 write!(formatter, "resident catalog repeats tool id `{tool_id}`")
             }
-            Self::DuplicateName { name } => {
-                write!(formatter, "resident catalog repeats tool name `{name}`")
+            Self::DuplicateOperation {
+                operation,
+                first_tool,
+                second_tool,
+            } => {
+                write!(
+                    formatter,
+                    "tools `{first_tool}` and `{second_tool}` are both performed as `{operation}`; one operation names one tool"
+                )
             }
             Self::RegistrationRefused { refusal } => write!(formatter, "{refusal}"),
         }
@@ -302,16 +326,18 @@ pub fn build_tool_catalog(
         apply_contribution(&mut tools, contribution);
     }
     let mut ids = std::collections::BTreeSet::new();
-    let mut names = std::collections::BTreeSet::new();
+    let mut operations = BTreeMap::new();
     for manifest in &tools {
         if !ids.insert(&manifest.id) {
             return Err(ToolCatalogBuildError::DuplicateId {
                 tool_id: manifest.id.clone(),
             });
         }
-        if !names.insert(manifest.name.as_str()) {
-            return Err(ToolCatalogBuildError::DuplicateName {
-                name: manifest.name.clone(),
+        if let Some(first) = operations.insert(&manifest.operation, &manifest.id) {
+            return Err(ToolCatalogBuildError::DuplicateOperation {
+                operation: manifest.tool(),
+                first_tool: first.clone(),
+                second_tool: manifest.id.clone(),
             });
         }
         if let Some(engine) = manifest.isolation_engine()
@@ -319,7 +345,7 @@ pub fn build_tool_catalog(
         {
             return Err(ToolCatalogBuildError::RegistrationRefused {
                 refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
-                    tool: manifest.name.clone(),
+                    tool: manifest.tool(),
                     engine: engine.to_owned(),
                 },
             });
@@ -334,14 +360,14 @@ pub fn build_tool_catalog(
                 .and_then(|resolve| resolve(&manifest))
                 .ok_or_else(|| ToolCatalogBuildError::MissingContract {
                     tool_id: manifest.id.clone(),
-                    name: manifest.name.clone(),
+                    operation: manifest.tool(),
                 })?;
             // A control call's result is its control: a tool that declares
             // one has no output for a contract to state beside it.
             if !manifest.declaration().controls.is_empty() && !contract.states_no_output() {
                 return Err(ToolCatalogBuildError::RegistrationRefused {
                     refusal: crate::RegistrationRefused::ControlDeclaresOutput {
-                        tool: manifest.name.clone(),
+                        tool: manifest.tool(),
                     },
                 });
             }
@@ -355,7 +381,7 @@ fn apply_contribution(tools: &mut Vec<ToolManifest>, contribution: ToolCatalogCo
     if contribution.remove.is_empty() {
         return;
     }
-    tools.retain(|tool| !contribution.remove.contains(&tool.name));
+    tools.retain(|tool| !contribution.remove.contains(&tool.operation));
 }
 
 #[cfg(test)]
@@ -363,10 +389,17 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn op(name: &str) -> crate::QualifiedOperation {
+        use crate::IntoOperation as _;
+        format!("tools.{name}")
+            .into_operation()
+            .expect("a canonical operation")
+    }
+
     fn tool(name: &str) -> ToolDefinition {
         ToolDefinition::raw(
             format!("tool:{name}"),
-            name,
+            op(name),
             format!("Tool {name}"),
             serde_json::json!({
                 "type": "object",
@@ -436,7 +469,7 @@ mod tests {
         );
         let error = ToolDefinition::raw(
             "bad",
-            "bad",
+            "tools.bad",
             "bad",
             serde_json::json!({"type": "unknown"}),
             serde_json::json!({}),
@@ -484,12 +517,12 @@ mod tests {
     fn contributions_remove_members() {
         let catalog = build_tool_catalog(build_input(
             vec![tool("read_file"), tool("write_file")],
-            vec![ToolCatalogContribution::remove_tools(["write_file"])],
+            vec![ToolCatalogContribution::remove_tools([op("write_file")])],
         ))
         .expect("complete effective definition");
 
-        assert!(catalog.has_callable_tool("read_file"));
-        assert!(!catalog.has_callable_tool("write_file"));
+        assert!(catalog.has_callable_tool(&op("read_file")));
+        assert!(!catalog.has_callable_tool(&op("write_file")));
         assert_eq!(catalog.callable_tools().len(), 1);
     }
 
@@ -504,7 +537,7 @@ mod tests {
             catalog
                 .entries()
                 .iter()
-                .map(|entry| entry.manifest.name.clone())
+                .map(|entry| entry.manifest.standard_name())
                 .collect()
         };
         let _ = (
@@ -512,18 +545,18 @@ mod tests {
             parent.model_tool_specs(),
             parent.derived(names),
         );
-        let catalog = parent.filtered(|entry| entry.manifest.name == "read_file");
-        assert!(!catalog.has_callable_tool("write_file"));
-        assert_eq!(*catalog.tool_names(), ["read_file"]);
+        let catalog = parent.filtered(|entry| entry.manifest.operation == op("read_file"));
+        assert!(!catalog.has_callable_tool(&op("write_file")));
+        assert_eq!(*catalog.tool_names(), ["tools__read_file"]);
         assert_eq!(
             catalog
                 .model_tool_specs()
                 .iter()
                 .map(|spec| spec.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file"]
+            ["tools__read_file"]
         );
-        assert_eq!(*catalog.derived(names), ["read_file"]);
+        assert_eq!(*catalog.derived(names), ["tools__read_file"]);
     }
 
     #[test]
@@ -532,7 +565,7 @@ mod tests {
         let hidden = build_tool_catalog(ToolCatalogBuildInput {
             tools: vec![missing.clone()],
             resolve_contract: None,
-            contributions: vec![ToolCatalogContribution::remove_tools(["missing"])],
+            contributions: vec![ToolCatalogContribution::remove_tools([op("missing")])],
             isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("suppressed manifests are not resident members");
@@ -549,7 +582,7 @@ mod tests {
             error,
             ToolCatalogBuildError::MissingContract {
                 tool_id: missing.id,
-                name: "missing".into(),
+                operation: "tools.missing".into(),
             }
         );
     }
@@ -578,37 +611,73 @@ mod tests {
             }
         );
         assert_eq!(resolutions.load(Ordering::SeqCst), 0);
+    }
 
-        let mut repeated_name = tool("second").manifest();
-        repeated_name.name = first.name.clone();
+    /// OP-KEY (X1): the catalog refuses two tools with one operation, naming
+    /// both, and a tool's Standard-mode name is derived from its operation:
+    /// distinct operations get distinct names, and a path over the budget is
+    /// truncated with an `_h` digest suffix.
+    #[test]
+    fn one_operation_names_one_tool_and_its_standard_name_is_derived() {
+        let mail = |id: &str| {
+            ToolDefinition::raw(
+                id,
+                "mail.send",
+                "Send mail",
+                ToolDefinition::default_input_schema(),
+                serde_json::json!({ "type": "string" }),
+            )
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(30))
+        };
         let error = build_tool_catalog(build_input(
-            vec![
-                ToolDefinition::raw(
-                    first.id,
-                    first.name.clone(),
-                    "First",
-                    ToolDefinition::default_input_schema(),
-                    serde_json::json!({ "type": "string" }),
-                )
-                .expect("valid declared tool schemas")
-                .with_execution(std::time::Duration::from_secs(30)),
-                ToolDefinition::raw(
-                    repeated_name.id,
-                    repeated_name.name,
-                    "Second",
-                    ToolDefinition::default_input_schema(),
-                    serde_json::json!({ "type": "string" }),
-                )
-                .expect("valid declared tool schemas")
-                .with_execution(std::time::Duration::from_secs(30)),
-            ],
+            vec![mail("tool:first"), mail("tool:second")],
             Vec::new(),
         ))
-        .expect_err("a duplicate effective name is ambiguous model authority");
+        .expect_err("one operation names one tool");
         assert_eq!(
             error,
-            ToolCatalogBuildError::DuplicateName { name: first.name }
+            ToolCatalogBuildError::DuplicateOperation {
+                operation: "mail.send".into(),
+                first_tool: "tool:first".into(),
+                second_tool: "tool:second".into(),
+            }
         );
+        assert!(
+            error.to_string().contains("tool:first") && error.to_string().contains("tool:second")
+        );
+        assert_eq!(mail("tool:first").manifest.standard_name(), "mail__send");
+        assert_ne!(
+            tool("a_b").manifest.standard_name(),
+            ToolDefinition::raw(
+                "tool:a.b",
+                "tools.a.b",
+                "",
+                ToolDefinition::default_input_schema(),
+                serde_json::json!({}),
+            )
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(30))
+            .manifest
+            .standard_name(),
+            "`tools.a_b` and `tools.a.b` are distinct operations"
+        );
+        let long = format!("tools.{}", ["segment"; 12].join("."));
+        let named = ToolDefinition::raw(
+            "tool:long",
+            long.as_str(),
+            "",
+            ToolDefinition::default_input_schema(),
+            serde_json::json!({}),
+        )
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
+        .manifest
+        .standard_name();
+        assert_eq!(named.len(), 64, "{named}");
+        let (_, suffix) = named.rsplit_once("_h").expect("a digest suffix");
+        assert_eq!(suffix, crate::digest_tag(&long));
+        assert!(!named.contains("___"), "{named}");
     }
 
     fn refused(
@@ -627,7 +696,7 @@ mod tests {
         assert_eq!(
             refused(tool("approve").with_declaration(crate::ToolDeclaration::deferring(), None)),
             crate::RegistrationRefused::MissingBound {
-                tool: "approve".into(),
+                tool: "tools.approve".into(),
                 bound: crate::ToolBound::Park,
             }
         );
@@ -637,7 +706,7 @@ mod tests {
                 Some(crate::ParkBound::UntilScopeEnd)
             )),
             crate::RegistrationRefused::ParkWithoutDeferral {
-                tool: "read".into(),
+                tool: "tools.read".into(),
             }
         );
         let stored = |edit: fn(&mut serde_json::Value)| {
@@ -658,11 +727,11 @@ mod tests {
         };
         assert_eq!(
             stored(|manifest| drop(manifest["execution"].take())),
-            "tool `approve` declares no execution bound; its host must set one"
+            "tool `tools.approve` declares no execution bound; its host must set one"
         );
         assert_eq!(
             stored(|manifest| drop(manifest["park"].take())),
-            "tool `approve` declares no park bound; its host must set one"
+            "tool `tools.approve` declares no park bound; its host must set one"
         );
 
         let hour = std::time::Duration::from_secs(60 * 60);
@@ -707,7 +776,7 @@ mod tests {
         assert_eq!(
             refused(tool("spawn").with_declaration(unordered.clone(), None)),
             crate::RegistrationRefused::Declaration {
-                tool: "spawn".into(),
+                tool: "tools.spawn".into(),
                 cause: crate::DeclarationRefusal::IntentOrder,
             }
         );
@@ -720,7 +789,7 @@ mod tests {
         assert_eq!(
             refused(deferring.isolated_in("sandbox")),
             crate::RegistrationRefused::Declaration {
-                tool: "spawn".into(),
+                tool: "tools.spawn".into(),
                 cause: crate::DeclarationRefusal::IsolatedInlineCapability,
             }
         );
@@ -731,7 +800,7 @@ mod tests {
             serde_json::from_value::<ToolManifest>(stored)
                 .expect_err("a manifest with an invalid declaration decoded")
                 .to_string(),
-            "tool `spawn`'s declaration is refused: declared intents are not in vocabulary order"
+            "tool `tools.spawn`'s declaration is refused: declared intents are not in vocabulary order"
         );
     }
 
@@ -745,7 +814,9 @@ mod tests {
         };
         assert_eq!(
             refused(tool("run").with_declaration(isolated, None)),
-            crate::RegistrationRefused::IsolatedWithoutEngine { tool: "run".into() }
+            crate::RegistrationRefused::IsolatedWithoutEngine {
+                tool: "tools.run".into()
+            }
         );
         let run = tool("run")
             .isolated_in("sandbox")
@@ -762,13 +833,13 @@ mod tests {
                 register(engines).expect_err("the isolated tool was registered"),
                 ToolCatalogBuildError::RegistrationRefused {
                     refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
-                        tool: "run".into(),
+                        tool: "tools.run".into(),
                         engine: "sandbox".into(),
                     },
                 }
             );
         }
         let catalog = register(&["other", "sandbox"]).expect("its engine is registered");
-        assert!(catalog.has_callable_tool("run"));
+        assert!(catalog.has_callable_tool(&op("run")));
     }
 }

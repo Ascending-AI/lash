@@ -30,7 +30,7 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Answers once its completion wait resolves.",
         object.clone(),
         object,
@@ -81,7 +81,7 @@ impl lash_core::ToolProvider for Deferring {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == self.name).then(|| Arc::new(definition(self.name).contract()))
+        (name == format!("tools.{}", self.name)).then(|| Arc::new(definition(self.name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -182,12 +182,12 @@ pub(super) async fn a_settled_call_leaves_its_provider_unrequired_on_a_later_cla
         vec![
             served::response(vec![served::call(
                 "settlement-k-call",
-                K_TOOL,
+                &format!("tools.{K_TOOL}"),
                 serde_json::json!({}),
             )]),
             served::response(vec![served::call(
                 "settlement-j-call",
-                J_TOOL,
+                &format!("tools.{J_TOOL}"),
                 serde_json::json!({}),
             )]),
         ],

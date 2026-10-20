@@ -8,8 +8,8 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
-    ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome, ToolProvider,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -69,11 +69,10 @@ pub(crate) fn tools(data_dir: &Path) -> Result<Arc<dyn ToolProvider>> {
         })),
     ].into_iter().map(|(name, policy, input)| {
         Ok(ToolDefinition::raw(
-            format!("workbench:crash:{name}"), format!("workbench_crash_{name}"),
+            format!("workbench:crash:{name}"), format!("crash_fixture.{name}"),
             "Development crash-resume evidence.", input, json!({}),
         )?.with_execution(Duration::from_secs(120))
-            .with_execution_policy(policy)
-            .with_tool_binding(ToolBinding::new(["crash_fixture"], name)))
+            .with_execution_policy(policy))
     }).collect::<Result<Vec<_>>>()?;
     Ok(Arc::new(StaticToolProvider::new(
         definitions,
@@ -89,14 +88,14 @@ struct Evidence {
 
 impl Evidence {
     fn run(&self, call: ToolCall<'_>) -> Result<ToolOutcome> {
-        if call.name() == "workbench_crash_array" {
+        if call.name() == "crash_fixture.array" {
             let part = call.args["part"]
                 .as_f64()
                 .filter(|part| (0.0..=3.0).contains(part) && part.fract() == 0.0)
                 .ok_or_else(|| anyhow::anyhow!("part must be 0..3"))?;
             return Ok(ToolOutcome::ok(json!(vec![7.0 + part; 32768])));
         }
-        if call.name() == "workbench_crash_increment" {
+        if call.name() == "crash_fixture.increment" {
             // Each entry is a body invocation, even for the same call id. A
             // fixture-side dedup would conceal the very failure this row judges.
             let mut file = std::fs::OpenOptions::new()

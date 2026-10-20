@@ -119,7 +119,7 @@ impl Scenario {
                             terminal_reason: lash::direct::LlmTerminalReason::ToolUse,
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "s34-provider-correlation".into(),
-                                tool_name: "s34_retry".into(),
+                                tool_name: "tools__s34_retry".into(),
                                 input_json: "{}".into(),
                                 replay: None,
                             }],
@@ -288,7 +288,7 @@ impl TelemetryPlugin {
             .provider(lash::tool_provider_key!("tools"), move |this, _state| {
                 let definition = ToolDefinition::raw(
                     "s34:retry",
-                    "s34_retry",
+                    "tools.s34_retry",
                     "One reported retry under one admitted call",
                     json!({"type":"object","additionalProperties":false}),
                     json!({"type":"string"}),

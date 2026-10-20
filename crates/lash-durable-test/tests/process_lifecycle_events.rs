@@ -359,6 +359,8 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
 
 const WRITE_TOOL: &str = "lifecycle_events_write";
 
+const WRITE_TOOL_OPERATION: &str = "tools.lifecycle_events_write";
+
 /// What the write tool wrote, per call.
 #[derive(Debug, Default)]
 struct World {
@@ -398,10 +400,9 @@ const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
     lash_core::ProcessConfigKey::new("lifecycle-events-write", lash_core::FormatVersion::ONE);
 
 fn write_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         WRITE_TOOL,
-        WRITE_TOOL,
+        WRITE_TOOL_OPERATION,
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -419,7 +420,6 @@ fn write_definition() -> lash_core::ToolDefinition {
     )
     .expect("a deferring tool declares its park bound")
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL))
 }
 
 fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
@@ -1032,7 +1032,7 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
             .expect("the retained tool record reads")
             .expect("the tool call has a record");
         assert_eq!(record.call_id, call_id);
-        assert_eq!(record.tool, WRITE_TOOL);
+        assert_eq!(record.tool, WRITE_TOOL_OPERATION);
         let args = serde_json::json!({ "x": index + 1 });
         assert_eq!(record.args, args);
         assert_eq!(

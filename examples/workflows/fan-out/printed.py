@@ -2,7 +2,7 @@
 async def demo():
     #: Describe how to echo one value
     async def work(value):
-        return (await helper_py_reply((await tools.corpus.echo(value, result="json"))))
+        return (await helper_py_reply((await corpus.echo(value, result="json"))))
     #: Echo "a" and "b" side by side and wait for both
     with k.return_():
         with k.bind("t1"):

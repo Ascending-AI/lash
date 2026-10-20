@@ -45,26 +45,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::ToolCall;
-use lash_core::ToolDefinitionBindingExt as _;
 
 use served::{Tier, WATCHDOG, World};
 use telemetry::Telemetry;
 
 /// The tool that parks on its completion key, which the law resolves.
 const DEFERRED: &str = "trace_deferred";
+const DEFERRED_OPERATION: &str = "tools.trace_deferred";
 
 fn definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{DEFERRED}"),
-        DEFERRED,
+        DEFERRED_OPERATION,
         "Parks until the trace law resolves it.",
         object.clone(),
         object,
     )
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], DEFERRED))
     .with_declaration(
         lash_core::ToolDeclaration::deferring(),
         Some(lash_core::ParkBound::Within(
@@ -96,7 +95,7 @@ impl lash_core::ToolProvider for DeferredTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == DEFERRED).then(|| Arc::new(definition().contract()))
+        (name == DEFERRED_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -178,7 +177,7 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
         &name,
         vec![served::response(vec![served::call(
             "call-1",
-            DEFERRED,
+            DEFERRED_OPERATION,
             serde_json::json!({}),
         )])],
     );
@@ -292,10 +291,7 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
         return;
     };
     let name = "trace-suspended-cell";
-    world.script(
-        name,
-        vec![served::cell(&format!("await tools.{DEFERRED}({{}});"))],
-    );
+    world.script(name, vec![served::cell("await tools.traceDeferred({});")]);
     let session = world.session(name, served::spec(8)).await;
     let sent = session
         .send(lash::TurnInput::text(name))
@@ -366,7 +362,7 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     violations.extend(telemetry.publication_violations(&[]));
     violations.extend(telemetry.first_turn_cell_violations(name, false));
     let closes = telemetry.first_turn_cell_closes(name);
-    let code = format!("await tools.{DEFERRED}({{}});");
+    let code = "await tools.traceDeferred({});".to_owned();
     let published = telemetry.published();
     let closing_code: Vec<_> = published
         .iter()
@@ -418,7 +414,7 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
         let (name, args, output, provider, node, attempts) = terminals[0];
         assert_eq!(
             name.name(),
-            Some(DEFERRED),
+            Some(DEFERRED_OPERATION),
             "the recorded tool name differs from its ToolId"
         );
         assert_eq!(args, &lash::tracing::TraceToolArgs::Unavailable);
@@ -479,6 +475,7 @@ async fn a_suspended_cell_discarded_on_a_takeover_node_exports_its_code(tier: Ti
 /// The tool a code cell's call runs, which holds on the node the law
 /// loses.
 const HELD: &str = "trace_held";
+const HELD_OPERATION: &str = "tools.trace_held";
 
 /// The plugin whose before-turn callback holds on the node the law loses.
 const HOLD_PLUGIN: &str = "trace-hold-law";
@@ -487,14 +484,13 @@ fn held_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{HELD}"),
-        HELD,
+        HELD_OPERATION,
         "Holds on the node the trace law loses.",
         object.clone(),
         object,
     )
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], HELD))
     // A call its node lost while it ran runs again on the node that takes
     // the cell over, which builds its body without the candidate.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
@@ -539,7 +535,7 @@ impl lash_core::ToolProvider for Hold {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == HELD).then(|| Arc::new(held_definition().contract()))
+        (name == HELD_OPERATION).then(|| Arc::new(held_definition().contract()))
     }
 
     async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -643,10 +639,7 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     };
     let name = format!("trace-lost-{lost:?}").to_lowercase();
     if let Lost::InCellCall = lost {
-        world.script(
-            &name,
-            vec![served::cell(&format!("await tools.{HELD}({{}});"))],
-        );
+        world.script(&name, vec![served::cell("await tools.traceHeld({});")]);
     }
     let session = world.session(&name, served::spec(8)).await;
     let sent = session

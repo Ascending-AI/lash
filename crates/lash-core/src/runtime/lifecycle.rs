@@ -316,18 +316,7 @@ impl LashRuntime {
         page_reader: Option<&crate::plugin::SessionPageReader>,
     ) -> Result<Session, SessionError> {
         let mut session = Session::new(services.clone(), &state.session_id).await?;
-        let catalog = session.resolved_tool_catalog()?;
-        session
-            .plugins()
-            .protocol_session()
-            .validate_tool_catalog(
-                &catalog,
-                Some(&crate::plugin::ProtocolSessionRestoreView::new(
-                    state,
-                    page_reader,
-                )),
-            )
-            .await?;
+        session.resolved_tool_catalog()?;
         session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();

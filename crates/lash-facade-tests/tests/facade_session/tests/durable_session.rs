@@ -1255,8 +1255,8 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
                 text_provider(
                     "cell-call-records",
                     typescript_block(
-                        "const first = await tools.app_lookup({});\n\
-                         const second = await tools.app_lookup({});\n\
+                        "const first = await tools.appLookup({});\n\
+                         const second = await tools.appLookup({});\n\
                          await control.finish(\"looked up twice\");",
                     ),
                 ),
@@ -1290,8 +1290,8 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
         } = activity.event
         {
             // The cell's last call is its `control.finish`.
-            if name != "finish" {
-                assert_eq!(name, "app_lookup");
+            if name != "control.finish" {
+                assert_eq!(name, "tools.app_lookup");
                 assert_eq!(args, serde_json::json!({}));
             }
             assert!(output.is_success());
@@ -1358,8 +1358,8 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
                 text_provider(
                     "cell-tool-records",
                     typescript_block(
-                        "const first = await tools.app_lookup({});\n\
-                         const second = await tools.app_lookup({});\n\
+                        "const first = await tools.appLookup({});\n\
+                         const second = await tools.appLookup({});\n\
                          await control.finish(\"looked up twice\");",
                     ),
                 ),
@@ -1475,8 +1475,8 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
                     text_provider(
                         "cancelled-cell-records",
                         typescript_block(
-                            "const first = await tools.app_lookup({});\n\
-                             const second = await tools.app_lookup({});",
+                            "const first = await tools.appLookup({});\n\
+                             const second = await tools.appLookup({});",
                         ),
                     ),
                     mock_llm_profile_spec(),
@@ -1549,7 +1549,7 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
                 .iter()
                 .map(|record| (record.tool.as_str(), record.output.is_success()))
                 .collect::<Vec<_>>(),
-            vec![("app_lookup", true); completed],
+            vec![("tools.app_lookup", true); completed],
             "{mode:?}: the calls the cell completed, and no other"
         );
         reopened.shutdown().await?;
@@ -1588,7 +1588,7 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
                 text_provider(
                     "after-turn-cell-calls",
                     typescript_block(
-                        "const found = await tools.app_lookup({});\n\
+                        "const found = await tools.appLookup({});\n\
                  await control.finish(\"looked up\");",
                     ),
                 ),
@@ -1614,7 +1614,10 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
     );
     assert_eq!(
         *seen.lock().expect("the law's lock"),
-        vec![vec!["app_lookup".to_owned(), "finish".to_owned()]],
+        vec![vec![
+            "tools.app_lookup".to_owned(),
+            "control.finish".to_owned()
+        ]],
         "the after-turn callbacks ran once, over the cell's calls"
     );
     drop(session);
@@ -1751,7 +1754,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
                     tool_name,
                     control: lash_core::CellControl::Finish { value },
                     ..
-                } if tool_name == "finish"
+                } if tool_name == "control.finish"
                     && *value == lash_core::OutputValue::from(serde_json::json!("three"))
             ),
             "{name}: {:?}",
@@ -1820,7 +1823,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
                 text_provider(
                     "finish-at-the-limit",
                     typescript_block(
-                        "const found = await tools.app_lookup({});\n\
+                        "const found = await tools.appLookup({});\n\
                          await control.finish(\"looked up once\");",
                     ),
                 ),
@@ -1844,7 +1847,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
         .await?;
     assert_eq!(
         settled.finished(),
-        Some(("finish", &serde_json::json!("looked up once"))),
+        Some(("control.finish", &serde_json::json!("looked up once"))),
         "{:?}",
         settled.outcome
     );

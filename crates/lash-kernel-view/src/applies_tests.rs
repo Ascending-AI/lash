@@ -5,12 +5,10 @@ use lash_kernel_doc::{Name, WorkflowDocumentEntry};
 
 fn lowered_holder(source: &str, typescript: bool, cell: bool) -> WorkflowDocument {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let env = Environment {
-        library: embedding.library(),
-        effects: &Default::default(),
-        controls: &Default::default(),
-        tool_roots: &Default::default(),
-    };
+    let namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("no effects are operations");
+    let env = Environment::new(embedding.library(), &namespaces);
     let mode = if cell {
         Mode::Cell(CellEnvironment::first())
     } else {

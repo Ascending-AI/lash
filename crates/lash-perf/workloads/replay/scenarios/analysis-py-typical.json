@@ -12,7 +12,7 @@
           "cell": [
             "chunks = []",
             "retained = 0",
-            "await control_finish({\"ready\": True})"
+            "await control.finish({\"ready\": True})"
           ]
         }
       ],
@@ -25,10 +25,10 @@
         {
           "cell": [
             "# Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payl",
-            "chunk = await tools_fixture_large({\"key\": \"data-{turn}\", \"bytes\": 30701})",
+            "chunk = await tools.fixture_large({\"key\": \"data-{turn}\", \"bytes\": 30701})",
             "chunks.append(chunk[\"text\"])",
             "retained = retained + len(chunk[\"text\"])",
-            "await control_finish({\"retained\": retained, \"chunks\": len(chunks), \"preview\": chunk[\"text\"][:380]})"
+            "await control.finish({\"retained\": retained, \"chunks\": len(chunks), \"preview\": chunk[\"text\"][:380]})"
           ]
         }
       ]

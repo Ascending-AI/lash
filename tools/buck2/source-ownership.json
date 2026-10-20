@@ -1063,7 +1063,6 @@
       "src/tool_call_id.rs",
       "src/tool_catalog.rs",
       "src/tool_contract.rs",
-      "src/tool_contract/binding.rs",
       "src/tool_contract/schema_validation.rs",
       "src/tool_declaration.rs",
       "src/tool_intents.rs",

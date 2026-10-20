@@ -412,19 +412,20 @@ pub use lash_protocol_types::{
     DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
     ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
-    JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole,
-    NextRun, NodeId, OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind,
-    PluginMessage, PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused,
-    RetainedOutput, RetainedValue, SchemaAdmissionError, SchemaContract, SchemaDialect,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TerminationMode,
-    TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBound,
-    ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
-    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
-    ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
-    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls,
-    TurnId, TurnOutputSource, ValueMismatch, ValueShape, ValueShapeLimits,
+    IntoOperation, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
+    MessageOrigin, MessageRole, NextRun, NodeId, OutcomeShape, OutputRetentionPolicy, OutputValue,
+    ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
+    ProviderAttemptLimits, QualifiedOperation, RegistrationRefused, RetainedOutput, RetainedValue,
+    SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SessionAppendNode, TerminationMode, TextProjectionMetadata,
+    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
+    ToolContract, ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolDraft,
+    ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
+    ToolIntentKind, ToolManifest, ToolOutputContract, ToolValue, ToolView, ToolViewBlock,
+    ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId, TurnOutputSource,
+    ValueMismatch, ValueShape, ValueShapeLimits,
 };
 pub use lash_protocol_types::{
     llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,
@@ -488,9 +489,7 @@ pub use lash_core_store::tool_surface::{
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
-pub use tool_registry::{
-    SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind, effect_path_of,
-};
+pub use tool_registry::{SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind};
 pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
 
 pub(crate) mod facade_ops {}

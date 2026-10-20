@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
@@ -127,7 +126,7 @@ impl ScriptBook {
                     .enumerate()
                     .map(|(index, call)| LlmOutputPart::ToolCall {
                         call_id: format!("{}-{step}-{index}", marker_slug(&marker)),
-                        tool_name: call.tool.clone(),
+                        tool_name: call.tool.replace('.', "__"),
                         input_json: call.args.to_string(),
                         replay: None,
                     })
@@ -252,15 +251,17 @@ struct Fixtures(Option<Arc<FixtureObserver>>);
 impl StaticToolExecute for Fixtures {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let args = call.args;
+        let name = call.name();
+        let name = name.split_once('.').map_or(name.as_str(), |(_, tool)| tool);
         if let Some(observe) = &self.0 {
-            observe(call.name(), args);
+            observe(name, args);
         }
         let key = args
             .get("key")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let answer = match call.name() {
+        let answer = match name {
             LOOKUP => serde_json::json!({
                 "key": key,
                 "title": format!("Record {key}"),
@@ -334,7 +335,7 @@ fn definition(
 ) -> anyhow::Result<lash_core::ToolDefinition> {
     Ok(lash_core::ToolDefinition::raw(
         name,
-        name,
+        format!("tools.{name}"),
         description,
         serde_json::json!({
             "type": "object",
@@ -346,8 +347,7 @@ fn definition(
     )
     .map_err(|error| anyhow::anyhow!("{name}'s schemas: {error}"))?
     .with_execution(Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name)))
+    .with_execution_policy(ExecutionPolicy::Once))
 }
 
 /// The fixture tools, bound as `tools.<name>` in code mode.

@@ -71,7 +71,7 @@ fn three_parked_tasks_resume_in_arrival_order() {
     let second = run(&other.source, &other.deliveries);
     assert_eq!(
         first.epochs[0].asked,
-        lines(&["echo:a1", "echo:b1", "echo:c1"])
+        lines(&["host.echo:a1", "host.echo:b1", "host.echo:c1"])
     );
     assert_eq!(first, one.node);
     assert_eq!(second, other.node);
@@ -97,7 +97,10 @@ fn single_and_list_waiters_interleave_as_node_does() {
 /// keep the process alive until the task ended.
 #[test]
 fn a_cell_that_ends_with_a_running_task_is_an_error() {
-    let recorded = run("const pending = echo(\"a\"); console.log(\"end\");", &[]);
+    let recorded = run(
+        "const pending = host.echo(\"a\"); console.log(\"end\");",
+        &[],
+    );
     assert_eq!(recorded.lines(), ["end"]);
     assert_eq!(
         recorded.end,
@@ -123,7 +126,7 @@ fn a_rejection_is_unhandled_only_at_the_cells_end() {
     let late = run(
         "const failing = async () => { throw \"late\"; };\n\
          const p = failing();\n\
-         await echo(\"a\");\n\
+         await host.echo(\"a\");\n\
          try { await p; } catch (error) { console.log(`caught ${error}`); }",
         &[],
     );
@@ -164,17 +167,17 @@ fn a_thenable_is_a_plain_value() {
 /// An error that leaves the cell uncaught ends the run in it.
 #[test]
 fn an_awaited_rejection_nothing_catches_ends_the_run() {
-    let recorded = run("await boom(\"x\");", &[]);
+    let recorded = run("await host.boom(\"x\");", &[]);
     assert_eq!(
         recorded.epochs,
         [
             Epoch {
                 delivered: Vec::new(),
-                asked: lines(&["boom:x"]),
+                asked: lines(&["host.boom:x"]),
                 logged: Vec::new(),
             },
             Epoch {
-                delivered: lines(&["boom:x"]),
+                delivered: lines(&["host.boom:x"]),
                 asked: Vec::new(),
                 logged: Vec::new(),
             },
@@ -189,14 +192,14 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
 #[test]
 fn a_discarded_tool_call_is_refused() {
     for source in [
-        "echo(1);",
-        "void echo(1);",
-        "async function f() { echo(1); }",
+        "host.echo(1);",
+        "void host.echo(1);",
+        "async function f() { host.echo(1); }",
     ] {
         let error = lower_with_effects(source).expect_err(source);
         assert_eq!(error.code, DiagnosticCode::UnawaitedTool, "{source}");
     }
-    assert!(lower_with_effects("const p = echo(1); await p;").is_ok());
+    assert!(lower_with_effects("const p = host.echo(1); await p;").is_ok());
     // A name the cell binds is its own function, not the host's tool.
     assert!(lower("const echo = (x) => x; echo(1);").is_ok());
 }
@@ -204,9 +207,9 @@ fn a_discarded_tool_call_is_refused() {
 /// A tool is called with the arguments its signature takes.
 #[test]
 fn a_tool_call_with_the_wrong_number_of_arguments_is_refused() {
-    let error = lower_with_effects("await echo();").expect_err("too few");
+    let error = lower_with_effects("await host.echo();").expect_err("too few");
     assert_eq!(error.code, DiagnosticCode::UnsupportedExpression);
-    assert!(lower_with_effects("await echo(1, 2);").is_err());
+    assert!(lower_with_effects("await host.echo(1, 2);").is_err());
 }
 
 /// FN-CROSS: guest functions cross as frozen function values, including
@@ -217,12 +220,12 @@ fn tool_arguments_freeze_guest_functions_but_refuse_builtins() {
 
     use super::machine::{Ended, end};
 
-    let direct = end("const value = () => 1; await finish(value);");
+    let direct = end("const value = () => 1; await control.finish(value);");
     let Ended::Finished(Datum::FunctionValue(function)) = direct else {
         panic!("a guest function crosses as a function value: {direct:?}");
     };
     assert_eq!(
-        end("const value = [1, [2, () => 1]]; await finish(value);"),
+        end("const value = [1, [2, () => 1]]; await control.finish(value);"),
         Ended::Finished(Datum::List(vec![
             Datum::Float(Float::new(1.0)),
             Datum::List(vec![
@@ -237,7 +240,9 @@ fn tool_arguments_freeze_guest_functions_but_refuse_builtins() {
         "new Map([['k', [Math.abs]]])",
     ] {
         assert_eq!(
-            end(&format!("const value = {argument}; await finish(value);")),
+            end(&format!(
+                "const value = {argument}; await control.finish(value);"
+            )),
             Ended::Raised("not_data".to_string()),
             "{argument}"
         );
@@ -344,12 +349,14 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         await items.sort({});
         await other.fetch({});
         "#,
-            &lash_kernel_dialect::Environment {
-                library: super::library(),
-                effects: &Default::default(),
-                controls: &Default::default(),
-                tool_roots: &Default::default(),
-            },
+            &lash_kernel_dialect::Environment::new(
+                super::library(),
+                &lash_kernel_dialect::Namespaces::of_signatures(
+                    &Default::default(),
+                    &Default::default(),
+                )
+                .expect("the test's effects are operations"),
+            ),
             lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
                 functions: &Default::default(),
@@ -373,12 +380,14 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
         let calls = crate::Parser::default()
             .tool_calls(
                 source,
-                &lash_kernel_dialect::Environment {
-                    library: super::library(),
-                    effects: &Default::default(),
-                    controls: &Default::default(),
-                    tool_roots: &Default::default(),
-                },
+                &lash_kernel_dialect::Environment::new(
+                    super::library(),
+                    &lash_kernel_dialect::Namespaces::of_signatures(
+                        &Default::default(),
+                        &Default::default(),
+                    )
+                    .expect("the test's effects are operations"),
+                ),
                 lash_kernel_dialect::CellEnvironment::first(),
             )
             .expect("discovery does not lower unrelated refusals");
@@ -394,7 +403,7 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
 /// a child parks inside its source body, then finishes a nested expression.
 #[test]
 fn an_async_body_resumes_with_identical_values_and_charge() {
-    let source = "const work = async (n: number) => n + await echo(n); await finish([await work(3), await work(4)]);";
+    let source = "const work = async (n: number) => n + await host.echo(n); await control.finish([await work(3), await work(4)]);";
     let plain = super::machine::plain_record_resume(source, u64::MAX, false);
     let cold = super::machine::plain_record_resume(source, 1, true);
     assert_eq!((&plain.0, plain.1), (&cold.0, cold.1));

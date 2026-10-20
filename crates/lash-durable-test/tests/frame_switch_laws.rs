@@ -21,6 +21,8 @@ use lash_core::{ToolCall, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
 
 const SWITCH_TOOL: &str = "switch_frame";
+
+const SWITCH_TOOL_OPERATION: &str = "tools.switch_frame";
 const FIRST: &str = "first turn";
 const SWITCH: &str = "switch frames, then carry on";
 const TASK: &str = "summarise where the work stands";
@@ -75,7 +77,7 @@ async fn world(
 ) -> Option<World> {
     let definition = lash_core::ToolDefinition::control(
         SWITCH_TOOL,
-        SWITCH_TOOL,
+        SWITCH_TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -95,7 +97,7 @@ async fn world(
         SWITCH,
         vec![served::response(vec![served::call(
             "switch-call",
-            SWITCH_TOOL,
+            SWITCH_TOOL_OPERATION,
             serde_json::json!({}),
         )])],
     );

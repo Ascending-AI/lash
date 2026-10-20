@@ -11,24 +11,25 @@ use super::*;
 
 use lash::TurnInput;
 use lash::tracing::otel::trace::SpanId;
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::testing::runtime_helpers::{MockCall, mock_provider};
 use opentelemetry_sdk::trace::SpanData;
 
 const ECHO: &str = "echo_now";
+
+const ECHO_OPERATION: &str = "tools.echo_now";
 const HOLD: &str = "hold_open";
+const HOLD_OPERATION: &str = "tools.hold_open";
 
 fn definition(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A terminal-closure probe.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 /// [`ECHO`] answers at once; [`HOLD`] opens `entered` and holds until its
@@ -67,13 +68,16 @@ impl ToolProvider for Tools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [ECHO, HOLD]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == HOLD {
+        if call.name() == HOLD_OPERATION {
             self.entered.notify_one();
             if self.deaf {
                 let _permit = self.release.acquire().await;
@@ -100,7 +104,7 @@ fn round_call() -> MockCall {
                 .into_iter()
                 .map(|(call_id, tool_name)| LlmOutputPart::ToolCall {
                     call_id: call_id.to_owned(),
-                    tool_name: tool_name.to_owned(),
+                    tool_name: format!("tools__{tool_name}"),
                     input_json: "{}".to_owned(),
                     replay: None,
                 })
@@ -132,7 +136,10 @@ async fn held_round(id: &str, tools: &Tools) -> Result<(Observed, LashCore, lash
     tools.entered.notified().await;
     observed
         .until("the settled member's span is exported", |observed| {
-            observed.spans(&format!("execute_tool {ECHO}")).len() == 1
+            observed
+                .spans(&format!("execute_tool {ECHO_OPERATION}"))
+                .len()
+                == 1
         })
         .await;
     Ok((observed, core, handle))
@@ -144,13 +151,13 @@ fn assert_closed(observed: &Observed, hold_outcome: &[&str]) {
     let all = observed.exported();
     let turns = observed.spans("invoke_agent");
     assert_eq!(turns.len(), 1, "one exported turn: {all:#?}");
-    let echo = observed.spans(&format!("execute_tool {ECHO}"));
+    let echo = observed.spans(&format!("execute_tool {ECHO_OPERATION}"));
     assert_eq!(echo.len(), 1, "the settled member closed once: {all:#?}");
     assert_eq!(
         attribute(&echo[0], "lash.outcome").as_deref(),
         Some("completed")
     );
-    let hold = observed.spans(&format!("execute_tool {HOLD}"));
+    let hold = observed.spans(&format!("execute_tool {HOLD_OPERATION}"));
     assert_eq!(hold.len(), 1, "the open member closed once: {all:#?}");
     let outcome = attribute(&hold[0], "lash.outcome");
     assert!(

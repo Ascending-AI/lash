@@ -18,7 +18,6 @@
 //! render verbatim. Their owners test the prose they contribute.
 
 use super::*;
-use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 /// Text that names the retired surface, with the reason each token is a defect.
 ///
@@ -163,7 +162,7 @@ async fn assembled_prompt_fragments_with_projection(
     let vocabulary = dialect.prompt_vocabulary();
     let tool = lash_core::ToolDefinition::raw(
         "tool:test/web_fetch",
-        "web_fetch",
+        "web.fetch",
         "Fetch a URL",
         serde_json::json!({
             "type": "object",
@@ -174,15 +173,14 @@ async fn assembled_prompt_fragments_with_projection(
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["web"], "fetch"));
+    .with_execution(std::time::Duration::from_secs(120));
     // A second member whose *shapes* are collections of records, like
     // `processes.list`. The first fixture's schema is one string field, so the
     // tool-docs fragment never rendered a collection or record type label and
     // the walker could not see what a TypeScript reader is shown for them.
     let listing = lash_core::ToolDefinition::raw(
         "tool:test/list_process_handles",
-        "list_process_handles",
+        "processes.list",
         "List process runs visible to this session",
         serde_json::json!({
             "type": "object",
@@ -213,8 +211,7 @@ async fn assembled_prompt_fragments_with_projection(
         }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["processes"], "list"));
+    .with_execution(std::time::Duration::from_secs(120));
     // A third member shaped like an MCP import (FIG-4544): no
     // `additionalProperties`, nested object and array properties, constraints
     // and a field without a description. Every fixture above is a closed
@@ -222,7 +219,7 @@ async fn assembled_prompt_fragments_with_projection(
     // widened `Record<string, unknown>` never showed up in.
     let imported = lash_core::ToolDefinition::raw(
         "tool:test/issues_search",
-        "mcp__tracker__issues_search",
+        "tracker.issues_search",
         "[MCP tracker] Search issues.",
         serde_json::json!({
             "type": "object",
@@ -258,11 +255,7 @@ async fn assembled_prompt_fragments_with_projection(
         }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
-        ["tracker"],
-        "issues_search",
-    ));
+    .with_execution(std::time::Duration::from_secs(120));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool, listing, imported]);
 
     let mut fragments = vec![(
@@ -295,10 +288,10 @@ async fn assembled_prompt_fragments_with_projection(
     fragments.push((
         "deferred-tool advertisement",
         crate::catalogue_preview(
-            [crate::CataloguePreviewEntry {
-                module_path: vec!["workbench_deferred".to_string()],
-                call: "stats".to_string(),
-            }],
+            [crate::CataloguePreviewEntry::new(
+                lash_core::IntoOperation::into_operation("workbench_deferred.stats")
+                    .expect("a canonical operation"),
+            )],
             &crate::CataloguePreviewOptions::default(),
         )
         .expect("one catalogued entry renders an advertisement"),

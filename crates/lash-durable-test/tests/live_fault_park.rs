@@ -38,7 +38,6 @@ mod sim;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::durable_port::domain::UnfinishedPhase;
 use lash_core::durable_port::{ActorKey, ActorState, CommitLabel, Release};
 use lash_core::llm::types::LlmRequest;
@@ -443,9 +442,11 @@ const ORDINAL_MISS_PARK: &str = r#"{"reason":"pass_loop","failed_passes":8,"erro
 
 /// The native tool whose first run holds until its node goes.
 const HOLD: &str = "hold_probe";
+const HOLD_OPERATION: &str = "tools.hold_probe";
 
 /// The cell's `Repeatable` tool, as FIG-6289's ordinal miss met it.
 const FLAKY: &str = "flaky";
+const FLAKY_OPERATION: &str = "tools.flaky";
 
 /// A tool definition bound as `tools.<name>`.
 fn probe_definition(
@@ -455,7 +456,7 @@ fn probe_definition(
 ) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A park law's probe.",
         lash_core::ToolDefinition::default_input_schema(),
         output,
@@ -463,7 +464,6 @@ fn probe_definition(
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(600))
     .with_execution_policy(policy)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 /// [`HOLD`]: its first run says it started and never answers; every later
@@ -499,7 +499,7 @@ impl lash_core::ToolProvider for Holding {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == HOLD).then(|| Arc::new(hold_definition().contract()))
+        (name == HOLD_OPERATION).then(|| Arc::new(hold_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -548,7 +548,7 @@ impl lash_core::ToolProvider for Flaky {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == FLAKY).then(|| Arc::new(flaky_definition().contract()))
+        (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -675,7 +675,7 @@ async fn a_turn_wedged_in_its_tools_phase_by_a_pass_loop_park_finishes_at_the_ne
         WEDGED,
         vec![served::response(vec![served::call(
             "call_0",
-            HOLD,
+            HOLD_OPERATION,
             serde_json::json!({}),
         )])],
     );

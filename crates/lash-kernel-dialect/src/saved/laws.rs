@@ -190,8 +190,7 @@ fn installing_loads_no_capture_payload() {
         &functions,
         &BTreeSet::from([Name::new("read")]),
         &lash_kernel_doc::FunctionRepresentation::Bare,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
+        &crate::Namespaces::default(),
         &|_| true,
     )
     .expect("install");
@@ -547,8 +546,11 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
             &functions,
             &BTreeSet::from([Name::new("load")]),
             &lash_kernel_doc::FunctionRepresentation::Bare,
-            &BTreeMap::from([(fetch.clone(), signature.clone())]),
-            &BTreeMap::new(),
+            &crate::Namespaces::of_signatures(
+                &BTreeMap::from([(fetch.clone(), signature.clone())]),
+                &BTreeMap::new(),
+            )
+            .expect("an operation"),
             &|_| true,
         )
         .map(|_| document.manifest.effects)

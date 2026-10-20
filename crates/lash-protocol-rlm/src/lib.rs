@@ -100,7 +100,6 @@ pub mod tool_presenters {
     pub use lash_tool_presenter_python as python;
     pub use lash_tool_presenter_typescript as typescript;
 }
-pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
     Charge, ChargeLimiter, ExecutionBounds, HelperReleaseGate, InstructionBound, LimitDecision,
     MemoryBound, MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmChannel,

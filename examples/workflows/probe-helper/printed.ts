@@ -15,13 +15,13 @@ export async function summarize_inbox() {
       } else {
         t3 = await helper_ts_read(email, "snippet");
       }
-      let summary = (await await tools.llm.query((await helper_ts_boundary({task: "Summarize this email", inputs: {snippet: t3}}))));
-      await await tools.display.show_message((await helper_ts_boundary({text: summary})));
+      let summary = (await await llm.query((await helper_ts_boundary({task: "Summarize this email", inputs: {snippet: t3}}))));
+      await await display.showMessage((await helper_ts_boundary({text: summary})));
       return k.returnVia(summary, helper_ts_promise_adopt);
     }, this3, helper_list_copy(args3)));
   }, {}] as const;
   /** Get the three newest emails */
-  let emails = (await await tools.gmail.list_recent((await helper_ts_boundary({count: 3.0}))));
+  let emails = (await await gmail.listRecent((await helper_ts_boundary({count: 3.0}))));
   /** Start an empty list of summaries */
   let summaries = [];
   /** Go through each email */

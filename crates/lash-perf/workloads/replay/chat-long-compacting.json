@@ -12,7 +12,7 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_lookup",
+              "tool": "tools.fixture_lookup",
               "args": {
                 "key": "item-{turn}"
               }

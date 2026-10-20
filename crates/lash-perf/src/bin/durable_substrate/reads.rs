@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolProviderRegistration, ToolReads};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -85,7 +84,7 @@ impl StaticToolExecute for Adapter {
         reason = "the fixture write schema requires a string previous answer"
     )]
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        let value = if call.name() == "bench_write" {
+        let value = if call.name() == "tools.bench_write" {
             let previous = call.args["previous"].as_str().expect("write argument");
             assert_eq!(previous, self.0.value(1));
             self.0.writes.lock_recover().push(previous.to_owned());
@@ -108,28 +107,27 @@ fn definition(
 ) -> Result<lash_core::ToolDefinition> {
     Ok(lash_core::ToolDefinition::raw(
         name,
-        name,
+        format!("tools.{name}"),
         "Fixed local benchmark observation.",
         json!({"type":"object", "properties":{"previous":{"type":"string"}},
             "required":["previous"], "additionalProperties":false}),
         json!({"type":"string"}),
     )?
     .with_execution(Duration::from_secs(30))
-    .with_execution_policy(policy)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name)))
+    .with_execution_policy(policy))
 }
 
 fn source(python: bool, variant: Variant, payload: usize) -> String {
     let call = if python {
-        "await tools_bench_read({\"previous\": r})"
+        "await tools.bench_read({\"previous\": r})"
     } else {
-        "await tools.bench_read({previous: r})"
+        "await tools.benchRead({previous: r})"
     };
     let final_value = format!("{}:{}", variant.count(), "x".repeat(payload));
     let body = if python {
         (if variant == Variant::Mixed {
             format!(
-                "r = \"seed\"\nr = {call}\nawait tools_bench_write({{\"previous\": r}})\nr = {call}\n"
+                "r = \"seed\"\nr = {call}\nawait tools.bench_write({{\"previous\": r}})\nr = {call}\n"
             )
         } else {
             format!("r = \"seed\"\nfor i in range({READS}):\n    r = {call}\n")
@@ -137,7 +135,7 @@ fn source(python: bool, variant: Variant, payload: usize) -> String {
     } else {
         (if variant == Variant::Mixed {
             format!(
-                "let r = \"seed\";\nr = {call};\nawait tools.bench_write({{previous: r}});\nr = {call};\n"
+                "let r = \"seed\";\nr = {call};\nawait tools.benchWrite({{previous: r}});\nr = {call};\n"
             )
         } else {
             format!("let r = \"seed\";\nfor (let i = 0; i < {READS}; i++) {{ r = {call}; }}\n")

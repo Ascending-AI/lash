@@ -163,7 +163,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
             LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "call-1".to_string(),
-                    tool_name: "app_lookup".to_string(),
+                    tool_name: "tools__app_lookup".to_string(),
                     input_json: "{}".to_string(),
                     replay: None,
                 }],
@@ -247,7 +247,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
                 explicit_ephemeral_facets(LashCore::rlm_builder(rlm_backend, rlm_factory))
                     .serve_test_llm_profile(
                         queued_text_provider(vec![typescript_block(
-                            r#"const value = await tools.app_lookup({});
+                            r#"const value = await tools.appLookup({});
 await control.finish("done");"#,
                         )]),
                         mock_llm_profile_spec(),
@@ -319,7 +319,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
                 LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: format!("sentinel-{turn}"),
-                        tool_name: "app_lookup".to_string(),
+                        tool_name: "tools__app_lookup".to_string(),
                         input_json: "{}".to_string(),
                         replay: None,
                     }],
@@ -424,7 +424,7 @@ fn shipped_tool_presenters_have_no_authored_examples() {
         ToolDisclosure, ToolPresentationEntry, ToolPresentationRequest, ToolPresenter,
     };
     let definition = lash::tools::ToolDefinition::raw(
-        "tool:lookup", "lookup", "Lookup a record",
+        "tool:lookup", "tools.lookup", "Lookup a record",
         serde_json::json!({"type":"object", "properties":{"query":{"type":"string", "description":"Search text"}}, "required":["query"]}),
         serde_json::json!({"type":"string"}),
     ).expect("schemas").with_execution(std::time::Duration::from_secs(30));
@@ -433,7 +433,7 @@ fn shipped_tool_presenters_have_no_authored_examples() {
     let entries = [ToolPresentationEntry {
         manifest: &manifest,
         contract: &contract,
-        call_path: "lookup",
+        call_path: "tools.lookup",
         pinned: false,
     }];
     let standard = lash::standard::StandardToolPresenter;
@@ -504,14 +504,15 @@ fn shipped_tool_presenters_have_no_authored_examples() {
 fn facade_catalogue_preview_honors_host_vocabulary_and_limits() {
     let preview = lash::tools::catalogue_preview(
         [lash::tools::CataloguePreviewEntry::new(
-            ["tools", "hidden_module"],
-            "hidden_call",
+            lash::tools::IntoOperation::into_operation("tools.hidden_module.hidden_call")
+                .expect("a canonical operation"),
         )],
         &lash::tools::CataloguePreviewOptions {
             title: "Host catalogue".into(),
             search_call_path: "tools.find".into(),
             module_limit: 0,
             call_name_limit: 0,
+            ..lash::tools::CataloguePreviewOptions::default()
         },
     )
     .expect("nonempty catalogue");
@@ -551,7 +552,7 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
             text_response(&typescript_block(
                 r#"const mapped = new Map([["a", 1], ["b", 2], ["c", 3]]);
 const object = { first: 1, second: 2 };
-await tools.app_lookup({});
+await tools.appLookup({});
 console.log("abcdefghijklmnopqrstuvwxyz");"#,
             )),
             text_response(&typescript_block(

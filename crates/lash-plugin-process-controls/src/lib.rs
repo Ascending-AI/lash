@@ -15,9 +15,7 @@ use serde_json::Value;
 
 use lash_core::plugin::{PluginFactory, PluginSpec, StaticPluginFactory};
 use lash_core::{ProcessId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
-use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
-};
+use lash_tool_support::{StaticToolExecute, StaticToolProvider};
 
 mod declarations;
 
@@ -266,10 +264,10 @@ struct SessionProcessAdminTools {
 #[async_trait::async_trait]
 impl StaticToolExecute for SessionProcessAdminTools {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == "await_process" {
+        if call.name() == "processes.await" {
             return execute_process_await_tool_call(call.context, call.args);
         }
-        if call.name() == "start_process" {
+        if call.name() == "processes.start" {
             return execute_process_start_tool_call(
                 call.context,
                 call.args,
@@ -278,15 +276,15 @@ impl StaticToolExecute for SessionProcessAdminTools {
             )
             .await;
         }
-        if call.name() == "get_process_definition" {
+        if call.name() == "processes.get" {
             return execute_process_get_tool_call(call.context, call.args);
         }
-        if call.name() == "list_process_handles" {
+        if call.name() == "processes.list" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
             );
         }
-        if call.name() != "cancel_process" || !self.include_cancel_process {
+        if call.name() != "processes.cancel" || !self.include_cancel_process {
             return done_without_intents(ToolOutcome::err_fmt(format_args!(
                 "Unknown leaf process tool: {}",
                 call.name()
@@ -351,7 +349,7 @@ pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemp
 fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
-        "list_process_handles",
+        "processes.list",
         "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition ID, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of an inline function and `definition_id` selects the ID from a returned handle or published workflow and `status: \"any\"` includes visible run history.",
         serde_json::json!({
             "type": "object",
@@ -372,7 +370,6 @@ fn process_list_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::new(["processes"], "list"))
 }
 
 fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinition> {
@@ -407,7 +404,7 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
 fn process_await_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:await_process",
-        "await_process",
+        "processes.await",
         "Wait for a durable process to finish and return its terminal outcome. Pass the handle a process start or `processes.list(...)` returned. The wait is durable: it survives a restart of the waiting turn, and cancelling the turn drops the wait without cancelling the process.",
         serde_json::json!({
             "type": "object",
@@ -433,7 +430,6 @@ fn process_await_tool_definition() -> ToolDefinition {
     // process ends or the awaiting scope does.
     .with_declaration(lash_core::ToolDeclaration::deferring(), Some(lash_core::ParkBound::UntilScopeEnd))
     .expect("a deferring tool declares its park bound")
-    .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
 #[expect(
@@ -443,7 +439,7 @@ fn process_await_tool_definition() -> ToolDefinition {
 fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
-        "cancel_process",
+        "processes.cancel",
         "Request cancellation for a durable process, including a running host-launched process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`. The result names the process and the cancellation this call requested; await the handle for the process's terminal.",
         serde_json::json!({
             "type": "object",
@@ -477,7 +473,6 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     .with_declaration(lash_core::ToolDeclaration::default()
             .with_intents([lash_core::ToolIntentKind::CancelProcess]), None)
             .expect("a valid tool declaration")
-    .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
 }
 
 /// Parks the call on the terminal of the handle's process.
@@ -723,7 +718,7 @@ mod certification {
                 lash::provider::LlmResponse {
                     parts: vec![lash::direct::LlmOutputPart::ToolCall {
                         call_id: "list".into(),
-                        tool_name: "list_process_handles".into(),
+                        tool_name: "processes__list".into(),
                         input_json: "{}".into(),
                         replay: None,
                     }],

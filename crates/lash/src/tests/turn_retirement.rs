@@ -27,29 +27,26 @@ fn cell(finishes: bool) -> String {
         ""
     };
     typescript_block(&format!(
-        "const found = await tools.app_lookup({{}});\n\
-         const approved = await tools.app_approve({{}});{finish}"
+        "const found = await tools.appLookup({{}});\n\
+         const approved = await tools.appApprove({{}});{finish}"
     ))
 }
 
 /// `tools.<name>`; a deferring one may park on its completion key.
 fn tool(name: &str, deferring: bool) -> lash_core::ToolDefinition {
-    let definition = test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            format!("tool:{name}"),
-            name,
-            "A law's tool.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "object" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120)),
-        name,
-    );
+    let definition = lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        format!("tools.{name}"),
+        "A law's tool.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     if !deferring {
         return definition;
     }
@@ -89,13 +86,16 @@ impl ToolProvider for ApprovalTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         ["app_lookup", "app_approve"]
             .contains(&name)
-            .then(|| Arc::new(tool(name, name == "app_approve").contract()))
+            .then(|| Arc::new(tool(name, name == "tools.app_approve").contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == "app_lookup" {
+        if call.name() == "tools.app_lookup" {
             return lash_core::ToolOutcome::ok(serde_json::json!({ "found": true })).into();
         }
         let key = match call.context.completion_key() {
@@ -351,7 +351,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     );
     assert_eq!(
         tools(&live_calls),
-        vec!["app_lookup".to_owned()],
+        vec!["tools.app_lookup".to_owned()],
         "the stopped cell's settled lookup is reported"
     );
 
@@ -963,6 +963,8 @@ struct FlakyLookup {
 
 const FLAKY: &str = "flaky_lookup";
 
+const FLAKY_OPERATION: &str = "tools.flaky_lookup";
+
 fn flaky_definition() -> lash_core::ToolDefinition {
     tool(FLAKY, false).with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
@@ -985,7 +987,7 @@ impl ToolProvider for FlakyLookup {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == FLAKY).then(|| Arc::new(flaky_definition().contract()))
+        (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -1029,7 +1031,7 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: "flaky-call".to_string(),
-                        tool_name: FLAKY.to_string(),
+                        tool_name: FLAKY_OPERATION.replace('.', "__"),
                         input_json: "{}".to_string(),
                         replay: None,
                     }],
@@ -1068,7 +1070,7 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
         2,
         "the call was retried once"
     );
-    assert_eq!(tools(&live_calls), vec![FLAKY.to_owned()]);
+    assert_eq!(tools(&live_calls), vec![FLAKY_OPERATION.to_owned()]);
     let left = ledger(&stores, session_name, run);
     assert!(
         left.is_empty(),

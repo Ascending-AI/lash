@@ -93,7 +93,7 @@ except UnboundLocalError as error:
 error = ValueError("made", "not raised")
 print(repr(error), error.args, isinstance(error, int))
 try:
-    await boom("tool failed")
+    await host.boom("tool failed")
 except Exception as error:
     print("tool", type(error).__name__, error)
 try:

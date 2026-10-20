@@ -13,7 +13,7 @@ pub(super) async fn agent_started_process_tool_call_graph_execution()
         vec![
             r#"<typescript>
 const definition = async () => {
-  const value = await tools.app_lookup({});
+  const value = await tools.appLookup({});
   return value;
 };
 const handle = await processes.start({ definition });

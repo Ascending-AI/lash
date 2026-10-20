@@ -65,16 +65,14 @@ impl Service {
         &self,
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
-        environment: &lash_kernel_dialect::Environment<'_>,
+        operations: &lash_kernel_dialect::Operations,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
             .request_accounted(Request::ImportWorkflow {
                 language,
                 source: source.to_owned(),
-                effects: environment.effects.clone(),
-                tool_roots: environment.tool_roots.clone(),
-                controls: environment.controls.clone(),
+                operations: operations.clone(),
                 limits,
             })
             .await?;

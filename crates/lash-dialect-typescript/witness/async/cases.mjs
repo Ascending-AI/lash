@@ -1,5 +1,5 @@
 // The asynchronous witnesses. Each case is a cell that calls the scripted
-// tools `echo(x)` (answers `x`), `boom(x)` (fails with an error named
+// tools `host.echo(x)` (answers `x`), `host.boom(x)` (fails with an error named
 // `boom` whose message is `x`) and `sleep(ms)`, and reports through
 // `console.log`, which writes an object as compact JSON. `deliveries` scripts the arrivals: each entry is the batch
 // of outcomes that arrive together, by the label of its request. A case
@@ -95,10 +95,10 @@ for (const base of [null, undefined]) {
     source: `
 let counter = 0;
 const step = async (name) => {
-  const first = await echo(name + "1");
+  const first = await host.echo(name + "1");
   counter = counter + 1;
   console.log(\`\${name} first \${first} \${counter}\`);
-  const second = await echo(name + "2");
+  const second = await host.echo(name + "2");
   counter = counter * 2;
   console.log(\`\${name} second \${second} \${counter}\`);
   return first + second;
@@ -106,17 +106,17 @@ const step = async (name) => {
 const all = await Promise.all([step("a"), step("b"), step("c")]);
 console.log(\`done \${all[0]} \${all[1]} \${all[2]} \${counter}\`);
 `,
-    deliveries: [["echo:b1"], ["echo:a1", "echo:c1"], ["echo:c2"], ["echo:a2"], ["echo:b2"]],
+    deliveries: [["host.echo:b1"], ["host.echo:a1", "host.echo:c1"], ["host.echo:c2"], ["host.echo:a2"], ["host.echo:b2"]],
   },
   {
     name: "fan_out_other_arrival_order",
     source: `
 let counter = 0;
 const step = async (name) => {
-  const first = await echo(name + "1");
+  const first = await host.echo(name + "1");
   counter = counter + 1;
   console.log(\`\${name} first \${first} \${counter}\`);
-  const second = await echo(name + "2");
+  const second = await host.echo(name + "2");
   counter = counter * 2;
   console.log(\`\${name} second \${second} \${counter}\`);
   return first + second;
@@ -124,20 +124,20 @@ const step = async (name) => {
 const all = await Promise.all([step("a"), step("b"), step("c")]);
 console.log(\`done \${all[0]} \${all[1]} \${all[2]} \${counter}\`);
 `,
-    deliveries: [["echo:c1", "echo:b1", "echo:a1"], ["echo:a2"], ["echo:b2", "echo:c2"]],
+    deliveries: [["host.echo:c1", "host.echo:b1", "host.echo:a1"], ["host.echo:a2"], ["host.echo:b2", "host.echo:c2"]],
   },
   {
     name: "operand_read_before_an_await",
     source: `
 let total = 0;
 const add = async (n) => {
-  total = total + (await echo(n));
+  total = total + (await host.echo(n));
   console.log(\`added \${n} total \${total}\`);
 };
 await Promise.all([add(1), add(10)]);
 console.log(\`total \${total}\`);
 `,
-    deliveries: [["echo:10"], ["echo:1"]],
+    deliveries: [["host.echo:10"], ["host.echo:1"]],
   },
   {
     name: "callbacks_of_a_map_run_concurrently",
@@ -151,13 +151,13 @@ const mapOf = (items, f) => {
 };
 const results = await Promise.all(mapOf(["a", "b", "c"], async (item) => {
   console.log(\`start \${item}\`);
-  const value = await echo(item);
+  const value = await host.echo(item);
   console.log(\`end \${value}\`);
   return value + value;
 }));
 console.log(\`results \${results[0]} \${results[1]} \${results[2]}\`);
 `,
-    deliveries: [["echo:c"], ["echo:a"], ["echo:b"]],
+    deliveries: [["host.echo:c"], ["host.echo:a"], ["host.echo:b"]],
   },
   {
     name: "promise_created_then_awaited_later",
@@ -184,34 +184,34 @@ console.log(\`got \${first} \${second}\`);
     name: "race_loser_keeps_running_and_fails",
     source: `
 const slow = async () => {
-  const value = await echo("slow");
+  const value = await host.echo("slow");
   console.log(\`slow got \${value}\`);
-  await boom("late");
+  await host.boom("late");
   console.log("not reached");
 };
 const fast = async () => {
-  const value = await echo("fast");
+  const value = await host.echo("fast");
   return value;
 };
 const winner = await Promise.race([slow(), fast()]);
 console.log(\`winner \${winner}\`);
-const more = await echo("more");
+const more = await host.echo("more");
 console.log(\`more \${more}\`);
-const again = await echo("again");
+const again = await host.echo("again");
 console.log(\`again \${again}\`);
 `,
-    deliveries: [["echo:fast"], ["echo:slow"], ["boom:late"], ["echo:more"], ["echo:again"]],
+    deliveries: [["host.echo:fast"], ["host.echo:slow"], ["host.boom:late"], ["host.echo:more"], ["host.echo:again"]],
   },
   {
     name: "all_fails_fast",
     source: `
 const ok = async (name) => {
-  const value = await echo(name);
+  const value = await host.echo(name);
   console.log(\`ok \${value}\`);
   return value;
 };
 const bad = async () => {
-  await boom("x");
+  await host.boom("x");
 };
 try {
   await Promise.all([ok("a"), bad(), ok("b")]);
@@ -219,10 +219,10 @@ try {
 } catch (error) {
   console.log(\`caught \${error}\`);
 }
-const tail = await echo("tail");
+const tail = await host.echo("tail");
 console.log(\`tail \${tail}\`);
 `,
-    deliveries: [["echo:a"], ["boom:x"], ["echo:b"], ["echo:tail"]],
+    deliveries: [["host.echo:a"], ["host.boom:x"], ["host.echo:b"], ["host.echo:tail"]],
   },
   {
     name: "all_settled",
@@ -232,17 +232,17 @@ const thrower = async () => {
 };
 const failing = async () => {
   try {
-    await boom("b");
+    await host.boom("b");
   } catch (error) {
     throw \`\${error}\`;
   }
 };
-const results = await Promise.allSettled([echo("a"), failing(), 3, thrower()]);
+const results = await Promise.allSettled([host.echo("a"), failing(), 3, thrower()]);
 for (const result of results) {
   console.log(result);
 }
 `,
-    deliveries: [["boom:b"], ["echo:a"]],
+    deliveries: [["host.boom:b"], ["host.echo:a"]],
   },
   {
     name: "rejection_caught_after_its_task_ended",
@@ -269,16 +269,16 @@ try {
     source: `
 const run = async () => {
   try {
-    const value = await echo("body");
+    const value = await host.echo("body");
     console.log(\`body \${value}\`);
     throw "failed";
   } finally {
-    const cleaned = await echo("cleanup");
+    const cleaned = await host.echo("cleanup");
     console.log(\`cleanup \${cleaned}\`);
   }
 };
 const other = async () => {
-  const value = await echo("other");
+  const value = await host.echo("other");
   console.log(\`other \${value}\`);
 };
 const background = other();
@@ -289,7 +289,7 @@ try {
 }
 await background;
 `,
-    deliveries: [["echo:body"], ["echo:other", "echo:cleanup"]],
+    deliveries: [["host.echo:body"], ["host.echo:other", "host.echo:cleanup"]],
   },
   {
     name: "microtask_order_without_tools",
@@ -331,10 +331,10 @@ log("end");
   {
     name: "then_catch_finally_over_tools",
     source: `
-const p = echo("a")
+const p = host.echo("a")
   .then((value) => {
     console.log(\`then \${value}\`);
-    return boom("b");
+    return host.boom("b");
   })
   .catch((error) => {
     console.log(\`catch \${error}\`);
@@ -343,17 +343,17 @@ const p = echo("a")
   .finally(() => {
     console.log("finally");
   });
-const q = echo("q");
+const q = host.echo("q");
 console.log(\`q \${await q}\`);
 console.log(\`p \${await p}\`);
 `,
-    deliveries: [["echo:a"], ["echo:q", "boom:b"]],
+    deliveries: [["host.echo:a"], ["host.echo:q", "host.boom:b"]],
   },
   {
     name: "finally_keeps_the_outcome_and_waits",
     source: `
 const log = (line) => console.log(line);
-const failed = Promise.reject("no").finally(() => echo("f"));
+const failed = Promise.reject("no").finally(() => host.echo("f"));
 const fine = Promise.resolve("yes").finally(() => { log("fine finally"); });
 const ticks = Promise.resolve()
   .then(() => log("t1"))
@@ -369,86 +369,86 @@ try {
 }
 await ticks;
 `,
-    deliveries: [["echo:f"]],
+    deliveries: [["host.echo:f"]],
   },
   {
     name: "arrivals_in_one_batch_keep_their_order",
     source: `
 const viaPromise = async () => {
-  const promise = echo("p");
+  const promise = host.echo("p");
   const value = await promise;
   console.log(\`promise \${value}\`);
 };
 const inPlace = async () => {
-  const value = await echo("i");
+  const value = await host.echo("i");
   console.log(\`in place \${value}\`);
 };
 const viaAll = async () => {
-  const values = await Promise.all([echo("x")]);
+  const values = await Promise.all([host.echo("x")]);
   console.log(\`all \${values[0]}\`);
 };
 const failing = async () => {
   try {
-    await boom("e");
+    await host.boom("e");
   } catch (error) {
     console.log(\`failed \${error}\`);
   }
 };
 await Promise.all([viaPromise(), inPlace(), viaAll(), failing()]);
 `,
-    deliveries: [["echo:x", "echo:p", "boom:e", "echo:i"]],
+    deliveries: [["host.echo:x", "host.echo:p", "host.boom:e", "host.echo:i"]],
   },
   {
     name: "arrivals_in_one_batch_reversed",
     source: `
 const viaPromise = async () => {
-  const promise = echo("p");
+  const promise = host.echo("p");
   const value = await promise;
   console.log(\`promise \${value}\`);
 };
 const inPlace = async () => {
-  const value = await echo("i");
+  const value = await host.echo("i");
   console.log(\`in place \${value}\`);
 };
 const viaAll = async () => {
-  const values = await Promise.all([echo("x")]);
+  const values = await Promise.all([host.echo("x")]);
   console.log(\`all \${values[0]}\`);
 };
 const failing = async () => {
   try {
-    await boom("e");
+    await host.boom("e");
   } catch (error) {
     console.log(\`failed \${error}\`);
   }
 };
 await Promise.all([viaPromise(), inPlace(), viaAll(), failing()]);
 `,
-    deliveries: [["echo:i", "boom:e", "echo:p", "echo:x"]],
+    deliveries: [["host.echo:i", "host.boom:e", "host.echo:p", "host.echo:x"]],
   },
   {
     name: "race_and_any_with_a_sleep",
     source: `
 const timer = sleep(50);
-const first = await Promise.race([timer, echo("r")]);
+const first = await Promise.race([timer, host.echo("r")]);
 console.log(\`race \${first}\`);
-const found = await Promise.any([boom("n1"), echo("y"), boom("n2")]);
+const found = await Promise.any([host.boom("n1"), host.echo("y"), host.boom("n2")]);
 console.log(\`any \${found}\`);
 try {
-  await Promise.any([boom("z1"), boom("z2")]);
+  await Promise.any([host.boom("z1"), host.boom("z2")]);
 } catch (error) {
   console.log(\`none \${error}\`);
 }
-const settled = await Promise.race([1, echo("unused")]);
+const settled = await Promise.race([1, host.echo("unused")]);
 console.log(\`settled \${settled}\`);
 await sleep(5);
 console.log("slept");
 `,
     deliveries: [
       ["sleep:50"],
-      ["boom:n1"],
-      ["echo:y"],
-      ["boom:z2"],
-      ["boom:z1"],
+      ["host.boom:n1"],
+      ["host.echo:y"],
+      ["host.boom:z2"],
+      ["host.boom:z1"],
       ["sleep:5"],
     ],
   },
@@ -475,7 +475,7 @@ await ticks;
     name: "single_and_list_waiters_on_one_promise",
     source: `
 const member = async () => {
-  await echo("m");
+  await host.echo("m");
 };
 const promise = member();
 const all = Promise.all([promise]);
@@ -490,6 +490,6 @@ await all;
 console.log("all");
 await waiting;
 `,
-    deliveries: [["echo:m"]],
+    deliveries: [["host.echo:m"]],
   },
 ];

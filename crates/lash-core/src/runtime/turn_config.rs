@@ -88,16 +88,10 @@ impl LashRuntime {
             registry
                 .validate_derived(resolved.base(), resolved.config())
                 .map_err(|fault| config_fault(fault).into_runtime_error())?;
-            let live = self
-                .session
-                .as_ref()
-                .map(|session| std::sync::Arc::clone(session.plugins().protocol_session()));
             super::config_ops::validate_config_tool_catalog(
                 plugins.host(),
                 &self.state,
-                self.page_reader(),
                 resolved.config(),
-                live.as_ref(),
             )
             .await
             .map_err(|error| RuntimeEffectControllerError::from(error).into_runtime_error())?;

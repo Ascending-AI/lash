@@ -242,7 +242,7 @@ impl CellTools {
         if let Some(definition) =
             ProductionToolHandlers::new(self.context.clone()).leaf_definition(&call.invocation())
         {
-            pending.tool_name = definition.manifest.name.clone();
+            pending.tool_name = definition.manifest.tool();
         }
         pending
     }
@@ -400,7 +400,7 @@ impl CellMembers {
         Err(
             lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
                 source: Box::new(crate::RegistrationRefused::UnregisteredIsolationEngine {
-                    tool: definition.manifest.name.clone(),
+                    tool: definition.manifest.tool(),
                     engine: engine.to_owned(),
                 }),
             }

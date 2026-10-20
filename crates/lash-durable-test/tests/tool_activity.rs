@@ -32,7 +32,6 @@ use std::sync::{Arc, Mutex};
 
 use lash::observe::Stream as _;
 use lash::observe::{SessionObservationStream, SessionObservationStreamItem};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity, StreamBlockKind,
 };
@@ -46,8 +45,10 @@ use served::{Tier, WATCHDOG, World};
 /// The tool whose body holds on the law's gate, then answers and, when
 /// asked, declares one detached child.
 const GATED: &str = "activity_gated";
+const GATED_OPERATION: &str = "tools.activity_gated";
 /// The tool that parks on its completion key; the law's gate resolves it.
 const DEFERRED: &str = "activity_deferred";
+const DEFERRED_OPERATION: &str = "tools.activity_deferred";
 /// What the law's presentation step appends to every call's return.
 const PRESENTED: &str = "presented by the activity law's step";
 
@@ -74,14 +75,13 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let definition = lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Answers its label once the activity law's gate opens.",
         object.clone(),
         object,
     )
     .expect("the tool's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
+    .with_execution(std::time::Duration::from_secs(120));
     if name == DEFERRED {
         definition
             .with_declaration(
@@ -164,6 +164,9 @@ impl lash_core::ToolProvider for ActivityTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [GATED, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
@@ -171,7 +174,7 @@ impl lash_core::ToolProvider for ActivityTools {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
-        if call.name() == DEFERRED {
+        if call.name() == DEFERRED_OPERATION {
             let key = call
                 .context
                 .completion_key()
@@ -434,7 +437,7 @@ async fn a_durable_turn_streams_a_native_call_s_activity_to_its_sink(tier: Tier)
         NAME,
         vec![served::response(vec![served::call(
             PROVIDER_CALL,
-            GATED,
+            GATED_OPERATION,
             serde_json::json!({ "label": "gated", "start": true }),
         )])],
     );
@@ -822,12 +825,12 @@ async fn a_presentation_step_presents_every_native_round_call(tier: Tier) {
             vec![served::response(vec![
                 served::call(
                     "presented-at-once",
-                    GATED,
+                    GATED_OPERATION,
                     serde_json::json!({ "label": "at-once" }),
                 ),
                 served::call(
                     "presented-after-park",
-                    DEFERRED,
+                    DEFERRED_OPERATION,
                     serde_json::json!({ "label": "after-park" }),
                 ),
             ])],
@@ -870,7 +873,7 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         NAME,
         vec![served::response(vec![served::call(
             "settled-call",
-            GATED,
+            GATED_OPERATION,
             serde_json::json!({ "label": "settled" }),
         )])],
     );
@@ -986,7 +989,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         NAME,
         vec![served::response(vec![served::call(
             "two-node-call",
-            GATED,
+            GATED_OPERATION,
             serde_json::json!({ "label": "two-nodes" }),
         )])],
     );
@@ -1091,17 +1094,17 @@ async fn a_tool_s_intent_outcome_never_reaches_the_model(tier: Tier) {
         vec![served::response(vec![
             served::call(
                 "answered-with-start",
-                GATED,
+                GATED_OPERATION,
                 serde_json::json!({ "label": "same", "start": true }),
             ),
             served::call(
                 "answered-alone",
-                GATED,
+                GATED_OPERATION,
                 serde_json::json!({ "label": "same" }),
             ),
             served::call(
                 "answered-with-slot",
-                GATED,
+                GATED_OPERATION,
                 serde_json::json!({ "label": "slot", "start": true, "slot": true }),
             ),
         ])],

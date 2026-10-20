@@ -193,7 +193,7 @@ impl Script {
             }
             Self::ContinueAs if rendered.contains(NEXT) => over(text(
                 request,
-                &cell(&format!("await control.continue_as({{ task: {TASK:?} }});")),
+                &cell(&format!("await control.continueAs({{ task: {TASK:?} }});")),
             )),
             Self::ContinueAs => over(text(request, &cell("await control.finish(\"set\");"))),
             Self::Overflow => LlmResponse {
@@ -684,7 +684,7 @@ impl PressureFrame {
                             ..
                         },
                         ..
-                    } if tool_name == "finish" && value.as_str() == Some(expected)
+                    } if tool_name == "control.finish" && value.as_str() == Some(expected)
                 ) => {}
             other => violations.push(format!(
                 "the second turn's cell did not find the global's type {expected}: {other:?}; \

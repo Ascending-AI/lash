@@ -23,7 +23,7 @@ async fn failures_keep_their_causes_and_name_the_work() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
         &services,
-        "import asyncio\nrender_invoice = asyncio.create_task(echo_say({'text': 'first'}))\nawait render_invoice",
+        "import asyncio\nrender_invoice = asyncio.create_task(echo.say({'text': 'first'}))\nawait render_invoice",
     ).await;
     assert!(first.error().is_none(), "{:?}", first.error());
     assert_eq!(first.bindings.not_carried, ["render_invoice"]);
@@ -96,7 +96,7 @@ async fn failures_keep_their_causes_and_name_the_work() {
             &mut state,
             cell_context(&host, SESSION, TURN, "exec-code:4", tools.clone()),
             &services,
-            "await echo_say({'text': 'held'})",
+            "await echo.say({'text': 'held'})",
         );
         tokio::select! {
             response = cell => panic!("held call ended: {:?}", response.result),
@@ -109,14 +109,14 @@ async fn failures_keep_their_causes_and_name_the_work() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:4", tools.clone()),
         &services,
-        "await echo_say({'text': 'held'})",
+        "await echo.say({'text': 'held'})",
     )
     .await;
     let failure = response.error().expect("the Once call was interrupted");
-    assert_interrupted_effect_label(&failure.message, "echo_say");
+    assert_interrupted_effect_label(&failure.message, "echo.say");
     for text in [
         "tool_failed",
-        "echo_say",
+        "echo.say",
         "outside work may already have happened",
         "check outside state before calling again",
     ] {
@@ -159,7 +159,7 @@ async fn committed_cells_report_binding_changes() {
         .with_recorded_render(crate::testing::recorded_test_render());
     let second = Box::pin(super::super::execute_cell(
         &mut state, ctx, lash_core::ExecRequest {
-            code: "import asyncio\nrows = [len(kept)]\ncount = 2\njob = asyncio.create_task(echo_say({'text': 'second'}))\nawait job".into(),
+            code: "import asyncio\nrows = [len(kept)]\ncount = 2\njob = asyncio.create_task(echo.say({'text': 'second'}))\nawait job".into(),
         }, &services,
         crate::projection::CodeModeProjectedBindings::new()
             .bind_json("scratch", serde_json::json!(99)).expect("projected scratch"),
@@ -345,7 +345,7 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
         &host,
         "exec-code:1",
         tools,
-        "await control_finish([await scale(), await scale(value=7)])",
+        "await control.finish([await scale(), await scale(value=7)])",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!([42, 21]));
@@ -359,7 +359,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     let host = open_host().await;
     let tools = Arc::new(CellTools::default());
     let mut source = state();
-    saved_cell(&mut source, &host, "exec-code:0", tools.clone(), "async def shout(text):\n    return await echo_say({'text': text})\nonce = await shout('a')").await;
+    saved_cell(&mut source, &host, "exec-code:0", tools.clone(), "async def shout(text):\n    return await echo.say({'text': text})\nonce = await shout('a')").await;
     assert!(
         source
             .lowering_functions()
@@ -386,14 +386,14 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
             Arc::new(super::saved_functions::NoTools),
         ),
         &python_services(),
-        "await control_finish(await shout('b'))",
+        "await control.finish(await shout('b'))",
     )
     .await;
     let error = refused.error().expect("missing tool refuses the cell");
     assert!(
         error.message.contains("PY_SAVED_FUNCTION_UNUSABLE")
             && error.message.contains(
-                "the saved function `shout` calls `echo_say`, which this session does not offer"
+                "the saved function `shout` calls `echo.say`, which this session does not offer"
             ),
         "{}",
         error.message
@@ -421,7 +421,7 @@ async fn a_saved_function_keeps_the_captures_its_cell_left() {
         &host,
         "exec-code:2",
         tools,
-        "await control_finish([clamp(3), clamp(50), factor, limits['top']])",
+        "await control.finish([clamp(3), clamp(50), factor, limits['top']])",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!([6, 10, 100, 1000]));
@@ -459,7 +459,7 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools),
         &python_services(),
-        "await control_finish(later())",
+        "await control.finish(later())",
     )
     .await;
     assert!(refused.error().is_some());

@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ExecutionPolicy, ToolCall, ToolOutcome};
 use serde_json::json;
 
@@ -40,7 +39,7 @@ impl StaticToolExecute for Echo {
 fn echo() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "ext_echo",
-        "ext_echo",
+        "tools.ext_echo",
         "Answers its argument.",
         json!({
             "type": "object",
@@ -56,7 +55,6 @@ fn echo() -> lash_core::ToolDefinition {
         0,
         0,
     ))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "ext_echo"))
 }
 
 /// A core whose cells are written in `dialect`.
@@ -99,7 +97,7 @@ async fn a_python_cell_saves_in_a_store_a_typescript_cell_pinned_on_sqlite_memor
             served::spec(8),
             cell(
                 "typescript",
-                "const r = await tools.ext_echo({ x: 1 });\nconsole.log(r.echo);",
+                "const r = await tools.extEcho({ x: 1 });\nconsole.log(r.echo);",
             ),
         )
         .await;
@@ -115,7 +113,7 @@ async fn a_python_cell_saves_in_a_store_a_typescript_cell_pinned_on_sqlite_memor
             served::spec(8),
             cell(
                 "python",
-                "r = await tools_ext_echo({\"x\": 2})\nprint(r[\"echo\"])",
+                "r = await tools.ext_echo({\"x\": 2})\nprint(r[\"echo\"])",
             ),
         )
         .await;

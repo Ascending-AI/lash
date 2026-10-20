@@ -1,2 +1,2 @@
-await finish("done")
+await control.finish("done")
 await corpus.echo("unreachable")

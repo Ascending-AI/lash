@@ -328,7 +328,7 @@ impl RecordedToolPresenter {
 /// let slot = ToolPresenterSlot::new(
 ///     WrappedToolPresenter::new("host.tools.v1", TypescriptToolPresenter)
 ///         .with_heading("Host tools")
-///         .with_filter(|tool| tool.call_path != "drop")
+///         .with_filter(|tool| tool.call_path != "tools.drop")
 ///         .with_appended("Host note."),
 /// );
 /// ```

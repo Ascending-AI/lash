@@ -176,7 +176,7 @@ await chat.reply("started deterministic failing process");"#,
             (Self::ExecBlocked, _) => finish_cell("\"session recovered after break glass\""),
             (Self::ToolValue, _) => cell("await workbench_surface.terminal({});"),
             (Self::TranscriptProjection, 0) => cell(
-                "await control.continue_as({task: \"canonical follow-frame task\", seed: {marker: \"hidden-seed\"}});",
+                "await control.continueAs({task: \"canonical follow-frame task\", seed: {marker: \"hidden-seed\"}});",
             ),
             (Self::TranscriptProjection, _) => finish_cell("\"canonical follow-frame reply\""),
             (Self::RenderedSurface, _) => finish_cell(
@@ -206,11 +206,9 @@ await chat.reply("started deterministic failing process");"#,
     )]
     pub(crate) fn tool_provider(self) -> Option<Arc<dyn lash::tools::ToolProvider>> {
         (self == Self::ToolValue).then(|| {
-            use lash::tools::ToolDefinitionBindingExt as _;
-
             let definition = lash::tools::ToolDefinition::control(
                 "tool:workbench_tool_value",
-                "workbench_tool_value",
+                "workbench_surface.terminal",
                 "Finish the deterministic workbench scenario with a typed tool value.",
                 serde_json::json!({
                     "type": "object",
@@ -220,11 +218,7 @@ await chat.reply("started deterministic failing process");"#,
                 lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),
             )
             .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(lash::tools::ToolBinding::new(
-                ["workbench_surface"],
-                "terminal",
-            ));
+            .with_execution(std::time::Duration::from_secs(120));
             Arc::new(lash::tools::StaticToolProvider::new(
                 vec![definition],
                 DevToolValue,
@@ -240,7 +234,7 @@ struct DevToolValue;
 impl lash::tools::StaticToolExecute for DevToolValue {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         (async {
-            debug_assert_eq!(call.name(), "workbench_tool_value");
+            debug_assert_eq!(call.name(), "workbench_surface.terminal");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             lash::tools::ToolOutcome::from_output(lash::tools::ToolCallOutput::finish(
                 lash::tools::ToolValue::untrusted_json(serde_json::json!({
@@ -573,15 +567,15 @@ fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
         return streamed_response(request, &finish_cell("\"peer interruption settled\""));
     }
     let body = if prompt.contains("MCP-DEPTH") {
-        r#"const summary = await workspace_stdio.sample_summary({text: "workbench"});
-const form = await workspace_stdio.elicit_confirmation({});
-const url = await workspace_stdio.elicit_via_url({});
-const roots = await workspace_stdio.list_host_roots({});
+        r#"const summary = await workspace_stdio.sampleSummary({text: "workbench"});
+const form = await workspace_stdio.elicitConfirmation({});
+const url = await workspace_stdio.elicitViaUrl({});
+const roots = await workspace_stdio.listHostRoots({});
 await chat.reply(summary.summary);"#
     } else if prompt.contains("MCP-DETACHED") {
         "await chat.reply(\"badge tool is detached\");"
     } else {
-        "const badge = await workspace_http.workspace_badge({}); await chat.reply(\"workspace badge came back\");"
+        "const badge = await workspace_http.workspaceBadge({}); await chat.reply(\"workspace badge came back\");"
     };
     streamed_response(request, &cell(body))
 }

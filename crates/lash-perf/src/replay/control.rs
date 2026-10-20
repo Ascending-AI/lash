@@ -98,7 +98,7 @@ pub enum Phase {
 fn inputs(n: usize) -> Vec<ToolCallSpec> {
     (0..n)
         .map(|i| ToolCallSpec {
-            tool: provider::LOOKUP.to_owned(),
+            tool: format!("tools.{}", provider::LOOKUP),
             args: serde_json::json!({"key": format!("item-{i}")}),
         })
         .collect()
@@ -119,9 +119,9 @@ fn workload(n: usize, leg: Leg) -> Workload {
                 .iter()
                 .map(|call| {
                     if protocol == Protocol::Python {
-                        format!("tools_fixture_lookup({})", call.args)
-                    } else {
                         format!("tools.fixture_lookup({})", call.args)
+                    } else {
+                        format!("tools.fixtureLookup({})", call.args)
                     }
                 })
                 .collect();
@@ -131,7 +131,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
                     expressions.join(",")
                 ),
                 Leg::PythonParallel => format!(
-                    "import asyncio\nawait asyncio.gather({})\nawait control_finish(\"Done.\")",
+                    "import asyncio\nawait asyncio.gather({})\nawait control.finish(\"Done.\")",
                     expressions.join(",")
                 ),
                 Leg::PythonSequential => {
@@ -139,7 +139,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
                         .iter()
                         .map(|expr| format!("await {expr}\n"))
                         .collect::<String>()
-                        + "await control_finish(\"Done.\")"
+                        + "await control.finish(\"Done.\")"
                 }
                 _ => {
                     expressions

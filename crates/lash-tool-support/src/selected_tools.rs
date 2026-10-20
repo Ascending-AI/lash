@@ -273,7 +273,7 @@ impl ToolProvider for Selected {
             .tool_manifests(config)
             .ok()?
             .into_iter()
-            .any(|manifest| manifest.name == name && self.admits(&manifest.id, config));
+            .any(|manifest| manifest.tool() == name && self.admits(&manifest.id, config));
         admitted
             .then(|| self.inner.resolve_contract(name, config))
             .flatten()

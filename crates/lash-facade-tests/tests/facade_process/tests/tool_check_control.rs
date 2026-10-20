@@ -4,10 +4,11 @@
 
 use super::*;
 use lash::{TurnEvent, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{TurnOutcome, TurnStop};
 
 const ECHO: &str = "echo_tool";
+
+const ECHO_OPERATION: &str = "tools.echo_tool";
 
 /// A tool that answers every call with its arguments.
 struct EchoTool;
@@ -15,7 +16,7 @@ struct EchoTool;
 fn echo_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{ECHO}"),
-        ECHO,
+        ECHO_OPERATION,
         "Echo the value.",
         serde_json::json!({
             "type": "object",
@@ -26,7 +27,6 @@ fn echo_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], ECHO))
 }
 
 #[async_trait]
@@ -43,7 +43,7 @@ impl ToolProvider for EchoTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == ECHO).then(|| Arc::new(echo_definition().contract()))
+        (name == ECHO_OPERATION).then(|| Arc::new(echo_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -93,7 +93,7 @@ async fn run_policy_turn(
                         return Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "call-policy".to_string(),
-                                tool_name: ECHO.to_string(),
+                                tool_name: ECHO_OPERATION.replace('.', "__"),
                                 input_json: r#"{"value":"x"}"#.to_string(),
                                 replay: None,
                             }],

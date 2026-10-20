@@ -54,7 +54,7 @@ const MAIL_REGISTRATION: &str = r#"<typescript>
 const on_mail = async (event: unknown) => {
   return true;
 };
-await workbench.register_trigger({
+await workbench.registerTrigger({
   source: { kind: "mail" },
   definition: on_mail,
   event_arg: "event",
@@ -141,7 +141,7 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
+        "<typescript>\nconst applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
@@ -482,13 +482,13 @@ const TWO_MAIL_REGISTRATIONS: &str = r#"<typescript>
 const on_mail = async (event: unknown) => {
   return true;
 };
-await workbench.register_trigger({
+await workbench.registerTrigger({
   source: { kind: "mail" },
   definition: on_mail,
   event_arg: "event",
   name: "first watcher"
 });
-await workbench.register_trigger({
+await workbench.registerTrigger({
   source: { kind: "mail" },
   definition: on_mail,
   event_arg: "event",
@@ -503,7 +503,7 @@ const CRON_REGISTRATION: &str = r#"<typescript>
 const on_tick = async (event: unknown) => {
   return true;
 };
-await workbench.register_trigger({
+await workbench.registerTrigger({
   source: { kind: "cron", expr: "0 0 */2 * * *" },
   definition: on_tick,
   event_arg: "event",
@@ -1029,7 +1029,7 @@ async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_p
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
+        "<typescript>\nconst applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())

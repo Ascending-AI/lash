@@ -49,7 +49,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::ToolCall;
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_durable::domain::TurnWrite;
@@ -79,6 +78,9 @@ const NOTES: &str = "storage-notes";
 const REMEMBER: &str = "remember";
 /// [`NOTES`]'s tool, which sets `last` and counts itself through [`INCR`].
 const NOTE: &str = "note";
+/// [`REMEMBER`] and [`NOTE`] as the operations a step calls.
+const REMEMBER_OPERATION: &str = "tools.remember";
+const NOTE_OPERATION: &str = "tools.note";
 /// [`NOTES`]'s reducer: `count` plus the input.
 const INCR: &str = "incr";
 /// How large [`MEMORY`]'s value is.
@@ -121,10 +123,14 @@ impl Shape {
             Self::Step => vec![served::response(vec![
                 served::call(
                     "call-remember",
-                    REMEMBER,
+                    REMEMBER_OPERATION,
                     serde_json::json!({ "label": "seed" }),
                 ),
-                served::call("call-note-s", NOTE, serde_json::json!({ "label": "s" })),
+                served::call(
+                    "call-note-s",
+                    NOTE_OPERATION,
+                    serde_json::json!({ "label": "s" }),
+                ),
             ])],
             Self::Cell => vec![served::cell(&format!(
                 "await tools.{REMEMBER}({{ label: \"seed\" }});\n\
@@ -137,7 +143,7 @@ impl Shape {
         match self {
             Self::Step => vec![served::response(vec![served::call(
                 "call-note-x",
-                NOTE,
+                NOTE_OPERATION,
                 serde_json::json!({ "label": "x" }),
             )])],
             Self::Cell => vec![served::cell(&format!(
@@ -172,14 +178,13 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Changes its plugin's namespace.",
         object.clone(),
         object,
     )
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     // A call a kill interrupted runs again at its ordinal.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
@@ -301,7 +306,8 @@ impl lash_core::ToolProvider for StoragePlugin {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == self.tool()).then(|| Arc::new(tool_definition(name).contract()))
+        (name.split_once('.') == Some(("tools", self.tool())))
+            .then(|| Arc::new(tool_definition(self.tool()).contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -999,14 +1005,14 @@ async fn a_fork_copies_and_resets_namespaces_as_declared_at_its_revision(tier: T
     let remember = |label: &str| {
         served::call(
             &format!("call-remember-{label}"),
-            REMEMBER,
+            REMEMBER_OPERATION,
             serde_json::json!({ "label": label }),
         )
     };
     let note = |label: &str| {
         served::call(
             &format!("call-note-{label}"),
-            NOTE,
+            NOTE_OPERATION,
             serde_json::json!({ "label": label }),
         )
     };
@@ -1118,7 +1124,7 @@ async fn a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it(tier:
             &label,
             vec![served::response(vec![served::call(
                 &format!("call-note-{turn}"),
-                NOTE,
+                NOTE_OPERATION,
                 serde_json::json!({ "label": label }),
             )])],
         );
@@ -1153,7 +1159,7 @@ async fn a_run_reverting_to_base_clears_its_overlay_body(tier: Tier) {
     let remember = |id: &str, label: &str| {
         served::response(vec![served::call(
             id,
-            REMEMBER,
+            REMEMBER_OPERATION,
             serde_json::json!({ "label": label }),
         )])
     };
@@ -1231,7 +1237,7 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
                 let label = format!("{round:02}").repeat(ROUND_BYTES / 2);
                 served::response(vec![served::call(
                     &format!("call-depth-{round:02}"),
-                    NOTE,
+                    NOTE_OPERATION,
                     serde_json::json!({ "label": label }),
                 )])
             })

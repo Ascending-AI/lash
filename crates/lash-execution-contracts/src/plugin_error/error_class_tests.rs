@@ -54,7 +54,7 @@ plugin_error_samples! {
     },
     UnusableToolSchema { .. } => PluginError::UnusableToolSchema {
         source: Box::new(crate::ToolDefinition::raw(
-            "sampled", "sampled", "sampled", serde_json::Value::Null, serde_json::json!({}),
+            "sampled", "tools.sampled", "sampled", serde_json::Value::Null, serde_json::json!({}),
         ).expect_err("a tool cannot publish an unusable schema")),
     },
     ValueMismatch { .. } => PluginError::ValueMismatch {
@@ -100,13 +100,19 @@ plugin_error_samples! {
     },
     ResidentToolContractUnavailable { .. } => PluginError::ResidentToolContractUnavailable {
         tool_id: crate::ToolId::from("tool:sampled"),
-        name: "sampled".to_string(),
+        operation: "sampled.run".to_string(),
     },
     ResidentToolDuplicateId { .. } => PluginError::ResidentToolDuplicateId {
         tool_id: crate::ToolId::from("tool:sampled"),
     },
-    ResidentToolDuplicateName { .. } => PluginError::ResidentToolDuplicateName {
-        name: "sampled".to_string(),
+    ResidentToolDuplicateOperation { .. } => PluginError::ResidentToolDuplicateOperation {
+        operation: "sampled.run".to_string(),
+        first_tool: crate::ToolId::from("tool:sampled"),
+        second_tool: crate::ToolId::from("tool:other"),
+    },
+    ResidentToolInvalidOperation { .. } => PluginError::ResidentToolInvalidOperation {
+        tool_id: crate::ToolId::from("tool:sampled"),
+        message: "no package".to_string(),
     },
     ToolRegistrationRefused { .. } => PluginError::ToolRegistrationRefused {
         source: Box::new(crate::RegistrationRefused::MissingBound {
@@ -116,7 +122,7 @@ plugin_error_samples! {
     },
     ToolSurfaceRefused { .. } => PluginError::ToolSurfaceRefused {
         refusal: Box::new(crate::SurfaceRefusal::Collision(lash_core_store::tool_surface::SurfaceCollision {
-            name: "sampled".to_string(),
+            operation: "host.sampled".to_string(),
             first_tool: crate::ToolId::from("tool:first"),
             first_provider: lash_core_store::tool_surface::ProviderKey::new(lash_core_store::obligations::RegistryKind::Session, "first", lash_core_store::plugin_registrations::ToolProviderKey::__literal("tools")),
             second_tool: crate::ToolId::from("tool:second"),

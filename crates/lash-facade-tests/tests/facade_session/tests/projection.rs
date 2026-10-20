@@ -21,7 +21,7 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
                 },
                 LlmOutputPart::ToolCall {
                     call_id: "tool-1".to_owned(),
-                    tool_name: "echo_tool".to_owned(),
+                    tool_name: "tools__echo_tool".to_owned(),
                     input_json: r#"{"value":"sample"}"#.to_owned(),
                     replay: None,
                 },

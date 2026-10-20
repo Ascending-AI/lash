@@ -167,12 +167,10 @@ fn lower(
     )]);
     let bindings: BTreeSet<Name> = bindings.iter().map(|name| Name::new(*name)).collect();
     let functions = BTreeMap::new();
-    let environment = lash_kernel_dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &controls,
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls).ok()?;
+    let environment =
+        lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let cell = lash_kernel_dialect::CellEnvironment {
         bindings: &bindings,
         functions: &functions,
@@ -206,7 +204,7 @@ while (attempts < 5 && result === null) {
   attempts = attempts + 1;
   try {
     const reply = await tools.deploy({ service: "api", version: "1.2.3", attempt: attempts });
-    if (reply.ok) { result = reply; } else { await tools.sleep_ms({ ms: 100 * attempts }); }
+    if (reply.ok) { result = reply; } else { await tools.sleepMs({ ms: 100 * attempts }); }
   } catch (error) {
     await tools.log({ level: "warn", message: `attempt ${attempts} failed: ${error}` });
   }
@@ -224,7 +222,7 @@ for (const row of rows.rows) {
 }
 const top = Object.entries(byCustomer).sort((a, b) => b[1].total - a[1].total).slice(0, 10);
 const lines = top.map(([name, v]) => `${name}: ${v.count} orders, ${v.total.toFixed(2)} total, ${[...new Set(v.items)].length} skus`);
-await tools.write_file({ path: "report.txt", text: lines.join("\n") });
+await tools.writeFile({ path: "report.txt", text: lines.join("\n") });
 await control.finish({ customers: top.length, lines });"#,
 ];
 
@@ -237,7 +235,7 @@ fn workflow(steps: usize) -> String {
   for (let i = 0; i < input.items.length; i = i + 1) {{
     const item = input.items[i];
     try {{
-      const reply = await tools.process_item({{ step: {step}, index: i, item, label: `step {step} item ${{i}}` }});
+      const reply = await tools.processItem({{ step: {step}, index: i, item, label: `step {step} item ${{i}}` }});
       if (reply.ok && reply.score > {step}) {{
         started.notes.push({{ index: i, score: reply.score, text: reply.text.slice(0, 64) }});
       }} else {{

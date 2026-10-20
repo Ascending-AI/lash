@@ -7,17 +7,18 @@
 use super::*;
 
 use lash::{TurnEvent, TurnInput};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{TurnFinish, TurnOutcome};
 
 const SEARCH: &str = "search";
+
+const SEARCH_OPERATION: &str = "tools.search";
 
 /// `search`: a host tool whose result states a `diagnostics` record with a
 /// required `took`.
 fn search_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{SEARCH}"),
-        SEARCH,
+        SEARCH_OPERATION,
         "Search the index.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({
@@ -37,7 +38,6 @@ fn search_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], SEARCH))
 }
 
 /// `search`, answering a `diagnostics` that lacks its required `took`.
@@ -57,7 +57,7 @@ impl ToolProvider for SearchTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SEARCH).then(|| Arc::new(search_definition().contract()))
+        (name == SEARCH_OPERATION).then(|| Arc::new(search_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -87,7 +87,7 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
                         return Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "call-search".to_string(),
-                                tool_name: SEARCH.to_string(),
+                                tool_name: SEARCH_OPERATION.replace('.', "__"),
                                 input_json: "{}".to_string(),
                                 replay: None,
                             }],
@@ -142,7 +142,7 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
     assert_eq!(mismatch.instance_path, "/diagnostics", "{mismatch:?}");
     assert!(mismatch.message.contains("\"took\""), "{mismatch:?}");
     assert!(
-        failure.message.contains("tool `search`"),
+        failure.message.contains("tool `tools.search`"),
         "the failure names the tool: {failure:?}"
     );
     assert_eq!(
@@ -157,7 +157,7 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
         panic!("two model calls: {requests:?}");
     };
     assert!(
-        next.contains("tool `search`") && next.contains("/diagnostics"),
+        next.contains("tool `tools.search`") && next.contains("/diagnostics"),
         "the model reads the failure with the tool's name and the path: {next}"
     );
     Ok(())
@@ -229,7 +229,7 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
         panic!("the committed call has a settled body");
     };
     assert_eq!(&record.call_id, call_id);
-    assert_eq!(record.tool, SEARCH);
+    assert_eq!(record.tool, SEARCH_OPERATION);
     let report_tool_calls = durable.read_turn_tool_calls(turn).await?;
     assert_eq!(
         report_tool_calls.as_slice(),
@@ -248,7 +248,10 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
         "FIG-6357: the cell carries the settle refusal without a second read"
     );
     assert_eq!(failure.code, "tool_outcome_not_declared");
-    assert!(failure.message.contains("tool `search`"), "{failure:?}");
+    assert!(
+        failure.message.contains("tool `tools.search`"),
+        "{failure:?}"
+    );
     assert!(failure.message.contains("/diagnostics"), "{failure:?}");
     assert!(failure.message.contains("took"), "{failure:?}");
     let Some(lash_core::ToolFailureCause::Declaration {

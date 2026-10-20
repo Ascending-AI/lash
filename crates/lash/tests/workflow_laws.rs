@@ -137,18 +137,16 @@ const ECHO_TOOLS: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new("workflow-echo", lash::plugins::FormatVersion::ONE);
 
 fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
-    use lash::tools::ToolDefinitionBindingExt as _;
     vec![
         lash::tools::ToolDefinition::raw(
             "tool:echo",
-            "echo",
+            "tools.echo",
             "Answers its value.",
             serde_json::json!({"type": "object"}),
             serde_json::json!({}),
         )
         .expect("tool schema")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "echo")),
+        .with_execution(std::time::Duration::from_secs(120)),
     ]
 }
 
@@ -402,7 +400,7 @@ main { finish null }
     document.manifest.effects.insert(
         effect.clone(),
         lash::workflow::document::OperationRequirement::of_signature(
-            checked.effects()[&effect].clone(),
+            checked.checker().effects[&effect].clone(),
         ),
     );
     let publication = published(
@@ -497,7 +495,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         document.manifest.effects.insert(
             effect.clone(),
             lash::workflow::document::OperationRequirement::of_signature(
-                checked.effects()[&effect].clone(),
+                checked.checker().effects[&effect].clone(),
             ),
         );
     }
@@ -831,7 +829,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
     document.manifest.effects.insert(
         echo.clone(),
         lash::workflow::document::OperationRequirement::of_signature(
-            checked.effects()[&echo].clone(),
+            checked.checker().effects[&echo].clone(),
         ),
     );
     let publication = published(
@@ -1128,7 +1126,8 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
         echo.clone(),
         lash::workflow::document::OperationRequirement::of_signature(
             checked
-                .effects()
+                .checker()
+                .effects
                 .get(&echo)
                 .expect("the host offers the tool")
                 .clone(),
@@ -1298,7 +1297,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         document.manifest.effects.insert(
             name.clone(),
             lash::workflow::document::OperationRequirement::of_signature(
-                checked.effects()[&name].clone(),
+                checked.checker().effects[&name].clone(),
             ),
         );
     }

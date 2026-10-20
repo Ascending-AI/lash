@@ -16,8 +16,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Written;
+use lash_kernel_dialect::{Offered, OfferedSource, QualifiedOperation};
 use lash_kernel_doc::{Datum, EffectName, IdentifiedDocument, Signature, Site};
-use lash_vm_runtime::{HostBoundary, HostEffect};
+use lash_vm_runtime::HostBoundary;
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
 use super::host_graph::{CallStatus, CellEnd, HostState};
@@ -94,11 +95,7 @@ impl CellEnvelope {
         let mut grants = BTreeMap::new();
         let mut conflicted = BTreeSet::new();
         for grant in self.grants.values() {
-            let Some(effect) = lash_core::effect_path_of(grant.manifest())
-                .and_then(|path| EffectName::new(path.as_str()).ok())
-            else {
-                continue;
-            };
+            let effect = grant.manifest().operation.effect_name();
             if grants.insert(effect.clone(), grant.clone()).is_some() {
                 conflicted.insert(effect);
             }
@@ -109,19 +106,29 @@ impl CellEnvelope {
         grants
     }
 
-    /// The effects `boundary` offers, as the envelope records them.
-    pub(super) fn record_effects(boundary: &HostBoundary) -> BTreeMap<EffectName, RecordedEffect> {
+    /// The tools `boundary` offers, as the envelope records them: each with
+    /// the turn controls `controls` says its tool declares. An unavailable
+    /// note is no tool, and is recorded as a note.
+    pub(super) fn record_effects(
+        boundary: &HostBoundary,
+        controls: impl Fn(&lash_core::ToolId) -> lash_core::TurnControls,
+    ) -> BTreeMap<EffectName, RecordedEffect> {
         boundary
-            .signatures()
-            .into_iter()
-            .filter_map(|(name, signature)| {
-                let effect = boundary.effect(&name)?;
+            .operations()
+            .iter()
+            .filter_map(|(operation, offered)| {
+                let (OfferedSource::Catalog { tool } | OfferedSource::Deferred { tool }) =
+                    &offered.source
+                else {
+                    return None;
+                };
+                let tool = lash_core::ToolId::new(tool.as_str());
                 Some((
-                    name,
+                    operation.effect_name(),
                     RecordedEffect {
-                        tool: effect.tool.clone(),
-                        signature,
-                        controls: effect.controls.clone(),
+                        controls: controls(&tool),
+                        tool,
+                        signature: offered.requirement.signature.clone(),
                     },
                 ))
             })
@@ -132,13 +139,20 @@ impl CellEnvelope {
     pub(super) fn boundary(&self) -> Result<HostBoundary, String> {
         let mut boundary = HostBoundary::new();
         for (name, effect) in &self.effects {
+            let operation =
+                QualifiedOperation::from_effect(name).map_err(|error| error.to_string())?;
             boundary
-                .offer(
-                    name.as_str(),
-                    HostEffect {
-                        tool: effect.tool.clone(),
-                        signature: effect.signature.clone(),
-                        controls: effect.controls.clone(),
+                .offer_operation(
+                    operation,
+                    Offered {
+                        requirement: lash_kernel_doc::OperationRequirement::of_signature(
+                            effect.signature.clone(),
+                        ),
+                        controls: lash_vm_runtime::effect_controls(&effect.controls),
+                        read: false,
+                        source: OfferedSource::Catalog {
+                            tool: effect.tool.to_string(),
+                        },
                     },
                 )
                 .map_err(|error| error.to_string())?;

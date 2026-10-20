@@ -593,7 +593,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
     assert_eq!(
         pool.advertised_tools()
             .into_iter()
-            .map(|tool| tool.name().to_string())
+            .map(|tool| tool.manifest.tool())
             .collect::<Vec<_>>(),
         [mcp_name("mock", "generation-2")]
     );
@@ -1760,7 +1760,7 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
     assert_eq!(
         pool.advertised_tools()
             .into_iter()
-            .map(|tool| tool.name().to_string())
+            .map(|tool| tool.manifest.tool())
             .collect::<Vec<_>>(),
         [mcp_name("mock", "work")]
     );

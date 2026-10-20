@@ -36,7 +36,7 @@ async fn catalog_refresh_timeout_reaps_the_service_and_retains_the_last_catalog(
         entry.service_snapshot().is_none(),
         "timeout destroys the service's unanswered SDK responders"
     );
-    assert_eq!(pool.advertised_tools()[0].name(), mcp_name("mock", "work"));
+    assert_eq!(pool.advertised_tools()[0].manifest.tool(), mcp_name("mock", "work"));
     for _ in 0..100_000 {
         entry.request_tool_refresh(service.generation);
     }

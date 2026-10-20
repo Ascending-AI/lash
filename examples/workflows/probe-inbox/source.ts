@@ -7,7 +7,7 @@ export async function digest(items) {
     /** Wait six seconds */
     await sleep(6000);
     /** Show the item's title */
-    await display.show_message({ text: item.title });
+    await display.showMessage({ text: item.title });
     /** Count the item as sent */
     sent = sent + 1;
   }

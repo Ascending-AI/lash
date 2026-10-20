@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_core::{
-    AttachmentCreateMeta, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    ToolDefinitionBindingExt as _, ToolProvider,
+    AttachmentCreateMeta, AttachmentRef, AttachmentStore, AttachmentStoreError, ToolProvider,
 };
 use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
@@ -188,14 +187,13 @@ struct NestedMedia;
 fn definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:nested_media",
-        "nested_media",
+        "tools.nested_media",
         "Return retained media in an MCP content block",
         serde_json::json!({"type":"object"}),
         serde_json::json!({}),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], "nested_media"))
 }
 #[async_trait::async_trait]
 impl ToolProvider for NestedMedia {
@@ -213,7 +211,7 @@ impl ToolProvider for NestedMedia {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "nested_media").then(|| Arc::new(definition().contract()))
+        (name == "tools.nested_media").then(|| Arc::new(definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         assert!(
@@ -286,7 +284,7 @@ async fn send(url: bool, tools: bool) -> Sent {
                         parts: vec![if invoke {
                             lash_core::LlmOutputPart::ToolCall {
                                 call_id: "call-media".into(),
-                                tool_name: "nested_media".into(),
+                                tool_name: "tools__nested_media".into(),
                                 input_json: "{}".into(),
                                 replay: None,
                             }
@@ -504,7 +502,7 @@ impl ToolProvider for ReceiptTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "nested_media").then(|| Arc::new(definition().contract()))
+        (name == "tools.nested_media").then(|| Arc::new(definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -541,7 +539,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
                     parts: vec![if invoke {
                         lash_core::LlmOutputPart::ToolCall {
                             call_id: "put-receipts".into(),
-                            tool_name: "nested_media".into(),
+                            tool_name: "tools__nested_media".into(),
                             input_json: "{}".into(),
                             replay: None,
                         }

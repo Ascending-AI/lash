@@ -87,7 +87,7 @@ impl Runner {
     /// Lowers and admits `case`, or what a refusal to lower it observes.
     pub fn lower(&self, case: &Case) -> Result<Lowered, String> {
         let effects = BTreeMap::from([(
-            EffectName::new("observe").map_err(|e| e.to_string())?,
+            EffectName::new("host.observe").map_err(|e| e.to_string())?,
             Signature {
                 params: vec![Param {
                     name: Name::new("value"),
@@ -97,12 +97,10 @@ impl Runner {
                 result: Type::Any,
             },
         )]);
-        let env = Environment {
-            library: &self.library,
-            effects: &effects,
-            tool_roots: &BTreeSet::new(),
-            controls: &BTreeMap::new(),
-        };
+        let env_namespaces =
+            lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
+                .map_err(|e| e.to_string())?;
+        let env = Environment::new(&self.library, &env_namespaces);
         let lowered = match case.dialect.as_str() {
             "typescript" => lash_dialect_typescript::lower(
                 &case.source,
@@ -193,7 +191,7 @@ impl Runner {
                                 continue;
                             }
                         };
-                        if effect.effect.as_str() != "observe" {
+                        if effect.effect.as_str() != "host.observe" {
                             return Err("unexpected effect".into());
                         }
                         let value = effect.args.first().ok_or("observe needs a value")?;

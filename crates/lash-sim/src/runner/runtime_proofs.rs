@@ -330,7 +330,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
             1,
             "tool.pending-completion.resolve",
             json!({
-                "tool": "app_lookup",
+                "tool": "tools.app_lookup",
                 "resolution": resolved_payload,
                 "completion_key_observed": true,
             }),
@@ -353,7 +353,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         result_digest: crate::invariants::result_digest(
             &crate::content_oracle::ToolResultContent::from_tool_value(
                 "",
-                "app_lookup",
+                "tools.app_lookup",
                 &resolution,
             )
             .content,
@@ -403,7 +403,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         && completed_after > completed_before
         && completed_outputs
             .iter()
-            .any(|(name, output)| name == "app_lookup" && output == &resolution);
+            .any(|(name, output)| name == "tools.app_lookup" && output == &resolution);
     require(
         final_ok,
         "pending tool completion did not resume the turn to the scripted final answer",
@@ -424,7 +424,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
         session_id,
         turn_index,
         assistant_message,
-        tool_name: "app_lookup".to_string(),
+        tool_name: "tools.app_lookup".to_string(),
         completion_boundary_id: delivered.boundary_id.clone(),
         scheduler_controlled: delivered.scheduler.scheduler_controlled,
         scheduler_sequence: delivered.sequence,
@@ -743,11 +743,11 @@ impl lash_core::ToolProvider for PendingToolProvider {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(pending_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(pending_tool_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() != "app_lookup" {
+        if call.name() != "tools.app_lookup" {
             return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
                 .into();
         }
@@ -771,7 +771,7 @@ impl lash_core::ToolProvider for PendingToolProvider {
 fn pending_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:app_lookup",
-        "app_lookup",
+        "tools.app_lookup",
         "Look up app state.",
         json!({
             "type": "object",
@@ -798,7 +798,7 @@ pub(super) fn pending_tool_roundtrip_provider(
     final_answer: Arc<tokio::sync::Notify>,
 ) -> ProviderHandle {
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
-        tool_call_llm_response("call-1", "app_lookup", "{}"),
+        tool_call_llm_response("call-1", "tools__app_lookup", "{}"),
         text_llm_response("done"),
     ])));
     lash_core::testing::TestProvider::builder()

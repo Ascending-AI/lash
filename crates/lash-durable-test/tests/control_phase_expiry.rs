@@ -39,7 +39,7 @@ fn core(
     let parts = if tool {
         vec![LlmOutputPart::ToolCall {
             call_id: "checked".into(),
-            tool_name: "echo_tool".into(),
+            tool_name: "tools__echo_tool".into(),
             input_json: "{\"value\":\"hello\"}".into(),
             replay: None,
         }]

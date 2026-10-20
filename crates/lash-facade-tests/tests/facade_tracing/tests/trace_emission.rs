@@ -157,7 +157,7 @@ const TURN: &str = "emission-turn";
 /// turn id: the second send is answered from the committed run.
 async fn served_turn() -> Result<(Observed, LashCore)> {
     let mut calls = vec![
-        tool_call("call-echo", "echo_tool", r#"{"value":"emitted"}"#),
+        tool_call("call-echo", "tools__echo_tool", r#"{"value":"emitted"}"#),
         text_call("done"),
     ];
     calls[0].stream_events = vec![lash_protocol_types::llm::types::LlmStreamEvent::Evidence(
@@ -531,10 +531,10 @@ async fn a_served_tool_call_exports_one_execute_tool_span() -> Result<()> {
     let spans = observed.spans("execute_tool");
     assert_eq!(spans.len(), 1, "one exported call: {spans:#?}");
     let span = span_of(&spans, &completed[0]);
-    assert_eq!(span.name, "execute_tool echo_tool");
+    assert_eq!(span.name, "execute_tool tools.echo_tool");
     assert_eq!(
         attribute(span, "gen_ai.tool.name").as_deref(),
-        Some("echo_tool")
+        Some("tools.echo_tool")
     );
     assert!(!failed(span), "a successful call is no error");
     let turns = observed.spans("invoke_agent");

@@ -12,7 +12,7 @@ pub const NATIVE_EXECUTE_TOOL_NAME: &str = "execute_code";
 pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
     let definition = lash_core::ToolDefinition::raw(
         "rlm:execute_code",
-        NATIVE_EXECUTE_TOOL_NAME,
+        "rlm.execute_code",
         format!(
             "Execute {} in the persistent session",
             dialect.language_id()

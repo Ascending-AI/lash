@@ -891,6 +891,7 @@ PACKAGE_DEPS = {
             "blake3": "//third-party/rust:p0032",
             "jsonschema": "//third-party/rust:p0184",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",

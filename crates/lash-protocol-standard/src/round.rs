@@ -63,6 +63,9 @@ pub(crate) struct RoundRules<'a> {
     pub(crate) listed: Option<&'a dyn Fn(&str) -> bool>,
     /// Whether a call to the named tool ends the turn.
     pub(crate) ends_the_turn: &'a dyn Fn(&str) -> bool,
+    /// The operation a call of the model-facing name performs: the round
+    /// dispatches and records calls by it, never by the derived name.
+    pub(crate) operation: &'a dyn Fn(&str) -> String,
 }
 
 /// A planned round.
@@ -131,6 +134,8 @@ pub(crate) fn plan_round(calls: Vec<ResponseCall>, rules: &RoundRules<'_>) -> Ro
         parse_error,
     } in calls
     {
+        let named = std::mem::take(&mut call.tool_name);
+        call.tool_name = (rules.operation)(&named);
         let control = (rules.ends_the_turn)(&call.tool_name);
         if control && spent {
             if parse_error.is_some() {
@@ -159,15 +164,15 @@ pub(crate) fn plan_round(calls: Vec<ResponseCall>, rules: &RoundRules<'_>) -> Ro
         // members resolve against the session's callable catalog, not the
         // request's listed tools.
         if let Some(listed) = rules.listed
-            && !listed(&call.tool_name)
+            && !listed(&named)
         {
-            let output = unlisted(&call.tool_name, rules.batch);
+            let output = unlisted(&named, rules.batch);
             round.refused.push((call, output));
             blocked |= !control;
             continue;
         }
         match rules.batch {
-            BatchSugar::Enabled { max_members } if call.tool_name == BATCH_TOOL_NAME => {
+            BatchSugar::Enabled { max_members } if named == BATCH_TOOL_NAME => {
                 match members(&call.args, max_members, rules, &mut spent, &mut blocked) {
                     Ok(members) => entries.push(Entry::Wrapper { call, members }),
                     Err(message) => {
@@ -278,6 +283,7 @@ fn members(
         .enumerate()
         .map(|(index, member)| {
             let index = index_u32(index);
+            let tool = (rules.operation)(&member.tool);
             if member.tool == BATCH_TOOL_NAME {
                 *blocked = true;
                 return Member::Refused {
@@ -286,18 +292,18 @@ fn members(
                     error: Value::String("`batch` cannot run inside `batch`".to_string()),
                 };
             }
-            let control = (rules.ends_the_turn)(&member.tool);
+            let control = (rules.ends_the_turn)(&tool);
             if control && *spent {
                 return Member::Refused {
                     index,
-                    error: failure_value(attempt_spent_failure(&member.tool)),
-                    tool: member.tool,
+                    error: failure_value(attempt_spent_failure(&tool)),
+                    tool,
                 };
             }
             *spent |= control;
             Member::Run {
                 index,
-                tool: member.tool,
+                tool,
                 parameters: member.parameters,
                 control,
             }

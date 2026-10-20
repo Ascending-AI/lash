@@ -25,7 +25,6 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
@@ -60,7 +59,7 @@ fn cell(session: &str) -> String {
     } else {
         ""
     };
-    let call = format!("tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }})");
+    let call = format!("tools.extWrite({{ x: 7, session: \"{session}\" }})");
     let awaited = if killed {
         call
     } else {
@@ -450,7 +449,7 @@ fn cell_owner(world: &World, session: &SessionId) -> OwnerKey {
 fn ext_write(world: Weak<World>) -> Result<Arc<dyn lash_core::ToolProvider>, String> {
     let definition = lash_core::ToolDefinition::raw(
         EXT_WRITE,
-        EXT_WRITE,
+        format!("tools.{}", EXT_WRITE),
         "Writes x to the outside world, once.",
         serde_json::json!({
             "type": "object",
@@ -465,8 +464,7 @@ fn ext_write(world: Weak<World>) -> Result<Arc<dyn lash_core::ToolProvider>, Str
     )
     .map_err(|error| error.to_string())?
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(ExecutionPolicy::Once)
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], EXT_WRITE));
+    .with_execution_policy(ExecutionPolicy::Once);
     Ok(Arc::new(StaticToolProvider::new(
         vec![definition],
         ExtWrite { world },

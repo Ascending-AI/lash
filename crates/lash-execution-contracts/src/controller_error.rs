@@ -206,7 +206,8 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ToolPresentationRefused { .. }
             | PluginError::ResidentToolContractUnavailable { .. }
             | PluginError::ResidentToolDuplicateId { .. }
-            | PluginError::ResidentToolDuplicateName { .. }
+            | PluginError::ResidentToolDuplicateOperation { .. }
+            | PluginError::ResidentToolInvalidOperation { .. }
             | PluginError::ToolRegistrationRefused { .. }
             | PluginError::SessionAlreadyExists { .. }
             | PluginError::MissingRecordedSessionConfig { .. }

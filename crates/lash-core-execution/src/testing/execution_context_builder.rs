@@ -347,7 +347,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             .expect("fixture provider advertises")
             .into_iter()
             .filter_map(|manifest| {
-                let contract = self.provider.resolve_contract(&manifest.name, &config)?;
+                let contract = self.provider.resolve_contract(&manifest.tool(), &config)?;
                 Some(crate::SurfaceEntry {
                     provider: key.clone(),
                     definition: crate::ToolDefinition {

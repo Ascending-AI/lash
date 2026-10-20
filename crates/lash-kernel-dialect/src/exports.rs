@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::{FunctionName, OperationRequirement, Signature, Type};
 use serde::{Deserialize, Serialize};
 
+use crate::PackagePath;
 use crate::names::Segment;
 
 /// One export of a package, under one canonical segment.
@@ -128,3 +129,54 @@ pub const BRAND_FIELD: &str = "__lash_brand";
 
 /// The field every package value holds its building artifact's digest in.
 pub const BUILT_FIELD: &str = "__lash_built";
+
+/// The code exports of the packages a namespace is composed from.
+pub trait ExportView {
+    /// The exports of the package that owns `path`, or `None` when no
+    /// package of the view owns it.
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>>;
+    /// Every package path the view holds, in order.
+    fn paths(&self) -> Vec<PackagePath>;
+    /// What reserves `root`, a root no package path may take: lash's
+    /// definition roots, each installed dialect's globals and the names its
+    /// printer generates. `None` for a root a package may take.
+    fn reserves(&self, root: &str) -> Option<String> {
+        let _ = root;
+        None
+    }
+}
+
+/// A view that holds no package.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoPackages;
+
+impl ExportView for NoPackages {
+    fn exports(&self, _: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+        None
+    }
+
+    fn paths(&self) -> Vec<PackagePath> {
+        Vec::new()
+    }
+}
+
+/// `view` with the roots `reserves` reserves beside its own: what an
+/// embedding with installed dialects composes namespaces under.
+pub struct Reserving<'a> {
+    pub view: &'a dyn ExportView,
+    pub reserves: &'a dyn Fn(&str) -> Option<String>,
+}
+
+impl ExportView for Reserving<'_> {
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+        self.view.exports(path)
+    }
+
+    fn paths(&self) -> Vec<PackagePath> {
+        self.view.paths()
+    }
+
+    fn reserves(&self, root: &str) -> Option<String> {
+        self.view.reserves(root).or_else(|| (self.reserves)(root))
+    }
+}

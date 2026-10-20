@@ -2794,6 +2794,7 @@ dependencies = [
  "blake3",
  "jsonschema",
  "lash-kernel-check",
+ "lash-kernel-dialect",
  "lash-kernel-doc",
  "proptest",
  "schemars",

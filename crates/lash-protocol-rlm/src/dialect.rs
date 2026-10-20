@@ -11,7 +11,6 @@ use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_tool_presenter_api::ToolPresenterSlot;
 use lash_tool_shape::SchemaShape;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-use lash_vm_runtime::ResolvedToolBinding;
 
 pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
@@ -126,10 +125,10 @@ impl std::fmt::Debug for CellDialect {
 /// dialect's kernel package does that in a worker. How its tools read is
 /// its [`CellDialect`]'s tool presenter's.
 pub trait DialectPrompts: Send + Sync + 'static {
-    /// The call path a cell in this dialect writes to call a bound tool, or
-    /// the refusal when no cell in this dialect can address it. The tool is
-    /// offered to the cell as the effect of this name.
-    fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal>;
+    /// How this dialect spells a canonical name: the one spelling its
+    /// lowering, printer and prompts share. A cell calls an operation by its
+    /// package path and name in it ([`lash_kernel_dialect::spell_operation`]).
+    fn spelling(&self) -> lash_kernel_dialect::Spelling;
 
     /// A schema shape as a type, in this dialect's syntax. Shared code calls
     /// it wherever a prompt shows the type of a value or of a history item.
@@ -197,8 +196,6 @@ pub struct DialectRefusal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DialectRefusalKind {
-    /// No cell in the dialect can call the tool binding's path as a tool.
-    UnaddressableToolPath,
     /// The dialect's tool presenter refused to present the tool. The cause
     /// retains its typed fields and stable `PresentationRefusal::code()`.
     PresentationRefused(lash_tool_presenter_api::PresentationRefusal),
@@ -214,7 +211,6 @@ impl std::error::Error for DialectRefusal {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
             DialectRefusalKind::PresentationRefused(cause) => Some(cause),
-            DialectRefusalKind::UnaddressableToolPath => None,
         }
     }
 }
@@ -320,6 +316,15 @@ pub(crate) struct CodeModeDialectServices {
 /// call, in the dialect's spelling, that finds them (FIG-1435). It follows
 /// the docs, so a tool appended to the catalogue leaves the docs before it
 /// byte for byte as they were.
+/// The operation named by the effect name `effect` as `spelling` writes
+/// it; `effect` itself when it names no canonical operation.
+pub(crate) fn spelled_effect(spelling: lash_kernel_dialect::Spelling, effect: &str) -> String {
+    lash_kernel_dialect::operation_text::parse(effect).map_or_else(
+        |_| effect.to_owned(),
+        |operation| lash_kernel_dialect::spell_operation(spelling, &operation),
+    )
+}
+
 pub(crate) fn catalogue_label(
     catalogue: &crate::tool_catalog::ToolCatalogueDisclosure,
     discovery_call: &str,
@@ -446,17 +451,10 @@ impl SessionDialect {
         self.prompt_vocabulary().cell_tags
     }
 
-    /// A catalog tool's call path in the selected dialect: the manifest's
-    /// neutral binding, spelled by the dialect.
-    pub(crate) fn tool_call_path(
-        &self,
-        manifest: &lash_core::ToolManifest,
-    ) -> Result<String, SessionError> {
-        let binding = lash_vm_runtime::required_tool_executable(manifest)
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        self.language()
-            .tool_call_path(&binding)
-            .map_err(|refusal| SessionError::Protocol(refusal.to_string()))
+    /// A catalog tool's call path in the selected dialect: its operation,
+    /// spelled by the dialect.
+    pub(crate) fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> String {
+        lash_kernel_dialect::spell_operation(self.language().spelling(), &manifest.operation)
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {
@@ -546,10 +544,7 @@ impl SessionDialect {
         if manifest.id.as_str() == crate::control_tools::FINISH_TOOL_ID {
             return self.prompt_vocabulary().finish_call.to_owned();
         }
-        match self.tool_call_path(manifest) {
-            Ok(path) => format!("await {path}(…)"),
-            Err(_) => manifest.name.clone(),
-        }
+        format!("await {}(…)", self.tool_call_path(manifest))
     }
 
     /// How a cell calls the finish tool named `name`, when only its name is
@@ -844,16 +839,6 @@ impl DialectSession {
         Ok(response)
     }
 
-    /// Every name the session binds, loading the binding tree first:
-    /// the live catalog check reads it before any turn (FIG-5824).
-    pub(crate) async fn session_names(&mut self) -> Result<BTreeSet<String>, SessionError> {
-        self.state
-            .session_names()
-            .await
-            .map_err(|error| SessionError::Protocol(error.to_string()))
-            .map(|names| names.into_iter().map(|name| name.to_string()).collect())
-    }
-
     /// Takes `pages` as where the session's committed state stands, so a
     /// host read of it (the names a catalog check loads) reaches the
     /// store.
@@ -1034,8 +1019,8 @@ mod tests {
             }
         }
 
-        fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {
-            Ok(binding.call_path())
+        fn spelling(&self) -> lash_kernel_dialect::Spelling {
+            lash_kernel_dialect::Spelling::TypeScript
         }
 
         fn schema_type(

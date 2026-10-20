@@ -73,4 +73,4 @@ class Generator:
 
     def case(self, expression, index):
         return {"id": f"fuzz/{self.dialect}/{index}", "dialect": self.dialect,
-                "source": f"await observe({expression.source})" + (";" if self.dialect == "typescript" else "\n")}
+                "source": f"await host.observe({expression.source})" + (";" if self.dialect == "typescript" else "\n")}

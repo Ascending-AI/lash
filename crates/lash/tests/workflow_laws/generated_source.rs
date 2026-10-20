@@ -65,12 +65,10 @@ fn sites(document: &Document) -> Vec<Site> {
 async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps() {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
-    let environment = lash::dialect::Environment {
-        library: embedding.library(),
-        effects: &Default::default(),
-        tool_roots: &Default::default(),
-        controls: &Default::default(),
-    };
+    let environment_namespaces =
+        lash::dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
+    let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let ts = lash::typescript::lower(
         "const answer = [1, 2].map(x => x + 1);",
         &environment,

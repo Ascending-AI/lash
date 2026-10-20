@@ -46,11 +46,7 @@ impl PythonToolPresenter {
     fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
         let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
         let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
-        let reserved = tool
-            .call_path
-            .split('.')
-            .chain([tool.manifest.name.as_str()])
-            .collect::<Vec<_>>();
+        let reserved = tool.call_path.split('.').collect::<Vec<_>>();
         let allocator = python_name_allocator(&[&input, &output], &reserved);
         render_tool_doc(
             tool,
@@ -93,11 +89,12 @@ impl ToolPresenter for PythonToolPresenter {
             .reserved_names
             .iter()
             .map(String::as_str)
-            .chain(request.tools.iter().flat_map(|tool| {
-                tool.call_path
-                    .split('.')
-                    .chain([tool.manifest.name.as_str()])
-            }))
+            .chain(
+                request
+                    .tools
+                    .iter()
+                    .flat_map(|tool| tool.call_path.split('.')),
+            )
             .collect::<Vec<_>>();
         let initial = |selected: &[bool]| {
             let documents = documents

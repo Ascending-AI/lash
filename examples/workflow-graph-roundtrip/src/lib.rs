@@ -481,7 +481,7 @@ async fn read_environment(
 ) -> Result<Json<EnvironmentView>, ErrorResponse> {
     let environment = state.environment().await?;
     Ok(Json(EnvironmentView {
-        effects: serde_json::to_value(environment.effects())
+        effects: serde_json::to_value(environment.checker().effects)
             .map_err(|error| ErrorResponse::invalid("environment", error))?,
         functions: environment
             .functions()

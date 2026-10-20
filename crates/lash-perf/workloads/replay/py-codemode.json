@@ -11,11 +11,11 @@
       "replies": [
         {
           "cell": [
-            "big = await tools_fixture_large({\"key\": \"corpus\", \"bytes\": 1000000})",
+            "big = await tools.fixture_large({\"key\": \"corpus\", \"bytes\": 1000000})",
             "def describe(record, size):",
             "    return record[\"title\"] + \" / \" + str(size) + \" bytes kept\"",
             "last = \"none\"",
-            "await control_finish({\"loaded\": big[\"bytes\"], \"length\": len(big[\"text\"])})"
+            "await control.finish({\"loaded\": big[\"bytes\"], \"length\": len(big[\"text\"])})"
           ]
         }
       ]
@@ -26,11 +26,11 @@
       "replies": [
         {
           "cell": [
-            "record = await tools_fixture_lookup({\"key\": \"item-{turn}\"})",
-            "waited = await tools_fixture_slow({\"key\": \"wait-{turn}\", \"ms\": 5})",
+            "record = await tools.fixture_lookup({\"key\": \"item-{turn}\"})",
+            "waited = await tools.fixture_slow({\"key\": \"wait-{turn}\", \"ms\": 5})",
             "head = big[\"text\"][0:4096]",
             "last = describe(record, len(big[\"text\"]))",
-            "await control_finish({\"turn\": {turn}, \"last\": last, \"head\": len(head), \"waited\": waited[\"waited_ms\"], \"score\": record[\"score\"]})"
+            "await control.finish({\"turn\": {turn}, \"last\": last, \"head\": len(head), \"waited\": waited[\"waited_ms\"], \"score\": record[\"score\"]})"
           ]
         }
       ]

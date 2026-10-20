@@ -123,9 +123,9 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
         ] {
             let case = format!("{} {channel:?}", dialect.name());
             let code = if dialect.name() == "python" {
-                "found = await tools_app_lookup({})"
+                "found = await tools.app_lookup({})"
             } else {
-                "const found = await tools.app_lookup({});"
+                "const found = await tools.appLookup({});"
             };
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
@@ -159,7 +159,7 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
                     .await;
             let lookup = output_tool_calls
                 .iter()
-                .find(|record| record.tool == "app_lookup")
+                .find(|record| record.tool == "tools.app_lookup")
                 .unwrap_or_else(|| panic!("{case}: the lookup completed"));
             {
                 let requests = requests.lock_recover();
@@ -176,14 +176,9 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
                     "{case}: the durable call id stays out of successful feedback"
                 );
                 assert!(
-                    texts.iter().any(|text| {
-                        let operation = if dialect.name() == "python" {
-                            "tools_app_lookup"
-                        } else {
-                            "tools.app_lookup"
-                        };
-                        text.contains(&format!("Calls:\n- {operation} → ok"))
-                    }),
+                    texts
+                        .iter()
+                        .any(|text| text.contains("Calls:\n- tools.app_lookup → ok")),
                     "{case}: concise call feedback is preserved: {texts:?}"
                 );
             }
@@ -213,9 +208,9 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
         ] {
             let case = format!("{} {channel:?}", dialect.name());
             let code = if dialect.name() == "python" {
-                "found = await tools_app_lookup({})\nraise ValueError('after the lookup')"
+                "found = await tools.app_lookup({})\nraise ValueError('after the lookup')"
             } else {
-                "const found = await tools.app_lookup({});\nthrow new Error(\"after the lookup\");"
+                "const found = await tools.appLookup({});\nthrow new Error(\"after the lookup\");"
             };
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
@@ -248,7 +243,7 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                     .await;
             let lookup = output_tool_calls
                 .iter()
-                .find(|record| record.tool == "app_lookup")
+                .find(|record| record.tool == "tools.app_lookup")
                 .unwrap_or_else(|| panic!("{case}: the turn's ledger holds the lookup"));
             let transcript = committed(&session)
                 .await
@@ -333,13 +328,13 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
             lash::rlm::CellDialect::typescript(),
             "await app_lookup({});",
             "TS_UNKNOWN_BINDING",
-            "tools.app_lookup",
+            "tools.appLookup",
         ),
         (
             lash::rlm::CellDialect::python(),
             "await app_lookup({})",
             "PY_UNKNOWN_NAME",
-            "tools_app_lookup",
+            "tools.app_lookup",
         ),
     ] {
         let mut baseline = None;
@@ -350,7 +345,10 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
                 let (start, end) = diagnostic.span.expect("unknown name has a span");
                 assert_eq!(&code[start..end], "app_lookup");
                 assert_eq!(
-                    diagnostic.grants.get("app_lookup").map(String::as_str),
+                    diagnostic
+                        .grants
+                        .get("tools.app_lookup")
+                        .map(String::as_str),
                     Some(callable)
                 );
                 vec![format!("did you mean `{callable}`?")]

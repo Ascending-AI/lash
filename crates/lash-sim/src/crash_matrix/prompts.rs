@@ -184,7 +184,7 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 }
                 let part = |tool: &str| LlmOutputPart::ToolCall {
                     call_id: format!("{tool}-{call}"),
-                    tool_name: tool.to_owned(),
+                    tool_name: format!("tools__{tool}"),
                     input_json: "{}".to_owned(),
                     replay: None,
                 };
@@ -296,7 +296,8 @@ impl Memo {
                                 .flat_map(|message| message.parts.iter())
                                 .any(|part| {
                                     part.kind() == lash_core::PartKind::ToolResult
-                                        && part.tool_name() == Some(SET_T)
+                                        && part.tool_name()
+                                            == Some(format!("tools__{SET_T}").as_str())
                                 })
                         });
                         Ok::<_, lash_core::plugin::prompt::PromptRenderError>(
@@ -332,7 +333,7 @@ impl Memo {
             move |_this, _state| {
                 Ok(Arc::new(|input| {
                     Box::pin(async move {
-                        if input.context.tool_name != SPECULATE {
+                        if input.context.tool_name != format!("tools.{SPECULATE}") {
                             return Ok(lash_core::plugin::AfterToolContributions::default());
                         }
                         Ok(lash_core::plugin::AfterToolDecision::Deny(
@@ -371,7 +372,7 @@ fn tools()
     let definition = |name: &str, description: &str| {
         lash_core::ToolDefinition::raw(
             name,
-            name,
+            format!("tools.{name}"),
             description,
             serde_json::json!({ "type": "object", "additionalProperties": false }),
             serde_json::json!({ "type": "object" }),
@@ -403,7 +404,7 @@ struct MemoTools;
 #[async_trait::async_trait]
 impl StaticToolExecute for MemoTools {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        let t = if call.name() == SET_T {
+        let t = if call.name() == format!("tools.{SET_T}") {
             NEXT_T
         } else {
             "speculative"

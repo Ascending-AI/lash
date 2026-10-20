@@ -6,17 +6,17 @@ use lash::dialect::SourceFormat;
 use lash::workflow::document::{self as k, Captions, Document};
 use lash::workflow::view::{BindingView, SiteKind, WorkflowView, derive};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 const TYPESCRIPT: &str = r#"export async function route(priority: string) {
   /** The filed request */
-  const reply = await inbox.send_item({ title: priority });
-  const pending = inbox.send_item({ title: "later" });
+  const reply = await inbox.sendItem({ title: priority });
+  const pending = inbox.sendItem({ title: "later" });
   const later = await pending;
-  const urgent = (await inbox.send_item({ title: "check" })).urgent;
+  const urgent = (await inbox.sendItem({ title: "check" })).urgent;
   /** The marked priority */
   const marked = priority + "!";
-  if (reply === marked) { await inbox.send_item({ title: "2" }); }
+  if (reply === marked) { await inbox.sendItem({ title: "2" }); }
   return [later, urgent];
 }"#;
 
@@ -48,13 +48,10 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
             result: k::Type::Any,
         },
     )]);
-    let roots = BTreeSet::from([k::Name::new("inbox")]);
-    let environment = lash::dialect::Environment {
-        library: embedding.library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &Default::default(),
-    };
+    let environment_namespaces =
+        lash::dialect::Namespaces::of_signatures(&effects, &Default::default())
+            .expect("the test's effects are operations");
+    let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mode = lash::dialect::Mode::Module;
     let lowered = match format {
         SourceFormat::TypeScriptV1 => {

@@ -9,7 +9,6 @@ use lash_core::{
     llm::types::{LlmMessage, LlmRole},
     test_support::ToolCatalogBuildInput,
 };
-use lash_vm_runtime::ToolManifestBindingExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,12 +17,7 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
     let defs = BenchmarkLargeToolCatalog::build_tool_definitions();
     assert_eq!(defs.len(), 63);
     assert!(defs.iter().all(|def| {
-        let binding = def
-            .manifest
-            .tool_binding()
-            .expect("valid lash_vm binding")
-            .expect("benchmark tool has lash_vm binding");
-        binding.module_path == vec!["gmail".to_string()]
+        def.manifest.tool().starts_with("gmail.")
             && !def.contract.input_schema.canonical.as_value()["properties"]
                 .as_object()
                 .expect("object schema")
@@ -94,36 +88,20 @@ fn rlm_large_tool_catalog_pins_each_contract_once() {
 fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lash_vm() {
     let definitions = benchmark_oblique_tool_definitions();
     assert_eq!(definitions.len(), 3);
-    let bindings = definitions
+    let operations = definitions
         .iter()
-        .map(|definition| {
-            let binding = definition
-                .manifest
-                .tool_binding()
-                .expect("valid lash_vm binding")
-                .expect("oblique fixture tool has lash_vm binding");
-            (
-                definition.name().to_string(),
-                binding.module_path,
-                binding.operation,
-            )
-        })
+        .map(|definition| definition.manifest.tool())
         .collect::<Vec<_>>();
-    assert!(bindings.contains(&(
-        "oblique_search".to_string(),
-        vec!["obliq".to_string()],
-        Some("search".to_string())
-    )));
-    assert!(bindings.contains(&(
-        "oblique_judge_candidates".to_string(),
-        vec!["obliq".to_string()],
-        Some("judge_candidates".to_string())
-    )));
-    assert!(bindings.contains(&(
-        "oblique_list_async_handles".to_string(),
-        vec!["obliq".to_string()],
-        Some("list_async_handles".to_string())
-    )));
+    for operation in [
+        "obliq.search",
+        "obliq.judge_candidates",
+        "obliq.list_async_handles",
+    ] {
+        assert!(
+            operations.iter().any(|name| name == operation),
+            "{operations:?}"
+        );
+    }
     let search_contract = benchmark_oblique_search_tool_definition().contract;
     assert!(search_contract.output_contract.is_static());
     assert_eq!(

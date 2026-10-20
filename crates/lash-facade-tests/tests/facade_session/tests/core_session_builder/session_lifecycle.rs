@@ -253,7 +253,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
                         return Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "patched-frame-switch".to_owned(),
-                                tool_name: "switch_frame".to_owned(),
+                                tool_name: "tools__switch_frame".to_owned(),
                                 input_json: "{}".to_owned(),
                                 replay: None,
                             }],
@@ -268,7 +268,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         .into_handle();
     let definition = lash_core::ToolDefinition::control(
         "switch_frame",
-        "switch_frame",
+        "tools.switch_frame",
         "Switches the agent frame.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),

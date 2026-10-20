@@ -3,7 +3,6 @@ use lash_core::{
     ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolDefinition, ToolManifest,
     ToolOutcome, ToolProvider, TurnControl, TurnControls,
 };
-use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -36,10 +35,10 @@ impl ToolProvider for RlmControlToolsProvider {
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
         match name {
-            "continue_as" => Some(Arc::new(
+            CONTINUE_AS_OPERATION => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
-            "read_output" => Some(Arc::new(
+            READ_OUTPUT_OPERATION => Some(Arc::new(
                 read_output_tool_definition_for(self.vocabulary).contract(),
             )),
             _ => None,
@@ -47,9 +46,9 @@ impl ToolProvider for RlmControlToolsProvider {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        match call.name() {
-            "read_output" => read_output(call).await,
-            "continue_as" => match continue_as_switch_frame(call.args, call.context) {
+        match call.name().as_str() {
+            READ_OUTPUT_OPERATION => read_output(call).await,
+            CONTINUE_AS_OPERATION => match continue_as_switch_frame(call.args, call.context) {
                 Ok(control) => ToolOutcome::turn_control(control).into(),
                 Err(err) => ToolOutcome::err(err).into(),
             },
@@ -106,7 +105,7 @@ impl ToolProvider for RlmFinishProvider {
         config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<ToolContract>> {
         let definition = self.definition(config);
-        (definition.manifest.name == name).then(|| Arc::new(definition.contract()))
+        (definition.manifest.tool() == name).then(|| Arc::new(definition.contract()))
     }
 
     /// The value is the whole input: settlement checks it against the
@@ -131,7 +130,7 @@ fn read_output_tool_definition_for(
 ) -> ToolDefinition {
     ToolDefinition::raw(
         "tool:read_output",
-        "read_output",
+        READ_OUTPUT_OPERATION,
         format!("Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
         json!({
             "type": "object",
@@ -143,7 +142,6 @@ fn read_output_tool_definition_for(
     ).expect("valid schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::new(["control"], "read_output"))
 }
 
 /// Reads a retained value whole. A value whose bytes the store no longer
@@ -194,22 +192,28 @@ async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
     }
 }
 
-/// The name of Lash's finish control tool: what a turn it ended records as
-/// its finishing tool.
-pub const FINISH_TOOL_NAME: &str = "finish";
+/// The operation of Lash's finish control tool: what a turn it ended
+/// records as its finishing tool.
+pub const FINISH_TOOL_NAME: &str = "control.finish";
 
 /// The finish control tool's id. Its one input is the turn's answer, whole.
-pub(crate) const FINISH_TOOL_ID: &str = "tool:finish";
+pub(crate) const FINISH_TOOL_ID: &str = "tool:control.finish";
+
+/// The operation of the retained-output reader.
+const READ_OUTPUT_OPERATION: &str = "control.read_output";
+
+/// The operation of the frame switch.
+pub(crate) const CONTINUE_AS_OPERATION: &str = "control.continue_as";
 
 /// The `finish` control tool as a session in `dialect` advertises it.
 pub fn finish_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
     finish_tool_definition_for(dialect.prompt_vocabulary())
 }
 
-/// Lash's `control.finish`: [`lash_core::finish_tool`] over any JSON value,
-/// in the `control` binding. Its whole input is the turn's answer. A host
+/// Lash's `control.finish`: [`lash_core::finish_tool`] over any JSON value. Its whole input is the turn's answer. A host
 /// that wants a typed answer offers its own finish tool, which takes this
 /// one's place ([`lash_core::suppress_default_finish`]).
+#[expect(clippy::expect_used, reason = "a fixed canonical operation")]
 pub(crate) fn finish_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
@@ -217,12 +221,12 @@ pub(crate) fn finish_tool_definition_for(
         "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing.",
         cell_noun = vocabulary.cell_noun
     );
-    let definition = lash_core::finish_tool(
+    lash_core::finish_tool(
         FINISH_TOOL_NAME,
         definition_description,
         lash_core::JsonSchema::any(),
-    );
-    definition.with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
+    )
+    .expect("a canonical operation")
 }
 
 /// The `continue_as` control tool as a session in `dialect` advertises it.
@@ -239,14 +243,13 @@ pub(crate) fn continue_as_tool_definition_for(
 ) -> ToolDefinition {
     ToolDefinition::control(
         "tool:continue_as",
-        "continue_as",
+        CONTINUE_AS_OPERATION,
         format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Read-only seeds stay read-only. It ends the turn and returns nothing: nothing after the call runs, so make it the last thing the {cell_noun} does, once all its other work has finished.", cell_noun = vocabulary.cell_noun),
         continue_as_input_schema(),
         TurnControls::switch_agent_frame(),
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
     ))
@@ -650,10 +653,16 @@ mod tests {
         })
         .attempt("test-turn");
         let manifest = provider
-            .resolve_manifest("continue_as", &lash_core::OwnerConfigView::default())
+            .resolve_manifest(
+                "control.continue_as",
+                &lash_core::OwnerConfigView::default(),
+            )
             .expect("continue_as manifest");
         let contract = provider
-            .resolve_contract("continue_as", &lash_core::OwnerConfigView::default())
+            .resolve_contract(
+                "control.continue_as",
+                &lash_core::OwnerConfigView::default(),
+            )
             .expect("continue_as contract");
         match provider
             .execute(lash_core::ToolCall::new(

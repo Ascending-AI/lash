@@ -7,14 +7,13 @@ use super::*;
 fn form(operation: &str, input: serde_json::Value) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:forms_{operation}"),
-        format!("forms_{operation}"),
+        format!("forms.{operation}"),
         "Answers the input it was called with.",
         input,
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["forms"], operation))
 }
 
 /// The tool every field of whose input is optional, one with a default an
@@ -100,7 +99,7 @@ impl Forms {
     fn definition(key: &str) -> Option<lash_core::ToolDefinition> {
         forms()
             .into_iter()
-            .find(|tool| tool.manifest.name == key || tool.manifest.id.as_str() == key)
+            .find(|tool| tool.manifest.tool() == key || tool.manifest.id.as_str() == key)
     }
 }
 
@@ -175,11 +174,11 @@ fn spellings() -> [Spelling; 2] {
         Spelling {
             dialect: CellDialect::python(),
             workers: python_workers,
-            call: |operation| format!("forms_{operation}"),
-            finish: "control_finish",
+            call: |operation| format!("forms.{operation}"),
+            finish: "control.finish",
             null: "None",
             missing: |operation| {
-                format!("the call gives the tool `forms_{operation}` no value for `input`")
+                format!("the call gives the tool `forms.{operation}` no value for `input`")
             },
             excess: "takes 1 arguments but 2 were given",
         },
@@ -241,7 +240,7 @@ async fn tool_input_omission_follows_canonical_schema() {
         );
         assert_eq!(
             tools.executed(),
-            vec![("forms_optional".to_owned(), serde_json::json!({})); 2],
+            vec![("forms.optional".to_owned(), serde_json::json!({})); 2],
             "{name}: an omitted input executes as exactly {{}}, defaults unapplied"
         );
 

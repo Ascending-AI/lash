@@ -153,12 +153,12 @@ fn check_agent_foreground_tool_call_round_trip(
 ) -> Result<Value, String> {
     require_agent_final_value(result, &json!({ "ok": true }), contract)?;
     require_u64(result, "/tool_completed_count", 2, contract)?;
-    require_agent_tool_output(result, "app_lookup", &json!({ "ok": true }), contract)?;
-    require_agent_tool_output(result, "finish", &Value::Null, contract)?;
+    require_agent_tool_output(result, "tools.app_lookup", &json!({ "ok": true }), contract)?;
+    require_agent_tool_output(result, "control.finish", &Value::Null, contract)?;
     Ok(json!({
         "final_value": { "ok": true },
         "tool_completed_count": 2,
-        "tool_name": "app_lookup",
+        "tool_name": "tools.app_lookup",
     }))
 }
 

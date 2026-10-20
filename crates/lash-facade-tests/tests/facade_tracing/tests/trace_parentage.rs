@@ -275,7 +275,7 @@ fn node(name: &str) -> lash::persistence::LeaseOwnerIdentity {
 }
 
 fn pending_call(call_id: &str) -> lash_core::testing::runtime_helpers::MockCall {
-    tool_call(call_id, "echo_tool", r#"{"value":"held"}"#)
+    tool_call(call_id, "tools__echo_tool", r#"{"value":"held"}"#)
 }
 
 /// Open T1 under A and, while its first call is held, steer B into it and

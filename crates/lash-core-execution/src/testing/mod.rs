@@ -120,13 +120,12 @@ pub fn effect(name: &str) -> crate::EffectName {
     crate::EffectName::new(name).expect("a fixture effect name")
 }
 
-/// The effect `definition`'s binding names (`module.operation`): the path
-/// an env links it under and an engine's step performs.
+/// The effect `definition`'s operation names (`package.operation`): the
+/// path an env links it under and an engine's step performs.
 #[cfg(any(test, feature = "testing"))]
-#[expect(clippy::expect_used, reason = "fixture tools are bound")]
 #[must_use]
 pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
-    effect(&crate::effect_path_of(&definition.manifest).expect("a fixture tool is bound"))
+    definition.manifest.operation.effect_name()
 }
 
 /// What an engine that performs each of `tools` declares (P3): each tool's

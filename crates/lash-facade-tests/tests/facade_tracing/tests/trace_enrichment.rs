@@ -506,7 +506,7 @@ async fn flooded_tool_span(
         ))
         .serve_test_llm_profile(
             mock_provider(vec![
-                tool_call("call-echo", "echo_tool", r#"{"value":"flooded"}"#),
+                tool_call("call-echo", "tools__echo_tool", r#"{"value":"flooded"}"#),
                 text_call("done"),
             ])
             .into_handle(),

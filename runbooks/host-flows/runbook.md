@@ -27,9 +27,9 @@ declares
 | Intent | TypeScript | Python |
 | --- | --- | --- |
 | Define a process | `const approval = async (request) => { ... };` | `async def approval(request): ...` |
-| Start one | `await processes.start({ definition: approval, args: { request } })` | `await processes_start({"definition": approval, "args": {"request": request}})` |
-| Wait for its terminal | `await handle`, or `await processes.await({ handle })` | `await handle`, or `await processes_await({"handle": handle})` |
-| List running ones | `await processes.list({})` | `await processes_list({})` |
+| Start one | `await processes.start({ definition: approval, args: { request } })` | `await processes.start({"definition": approval, "args": {"request": request}})` |
+| Wait for its terminal | `await handle`, or `await processes.await({ handle })` | `await handle`, or `await getattr(processes, "await")({"handle": handle})` |
+| List running ones | `await processes.list({})` | `await processes.list({})` |
 | Wait inside the process for a decision | call the approval-gated `workbench_ops_apply_change` | call the same deferring host tool |
 | Sleep durably | `await sleep(25)` | `await asyncio.sleep(0.025)` |
 

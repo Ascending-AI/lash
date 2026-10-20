@@ -60,8 +60,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use lash::sync::RwLockExt;
 use lash::tools::{
-    ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
+    ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
+    ToolProvider,
 };
 use lash::{LashCore, ProcessId, SessionId};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -70,7 +70,7 @@ use serde_json::{Map, Value, json};
 
 mod registration;
 
-pub(crate) const REGISTER_TRIGGER_TOOL_NAME: &str = "workbench_register_trigger";
+pub(crate) const REGISTER_TRIGGER_TOOL_NAME: &str = "workbench.register_trigger";
 
 /// The originator scope prefix of every process a delivery starts; the rest
 /// of the scope is the subscribing session.
@@ -1062,7 +1062,7 @@ struct TriggerRegistrationProvider {
 pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:workbench_register_trigger",
-        REGISTER_TRIGGER_TOOL_NAME,
+        "workbench.register_trigger",
         "Publish an inline function as a workflow and start it on every event of a workbench source: \
          every mail delivered to a connected inbox, or each tick of a cron schedule. \
          The event is passed in `event_arg`; `args` fixes the definition's other arguments.",
@@ -1110,7 +1110,6 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
     .expect("valid declared tool schemas")
     // A signature check and one row: a short body.
     .with_execution(Duration::from_secs(30))
-    .with_tool_binding(ToolBinding::new(["workbench"], "register_trigger"))
 }
 
 #[async_trait]

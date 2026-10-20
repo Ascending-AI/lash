@@ -28,15 +28,13 @@ impl LashRuntime {
     }
 }
 
-/// Judge a proposed catalog over the boundary's committed bindings without
-/// materializing or registering a live session. Config commands can still
-/// repair a session whose old plugin configuration cannot build.
+/// Judge that a proposed catalog builds, without materializing or
+/// registering a live session. Config commands can still repair a session
+/// whose old plugin configuration cannot build.
 pub(super) async fn validate_config_tool_catalog(
     host: &crate::PluginHost,
     state: &crate::RuntimeSessionState,
-    page_reader: Option<&crate::plugin::SessionPageReader>,
     config: &crate::PersistedSessionConfig,
-    live: Option<&std::sync::Arc<dyn crate::plugin::ProtocolSessionPlugin>>,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let authority = crate::plugin::SessionAuthorityContext {
         plugin_config: crate::AdmittedPluginConfig::new(
@@ -52,16 +50,11 @@ pub(super) async fn validate_config_tool_catalog(
         ),
         None => crate::plugin::PluginSessionRequest::creation(state.session_id.clone(), authority),
     };
-    host.validate_session_tool_catalog(
-        request,
-        &crate::plugin::ProtocolSessionRestoreView::new(state, page_reader),
-        live,
-    )
-    .await
+    host.validate_session_tool_catalog(request)
 }
 
-/// Return a candidate catalog's config refusal (a namespace collision, or
-/// a surface its providers cannot build) without losing its type at a
+/// Return a candidate catalog's config refusal (a surface its providers
+/// cannot build) without losing its type at a
 /// plugin boundary. Other failures remain infrastructure failures.
 pub(super) fn catalog_config_refusal(
     error: &lash_execution_contracts::plugin_error::PluginError,
@@ -83,17 +76,17 @@ pub(super) fn catalog_config_refusal(
 }
 
 /// The catalog refusal a run-shape refusal carries, if it is one: the core
-/// owner's namespace collision or surface refusal.
+/// owner's surface refusal.
 pub(super) fn catalog_refusal_of(
     refusal: &crate::RunShapeRefusal,
 ) -> Option<&crate::ConfigRefusal> {
     match refusal {
         crate::RunShapeRefusal::Owner { refusal }
             if matches!(
-                refusal.owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
+                refusal
+                    .owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
                 Some(
-                    lash_execution_contracts::config_error::CoreConfigRefusal::ToolNamespaceCollision { .. }
-                        | lash_execution_contracts::config_error::CoreConfigRefusal::ToolSurfaceRefused { .. }
+                    lash_execution_contracts::config_error::CoreConfigRefusal::ToolSurfaceRefused { .. }
                 )
             ) =>
         {

@@ -38,7 +38,8 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                                 parts: (results..results + 2)
                                     .map(|index| LlmOutputPart::ToolCall {
                                         call_id: format!("call-{index}"),
-                                        tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
+                                        tool_name: lash_core::testing::FIXTURE_ECHO_TOOL
+                                            .replace('.', "__"),
                                         input_json:
                                             serde_json::json!({"value": format!("value-{index}")})
                                                 .to_string(),

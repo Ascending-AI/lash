@@ -84,8 +84,14 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
             as Arc<dyn PluginFactory>
     };
-    let lookup = lash::mcp::mcp_tool_names("records", &["lookup"])["lookup"].clone();
-    let search = lash::mcp::mcp_tool_names("records", &["search"])["search"].clone();
+    let lookup = lash::tools::IntoOperation::into_operation(
+        lash::mcp::mcp_tool_names("records", &["lookup"])["lookup"].clone(),
+    )
+    .expect("an MCP operation");
+    let search = lash::tools::IntoOperation::into_operation(
+        lash::mcp::mcp_tool_names("records", &["search"])["search"].clone(),
+    )
+    .expect("an MCP operation");
 
     // The session was created while the server advertised `lookup`.
     let created_factory = Arc::new(
@@ -168,14 +174,14 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         manifest: restored
             .entries()
             .iter()
-            .find(|entry| entry.manifest.name == lookup)
+            .find(|entry| entry.manifest.operation == lookup)
             .expect("the recorded surface names lookup")
             .manifest
             .clone(),
         contract: (*restored
             .entries()
             .iter()
-            .find(|entry| entry.manifest.name == lookup)
+            .find(|entry| entry.manifest.operation == lookup)
             .expect("the recorded surface names lookup")
             .contract)
             .clone(),
@@ -641,7 +647,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
             .pool()
             .advertised_tools()
             .iter()
-            .any(|tool| tool.name().contains("__work_"))
+            .any(|tool| tool.manifest.tool().starts_with("catalog.work"))
         {
             tokio::task::yield_now().await;
         }

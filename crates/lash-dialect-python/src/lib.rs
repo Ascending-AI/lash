@@ -121,11 +121,7 @@ fn lower_with_calls(
     calls: Option<&mut std::collections::BTreeSet<String>>,
 ) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
-        lower::check_binding_names(
-            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
-            environment.effects,
-            environment.tool_roots,
-        )?;
+        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
     }
     let max_bytes = limits.max_bytes;
     if source.len() > max_bytes {
@@ -194,6 +190,16 @@ impl FrontEnd for Python {
         mode: Mode<'_>,
     ) -> Result<Lowered, Diagnostic> {
         lower_with_limits(source, environment, mode, self.limits)
+    }
+
+    fn reserves(&self, root: &str) -> Option<String> {
+        if lower::is_builtin(root) || root == "asyncio" {
+            Some("a Python built-in".to_owned())
+        } else if !printer::legal_identifier(root) {
+            Some("a name the Python printer generates".to_owned())
+        } else {
+            None
+        }
     }
 }
 

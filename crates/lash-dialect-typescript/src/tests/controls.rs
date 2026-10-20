@@ -27,17 +27,19 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
     let finish = EffectName::new("control.finish").expect("a tool's name");
     let effects = BTreeMap::from([
         (finish.clone(), signature.clone()),
-        (EffectName::new("echo").expect("a tool's name"), signature),
+        (
+            EffectName::new("host.echo").expect("a tool's name"),
+            signature,
+        ),
     ]);
     let controls = BTreeMap::from([(finish, BTreeSet::from([EffectControl::Finish]))]);
     crate::lower(
         source,
-        &Environment {
-            library: super::library(),
-            effects: &effects,
-            controls: &controls,
-            tool_roots: &std::collections::BTreeSet::new(),
-        },
+        &Environment::new(
+            super::library(),
+            &lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
+                .expect("the test's effects are operations"),
+        ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )
 }
@@ -55,7 +57,7 @@ fn ends_main(lowered: &Lowered) -> bool {
 #[test]
 fn a_control_call_ends_the_cell_and_nothing_after_it_runs() {
     let recorded = machine::run(
-        "console.log(\"before\");\nawait finish(1);\nconsole.log(\"after\");",
+        "console.log(\"before\");\nawait control.finish(1);\nconsole.log(\"after\");",
         &[],
     );
     assert_eq!(recorded.lines(), ["before"]);
@@ -65,7 +67,7 @@ fn a_control_call_ends_the_cell_and_nothing_after_it_runs() {
         .iter()
         .flat_map(|epoch| epoch.asked.iter().map(String::as_str))
         .collect();
-    assert_eq!(asked, ["finish:1"]);
+    assert_eq!(asked, ["control.finish:1"]);
 }
 
 /// Law 2: a control call that is not awaited where it stands at the top of
@@ -74,8 +76,8 @@ fn a_control_call_ends_the_cell_and_nothing_after_it_runs() {
 #[test]
 fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs() {
     for source in [
-        "await Promise.all([control.finish(1), echo(2)]);",
-        "const pending = control.finish(1);\nawait echo(2);\nawait pending;",
+        "await Promise.all([control.finish(1), host.echo(2)]);",
+        "const pending = control.finish(1);\nawait host.echo(2);\nawait pending;",
         "async function end() { await control.finish(1); }\nawait end();",
         "await Promise.all([1, 2].map(async (x) => await control.finish(x)));",
     ] {
@@ -83,7 +85,7 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
         assert_eq!(error.code.as_str(), "TS_CONTROL_CALL_PLACEMENT", "{source}");
         assert!(!error.is_dialect_refusal(), "a program defect: {source}");
     }
-    let lowered = lower_against_control("await echo(1);\nawait control.finish(2);")
+    let lowered = lower_against_control("await host.echo(1);\nawait control.finish(2);")
         .expect("a control call awaited at the top level lowers");
     assert!(ends_main(&lowered));
 }

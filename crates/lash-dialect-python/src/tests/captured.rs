@@ -28,7 +28,7 @@ use super::machine;
 const ADAPTER: &str = "
 adapter_outputs = []
 async def adapter_tool(name, argument):
-    return await host_tool(name, argument)
+    return await host.tool(name, argument)
 def adapter_copy(value):
     if isinstance(value, list):
         return [adapter_copy(item) for item in value]
@@ -41,7 +41,7 @@ try:
     adapter_end = ('returned', await main(adapter_tool, adapter_output))
 except Exception as adapter_error:
     adapter_end = ('raised', type(adapter_error).__name__, str(adapter_error))
-await host_end(adapter_outputs, adapter_end)
+await host.end(adapter_outputs, adapter_end)
 ";
 
 #[derive(Deserialize)]
@@ -118,14 +118,14 @@ fn effects() -> BTreeMap<EffectName, Signature> {
     };
     BTreeMap::from([
         (
-            EffectName::new("host_tool").expect("a tool's name"),
+            EffectName::new("host.tool").expect("a tool's name"),
             signature(vec![
                 param("name", Type::Text),
                 param("argument", Type::Any),
             ]),
         ),
         (
-            EffectName::new("host_end").expect("a tool's name"),
+            EffectName::new("host.end").expect("a tool's name"),
             signature(vec![param("outputs", Type::Any), param("end", Type::Any)]),
         ),
     ])
@@ -160,7 +160,7 @@ fn on_the_kernel(source: &str, script: &Script) -> Capture {
                 let Request::Effect(effect) = &request else {
                     panic!("a captured case does not sleep\n{text_}");
                 };
-                if effect.effect.as_str() == "host_end" {
+                if effect.effect.as_str() == "host.end" {
                     reported = Some((effect.args[0].clone(), effect.args[1].clone()));
                     outcomes.push((effect.wait, Outcome::Completed(Datum::Null)));
                     continue;

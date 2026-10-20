@@ -99,7 +99,7 @@ impl LedgerCall {
     fn control(&self, boundary: &HostBoundary) -> bool {
         boundary
             .effect(&self.operation)
-            .is_some_and(|effect| !effect.controls.is_empty())
+            .is_some_and(|(_, offered)| !offered.controls.is_empty())
     }
 }
 
@@ -289,7 +289,7 @@ impl CellHost<'_> {
                 format!("this session cannot offer `{}`: {note}", request.effect),
             ));
         }
-        let effect = self.boundary.effect(&request.effect).ok_or_else(|| {
+        let tool = self.boundary.tool(&request.effect).ok_or_else(|| {
             refused(
                 UNKNOWN_EFFECT,
                 format!("this session offers no `{}`", request.effect),
@@ -300,7 +300,7 @@ impl CellHost<'_> {
         let args = CellArgs
             .args(&request.args)
             .map_err(|refusal| refusal.error(&request.effect))?;
-        let invocation = self.invocation(request, call, effect.tool.clone(), args);
+        let invocation = self.invocation(request, call, tool, args);
         let frozen =
             FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &CellArgs)
                 .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
@@ -421,7 +421,7 @@ impl KernelEffects for CellHost<'_> {
         let control = self
             .boundary
             .effect(&request.effect)
-            .is_some_and(|effect| !effect.controls.is_empty());
+            .is_some_and(|(_, offered)| !offered.controls.is_empty());
         // A cancelled call ends the cell whatever its program made of the
         // error, and so does the turn's own cancel: nothing after either
         // ends the turn in its place.

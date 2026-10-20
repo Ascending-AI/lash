@@ -244,7 +244,7 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
         .expect("control barrier during HTTP storm");
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
     fixture.state.release.notify_one();
-    while pool.advertised_tools()[0].name()
+    while pool.advertised_tools()[0].manifest.tool()
         != crate::mcp_tool_names("http", &["work-3"])["work-3"].clone()
     {
         tokio::task::yield_now().await;
@@ -347,7 +347,7 @@ async fn mcp_guidance_renders_the_offered_catalogs_revision_without_the_server()
         let entry = pool.entries.read_recover()["http"].clone();
         let generation = entry.service_snapshot().expect("HTTP service").generation;
         entry.request_tool_refresh(generation);
-        while pool.advertised_tools()[0].name()
+        while pool.advertised_tools()[0].manifest.tool()
             != crate::mcp_tool_names("http", &["work-2"])["work-2"]
         {
             tokio::task::yield_now().await;

@@ -29,9 +29,9 @@ async function record({ name, source, deliveries, deviation }) {
       pending.push({ label, settle: () => settle(resolve, reject) });
     });
   };
-  const echo = (x) => ask(`echo:${x}`, (resolve) => resolve(x));
+  const echo = (x) => ask(`host.echo:${x}`, (resolve) => resolve(x));
   const boom = (x) =>
-    ask(`boom:${x}`, (_, reject) => {
+    ask(`host.boom:${x}`, (_, reject) => {
       const error = new Error(String(x));
       error.name = "boom";
       reject(error);
@@ -46,7 +46,7 @@ async function record({ name, source, deliveries, deviation }) {
   const console = { log: (...parts) => epoch.logged.push(parts.map(spelled).join(" ")) };
 
   let end = null;
-  new AsyncFunction("echo", "boom", "sleep", "console", source)(echo, boom, sleep, console).then(
+  new AsyncFunction("host", "sleep", "console", source)({ echo, boom }, sleep, console).then(
     () => (end = "ok"),
     (error) => (end = `error ${error}`),
   );

@@ -15,7 +15,7 @@ use super::machine;
 fn effects() -> std::collections::BTreeMap<EffectName, Signature> {
     let mut effects = machine::effects();
     effects.insert(
-        EffectName::new("control_finish").expect("a tool's name"),
+        EffectName::new("control.finish").expect("a tool's name"),
         Signature {
             params: vec![Param {
                 name: Name::new("value"),
@@ -34,7 +34,7 @@ fn effects() -> std::collections::BTreeMap<EffectName, Signature> {
 fn a_control_call_ends_the_program_and_nothing_after_it_runs() {
     let mut asked = Vec::new();
     let (lines, end) = machine::drive(
-        "print('before')\nawait control_finish(1)\nprint('after')\n",
+        "print('before')\nawait control.finish(1)\nprint('after')\n",
         effects(),
         super::pages::Session::default(),
         |lines, park, _| {
@@ -53,7 +53,7 @@ fn a_control_call_ends_the_program_and_nothing_after_it_runs() {
     );
     assert!(lines.is_empty(), "{lines:?}");
     assert!(matches!(end, End::Finished(_)), "{end:?}");
-    assert_eq!(asked, ["control_finish"]);
+    assert_eq!(asked, ["control.finish"]);
 }
 
 /// Law 2: a control call made into a task (`asyncio.gather`,
@@ -62,9 +62,9 @@ fn a_control_call_ends_the_program_and_nothing_after_it_runs() {
 #[test]
 fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs() {
     for source in [
-        "import asyncio\nawait asyncio.gather(control_finish(1), echo(2))\n",
-        "import asyncio\njob = asyncio.create_task(control_finish(1))\nawait echo(2)\nawait job\n",
-        "async def end():\n    await control_finish(1)\nawait end()\n",
+        "import asyncio\nawait asyncio.gather(control.finish(1), host.echo(2))\n",
+        "import asyncio\njob = asyncio.create_task(control.finish(1))\nawait host.echo(2)\nawait job\n",
+        "async def end():\n    await control.finish(1)\nawait end()\n",
     ] {
         let error = machine::lower_with_effects(source, &effects()).expect_err(source);
         assert_eq!(error.code, "PY_CONTROL_CALL_PLACEMENT", "{source}");
@@ -74,27 +74,23 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
             "{source}"
         );
     }
-    machine::lower_with_effects("await echo(1)\nawait control_finish(2)\n", &effects())
+    machine::lower_with_effects("await host.echo(1)\nawait control.finish(2)\n", &effects())
         .expect("a control call awaited at the top level lowers");
 }
 
-/// FIG-5781: a tool's name is reserved. A module binding named
-/// `control_finish` would hide the tool from itself and every later cell,
-/// so it is refused with a repair.
+/// A11: `control` stays reserved, while a name that merely equals a
+/// flattened effect name is an ordinary binding.
 #[test]
-fn a_cell_cannot_bind_a_tools_name() {
-    for source in [
-        "control_finish = 1\nprint(control_finish)\n",
-        "def control_finish(x):\n    return x\nprint(control_finish(1))\n",
-    ] {
-        let error = machine::lower_with_effects(source, &effects()).expect_err(source);
-        assert_eq!(error.code, "PY_SHADOWS_BUILTIN", "{source}");
-        assert!(
-            error
-                .repairs
-                .iter()
-                .any(|repair| repair.contains("control_finish_")),
-            "{source}"
-        );
-    }
+fn a_cell_cannot_bind_control_but_may_bind_a_flattened_name() {
+    let error = machine::lower_with_effects("control = 1\nprint(control)\n", &effects())
+        .expect_err("control is reserved");
+    assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
+    assert!(
+        error
+            .repairs
+            .iter()
+            .any(|repair| repair.contains("control_"))
+    );
+    machine::lower_with_effects("control_finish = 1\nprint(control_finish)\n", &effects())
+        .expect("a flattened effect name is no reserved name");
 }

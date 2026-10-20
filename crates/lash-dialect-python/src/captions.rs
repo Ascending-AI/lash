@@ -21,7 +21,7 @@ ones the description, and a bare `#:` a blank line in it:
 
     #: Fetch the open orders
     #: Only orders not yet shipped.
-    orders = await tools.orders.list(status=\"open\")
+    orders = await orders.list(status=\"open\")
 
 A caption above an `async def` titles that workflow. Above `else:` (of an `if`, \
 `for` or `while`), the first `except` or `finally:` it names that branch; above \

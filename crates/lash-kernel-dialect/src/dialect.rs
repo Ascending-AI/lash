@@ -5,9 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    CaptionKind, Captions, Document, EffectName, Name, Signature, Site, SourceMap,
-};
+use lash_kernel_doc::{CaptionKind, Captions, Document, Name, Site, SourceMap};
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
@@ -18,18 +16,21 @@ use crate::library::Library;
 pub struct Environment<'a> {
     /// The kernel library and the dialect's own functions, by name.
     pub library: &'a dyn Library,
-    /// The effects the host supplies, with the signature each is performed
-    /// under.
-    pub effects: &'a BTreeMap<EffectName, Signature>,
-    /// Tool namespace roots from the host's catalog, before dialect name
-    /// rendering. Python's flattened effect names cannot recover these.
-    pub tool_roots: &'a BTreeSet<Name>,
-    /// The turn-ending controls each effect declares its result may be
-    /// ([`EffectControl`]): the effects named here are control calls. An
-    /// effect that declares none is absent. A front end ends `main` right
-    /// after a control call settles, and a saved function pins what its
-    /// effects declared.
-    pub controls: &'a BTreeMap<EffectName, BTreeSet<EffectControl>>,
+    /// The packages and offered operations a dotted name resolves through.
+    /// An operation whose [`crate::Offered::controls`] are not empty is a
+    /// control call: a front end ends `main` right after it settles, and a
+    /// saved function pins what its effects declared.
+    pub namespaces: &'a crate::Namespaces,
+}
+
+impl<'a> Environment<'a> {
+    #[must_use]
+    pub fn new(library: &'a dyn Library, namespaces: &'a crate::Namespaces) -> Self {
+        Self {
+            library,
+            namespaces,
+        }
+    }
 }
 
 /// What a cell lowers against beyond the [`Environment`]: the session it
@@ -129,6 +130,14 @@ pub trait FrontEnd {
         environment: &Environment<'_>,
         mode: Mode<'_>,
     ) -> Result<Lowered, Diagnostic>;
+
+    /// What in this dialect reserves `root`, so that no package path may
+    /// take it: one of its globals, or a name its printer generates. `None`
+    /// for a root a package may take.
+    fn reserves(&self, root: &str) -> Option<String> {
+        let _ = root;
+        None
+    }
 }
 
 /// Writes a document as plain source in the dialect, without compiling or

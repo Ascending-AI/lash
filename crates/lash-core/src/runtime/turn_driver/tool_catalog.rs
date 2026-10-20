@@ -108,8 +108,15 @@ impl RuntimeTurnDriver<'_> {
                     .filter(|manifest| !manifest.declaration().controls.is_empty())
                     .map(|manifest| {
                         let controls = manifest.declaration().controls.clone();
-                        (manifest.name, controls)
+                        (manifest.tool(), controls)
                     })
+                    .collect(),
+                truncated_names: execution_environment
+                    .tool_definitions
+                    .iter()
+                    .map(crate::ToolDefinition::manifest)
+                    .map(|manifest| (manifest.standard_name(), manifest.tool()))
+                    .filter(|(name, operation)| name.replace("__", ".") != *operation)
                     .collect(),
             },
             execution_environment.surface,
@@ -123,7 +130,7 @@ impl RuntimeTurnDriver<'_> {
             Some(recorded) if !self.surface_installed => self
                 .session
                 .install_recorded_tool_surface(Arc::clone(recorded))?,
-            _ => self.session.admit_tool_surface().await?,
+            _ => self.session.admit_tool_surface()?,
         };
         Ok(PreparedExecutionEnvironment {
             tool_definitions: tool_surface.definitions(),

@@ -44,7 +44,7 @@ fn lines(source: &str) -> Vec<String> {
 fn passes_continue_break_return_raise_and_else() {
     let source = "def first_big(xs):\n    for x in xs:\n        if x > 2:\n            return x\n    return None\n\
         out = []\n\
-        for x in [1, 2, 3, 4]:\n    if x == 2:\n        continue\n    out.append(await echo(x))\n    if x == 3:\n        break\nelse:\n    print('never')\n\
+        for x in [1, 2, 3, 4]:\n    if x == 2:\n        continue\n    out.append(await host.echo(x))\n    if x == 3:\n        break\nelse:\n    print('never')\n\
         for x in (5, 6):\n    out.append(x)\nelse:\n    print('exhausted')\n\
         try:\n    for x in [7]:\n        raise ValueError('inside')\n    else:\n        print('never')\nexcept ValueError as error:\n    print(error)\n\
         n = 0\n\
@@ -61,7 +61,7 @@ fn passes_continue_break_return_raise_and_else() {
 /// protocol, each value read live.
 #[test]
 fn a_str_walks_code_points_and_a_view_reads_the_dict_live() {
-    let source = "for c in 'a\u{e9}\u{1f600}':\n    print(await echo(c))\n\
+    let source = "for c in 'a\u{e9}\u{1f600}':\n    print(await host.echo(c))\n\
         d = {'a': 1, 'b': 2}\n\
         for k, v in d.items():\n    d['b'] = 20\n    print(k, v)\n\
         for v in d.values():\n    print(v)\n\
@@ -88,7 +88,7 @@ fn a_str_walks_code_points_and_a_view_reads_the_dict_live() {
 #[test]
 fn a_dict_delete_before_a_park_is_refused_at_the_next_step() {
     let (end, lines) = run(
-        "d = {'a': 1, 'b': 2, 'c': 3}\nfor k in d:\n    print(await echo(k))\n    if k == 'a':\n        del d['b']\n",
+        "d = {'a': 1, 'b': 2, 'c': 3}\nfor k in d:\n    print(await host.echo(k))\n    if k == 'a':\n        del d['b']\n",
     );
     assert_eq!(
         end,
@@ -122,7 +122,7 @@ fn a_final_delete_raises_at_exhaustion_and_a_break_after_one_does_not() {
 #[test]
 fn a_same_size_delete_and_add_spends_the_entry_budget() {
     let (end, lines) = run(
-        "d = {'a': 1, 'b': 2}\nfor k in d:\n    print(await echo(k))\n    del d[k]\n    d[k + 'x'] = 1\n",
+        "d = {'a': 1, 'b': 2}\nfor k in d:\n    print(await host.echo(k))\n    del d[k]\n    d[k + 'x'] = 1\n",
     );
     assert_eq!(
         end,

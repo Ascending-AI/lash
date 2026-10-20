@@ -22,7 +22,7 @@ mod lifecycle_actor;
 mod round_trip;
 pub(crate) mod tool_changes;
 pub(crate) use admission::admitted_binding;
-use admission::{McpToolBinding, RemoteCompletion};
+use admission::{McpCallTarget, RemoteCompletion};
 
 use lash_protocol_types::{sync::LockResultExt, sync::MutexExt, sync::RwLockExt};
 use std::collections::BTreeMap;
@@ -51,7 +51,6 @@ use lash_core::{
     AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolId,
     ToolOutcome, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
 };
-use lash_tool_support::ToolDefinitionBindingExt;
 
 use crate::call_failure::{McpCallFailure, McpServiceFailure};
 #[cfg(test)]
@@ -256,8 +255,8 @@ struct InstalledServer {
     entry: Weak<McpEntry>,
     /// Prefixed tool definitions, replaced on every successful (re)connect or
     /// refresh and kept across a disconnect so the tool surface stays stable
-    /// during an outage. Keys are bounded bare model names
-    /// (`mcp__<server>__<tool>`) with symmetric eight-character identity
+    /// during an outage. Keys are the tools' operations, by effect name
+    /// (`<server>.<tool>`), with symmetric `_h` eight-character identity
     /// suffixes on cleanup/truncation collision groups.
     tools: BTreeMap<String, ImportedTool>,
 }
@@ -327,7 +326,7 @@ impl InstalledCatalog {
                 .find_map(|(name, tool)| matches(name, tool).then_some(tool))?;
             Some(ResolvedToolTarget {
                 entry: installed.entry.upgrade()?,
-                advertised_name: tool.definition.manifest.name.clone(),
+                advertised_name: tool.definition.manifest.tool(),
                 native_name: tool.original_name.clone(),
                 binding: admission::admitted_binding(&tool.definition.manifest).ok(),
             })
@@ -340,7 +339,7 @@ struct ResolvedToolTarget {
     entry: Arc<McpEntry>,
     advertised_name: String,
     native_name: String,
-    binding: Option<McpToolBinding>,
+    binding: Option<McpCallTarget>,
 }
 
 impl McpConnectionPool {
@@ -558,9 +557,10 @@ impl McpConnectionPool {
             .and_then(|entry| entry.startup_failure.read_recover().clone())
     }
 
-    /// All advertised tools across every server, with bounded
-    /// `mcp__<server>__<tool>` names. Cleanup/truncation collision groups use
-    /// `<tool>__<8-character-id-digest>` for every member. These are precomputed
+    /// All advertised tools across every server, each the operation
+    /// `<server>.<tool>` in canonical names. Cleanup/truncation collision
+    /// groups use `<tool>_h<8-character-id-digest>` for every member. These
+    /// are precomputed
     /// `ToolDefinition` clones.
     /// Includes tools of currently disconnected servers (last successful
     /// discovery) so the tool catalog stays stable across an outage.
@@ -729,7 +729,7 @@ fn validate_unique_server_prefixes<'a>(
 ) -> Result<(), McpError> {
     let mut prefixes = BTreeMap::<String, &'a str>::new();
     for server_name in server_names {
-        let prefix = naming::server_prefix(server_name);
+        let prefix = naming::server_segment(server_name);
         if let Some(existing_server) = prefixes.insert(prefix.clone(), server_name) {
             return Err(McpError::Config(prefix_collision_message(
                 existing_server,
@@ -745,12 +745,12 @@ fn conflicting_server_prefix<'a>(
     existing_server_names: impl IntoIterator<Item = &'a str>,
     incoming_server: &str,
 ) -> Option<(&'a str, String)> {
-    let incoming_prefix = naming::server_prefix(incoming_server);
+    let incoming_prefix = naming::server_segment(incoming_server);
     existing_server_names
         .into_iter()
         .find(|existing_server| {
             *existing_server != incoming_server
-                && naming::server_prefix(existing_server) == incoming_prefix
+                && naming::server_segment(existing_server) == incoming_prefix
         })
         .map(|existing_server| (existing_server, incoming_prefix))
 }
@@ -1055,13 +1055,11 @@ fn import_tools_with_name_builder(
     server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
     execution: Duration,
-    mut build_name: impl FnMut(&str, &str) -> (String, lash_tool_support::ToolBinding),
+    mut build_name: impl FnMut(&str, &str) -> String,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let mut imported = BTreeMap::new();
-    let module = Arc::new(lash_core::ToolModule {
-        name: server_name.to_string(),
-    });
+    let server = naming::server_segment(server_name);
     for tool in tools {
         let tool_digest = admission::tool_digest(&tool)?;
         // MCP tasks are an unsolicited extension result in 2026-07-28,
@@ -1075,19 +1073,19 @@ fn import_tools_with_name_builder(
             .unwrap_or_default();
         let input_schema = Value::Object((*tool.input_schema).clone());
         let output_schema = mcp_result_schema(tool.output_schema.as_deref());
-        let (prefixed, lash_vm_binding) = build_name(server_name, &original_name);
+        // The tool's operation: the server's canonical segment and the
+        // tool's canonical name, both NAME-CANON by construction.
+        let prefixed = format!("{server}.{}", build_name(server_name, &original_name));
         let tool_id = naming::durable_tool_id(server_name, &original_name);
 
-        let mut definition = ToolDefinition::raw(
+        let definition = ToolDefinition::raw(
             tool_id,
-            prefixed.clone(),
+            prefixed.as_str(),
             description,
             input_schema,
             output_schema,
         )?
-        .with_execution(execution)
-        .with_tool_binding(lash_vm_binding);
-        definition.manifest.module = Some(Arc::clone(&module));
+        .with_execution(execution);
         let imported_tool = ImportedTool {
             original_name,
             definition,
@@ -1100,7 +1098,7 @@ fn import_tools_with_name_builder(
             }
             std::collections::btree_map::Entry::Occupied(existing) => {
                 return Err(McpError::Config(format!(
-                    "MCP model-facing name collision for `{prefixed}` between tool ids `{}` and `{}`",
+                    "MCP operation collision for `{prefixed}` between tool ids `{}` and `{}`",
                     existing.get().definition.manifest.id,
                     imported_tool.definition.manifest.id
                 )));

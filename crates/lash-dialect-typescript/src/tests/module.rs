@@ -3,7 +3,7 @@
 //! TypeScript annotation means; the twin cases that compare entry names and
 //! refusal codes with Python run through the host's import.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
@@ -13,12 +13,10 @@ use crate::DiagnosticCode;
 
 fn module(source: &str) -> Result<Lowered, crate::Diagnostic> {
     let effects = super::machine::effects();
-    let environment = Environment {
-        library: super::library(),
-        effects: &effects,
-        controls: super::controls(),
-        tool_roots: &BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, super::library())
         .unwrap_or_else(|invalid| panic!("{invalid}"));
@@ -46,19 +44,17 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
 fn filtering_records_then_mapping_the_result_admits() {
     let mut effects = super::machine::effects();
     effects
-        .get_mut(&EffectName::new("echo").unwrap())
+        .get_mut(&EffectName::new("host.echo").unwrap())
         .unwrap()
         .result = Type::List(Box::new(Type::Any));
-    let environment = Environment {
-        library: super::library(),
-        effects: &effects,
-        controls: super::controls(),
-        tool_roots: &BTreeSet::new(),
-    };
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
+            .expect("the test's effects are operations");
+    let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(
         r#"
 export async function unread_subjects() {
-  const emails = await echo(null);
+  const emails = await host.echo(null);
   const unread = emails.filter((email) => email.unread);
   const subjects = unread.map((email) => email.subject);
   return subjects;

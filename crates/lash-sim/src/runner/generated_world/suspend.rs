@@ -117,7 +117,7 @@ impl GeneratedRuntimeWorld {
             }
         };
         let session_alias = event.actor_alias.clone();
-        let tool_name = format!("await_{suspend_kind_label}");
+        let tool_name = format!("tools.await_{suspend_kind_label}");
         let resolution = json!({
             "ok": true,
             "suspend_kind": suspend_kind_label,
@@ -132,7 +132,7 @@ impl GeneratedRuntimeWorld {
         // transport (not a TestProvider), so both the tool-call exchange that
         // suspends the turn and the post-resume exchange exercise real provider
         // wire parsing.
-        let suspend_scripts = suspend_roundtrip_scripts(&tool_name)
+        let suspend_scripts = suspend_roundtrip_scripts(&tool_name.replace('.', "__"))
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),

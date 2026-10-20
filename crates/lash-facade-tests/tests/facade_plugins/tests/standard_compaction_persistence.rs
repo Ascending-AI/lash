@@ -876,7 +876,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         ),
         response_with_usage(
             &typescript_block(
-                r#"await control.continue_as({ task: "finish from the new frame" });"#,
+                r#"await control.continueAs({ task: "finish from the new frame" });"#,
             ),
             1,
         ),

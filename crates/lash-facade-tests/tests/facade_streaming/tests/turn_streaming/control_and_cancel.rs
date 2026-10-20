@@ -598,7 +598,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
                     return Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "primary-lookup".to_string(),
-                            tool_name: "app_lookup".to_string(),
+                            tool_name: "tools__app_lookup".to_string(),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
@@ -736,7 +736,7 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
                     return Ok(LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "primary-lookup".to_string(),
-                            tool_name: "app_lookup".to_string(),
+                            tool_name: "tools__app_lookup".to_string(),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
@@ -859,7 +859,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     assert!(matches!(
         &tool_completed.event,
         TurnEvent::ToolCallCompleted { name, output, .. }
-            if name == "app_lookup" && output.value_for_projection() == serde_json::json!({ "ok": true })
+            if name == "tools.app_lookup" && output.value_for_projection() == serde_json::json!({ "ok": true })
     ));
     Ok(())
 }

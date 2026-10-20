@@ -160,17 +160,15 @@ struct DataTool;
 
 #[cfg(feature = "rlm")]
 fn data_definition() -> lash_core::ToolDefinition {
-    use lash_core::ToolDefinitionBindingExt as _;
     lash_core::ToolDefinition::raw(
         "tool:read-data",
-        "read_data",
-        "Read data",
+        "report.read",
+        "Read the report",
         serde_json::json!({"type":"object"}),
         serde_json::json!({}),
     )
     .expect("valid schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_core::ToolBinding::new(["data"], "read"))
 }
 
 #[cfg(feature = "rlm")]
@@ -187,7 +185,7 @@ impl ToolProvider for DataTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "read_data").then(|| Arc::new(data_definition().contract()))
+        (name == "report.read").then(|| Arc::new(data_definition().contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         lash_core::ToolOutcome::ok(serde_json::json!(1)).into()
@@ -199,7 +197,7 @@ impl ToolProvider for DataTool {
 #[cfg(feature = "rlm")]
 const DATA_TOOLS: &str = "data-tools";
 
-/// A selection that offers every tool but `read_data`.
+/// A selection that offers every tool but `report.read`.
 #[cfg(feature = "rlm")]
 fn without_data() -> lash::tools::ToolSelectionConfig {
     lash::tools::ToolSelectionConfig {
@@ -209,37 +207,56 @@ fn without_data() -> lash::tools::ToolSelectionConfig {
     }
 }
 
+/// The cells of an NS-SHADOW session: bind `report`, then read it as many
+/// times as the law runs a turn after the host adds the package `report`.
 #[cfg(feature = "rlm")]
-async fn namespace_collision_law(per_run: bool) -> Result<()> {
+fn report_cells(bind: &str, read: &str, reads: usize) -> ProviderHandle {
+    let mut cells = std::collections::VecDeque::from([typescript_block(&format!(
+        "{bind} await control.finish(0);"
+    ))]);
+    cells.extend(
+        std::iter::repeat_with(|| typescript_block(&format!("await control.finish({read});")))
+            .take(reads),
+    );
+    let cells = Arc::new(StdMutex::new(cells));
+    lash::testing::TestProvider::builder()
+        .kind("namespace-shadow")
+        .complete(move |_request| {
+            let text = cells
+                .lock_recover()
+                .pop_front()
+                .expect("the law scripts every cell");
+            async move { Ok(text_response(&text)) }
+        })
+        .build()
+        .into_handle()
+}
+
+#[cfg(feature = "rlm")]
+fn assert_reads_the_binding(outcome: &lash::TurnOutcome) {
+    assert!(
+        matches!(outcome,
+        lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value, .. }) if *value == serde_json::json!(42)),
+        "the session's `report` binding shadows the package: {outcome:?}"
+    );
+}
+
+#[cfg(feature = "rlm")]
+async fn namespace_shadow_law(per_run: bool) -> Result<()> {
     for (index, (bind, read)) in [
-        ("const data = 41;", "data + 1"),
-        ("function data() { return 41; }", "data() + 1"),
+        ("const report = 41;", "report + 1"),
+        ("function report() { return 41; }", "report() + 1"),
     ]
     .into_iter()
     .enumerate()
     {
-        let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from([
-            typescript_block(&format!("{bind} await control.finish(0);")),
-            typescript_block(&format!("await control.finish({read});")),
-        ])));
-        let provider = lash::testing::TestProvider::builder()
-            .kind("namespace-collision")
-            .complete(move |_request| {
-                let text = cells
-                    .lock_recover()
-                    .pop_front()
-                    .expect("only accepted runs call the model");
-                async move { Ok(text_response(&text)) }
-            })
-            .build()
-            .into_handle();
         let core =
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
-                .serve_test_llm_profile(provider, mock_llm_profile_spec())
+                .serve_test_llm_profile(report_cells(bind, read, 2), mock_llm_profile_spec())
                 .plugin(Arc::new(data_tools()))
                 .build(lash_facade_tests::runtime_lease_owner())?;
         let id =
-            SessionId::parse(format!("namespace-collision-{per_run}-{index}")).expect("session id");
+            SessionId::parse(format!("namespace-shadow-{per_run}-{index}")).expect("session id");
         let session = core
             .session(id)
             .create(lash::SessionCreation::root(
@@ -250,12 +267,12 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
             .await?;
         let session = core.session(session.session_id().clone()).open().await?;
         session
-            .send(lash::TurnInput::text("bind data"))
+            .send(lash::TurnInput::text("bind report"))
             .output()
             .await?;
         if per_run {
             let outcome = session
-                .send(lash::TurnInput::text("offer data"))
+                .send(lash::TurnInput::text("offer report"))
                 .options(
                     data_tools().run_options(),
                     lash::tools::ToolSelectionConfig {
@@ -265,20 +282,16 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
                 .await?
                 .outcome()
                 .await?;
-            let lash::SendOutcome::Refused { refusal, .. } = outcome else {
-                panic!("collision must refuse the run");
+            let lash::SendOutcome::Settled { output, .. } = outcome else {
+                panic!("a package named like a binding is accepted: {outcome:?}");
             };
-            let Some(lash_core::RunShapeRefusal::Owner { refusal }) = refusal.run_shape_refusal()
-            else {
-                panic!("the run retains the typed catalog refusal: {refusal:?}");
-            };
-            assert_namespace_collision(refusal);
+            assert_reads_the_binding(&output.outcome);
         } else {
             let config = session.admin().config();
             let revision = config.revision().await?;
             let outcome = config
                 .apply(
-                    lash::config::ConfigWrite::new("offer-data", revision),
+                    lash::config::ConfigWrite::new("offer-report", revision),
                     lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
                         tools: lash::tools::ToolSelection::all(),
                     }),
@@ -286,50 +299,39 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
                 .await?
                 .await_outcome(&config)
                 .await?;
-            let lash::config::ConfigTransactionOutcome::Refused { refusal } = outcome else {
-                panic!("collision must refuse the transaction: {outcome:?}");
-            };
-            assert_namespace_collision(&refusal);
-            assert_eq!(config.revision().await?, revision);
+            assert!(
+                matches!(
+                    outcome,
+                    lash::config::ConfigTransactionOutcome::Applied { .. }
+                ),
+                "a package named like a binding is accepted: {outcome:?}"
+            );
         }
         let report = session
-            .send(lash::TurnInput::text("read the unchanged binding"))
+            .send(lash::TurnInput::text("read the binding"))
             .output()
             .await?;
-        assert!(
-            matches!(report.outcome,
-            lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)),
-            "the refused tools leave the binding usable"
-        );
+        assert_reads_the_binding(&report.outcome);
         drop(session);
         core.shutdown().await?;
     }
     Ok(())
 }
 
-/// FIG-5824: an offered namespace cannot displace a binding or saved function.
+/// NS-SHADOW (supersedes FIG-5824's refusal): a session holding `report`
+/// keeps running after its config offers a package `report`.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn tool_configuration_refuses_an_existing_namespace_binding() -> Result<()> {
-    namespace_collision_law(false).await
+async fn tool_configuration_offering_a_bound_root_keeps_the_binding() -> Result<()> {
+    namespace_shadow_law(false).await
 }
 
-/// FIG-5824: a run's provider options obey the same admission rule as
-/// sticky config.
+/// NS-SHADOW: a run's provider options offering a package `report` leave
+/// the session's `report` binding in force.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn per_run_tool_selection_refuses_an_existing_namespace_binding() -> Result<()> {
-    namespace_collision_law(true).await
-}
-
-#[cfg(feature = "rlm")]
-fn assert_namespace_collision(refusal: &lash_core::ConfigRefusal) {
-    assert!(
-        matches!(refusal.owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
-        Some(lash_execution_contracts::config_error::CoreConfigRefusal::ToolNamespaceCollision { root, binding })
-            if root == "data" && binding == "data"),
-        "{refusal:?}"
-    );
+async fn per_run_tool_selection_offering_a_bound_root_keeps_the_binding() -> Result<()> {
+    namespace_shadow_law(true).await
 }
 
 #[cfg(feature = "rlm")]
@@ -367,30 +369,18 @@ impl ToolProvider for ChangingDataTool {
     }
 }
 
-/// FIG-5824: adding a previously absent provider namespace refuses at
-/// installation.
+/// NS-SHADOW: a session holding `report` keeps running after the host
+/// installs a provider of the package `report`.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn provider_installation_refuses_an_existing_namespace_binding() -> Result<()> {
+async fn provider_installation_of_a_bound_root_keeps_the_binding() -> Result<()> {
     let visible = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from([
-        typescript_block("const data = 41; await control.finish(0);"),
-        typescript_block("await control.finish(data + 1);"),
-    ])));
-    let provider = lash::testing::TestProvider::builder()
-        .kind("namespace-installation")
-        .complete(move |_| {
-            let text = cells
-                .lock_recover()
-                .pop_front()
-                .expect("only accepted runs call the model");
-            async move { Ok(text_response(&text)) }
-        })
-        .build()
-        .into_handle();
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
-            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .serve_test_llm_profile(
+                report_cells("const report = 41;", "report + 1", 1),
+                mock_llm_profile_spec(),
+            )
             .tools(
                 lash::tool_provider_key!("tools"),
                 Arc::new(ChangingDataTool(Arc::clone(&visible))),
@@ -402,37 +392,30 @@ async fn provider_installation_refuses_an_existing_namespace_binding() -> Result
         .await?;
     let session = core.session(id).open().await?;
     session
-        .send(lash::TurnInput::text("bind data"))
+        .send(lash::TurnInput::text("bind report"))
         .output()
         .await?;
     let commands = session.admin().commands();
-    {
-        visible.store(true, Ordering::SeqCst);
-        let receipt = commands
-            .refresh_tool_catalog("offer data", "offer-data")
-            .await?;
-        let lash_core::runtime::SessionCommandSettlement::Applied {
-            outcome: lash_core::runtime::SessionCommandOutcome::Failed { refusal },
-            ..
-        } = commands.settle(receipt).await?
-        else {
-            panic!("the invalid provider installation settles refused");
-        };
-        let refusal = lash_core::RuntimeError::from(refusal);
-        let Some(lash_core::RunShapeRefusal::Owner { refusal }) = refusal.run_shape_refusal()
-        else {
-            panic!("the command retains the typed collision: {refusal:?}");
-        };
-        assert_namespace_collision(refusal);
-        // The provider belongs to the host: withdraw its rejected advertisement.
-        visible.store(false, Ordering::SeqCst);
-    }
+    visible.store(true, Ordering::SeqCst);
+    let receipt = commands
+        .refresh_tool_catalog("offer report", "offer-report")
+        .await?;
+    let settlement = commands.settle(receipt).await?;
+    assert!(
+        !matches!(
+            settlement,
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome: lash_core::runtime::SessionCommandOutcome::Failed { .. },
+                ..
+            }
+        ),
+        "a provider of a bound root installs: {settlement:?}"
+    );
     let report = session
-        .send(lash::TurnInput::text("read data"))
+        .send(lash::TurnInput::text("read report"))
         .output()
         .await?;
-    assert!(matches!(report.outcome,
-        lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)));
+    assert_reads_the_binding(&report.outcome);
     drop(session);
     core.shutdown().await?;
     Ok(())

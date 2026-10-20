@@ -128,7 +128,7 @@ vec![
             call_id: "deferred-cell".into(),
             tool_name: "execute_code".into(),
             input_json: serde_json::json!({
-                "code": "await tools.send_email({});"
+                "code": "await mail.sendEmail({});"
             }).to_string(),
             replay: None,
         }],
@@ -141,8 +141,8 @@ vec![
 The scenario names `PluginCallbackIdentity::tool_provider("resolver", "deferred")`
 and pauses after one response. The first cell must resolve and execute before
 that cut; prose completes the resumed turn without introducing another cell.
-The resolved definition carries its explicit `ToolBinding` and execution
-bound. Hosts put real authorization and other preconditions in `prepare`,
+The resolved definition carries its operation (`mail.send_email`) and
+execution bound. Hosts put real authorization and other preconditions in `prepare`,
 through the core, and supply one scenario for each callback they certify.
 
 Resolver entries are exposed separately through `deferred_resolution_counts`;

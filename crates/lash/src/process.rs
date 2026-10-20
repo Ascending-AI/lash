@@ -62,7 +62,6 @@ pub use lash_core::ProcessSurface;
 pub use lash_core::ResolvedInlineStart;
 pub use lash_core::ResolvedLink;
 pub use lash_core::ResolvedStartTarget;
-pub use lash_core::effect_path_of;
 /// The environment and engine settings a process runs under, which its
 /// starter states (FIG-6034), and the process components an environment
 /// names.

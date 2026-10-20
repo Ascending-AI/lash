@@ -8,7 +8,9 @@ use lash::tools::{
 use lash_core::llm::types::{LlmContentBlock, LlmRole};
 use std::sync::Mutex;
 
-const TOOL_NAME: &str = "strict_omission_probe";
+const TOOL_NAME: &str = "tools__strict_omission_probe";
+
+const TOOL_NAME_OPERATION: &str = "tools.strict_omission_probe";
 const DEFAULT_LIMIT: usize = 37;
 
 #[derive(Clone, Copy, Debug)]
@@ -156,7 +158,7 @@ fn tool_input_schema() -> Value {
 fn tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:strict_omission_probe",
-        TOOL_NAME,
+        TOOL_NAME_OPERATION,
         "Capture strict omission behavior.",
         tool_input_schema(),
         json!({

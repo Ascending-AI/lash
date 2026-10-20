@@ -11,7 +11,7 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "read-{turn}-0Synthetic payload for replay mea",
                 "bytes": 643
@@ -31,7 +31,7 @@
         {
           "tool_calls": [
             {
-              "tool": "fixture_large",
+              "tool": "tools.fixture_large",
               "args": {
                 "key": "read-{turn}-0Synthetic payload for replay mea",
                 "bytes": 5620

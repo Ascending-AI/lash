@@ -318,7 +318,7 @@ async fn next_call(entered: &mut mpsc::UnboundedReceiver<usize>) -> usize {
 /// such turn renders the accounts the host recorded since.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
-    const FOLLOW_ON: &str = "<typescript>\nawait control.continue_as({ task: \"observe the accounts\" });\n</typescript>";
+    const FOLLOW_ON: &str = "<typescript>\nawait control.continueAs({ task: \"observe the accounts\" });\n</typescript>";
     let requests = Arc::new(Mutex::new(Vec::<lash::provider::LlmRequest>::new()));
     let (entered_tx, mut entered) = mpsc::unbounded_channel::<usize>();
     let release = Arc::new(tokio::sync::Semaphore::new(0));
@@ -890,7 +890,7 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
         .await
         .expect("catalogue")
         .into_iter()
-        .find(|tool| tool.name == "inbox__test__send")
+        .find(|tool| tool.tool() == "inbox.test.send")
         .expect("send tool");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -1036,7 +1036,7 @@ async fn inbox_authority_resolves_for_any_account_name() {
             .await
             .expect("read the offered tools")
             .into_iter()
-            .find(|manifest| manifest.name == "inbox__test__send")
+            .find(|manifest| manifest.tool() == "inbox.test.send")
     };
     let select = |tools: lash::tools::ToolSelection, id: &'static str| {
         let config = session.admin().config();

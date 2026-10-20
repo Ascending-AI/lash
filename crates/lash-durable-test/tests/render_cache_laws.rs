@@ -234,7 +234,7 @@ impl lash::render::ToolOutputRenderer for SwitchingRenderer {
 fn fixture_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "law:fixture",
-        "fixture",
+        "tools.fixture",
         "Return a long result",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
@@ -267,7 +267,7 @@ impl lash_core::ToolProvider for FixtureTool {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "fixture").then(|| Arc::new(fixture_definition().contract()))
+        (name == "tools.fixture").then(|| Arc::new(fixture_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -289,7 +289,7 @@ fn standard_script(call: usize, request: &LlmRequest) -> LlmResponse {
                 .map(|index| {
                     served::call(
                         &format!("fixture-0-{index}"),
-                        "fixture",
+                        "tools.fixture",
                         serde_json::json!({}),
                     )
                 })
@@ -297,7 +297,7 @@ fn standard_script(call: usize, request: &LlmRequest) -> LlmResponse {
         ),
         2 | 4 => served::response(vec![served::call(
             &format!("fixture-{call}"),
-            "fixture",
+            "tools.fixture",
             serde_json::json!({}),
         )]),
         _ => served::text(request, "done"),

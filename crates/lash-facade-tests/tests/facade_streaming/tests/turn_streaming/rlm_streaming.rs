@@ -49,7 +49,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
                                 },
                                 LlmOutputPart::ToolCall {
                                     call_id: "lookup-1".to_string(),
-                                    tool_name: "app_lookup".to_string(),
+                                    tool_name: "tools__app_lookup".to_string(),
                                     input_json: "{}".to_string(),
                                     replay: None,
                                 },
@@ -1001,7 +1001,7 @@ pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> 
                         Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "direct-probe".into(),
-                                tool_name: "direct_probe".into(),
+                                tool_name: "tools__direct_probe".into(),
                                 input_json: "{}".into(),
                                 replay: None,
                             }],
@@ -1208,7 +1208,7 @@ pub(super) async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Res
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
-                    r#"const value = await tools.app_lookup({});
+                    r#"const value = await tools.appLookup({});
 await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
@@ -1237,7 +1237,7 @@ await control.finish("done");"#,
     let result_calls =
         lash::testing::tool_calls_for_activity(&session.durable(), &events.snapshot().await).await;
     assert_eq!(result_calls.len(), 2);
-    assert_eq!(result_calls[0].tool, "app_lookup");
+    assert_eq!(result_calls[0].tool, "tools.app_lookup");
     assert_eq!(result_calls[0].args, serde_json::json!({}));
     assert_eq!(
         result_calls[0].output.value_for_projection(),
@@ -1385,7 +1385,7 @@ pub(super) fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<
                     queued_text_provider(vec![typescript_block(
                         r#"let failure;
 try {
-  failure = await tools.app_lookup({});
+  failure = await tools.appLookup({});
 } catch (error) {
   failure = error;
 }
@@ -1420,7 +1420,7 @@ await control.finish("recovered");"#,
         let result_calls =
             lash::testing::tool_calls_for_activity(&session.durable(), &result.activities).await;
         assert_eq!(result_calls.len(), 2);
-        assert_eq!(result_calls[0].tool, "app_lookup");
+        assert_eq!(result_calls[0].tool, "tools.app_lookup");
         assert!(!result_calls[0].output.is_success());
         Ok(())
     })
@@ -1440,8 +1440,8 @@ pub(super) async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inn
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
-                    r#"const a = await tools.app_lookup({});
-const b = await tools.app_lookup({});
+                    r#"const a = await tools.appLookup({});
+const b = await tools.appLookup({});
 await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
@@ -1563,7 +1563,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
         assert_eq!(
             turn.outcome,
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
-                tool_name: "finish".to_string(),
+                tool_name: "control.finish".to_string(),
                 value: serde_json::json!(1)
             }),
             "the stray call is repaired and the next cell settles the turn"
@@ -1634,7 +1634,7 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
-                    "const value = await tools.app_lookup({});\nawait control.finish(value);",
+                    "const value = await tools.appLookup({});\nawait control.finish(value);",
                 )]),
                 mock_llm_profile_spec(),
             )
@@ -1730,7 +1730,7 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
     .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
-    const value = await tools.app_lookup({});
+    const value = await tools.appLookup({});
     return value;
   };
 const handle = await processes.start({ definition: lookup });
@@ -1779,7 +1779,7 @@ await control.finish(result);"#,
     assert!(
         !events.snapshot().await.iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::ToolCallCompleted { name, .. } if name != "start_process"
+            TurnEvent::ToolCallCompleted { name, .. } if name != "processes.start"
         )),
         "pending process tool launch must not emit a completed tool result"
     );
@@ -1828,7 +1828,7 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
             .serve_test_llm_profile(
                 queued_text_provider(vec![
                     typescript_block(
-                        r#"await control.continue_as({ task: "finish in a fresh frame" });"#,
+                        r#"await control.continueAs({ task: "finish in a fresh frame" });"#,
                     ),
                     typescript_block(r#"await control.finish("done after continue_as");"#),
                 ]),

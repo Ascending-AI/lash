@@ -762,7 +762,7 @@ impl Keyed {
     fn definition() -> crate::ToolDefinition {
         crate::ToolDefinition::raw(
             KEYED_TOOL,
-            "keyed",
+            "tools.keyed",
             "keyed probe",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
@@ -803,7 +803,7 @@ impl crate::ToolProvider for Keyed {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "keyed").then(|| Arc::new(Self::definition().contract()))
+        (name == "tools.keyed").then(|| Arc::new(Self::definition().contract()))
     }
 
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -856,7 +856,7 @@ async fn bound_and_executed(
         .tool_run_binding(&tool, Some(provider))
         .expect("the surface binds the tool");
     let crate::ToolAttemptOutcome::Done { result, .. } =
-        crate::testing::run_tool(&tools, "keyed", &serde_json::json!({})).await
+        crate::testing::run_tool(&tools, "tools.keyed", &serde_json::json!({})).await
     else {
         panic!("the call completes inline");
     };
@@ -1023,10 +1023,9 @@ const LOOKUP_TOOL: &str = "tool:lookup";
 
 /// The `Read` tool `lookup`: what a knowledge base says about a topic.
 fn lookup_definition() -> crate::ToolDefinition {
-    use lash_protocol_types::ToolDefinitionBindingExt as _;
     crate::ToolDefinition::raw(
         LOOKUP_TOOL,
-        "lookup",
+        "tools.lookup",
         "Looks a topic up.",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
@@ -1034,7 +1033,6 @@ fn lookup_definition() -> crate::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
     .with_execution_policy(crate::ExecutionPolicy::Read)
-    .with_tool_binding(lash_protocol_types::ToolBinding::new(["tools"], "lookup"))
 }
 
 /// What the knowledge base says about the topic `args` names.
@@ -1072,7 +1070,7 @@ impl crate::ToolProvider for Knowledge {
         name: &str,
         _config: &crate::OwnerConfigView,
     ) -> Option<Arc<crate::ToolContract>> {
-        (name == "lookup").then(|| Arc::new(lookup_definition().contract()))
+        (name == "tools.lookup").then(|| Arc::new(lookup_definition().contract()))
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {

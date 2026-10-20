@@ -61,6 +61,7 @@ use dialect::Dialect;
 const SESSION: &str = "frame-switch-session";
 const RUN: &str = "frame-switch-turn";
 const TOOL: &str = "switch_frame";
+const TOOL_OPERATION: &str = "tools.switch_frame";
 const MODEL: &str = "frame-switch-model";
 /// The first frame's input.
 const ASK: &str = "switch frames, then carry on";
@@ -108,7 +109,7 @@ impl StaticToolExecute for SwitchFrame {
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
     let definition = lash_core::ToolDefinition::control(
         TOOL,
-        TOOL,
+        TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         lash_core::TurnControls::switch_agent_frame(),
@@ -150,7 +151,7 @@ fn model(seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                     LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "frame-switch-call".to_owned(),
-                            tool_name: TOOL.to_owned(),
+                            tool_name: TOOL_OPERATION.replace('.', "__"),
                             input_json: "{}".to_owned(),
                             replay: None,
                         }],

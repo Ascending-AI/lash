@@ -40,8 +40,8 @@ pub(crate) const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside
 Available host features:
 - Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
 - You may call `agents.spawn(...)` for independent investigation.
-- You may use durable process definitions for work that should run independently. `processes.start` creates a process run immediately; `workbench.register_trigger` registers a definition the workbench starts on every event of one of its sources.
-- Async functions are ordinary cell code and may capture cell bindings. Pass a function directly as `definition`; the runtime copies its code and captures inline. Use `definition_id` to start a published workflow. Defining a function publishes nothing; `workbench.register_trigger` explicitly publishes the function it receives.
+- You may use durable process definitions for work that should run independently. `processes.start` creates a process run immediately; `workbench.registerTrigger` registers a definition the workbench starts on every event of one of its sources.
+- Async functions are ordinary cell code and may capture cell bindings. Pass a function directly as `definition`; the runtime copies its code and captures inline. Use `definition_id` to start a published workflow. Defining a function publishes nothing; `workbench.registerTrigger` explicitly publishes the function it receives.
 - `await processes.start({ definition: p, args: { ...args } })` returns a handle; `await handle` waits for the run and gives you the value it returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be awaited later.
 - To run subagents or slow tool branches in parallel, define one branch process and start every handle before awaiting any of them. Each start begins its run immediately, so awaiting the handles afterwards — one per line — collects results without serializing the work. Do not write several `const x = await agents.spawn(...)` lines and call that parallel. `Promise.all` joins tool promises and plain values only; a process handle is awaited directly on its own line:
 
@@ -67,7 +67,7 @@ Available host features:
       return tick.fired_at;
     };
 
-    await workbench.register_trigger({
+    await workbench.registerTrigger({
       source: { kind: "cron", expr: "0 8 * * *" },
       definition: on_tick,
       event_arg: "tick",
@@ -94,7 +94,7 @@ Available host features:
       };
     };
 
-    await workbench.register_trigger({
+    await workbench.registerTrigger({
       source: { kind: "mail" },
       definition: on_mail,
       event_arg: "event",
@@ -113,19 +113,19 @@ const WORKBENCH_PROMPT_PYTHON: &str = r###"You are running inside the Agent Work
 
 Available host features:
 - Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
-- You may call `agents_spawn(...)` for independent investigation.
-- Async functions are ordinary cell code and may capture cell bindings. Pass one as `definition` to `processes_start` or `workbench_register_trigger`; its code and captures are copied inline. Defining it publishes nothing. Use `definition_id` to start a published workflow. `workbench_register_trigger` explicitly publishes the function it receives.
-- `await processes_start({"definition": research, "args": {"task": "..."}})` returns a handle. Start all handles before awaiting any; `await handle` gives the returned value directly. Tool results are dicts: use `result["summary"]`, not attribute access. `asyncio.gather` joins tool calls; await process handles directly:
+- You may call `agents.spawn(...)` for independent investigation.
+- Async functions are ordinary cell code and may capture cell bindings. Pass one as `definition` to `processes.start` or `workbench.register_trigger`; its code and captures are copied inline. Defining it publishes nothing. Use `definition_id` to start a published workflow. `workbench.register_trigger` explicitly publishes the function it receives.
+- `await processes.start({"definition": research, "args": {"task": "..."}})` returns a handle. Start all handles before awaiting any; `await handle` gives the returned value directly. Tool results are dicts: use `result["summary"]`, not attribute access. `asyncio.gather` joins tool calls; await process handles directly:
 
 <python>
 async def research(task):
-    return await agents_spawn({"task": task, "output": {"summary": "str", "key_metrics": "list[str]"}})
+    return await agents.spawn({"task": task, "output": {"summary": "str", "key_metrics": "list[str]"}})
 
-first = await processes_start({"definition": research, "args": {"task": "Research the first topic"}})
-second = await processes_start({"definition": research, "args": {"task": "Research the second topic"}})
+first = await processes.start({"definition": research, "args": {"task": "Research the first topic"}})
+second = await processes.start({"definition": research, "args": {"task": "Research the second topic"}})
 first_result = await first
 second_result = await second
-await chat_reply("## Results\n\n" + first_result["summary"] + "\n\n" + second_result["summary"])
+await chat.reply("## Results\n\n" + first_result["summary"] + "\n\n" + second_result["summary"])
 </python>
 
 - For schedules, register a cron source with `expr` and optional `tz` (UTC by default). `event_arg` names the argument receiving `{"fired_at": str}`; `args` fixes other arguments. Use `*/10 * * * * *` for a quick smoke test. A process-end notice arrives in this chat when a started process ends:
@@ -134,22 +134,22 @@ await chat_reply("## Results\n\n" + first_result["summary"] + "\n\n" + second_re
 async def on_tick(tick):
     return tick["fired_at"]
 
-await workbench_register_trigger({"source": {"kind": "cron", "expr": "0 8 * * *"}, "definition": on_tick, "event_arg": "tick", "name": "morning check"})
-await chat_reply("Scheduled morning check for 08:00 UTC every day.")
+await workbench.register_trigger({"source": {"kind": "cron", "expr": "0 8 * * *"}, "definition": on_tick, "event_arg": "tick", "name": "morning check"})
+await chat.reply("Scheduled morning check for 08:00 UTC every day.")
 </python>
 
-- Connected mock email accounts are authorities at `inbox.<account>`, such as `inbox.work` and `inbox.personal`. `await inbox_work_send({"title": t, "text": b})` returns `{"account": ..., "id": ...}`; `await inbox_work_list({})` returns `{"account": ..., "messages": [...]}`; `await inbox_work_delete({"id": id})` removes one message. There is no recipient address.
-- On delivery from the Accounts tab or `inbox_<account>_send`, the workbench starts every definition registered on the mail source with `{"account": str, "title": str, "text": str}`. `account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.
+- Connected mock email accounts are authorities at `inbox.<account>`, such as `inbox.work` and `inbox.personal`. `await inbox.work.send({"title": t, "text": b})` returns `{"account": ..., "id": ...}`; `await inbox.work.list({})` returns `{"account": ..., "messages": [...]}`; `await inbox.work.delete({"id": id})` removes one message. There is no recipient address.
+- On delivery from the Accounts tab or `inbox.<account>.send`, the workbench starts every definition registered on the mail source with `{"account": str, "title": str, "text": str}`. `account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.
 
 <python>
 import asyncio
 
 async def on_mail(event):
-    boxes = await asyncio.gather(inbox_work_list({}), inbox_personal_list({}))
+    boxes = await asyncio.gather(inbox.work.list({}), inbox.personal.list({}))
     return {"arrived_in": event["account"], "title": event["title"], "waiting": len(boxes[0]["messages"]) + len(boxes[1]["messages"])}
 
-await workbench_register_trigger({"source": {"kind": "mail"}, "definition": on_mail, "event_arg": "event", "name": "inbox concierge"})
-await chat_reply("Inbox concierge is watching every delivery.")
+await workbench.register_trigger({"source": {"kind": "mail"}, "definition": on_mail, "event_arg": "event", "name": "inbox concierge"})
+await chat.reply("Inbox concierge is watching every delivery.")
 </python>
 
 A registration's `subscription_id` is a machine identity. Never quote it to the user: name a registration by its `name` and what it watches.

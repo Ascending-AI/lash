@@ -19,24 +19,25 @@ use super::*;
 
 use lash::TurnInput;
 use lash::tracing::otel::trace::{SpanId, Status};
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use opentelemetry_sdk::trace::SpanData;
 
 const ECHO: &str = "echo_now";
+
+const ECHO_OPERATION: &str = "tools.echo_now";
 const HOLD: &str = "hold_open";
+const HOLD_OPERATION: &str = "tools.hold_open";
 
 fn definition(name: &str) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "A cell-span probe.",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 /// [`ECHO`] answers at once; [`HOLD`] opens `entered` and holds until its
@@ -63,13 +64,16 @@ impl ToolProvider for Tools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let Some(("tools", name)) = name.split_once('.') else {
+            return None;
+        };
         [ECHO, HOLD]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == HOLD {
+        if call.name() == HOLD_OPERATION {
             self.entered.notify_one();
             call.context
                 .cancellation_token()
@@ -166,7 +170,7 @@ async fn a_cell_parents_its_calls_and_spans_its_own_time() -> Result<()> {
         sqlite_memory_store_backend().await,
         &Tools::default(),
         vec![
-            cell(&format!("await tools.{ECHO}({{}});")),
+            cell("await tools.echoNow({});"),
             text_response("called"),
             cell("throw new Error(\"boom\");"),
             text_response("failed"),
@@ -190,7 +194,7 @@ async fn a_cell_parents_its_calls_and_spans_its_own_time() -> Result<()> {
     let [called, failed] = &cells[..] else {
         panic!("one span per cell: {spans:#?}");
     };
-    let call = observed.spans(&format!("execute_tool {ECHO}"));
+    let call = observed.spans(&format!("execute_tool {ECHO_OPERATION}"));
     let [call] = &call[..] else {
         panic!("one call span: {spans:#?}");
     };
@@ -246,9 +250,7 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
     let (observed, core) = observed_core(
         sqlite_memory_store_backend().await,
         &tools,
-        vec![cell(&format!(
-            "await tools.{ECHO}({{}});\nawait tools.{HOLD}({{}});"
-        ))],
+        vec![cell("await tools.echoNow({});\nawait tools.holdOpen({});")],
     )?;
     let session = created_session(&core, SessionId::fixture("trace-cell-cancel"))
         .await
@@ -258,7 +260,10 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
     tools.entered.notified().await;
     observed
         .until("the cell's first call is exported", |observed| {
-            observed.spans(&format!("execute_tool {ECHO}")).len() == 1
+            observed
+                .spans(&format!("execute_tool {ECHO_OPERATION}"))
+                .len()
+                == 1
         })
         .await;
     handle
@@ -291,8 +296,9 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
         (HOLD, &["cancelled", "discarded"][..]),
     ] {
         // A call the terminal closes without an outcome is named by its
-        // tool id (`turn_trace::members_ended`), a settled one by its name.
-        let mut calls = observed.spans(&format!("execute_tool {tool}"));
+        // tool id (`turn_trace::members_ended`), a settled one by its
+        // operation.
+        let mut calls = observed.spans(&format!("execute_tool tools.{tool}"));
         calls.extend(observed.spans(&format!("execute_tool tool:{tool}")));
         let [call] = &calls[..] else {
             panic!("{tool} closed once: {spans:#?}");
@@ -322,7 +328,7 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
 async fn a_discarded_prediction_is_counted_on_its_cell_span() -> Result<()> {
     let tail = "Sent a joke…";
     let reply = text_response(&format!(
-        "<typescript>\nawait tools.{ECHO}({{}});\n</typescript>{tail}"
+        "<typescript>\nawait tools.echoNow({{}});\n</typescript>{tail}"
     ));
     let (observed, core) = observed_core(
         sqlite_memory_store_backend().await,
@@ -355,7 +361,12 @@ async fn a_discarded_prediction_is_counted_on_its_cell_span() -> Result<()> {
         attribute(cell, "lash.cell.tool_calls").as_deref(),
         Some("1")
     );
-    assert_eq!(observed.spans(&format!("execute_tool {ECHO}")).len(), 1);
+    assert_eq!(
+        observed
+            .spans(&format!("execute_tool {ECHO_OPERATION}"))
+            .len(),
+        1
+    );
     drop(session);
     core.shutdown().await?;
     Ok(())

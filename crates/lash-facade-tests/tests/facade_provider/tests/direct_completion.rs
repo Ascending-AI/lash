@@ -35,7 +35,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
                         Some(0) => LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "direct-call".to_string(),
-                                tool_name: "direct_probe".to_string(),
+                                tool_name: "tools__direct_probe".to_string(),
                                 input_json: "{}".to_string(),
                                 replay: None,
                             }],
@@ -74,7 +74,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
         lash::testing::tool_calls_for_activity(&session.durable(), &output.activities).await;
     let answered = output_tool_calls
         .iter()
-        .find(|call| call.tool == "direct_probe")
+        .find(|call| call.tool == "tools.direct_probe")
         .expect("the probe's call is reported")
         .output
         .value_for_projection();

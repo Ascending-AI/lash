@@ -52,7 +52,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
@@ -70,6 +69,7 @@ use served::Tier;
 const SESSION: &str = "process-holding-session";
 const INPUT: &str = "process-holding-turn";
 const PROBE: &str = "holding_probe";
+const PROBE_OPERATION: &str = "tools.holding_probe";
 
 /// The `max_tool_calls` the session records: the race's width.
 const LIMIT: usize = 2;
@@ -93,14 +93,13 @@ fn probe_definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{PROBE}"),
-        PROBE,
+        PROBE_OPERATION,
         "Records each body entry's call id; a held call never answers.",
         object.clone(),
         object,
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
     // A call a kill interrupted runs again at its ordinal: the raced calls
     // stay in flight across the kill, so the race is still held when the
     // call past the limit asks.
@@ -132,7 +131,7 @@ impl lash_core::ToolProvider for Probe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == PROBE).then(|| Arc::new(probe_definition().contract()))
+        (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -152,13 +151,12 @@ impl lash_core::ToolProvider for Probe {
 
 /// The turn's one cell: define the holding body, start it, and await it.
 fn cell() -> lash_core::llm::types::LlmResponse {
-    let body = format!(
-        "const body = async () => {{\n  \
-           const raced = await Promise.race([tools.{PROBE}({{ label: \"winner\" }}), \
-           tools.{PROBE}({{ label: \"loser\", hold: true }})]);\n  \
-           await tools.{PROBE}({{ label: \"refused\" }});\n  \
-           return raced;\n}};"
-    );
+    let body = "const body = async () => {\n  \
+           const raced = await Promise.race([tools.holdingProbe({ label: \"winner\" }), \
+           tools.holdingProbe({ label: \"loser\", hold: true })]);\n  \
+           await tools.holdingProbe({ label: \"refused\" });\n  \
+           return raced;\n};"
+        .to_owned();
     served::cell(&format!(
         "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
@@ -554,7 +552,7 @@ const AGGREGATE_SLEEP_MS: u64 = 300_000;
 async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmResponse {
     let body = format!(
         "const body = async () => {{\n  \
-           const both = await Promise.all([tools.{PROBE}({{ label: \"quick\" }}), \
+           const both = await Promise.all([tools.holdingProbe({{ label: \"quick\" }}), \
            sleep({AGGREGATE_SLEEP_MS})]);\n  \
            return both[1] === undefined ? \"woke\" : \"early\";\n}};"
     );
@@ -808,7 +806,7 @@ fn dynamic_target(name: &str) -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
-        name,
+        format!("tools.{name}"),
         "Records each body entry's call id.",
         object.clone(),
         object,
@@ -843,6 +841,7 @@ impl lash_core::ToolProvider for Resolver {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
+        let (_, name) = name.split_once('.')?;
         ["dyn_first", "dyn_second"]
             .contains(&name)
             .then(|| Arc::new(dynamic_target(name).contract()))

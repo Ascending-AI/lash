@@ -12,7 +12,7 @@
           "cell": [
             "chunks = []",
             "retained = 0",
-            "await control_finish({\"ready\": True})"
+            "await control.finish({\"ready\": True})"
           ]
         }
       ],
@@ -24,10 +24,10 @@
       "replies": [
         {
           "cell": [
-            "chunk = await tools_fixture_large({\"key\": \"data-{turn}\", \"bytes\": 2667})",
+            "chunk = await tools.fixture_large({\"key\": \"data-{turn}\", \"bytes\": 2667})",
             "chunks.append(chunk[\"text\"])",
             "retained = retained + len(chunk[\"text\"])",
-            "await control_finish({\"retained\": retained, \"chunks\": len(chunks), \"preview\": chunk[\"text\"][:95]})"
+            "await control.finish({\"retained\": retained, \"chunks\": len(chunks), \"preview\": chunk[\"text\"][:95]})"
           ]
         }
       ]

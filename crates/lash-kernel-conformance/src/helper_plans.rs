@@ -236,7 +236,7 @@ fn run_with_work<const L: u64>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(effect.effect.as_str(), "observe");
+                            assert_eq!(effect.effect.as_str(), "host.observe");
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
                         Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
@@ -292,10 +292,10 @@ fn depth_cases(dialect: &str) -> Vec<runner::Case> {
             dialect: dialect.into(),
             source: match dialect {
                 "python" => format!(
-                    "def f(n):\n    if n == 0:\n        return 0\n    return f(n - 1) + n % 3\nawait observe(f({depth}))\n"
+                    "def f(n):\n    if n == 0:\n        return 0\n    return f(n - 1) + n % 3\nawait host.observe(f({depth}))\n"
                 ),
                 _ => format!(
-                    "function f(n) {{ if (n === 0) {{ return 0; }} return f(n - 1) + (n % 3); }}\nawait observe(f({depth}));\n"
+                    "function f(n) {{ if (n === 0) {{ return 0; }} return f(n - 1) + (n % 3); }}\nawait host.observe(f({depth}));\n"
                 ),
             },
             bits: 0,
@@ -513,7 +513,7 @@ fn empty_python_sequence_repetition_charges_its_declared_tests() {
         let case = runner::Case {
             id: "empty-repeat".into(),
             dialect: "python".into(),
-            source: format!("await observe([] * {count})"),
+            source: format!("await host.observe([] * {count})"),
             bits: 0,
             stride: 0,
             nanoseconds: 0,

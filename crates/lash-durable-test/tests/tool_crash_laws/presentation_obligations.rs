@@ -18,6 +18,7 @@ const TURN: &str = "obligation-turn";
 /// The turn's id, which a later deployment attaches to.
 const RUN: &str = "obligation-run";
 const DEFERRED: &str = "obligation_deferred";
+const DEFERRED_OPERATION: &str = "tools.obligation_deferred";
 /// The plugin whose presentation step the parked call's plan records. It
 /// registers no tool provider.
 const PRESENTER: &str = "obligation-law-presenter";
@@ -31,7 +32,7 @@ fn definition() -> lash_core::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_core::ToolDefinition::raw(
         format!("tool:{DEFERRED}"),
-        DEFERRED,
+        DEFERRED_OPERATION,
         "Answers once its completion wait resolves.",
         object.clone(),
         object,
@@ -72,7 +73,7 @@ impl lash_core::ToolProvider for Deferring {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == DEFERRED).then(|| Arc::new(definition().contract()))
+        (name == DEFERRED_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -184,7 +185,7 @@ pub(super) async fn a_parked_members_recorded_presentation_plan_is_required_unti
         TURN,
         vec![served::response(vec![served::call(
             "obligation-call",
-            DEFERRED,
+            DEFERRED_OPERATION,
             serde_json::json!({}),
         )])],
     );

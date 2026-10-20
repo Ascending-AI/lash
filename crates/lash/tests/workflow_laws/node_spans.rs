@@ -132,7 +132,7 @@ async fn publish_nodes(
     document.manifest.effects.insert(
         echo.clone(),
         lash::workflow::document::OperationRequirement::of_signature(
-            checked.effects()[&echo].clone(),
+            checked.checker().effects[&echo].clone(),
         ),
     );
     let draft = Draft::open(document).expect("the document opens");

@@ -56,22 +56,19 @@ pub fn assistant_prose(events: &[TurnActivity]) -> String {
 
 /// `tools.app_lookup`, a tool whose attempt may defer.
 pub fn app_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(
-        lash_core::ToolDefinition::raw(
-            "tool:app_lookup",
-            "app_lookup",
-            "Look up app state.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "object" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120)),
-        "app_lookup",
+    lash_core::ToolDefinition::raw(
+        "tool:app_lookup",
+        "tools.app_lookup",
+        "Look up app state.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
         lash_core::ToolDeclaration::deferring(),
         Some(lash_core::ParkBound::Within(
@@ -98,7 +95,7 @@ impl ToolProvider for AppTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -125,7 +122,7 @@ impl ToolProvider for FailingAppTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -164,11 +161,11 @@ impl ToolProvider for PendingAppTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        assert_eq!(call.name(), "app_lookup");
+        assert_eq!(call.name(), "tools.app_lookup");
         let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
@@ -186,7 +183,7 @@ pub fn tool_roundtrip_provider() -> ProviderHandle {
         LlmResponse {
             parts: vec![LlmOutputPart::ToolCall {
                 call_id: "call-1".to_string(),
-                tool_name: "app_lookup".to_string(),
+                tool_name: "tools__app_lookup".to_string(),
                 input_json: "{}".to_string(),
                 replay: None,
             }],

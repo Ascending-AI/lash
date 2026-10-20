@@ -4,7 +4,6 @@
 use super::{Args, Case, Meter, Receipt, facade};
 use crate::workload::{Generator, OperationId, Workload};
 use anyhow::{Context, Result, ensure};
-use lash_core::ToolDefinitionBindingExt;
 use lash_core::llm::types::LlmContentBlock;
 use lash_core::provider::{ProviderOptions, ProviderReliability};
 use std::collections::BTreeMap;
@@ -57,16 +56,13 @@ impl Tools {
         ] {
             let definition = lash_core::ToolDefinition::raw(
                 format!("tool:{name}"),
-                name,
+                format!("tools.{name}"),
                 "Seeded synthetic boundary workload",
                 arguments,
                 result,
             )?
-            .with_execution(Duration::from_secs(120))
-            .with_tool_binding(
-                lash_core::ToolBinding::new(["tools"], name).with_authority_type("Tools"),
-            );
-            contracts.insert(name.into(), definition);
+            .with_execution(Duration::from_secs(120));
+            contracts.insert(format!("tools.{name}"), definition);
         }
         Ok(Self {
             workload,
@@ -76,8 +72,8 @@ impl Tools {
     }
     async fn invoke(&self, call: &lash_core::ToolCall<'_>) -> Result<lash_core::ToolCallOutput> {
         let generator = Generator::new(&self.workload, "boundary-seeded")?;
-        match call.name() {
-            "synthetic" => {
+        match call.name().as_str() {
+            "tools.synthetic" => {
                 let key = call.args["record"]["key"]
                     .as_str()
                     .context("synthetic key")?;
@@ -89,7 +85,7 @@ impl Tools {
                     generator.tool_result(key, bytes)?,
                 ))
             }
-            "attach" => {
+            "tools.attach" => {
                 let key = call.args["operation"]
                     .as_str()
                     .context("attachment operation")?;
@@ -117,7 +113,7 @@ impl Tools {
                     lash_core::ToolValue::Attachment(reference),
                 ))
             }
-            "mark" => Ok(lash_core::ToolCallOutput::success(
+            "tools.mark" => Ok(lash_core::ToolCallOutput::success(
                 serde_json::json!({"key": call.args["key"]}),
             )),
             _ => anyhow::bail!("unplanned tool"),
@@ -331,7 +327,7 @@ async fn execute(
                 let start = Instant::now();
                 let output = tokio::time::timeout(Duration::from_secs(120), handle.output()).await??;
                 ensure!(matches!(&output.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
-                    if tool_name == "finish" && value["operation"] == plan.operation.key()), "seeded cell did not finish: {:?}", output.outcome);
+                    if tool_name == "control.finish" && value["operation"] == plan.operation.key()), "seeded cell did not finish: {:?}", output.outcome);
                 meter.operation("seeded.send.settle", plan.operation.key(), "ok", start);
                 // Queued plans are separate keyed sends; the sequential recipe
                 // does not claim to model their active-turn scheduling share.
@@ -340,7 +336,7 @@ async fn execute(
                     let output = session.send(lash::TurnInput::text(format!("seeded-operation:{}", queued.idempotency_key)))
                         .id(lash::TurnId::try_from(queued.idempotency_key.clone())?).output().await?;
                     ensure!(matches!(&output.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
-                        if tool_name == "finish" && value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
+                        if tool_name == "control.finish" && value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
                     meter.operation("seeded.queued.settle", &queued.idempotency_key, "ok", start);
                 }
             }

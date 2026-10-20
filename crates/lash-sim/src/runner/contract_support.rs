@@ -405,11 +405,11 @@ impl lash_core::ToolProvider for ContractAppTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "app_lookup").then(|| Arc::new(contract_app_lookup_definition().contract()))
+        (name == "tools.app_lookup").then(|| Arc::new(contract_app_lookup_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == "app_lookup" {
+        if call.name() == "tools.app_lookup" {
             lash_core::ToolOutcome::ok(json!({ "ok": true })).into()
         } else {
             lash_core::ToolOutcome::err_fmt(format!("Unknown contract app tool: {}", call.name()))
@@ -425,7 +425,7 @@ impl lash_core::ToolProvider for ContractAppTools {
 fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:app_lookup",
-        "app_lookup",
+        "tools.app_lookup",
         "Lookup deterministic app state.",
         json!({
             "type": "object",
@@ -442,7 +442,6 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["tools"], "app_lookup"))
 }
 
 pub(super) struct ContractDurableInputTools {
@@ -500,12 +499,12 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "mock_input_request")
+        (name == "tools.mock_input_request")
             .then(|| Arc::new(contract_durable_input_definition().contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() != "mock_input_request" {
+        if call.name() != "tools.mock_input_request" {
             return lash_core::ToolOutcome::err_fmt(format!(
                 "Unknown durable input tool: {}",
                 call.name()
@@ -532,7 +531,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
 fn contract_durable_input_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:mock_input_request",
-        "mock_input_request",
+        "tools.mock_input_request",
         "Open a durable input request and wait for the answer.",
         json!({
             "type": "object",
@@ -554,10 +553,6 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
-        ["tools"],
-        "mock_input_request",
-    ))
     .with_declaration(
         lash_core::ToolDeclaration::deferring(),
         Some(lash_core::ParkBound::Within(

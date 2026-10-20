@@ -37,13 +37,13 @@ pub(crate) use envelope::{
 };
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::{CodeModeExecutionState, saved_function_pins};
-pub(crate) use session::{stored_binding_roots, stored_session_descriptor};
 pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
+use lash_kernel_dialect::OfferedSource;
 use lash_kernel_doc::{Datum, IdentifiedDocument, Name};
 use lash_kernel_vm::{Bounds, End, Target};
 use lash_protocol_types::sync::MutexExt;
@@ -356,39 +356,25 @@ async fn link_cell(
             })?
     };
 
-    // Each catalog tool is an effect, under the name a cell of this
-    // dialect calls it by.
+    // Each catalog tool is an offered operation, under its canonical name:
+    // the effect a cell of any dialect performs it as.
     let mut boundary = HostBoundary::new();
-    let mut tool_roots = BTreeSet::new();
     // The catalog tools that declare a read, by effect: what the cell's
     // read plan is drawn from.
     let mut read_tools = BTreeMap::new();
-    let mut grant_calls = BTreeMap::new();
     for tool in ctx.tool_catalog().entries() {
-        let surface = |error: String| host_failure(format!("invalid host tool surface: {error}"));
-        let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
-            .map_err(|error| surface(error.to_string()))?;
-        if let Some(root) = binding.module_path.first() {
-            tool_roots.insert(Name::new(root));
-        }
-        let path = services
-            .prompts
-            .tool_call_path(&binding)
-            .map_err(|refusal| surface(refusal.to_string()))?;
-        grant_calls.insert(tool.manifest.name.clone(), path.clone());
         boundary
             .offer_tool(
-                &path,
-                tool.manifest.id.clone(),
+                &tool.manifest,
                 &tool.contract.input_schema.canonical,
                 &tool.contract.output_schema.canonical,
-                tool.manifest.declaration().controls.clone(),
             )
-            .map_err(|error| surface(error.to_string()))?;
-        if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read
-            && let Ok(effect) = lash_kernel_doc::EffectName::new(path.as_str())
-        {
-            read_tools.insert(effect, tool.manifest.id.clone());
+            .map_err(|error| host_failure(format!("invalid host tool surface: {error}")))?;
+        if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read {
+            read_tools.insert(
+                tool.manifest.operation.effect_name(),
+                tool.manifest.id.clone(),
+            );
         }
     }
 
@@ -416,7 +402,6 @@ async fn link_cell(
     let outcomes =
         if ctx.parent_invocation().is_some() && !matches!(ctx.deferred_provider(), Ok(None)) {
             let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
-            let offered = boundary.signatures();
             let calls = services
                 .workers
                 .request_accounted(Request::ToolCalls {
@@ -424,8 +409,7 @@ async fn link_cell(
                     source: code.to_owned(),
                     bindings: names.clone(),
                     functions: state.lowering_functions(),
-                    effects: offered.clone(),
-                    controls: boundary.controls(),
+                    operations: boundary.operations().clone(),
                     helpers,
                 })
                 .await;
@@ -446,7 +430,7 @@ async fn link_cell(
                 .into_iter()
                 .filter(|path| {
                     !lash_kernel_doc::EffectName::new(path.as_str())
-                        .is_ok_and(|name| offered.contains_key(&name))
+                        .is_ok_and(|name| boundary.effect(&name).is_some())
                 })
                 .collect::<BTreeSet<_>>();
             if candidates.is_empty() {
@@ -462,17 +446,28 @@ async fn link_cell(
         };
     let grants = crate::deferred::offer_deferred_matches(&mut boundary, &outcomes, ctx)
         .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
-    for grant in grants.values() {
-        let binding = lash_vm_runtime::required_tool_executable(grant.manifest())
-            .map_err(|error| host_failure(error.to_string()))?;
-        if let Ok(path) = services.prompts.tool_call_path(&binding) {
-            grant_calls.insert(grant.manifest().name.clone(), path);
-        }
-    }
+    let unavailable_notes = crate::deferred::offer_unavailable_notes(&outcomes, &mut boundary);
+    // Each offered tool by its operation, as this dialect's cells call it:
+    // what a repair names.
+    let spelling = services.prompts.spelling();
+    let grant_calls = boundary
+        .operations()
+        .iter()
+        .filter(|(_, offered)| !matches!(offered.source, OfferedSource::Unavailable { .. }))
+        .map(|(operation, _)| {
+            (
+                operation.effect_name().to_string(),
+                lash_kernel_dialect::spell_operation(spelling, operation),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let candidates = read_candidates(ctx, &boundary, &grants, read_tools);
-
-    let mut effects = boundary.signatures();
-    let unavailable_notes = crate::deferred::offer_unavailable_notes(&outcomes, &mut effects);
+    // The worker plans as reads exactly the candidates; every other
+    // offered operation stays a recorded perform.
+    let mut operations = boundary.operations().clone();
+    for (operation, offered) in &mut operations {
+        offered.read = candidates.contains_key(&operation.effect_name());
+    }
     // The worker that lowers the cell starts its run (FIG-5921).
     let lowered = match discovery_failure {
         Some(failure) => failure,
@@ -482,13 +477,10 @@ async fn link_cell(
                 .request_for_run(Request::Lower {
                     dialect: state.dialect().to_owned(),
                     source: code.to_owned(),
-                    effects,
-                    tool_roots,
-                    controls: boundary.controls(),
+                    operations,
                     bindings: names,
                     functions: state.lowering_functions(),
                     helpers,
-                    reads: candidates.keys().cloned().collect(),
                 })
                 .await
         }
@@ -549,7 +541,16 @@ async fn link_cell(
         source_map,
         written,
         function_values,
-        effects: CellEnvelope::record_effects(&boundary),
+        effects: CellEnvelope::record_effects(&boundary, |tool| {
+            ctx.tool_catalog()
+                .entries()
+                .iter()
+                .map(|entry| &entry.manifest)
+                .chain(grants.values().map(lash_core::ToolExecutionGrant::manifest))
+                .find(|manifest| &manifest.id == tool)
+                .map(|manifest| manifest.declaration().controls.clone())
+                .unwrap_or_default()
+        }),
         grants,
         unavailable_notes,
         projected: projected.keys().cloned().collect(),
@@ -620,8 +621,8 @@ fn read_candidates(
         .filter(|(effect, tool)| {
             !grants.contains_key(tool)
                 && boundary
-                    .effect(effect)
-                    .is_some_and(|offered| &offered.tool == tool)
+                    .tool(effect)
+                    .is_some_and(|offered| &offered == tool)
         })
         .filter_map(|(effect, tool)| Some((effect, ctx.read_route(&tool).ok()?.provider)))
         .collect()

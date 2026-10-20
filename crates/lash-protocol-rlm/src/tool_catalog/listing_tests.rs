@@ -4,9 +4,6 @@
 //! catalogue leaves every byte listed before it as it was; and a tool a
 //! host's discovery finds carries its field notes.
 
-use std::sync::Arc;
-
-use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::json;
 
 use super::{
@@ -16,10 +13,10 @@ use super::{
 use crate::dialect::typescript_test_dialect;
 use crate::plugin::RlmDiscovery;
 
-fn tool(namespace: &str, operation: &str, module: Option<&str>) -> lash_core::ToolDefinition {
-    let mut tool = lash_core::ToolDefinition::raw(
+fn tool(namespace: &str, operation: &str) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
         format!("tool:{namespace}/{operation}"),
-        format!("{namespace}_{operation}"),
+        format!("{namespace}.{operation}"),
         format!("The {namespace} {operation} operation."),
         json!({
             "type": "object",
@@ -30,13 +27,10 @@ fn tool(namespace: &str, operation: &str, module: Option<&str>) -> lash_core::To
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new([namespace], operation));
-    tool.manifest.module = module.map(|name| {
-        Arc::new(lash_core::ToolModule {
-            name: name.to_string(),
-        })
-    });
-    tool
+}
+
+fn operation(text: &str) -> lash_core::QualifiedOperation {
+    lash_core::IntoOperation::into_operation(text).expect("a canonical operation")
 }
 
 fn catalog(tools: Vec<lash_core::ToolDefinition>) -> lash_core::ToolCatalog {
@@ -79,9 +73,9 @@ fn declarations(catalog: &lash_core::ToolCatalog, discovery: Option<&RlmDiscover
 /// out and the call that finds them.
 #[test]
 fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() {
-    let search = tool("tools", "search", None);
-    let big = ["a", "b", "c", "d"].map(|operation| tool("big", operation, None));
-    let small = tool("small", "only", None);
+    let search = tool("tools", "search");
+    let big = ["a", "b", "c", "d"].map(|operation| tool("big", operation));
+    let small = tool("small", "only");
     let mut members = vec![search.clone()];
     members.extend(big.iter().cloned());
     members.push(small.clone());
@@ -99,9 +93,9 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
     .expect("the catalogue presents");
     assert_eq!(
         disclosure.listed,
-        ["tools_search", "big_a", "big_b", "small_only"]
+        ["tools.search", "big.a", "big.b", "small.only"]
     );
-    assert_eq!(disclosure.omitted, ["big_c", "big_d"]);
+    assert_eq!(disclosure.omitted, ["big.c", "big.d"]);
     assert!(!disclosure.is_complete());
 
     let selected = ToolListing::of(
@@ -153,17 +147,14 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
     .expect("the catalogue presents");
     assert_eq!(
         none.disclosure.expect("a discovery listing").listed,
-        ["tools_search"]
+        ["tools.search"]
     );
 }
 
 /// A catalogue that fits says so.
 #[test]
 fn a_catalogue_that_fits_its_budget_is_labelled_complete() {
-    let members = catalog(vec![
-        tool("tools", "search", None),
-        tool("files", "grep", None),
-    ]);
+    let members = catalog(vec![tool("tools", "search"), tool("files", "grep")]);
     let complete = ToolListing::of(
         &members,
         &typescript_test_dialect(),
@@ -184,19 +175,19 @@ fn a_catalogue_that_fits_its_budget_is_labelled_complete() {
 
 /// A tool appended to the catalogue appends its doc: the declarations
 /// rendered before it are, byte for byte, the start of those rendered after
-/// it, in a module that sorts before the others and with or without
+/// it, in a namespace that sorts before the others and with or without
 /// discovery, so a prompt cache keeps the listing's prefix across the
 /// change. The label follows the docs.
 #[test]
 fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
     let before = vec![
-        tool("files", "grep", None),
-        tool("tracker", "search", Some("tracker")),
-        tool("tracker", "open", Some("tracker")),
-        tool("tools", "search", None),
+        tool("files", "grep"),
+        tool("tracker", "search"),
+        tool("tracker", "open"),
+        tool("tools", "search"),
     ];
     let mut after = before.clone();
-    after.push(tool("alpha", "fetch", Some("alpha")));
+    after.push(tool("alpha", "fetch"));
     let (before, after) = (catalog(before), catalog(after));
     let listing = |catalog| {
         ToolListing::of(
@@ -212,12 +203,11 @@ fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
 
     let (old, new) = (declarations(&before, None), declarations(&after, None));
     assert!(new.starts_with(&old), "{old}\n---\n{new}");
-    assert!(new.ends_with("#### alpha\n\n`alpha.fetch({ query: string }): Promise<string>`\nThe alpha fetch operation."), "{new}");
-    // A tool of no module after a module's tools is not read as one of
-    // them.
     assert!(
-        old.contains("#### Ungrouped tools\n\n`tools.search("),
-        "{old}"
+        new.ends_with(
+            "`alpha.fetch({ query: string }): Promise<string>`\nThe alpha fetch operation."
+        ),
+        "{new}"
     );
 
     let discovering = discovery(usize::MAX);
@@ -241,9 +231,9 @@ fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
 /// its field descriptions are in the text a search matches.
 #[test]
 fn a_discovered_tool_carries_its_field_notes() {
-    let mut search = lash_core::ToolDefinition::raw(
+    let search = lash_core::ToolDefinition::raw(
         "tool:tracker/issues_search",
-        "tracker_issues_search",
+        "tracker.issues_search",
         "Search issues.",
         json!({
             "type": "object",
@@ -264,8 +254,7 @@ fn a_discovered_tool_carries_its_field_notes() {
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
+    .with_execution(std::time::Duration::from_secs(120));
     let found = discovered_tool_doc(
         &crate::dialect::CellDialect::typescript(),
         &json!({}),
@@ -295,16 +284,6 @@ fn a_discovered_tool_carries_its_field_notes() {
         "{text}"
     );
     assert!(text.contains("Search issues."), "{text}");
-
-    search.manifest.bindings.clear();
-    assert!(
-        discovered_tool_doc(
-            &crate::dialect::CellDialect::typescript(),
-            &json!({}),
-            &search,
-        )
-        .is_err()
-    );
 }
 
 /// FIG-6336: a discovered path and schemas render the loaded tool's signature
@@ -313,7 +292,7 @@ fn a_discovered_tool_carries_its_field_notes() {
 fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
     let tool = lash_core::ToolDefinition::raw(
         "tool:tracker/search",
-        "tracker_search",
+        "tracker.issues.search",
         "Search issues.",
         json!({
             "$defs": { "Query": { "type": "string" } },
@@ -344,8 +323,7 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tracker", "issues"], "search"));
+    .with_execution(std::time::Duration::from_secs(120));
     let presentation = json!({});
     for dialect in [
         crate::dialect::CellDialect::typescript(),
@@ -354,7 +332,7 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         let signature = discovered_tool_signature(
             &dialect,
             &presentation,
-            &ToolBinding::from_path("tracker.issues.search"),
+            &operation("tracker.issues.search"),
             &tool.contract.input_schema.canonical,
             &tool.contract.output_schema.canonical,
         )
@@ -423,7 +401,7 @@ fn discovered_signatures_preserve_ten_level_select_options_in_every_dialect() {
             let signature = discovered_tool_signature(
                 &dialect,
                 &json!({}),
-                &ToolBinding::from_path("inbox.send_item"),
+                &operation("inbox.send_item"),
                 &input,
                 &output,
             )
@@ -469,7 +447,7 @@ fn discovered_signature_refusals_retain_the_presenter_cause() {
     let refused = discovered_tool_signature(
         &dialect,
         &config,
-        &ToolBinding::from_path("tools.search"),
+        &operation("tools.search"),
         &schema,
         &schema,
     )

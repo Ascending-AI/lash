@@ -48,7 +48,7 @@ pub fn looping_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
                         call_id: format!("lookup-{done}"),
-                        tool_name: "app_lookup".into(),
+                        tool_name: "tools__app_lookup".into(),
                         input_json: "{}".into(),
                         replay: None,
                     }],

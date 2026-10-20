@@ -36,8 +36,8 @@ mod served;
 
 use std::sync::{Arc, Mutex};
 
+use lash_core::ToolId;
 use lash_core::llm::types::{LlmRequest, LlmRole};
-use lash_core::{ToolDefinitionBindingExt as _, ToolId};
 use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
@@ -81,7 +81,7 @@ impl Spec {
         };
         lash_core::ToolDefinition::raw(
             self.id,
-            self.name,
+            format!("tools.{}", self.name),
             self.description,
             input,
             serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -131,7 +131,12 @@ impl Surface {
         })
     }
 
-    fn tool(&self, name: &str) -> Option<&Spec> {
+    /// The tool performed as `tools.<name>`.
+    fn tool(&self, operation: &str) -> Option<&Spec> {
+        let name = operation
+            .split_once('.')
+            .filter(|(root, _)| *root == "tools")?
+            .1;
         self.tools.iter().find(|tool| tool.name == name)
     }
 
@@ -167,7 +172,7 @@ impl lash_core::ToolProvider for Surface {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        let Some(tool) = self.tool(call.name()) else {
+        let Some(tool) = self.tool(&call.name()) else {
             return lash_core::ToolOutcome::err_fmt(format_args!(
                 "tool `{}` is not live",
                 call.name()
@@ -238,7 +243,7 @@ fn model(offered: &Arc<Offered>) -> lash_core::facade_support::ProviderHandle {
                                 } else {
                                     format!("surface-call-{index}")
                                 };
-                                served::call(&id, tool, serde_json::json!({}))
+                                served::call(&id, &format!("tools.{tool}"), serde_json::json!({}))
                             })
                             .collect(),
                     ));
@@ -395,8 +400,9 @@ fn only(tools: &[Spec]) -> lash::tools::ToolSelection {
 fn host_tools(offered: &[String]) -> Vec<String> {
     let mut names = offered
         .iter()
+        .filter_map(|name| name.strip_prefix("tools__"))
         .filter(|name| name.starts_with("surface_") || name.starts_with("collide_"))
-        .cloned()
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     names.sort();
     names
@@ -874,7 +880,6 @@ impl lash_core::ToolProvider for CellSurface {
 
 fn cell_definition(tool: &Spec) -> lash_core::ToolDefinition {
     tool.definition()
-        .with_tool_binding(lash_core::ToolBinding::new(["tools"], tool.name))
 }
 
 impl Deployment {
@@ -889,17 +894,26 @@ impl Deployment {
             .complete(move |request: LlmRequest| {
                 let prepared = prepared.clone();
                 async move {
-                if let Some(prepared) = prepared {
-                    prepared.notify_one();
-                    std::future::pending::<()>().await;
-                }
-                let answered = request.messages.iter().any(|message| message.role == LlmRole::Assistant);
-                Ok(served::text(&request, if answered { "done" } else {
-                    "<typescript>\nconsole.log(await tools.surface_held({}));\n</typescript>"
-                }))
+                    if let Some(prepared) = prepared {
+                        prepared.notify_one();
+                        std::future::pending::<()>().await;
+                    }
+                    let answered = request
+                        .messages
+                        .iter()
+                        .any(|message| message.role == LlmRole::Assistant);
+                    Ok(served::text(
+                        &request,
+                        if answered {
+                            "done"
+                        } else {
+                            "<typescript>\nconsole.log(await tools.surfaceHeld({}));\n</typescript>"
+                        },
+                    ))
                 }
             })
-            .build().into_handle();
+            .build()
+            .into_handle();
         let factory = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)

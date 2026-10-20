@@ -74,6 +74,8 @@ pub use identity::{
     BatchId, BlankIdentity, InputId, InvalidProcessId, NodeId, PROCESS_ID_PREFIX, ProcessId, RunId,
     RuntimeOwner, SessionId, TurnId, session_owner_namespace,
 };
+/// Serde for an operation as its effect name, as a field and as map keys.
+pub use lash_kernel_dialect::{operation_keys, operation_text};
 pub use llm::capability::{
     LlmProfileCapability, LlmProfileEffortValidationCategory, LlmProfileEffortValidationError,
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
@@ -124,10 +126,10 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    Backoff, BoundedRetry, ExecutionPolicy, LimitCause, ModelTool, ParkBound, RegistrationRefused,
-    ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolId, ToolManifest, ToolModule,
-    ToolOutputContract, schema_for,
+    Backoff, BoundedRetry, ExecutionPolicy, IntoOperation, LimitCause, ModelTool, ParkBound,
+    QualifiedOperation, RegistrationRefused, ToolArgumentProjectionPolicy, ToolBound, ToolBounds,
+    ToolContract, ToolDefinition, ToolDiscovery, ToolDraft, ToolId, ToolManifest,
+    ToolOutputContract, digest_tag, schema_for, standard_name,
 };
 pub use tool_declaration::{
     DeclarationRefusal, FinishDeclaration, OutcomeShape, ToolDeclaration, TurnControlKind,
