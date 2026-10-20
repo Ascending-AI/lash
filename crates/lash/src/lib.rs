@@ -654,6 +654,16 @@ pub mod tools {
         DeferredToolProvider, DeferredToolProviderRegistration, ExecutionBinding,
         ExecutionBindingUnreadable,
     };
+    /// A host-named tool granted dispatch through the deferred provider's
+    /// registration: its pure transform names the call path the provider
+    /// resolves and the arguments the matched tool is called with
+    /// ([`DeferredToolProviderRegistration::with_dispatch_grant`],
+    /// [`DeferredToolProviderRegistration::dispatch_link`]), and what
+    /// refuses a grant or a granted call.
+    pub use lash_core::{
+        DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
+        TransformRefusal,
+    };
     /// Turn flow control constructed by tool implementors; attach it with
     /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
     pub use lash_core::{

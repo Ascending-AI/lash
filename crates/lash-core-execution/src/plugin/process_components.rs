@@ -350,9 +350,9 @@ impl ProcessComponentRegistry {
     /// components serve under `env`'s config, under the contract the
     /// process pins, fitting the effect's signature under its policy in
     /// `fits` ([`lash_execution_contracts::process::check_links`]). A
-    /// `call_dynamic` link's provider is a component's deferred provider,
-    /// which matches its target per call, and a link's codec payload is
-    /// read by a component.
+    /// dispatch grant's provider is a component's deferred provider, which
+    /// matches its target per call, and a link's codec payload is read by a
+    /// component.
     ///
     /// # Errors
     ///
@@ -974,10 +974,9 @@ impl ProcessComposition {
                 .map_err(|reason| (payload.codec.clone(), reason))?;
         }
         let live = match &link.source {
-            // The `call_dynamic` endpoint is no provider's advertisement: it
-            // is served wherever the deferred provider it links is
-            // registered.
-            crate::LinkSource::Dynamic { .. } => {
+            // A granted tool is no provider's advertisement: it is served
+            // wherever the deferred provider its grant names is registered.
+            crate::LinkSource::Dispatch { .. } => {
                 if self.registry.deferred_provider(&link.provider).is_none() {
                     return Ok(None);
                 }
@@ -1023,10 +1022,6 @@ impl ProcessComposition {
             tool: link.tool.clone(),
             kind,
         };
-        let dynamic = matches!(link.source, crate::LinkSource::Dynamic { .. });
-        if dynamic != (effect.as_str() == crate::CALL_DYNAMIC_EFFECT) {
-            return drifted(crate::ToolSurfaceDriftKind::Missing);
-        }
         let served = match self.served_link(env, link) {
             Ok(served) => served,
             Err((codec, reason)) => return StepLink::Unreadable { codec, reason },
@@ -1055,7 +1050,7 @@ impl ProcessComposition {
     }
 
     /// How this node serves the call of the tool `matched` resolved a
-    /// `call_dynamic` path to (P6): the provider the match records, by its
+    /// granted tool's call path to (P6): the provider the match records, by its
     /// key, bound as the match routes it, under the policy its link
     /// recorded. One not registered here settles the call typed, without a
     /// body, as a missing linked tool does (D3).
@@ -1116,32 +1111,69 @@ impl ProcessComposition {
             .map_err(|unreadable| unreadable.to_string())
     }
 
-    /// Resolve `path`, the call path of a `call_dynamic` call `owner` makes
-    /// under `env`, through the deferred provider `env` links the endpoint
-    /// to, under `env`'s config (P6). Resolution is read-only discovery: a
-    /// path the provider does not answer is unavailable. Host notes and
-    /// refusal reasons are preserved verbatim.
+    /// The call the grant `env` links at `effect` names for `input`: its
+    /// transform's target, as this node's deferred provider registration
+    /// grants it (P6). The transform is never journaled: every step that
+    /// needs the target runs it again.
     ///
     /// # Errors
     ///
-    /// `env` links no `call_dynamic` endpoint, or its deferred provider is
-    /// not registered here.
-    pub async fn resolve_dynamic(
+    /// `env` links no dispatch grant at `effect`. A grant this node's
+    /// registration does not hold, or a transform that refuses `input`, is
+    /// the call's typed [`crate::DispatchRefusal`].
+    fn dispatch_target(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+    ) -> Result<Result<crate::DispatchTarget, crate::DispatchRefusal>, PluginError> {
+        let link = env
+            .effects()
+            .get(effect)
+            .filter(|link| link.dispatches())
+            .ok_or_else(|| {
+                PluginError::Registration(format!(
+                    "the process env links no dispatch grant at `{effect}`"
+                ))
+            })?;
+        let Some(transform) = self.registry.dispatch_transform(&link.provider, &link.tool) else {
+            return Ok(Err(crate::DispatchRefusal::NotGranted {
+                effect: effect.to_string(),
+                tool: link.tool.clone(),
+            }));
+        };
+        Ok(
+            transform(input).map_err(|refusal| crate::DispatchRefusal::InputRefused {
+                tool: link.tool.clone(),
+                reason: refusal.reason,
+            }),
+        )
+    }
+
+    /// Resolve the call `owner`'s call of the granted tool at `effect` with
+    /// `input` names under `env`: the grant's transform names the call path,
+    /// which the grant's deferred provider resolves under `env`'s config
+    /// (P6). Resolution is read-only discovery: a path the provider does not
+    /// answer is unavailable. Host notes and refusal reasons are preserved
+    /// verbatim.
+    ///
+    /// # Errors
+    ///
+    /// `env` links no dispatch grant at `effect`, or its deferred provider
+    /// is not registered here. A refusal before the provider is asked is
+    /// the call's typed [`crate::DispatchRefusal`].
+    pub async fn resolve_dispatch(
         &self,
         env: &Arc<crate::ProcessEnv>,
         owner: &crate::ExecutionOwner,
-        path: &str,
-    ) -> Result<crate::DeferredMatch, PluginError> {
-        let link = env
-            .effects()
-            .get(
-                &lash_kernel_doc::EffectName::new(crate::CALL_DYNAMIC_EFFECT)
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
-            )
-            .filter(|link| link.dynamic_endpoint().is_some())
-            .ok_or_else(|| {
-                PluginError::Registration("the process env links no call_dynamic endpoint".into())
-            })?;
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+    ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError> {
+        let path = match self.dispatch_target(env, effect, input)? {
+            Ok(target) => target.path,
+            Err(refusal) => return Ok(Err(refusal)),
+        };
+        let link = &env.effects()[effect];
         let config = super::OwnerConfigView::components(Arc::clone(env));
         config.validate_provider(&link.provider)?;
         let provider = self
@@ -1161,9 +1193,9 @@ impl ProcessComposition {
             &config,
         );
         let outcome = provider
-            .resolve(&cx, &[path])
+            .resolve(&cx, &[path.as_str()])
             .await
-            .remove(path)
+            .remove(&path)
             .unwrap_or(crate::DeferredOutcome::Unavailable { note: None });
         if let crate::DeferredOutcome::Resolved { link } = &outcome {
             config.validate_provider(&link.provider)?;
@@ -1171,10 +1203,44 @@ impl ProcessComposition {
                 config.validate_provider(&payload.codec)?;
             }
         }
-        Ok(crate::DeferredMatch {
-            requested: path.to_owned(),
+        Ok(Ok(crate::DeferredMatch {
+            requested: path,
             outcome,
-        })
+        }))
+    }
+
+    /// The arguments the call of the tool `matched` resolved runs with: the
+    /// grant's transform at `effect`, run again on `input`, the granted
+    /// tool's input. A transform that names another call path than the one
+    /// `matched` resolved diverged from the committed match, which is never
+    /// resolved again: the call is refused typed and the matched tool does
+    /// not run.
+    ///
+    /// # Errors
+    ///
+    /// `env` links no dispatch grant at `effect`. A grant this node's
+    /// registration does not hold, a transform that refuses `input`, or a
+    /// divergence is the call's typed [`crate::DispatchRefusal`].
+    pub fn dispatch_args(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+        matched: &crate::DeferredMatch,
+    ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError> {
+        Ok(self
+            .dispatch_target(env, effect, input)?
+            .and_then(|target| {
+                if target.path == matched.requested {
+                    Ok(target.args)
+                } else {
+                    Err(crate::DispatchRefusal::Diverged {
+                        tool: env.effects()[effect].tool.clone(),
+                        committed: matched.requested.clone(),
+                        recomputed: target.path,
+                    })
+                }
+            }))
     }
 
     /// The tools a process's linked calls run on, as this node's components

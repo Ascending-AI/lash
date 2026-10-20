@@ -72,20 +72,38 @@ pub enum ToolFailureCause {
         pinned: lash_kernel_doc::ContractId,
         live: lash_kernel_doc::ContractId,
     },
-    /// A process's `call_dynamic` call whose input is not a call path with
-    /// its arguments. Nothing was resolved.
-    DynamicCallInvalid {
+    /// A granted tool's transform refused the tool's input: it names no
+    /// call. Nothing was resolved.
+    DispatchInputRefused {
+        tool: crate::ToolId,
         reason: String,
     },
-    /// The deferred provider refused a process's `call_dynamic` path. The
-    /// decision is recorded and never resolved again; no tool ran.
+    /// A process's call of a tool its env links as a dispatch grant that
+    /// the deferred provider's registration on this node does not grant:
+    /// only a granted tool dispatches. Nothing was resolved.
+    DispatchNotGranted {
+        effect: String,
+        tool: crate::ToolId,
+    },
+    /// A granted tool's transform, run again for the call of the matched
+    /// tool, named another call path than the committed match resolved: the
+    /// transform is not deterministic, a host bug. The matched tool did not
+    /// run.
+    DispatchDiverged {
+        tool: crate::ToolId,
+        committed: String,
+        recomputed: String,
+    },
+    /// The deferred provider refused the call path a granted tool's
+    /// transform named. The decision is recorded and never resolved again;
+    /// no tool ran.
     DynamicCallRefused {
         path: String,
         reason: String,
     },
-    /// No tool is available for a process's `call_dynamic` path, with the
-    /// host's note. The decision is recorded and never resolved again; no
-    /// tool ran.
+    /// No tool is available for the call path a granted tool's transform
+    /// named, with the host's note. The decision is recorded and never
+    /// resolved again; no tool ran.
     DynamicCallUnavailable {
         path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

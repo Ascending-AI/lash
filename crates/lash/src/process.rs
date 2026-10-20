@@ -63,12 +63,6 @@ pub use lash_core::plugin::{
     ProcessComponentHost, ProcessComponentPorts, ProcessComponentSpec, ProcessSessionReads,
     StaticProcessComponent,
 };
-/// The fixed `call_dynamic` endpoint a process links to its env's
-/// deferred provider ([`EffectLink::dynamic`]), the effect path it is
-/// performed under and the input it takes.
-pub use lash_core::{
-    CALL_DYNAMIC_CONTRACT, CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint,
-};
 pub use lash_execution_contracts::process::DeclaredDefinitionLaunch;
 pub use lash_execution_contracts::process::DeclaredInlineLaunch;
 pub use lash_execution_contracts::process::DeclaredLaunch;

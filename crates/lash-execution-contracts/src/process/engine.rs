@@ -230,7 +230,7 @@ pub trait ProcessEngine: Send + Sync {
     /// The effects a run of `payload` performs (P3): each path its code
     /// calls or spawns, with the kernel signature it was checked against.
     /// An env links exactly these. An engine that performs no effect of its
-    /// own answers an empty map: its runs may link only `call_dynamic`.
+    /// own answers an empty map: its runs link nothing.
     ///
     /// # Errors
     ///

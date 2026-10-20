@@ -202,11 +202,11 @@ pub enum StepRequest {
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<Box<lash_protocol_types::EffectId>>,
-        /// The recorded match a `call_dynamic` call runs on (P6): set only
+        /// The recorded match a granted tool's call runs on (P6): set only
         /// by lash, on the step it issues once the call's resolution
-        /// committed, which runs the matched tool with the call's `args`
-        /// as its input. An engine never sets it: it asks for the
-        /// `call_dynamic` effect, whose step is the resolution.
+        /// committed, which runs the matched tool with the arguments the
+        /// grant's transform names for `input`. An engine never sets it: it
+        /// asks for the granted tool's effect, whose step is the resolution.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         matched: Option<Box<crate::DeferredMatch>>,
     },
@@ -243,19 +243,8 @@ impl StepRequest {
         }
     }
 
-    /// Whether this is the resolution of a `call_dynamic` call (P6): the
-    /// engine's step of the endpoint, whose committed outcome is the
-    /// call's [`DeferredMatch`](crate::DeferredMatch).
-    #[must_use]
-    pub fn resolves(&self) -> bool {
-        matches!(
-            self,
-            Self::Tool { effect, matched: None, .. } if effect.as_str() == crate::CALL_DYNAMIC_EFFECT
-        )
-    }
-
     /// The recorded match the step runs on, when it is the target of a
-    /// `call_dynamic` call.
+    /// granted tool's call.
     #[must_use]
     pub fn matched(&self) -> Option<&crate::DeferredMatch> {
         match self {

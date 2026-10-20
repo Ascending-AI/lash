@@ -16,12 +16,14 @@
 //!   store-local effect commits with the step's outcome. The step's payload
 //!   retains the call's `ToolCallRecord`; incorporation projects its output
 //!   for the engine.
-//! - **`call_dynamic` calls** are two steps (P6). The engine's step of the
-//!   endpoint is the call's resolution: the env's deferred provider resolves
-//!   its path, and its committed record's value is the match. The step lash
-//!   issues in the commit that consumes it runs the matched tool on the
+//! - **Granted tools' calls** are two steps (P6). The engine's step of an
+//!   effect its env links as a dispatch grant is the call's resolution: the
+//!   grant's transform names a call path, the grant's deferred provider
+//!   resolves it, and its committed record's value is the match. The step
+//!   lash issues in the commit that consumes it runs the matched tool on the
 //!   match's provider and binding, admitted under the tool's own
-//!   declaration, as a linked call is.
+//!   declaration, as a linked call is, with the arguments the transform
+//!   names again; a transform that names another path is refused typed.
 //! - **Resolved links** run the tool the declaring cell's committed
 //!   deferred match resolved, as the env retains it: its definition, on the
 //!   link's provider, under its binding, which this node must read before
@@ -39,7 +41,7 @@ use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody, MemberOutcome};
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, dynamic_resolution, tool_step_output,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, dispatch_resolution, tool_step_output,
     tool_step_refused, tool_step_resolved, tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
@@ -51,6 +53,26 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 
 use super::DurableProcessWorker;
+
+/// Whether `step` is the resolution of a granted tool's call (P6): its
+/// effect is linked as a dispatch grant in the env `runtime`'s tools were
+/// built from, and it is not the call of a match.
+fn resolves(runtime: &StepRuntime, step: &StepRequest) -> bool {
+    let StepRequest::Tool {
+        effect,
+        matched: None,
+        ..
+    } = step
+    else {
+        return false;
+    };
+    runtime.built_tools().is_some_and(|tools| {
+        tools
+            .effects
+            .get(effect)
+            .is_some_and(lash_core::OperationLink::dispatches)
+    })
+}
 
 /// The engine a process runs, which its engine steps belong to.
 fn engine_kind(process: &ProcessRecord) -> Option<&str> {
@@ -71,7 +93,7 @@ impl DurableProcessWorker {
         execution: AdmittedExecution,
         token: tokio_util::sync::CancellationToken,
     ) -> MemberOutcome {
-        let resolves = step.resolves();
+        let resolves = resolves(&runtime, &step);
         let StepRequest::Tool {
             effect,
             input,
@@ -83,7 +105,7 @@ impl DurableProcessWorker {
         };
         if resolves {
             return self
-                .resolve_dynamic(&runtime, &process, &execution, input)
+                .resolve_dispatch(&runtime, &process, &execution, &effect, input)
                 .await;
         }
         // `prepare` built the activation's tools before any step was
@@ -97,20 +119,39 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "a process tool step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
-        // The target of a `call_dynamic` call runs on its recorded match,
-        // and a resolved link's call on the resolution its env retains: the
+        // The target of a granted tool's call runs on its recorded match,
+        // with the arguments the grant's transform names again, and a
+        // resolved link's call on the resolution its env retains: the
         // matched tool, on the provider and payload its link names.
-        let resolution = match &matched {
-            Some(matched) => matched.resolved(),
-            None => step.effects.get(&effect),
-        }
-        .and_then(crate::ToolExecutionGrant::of_link);
-        if let Some(grant) = resolution {
+        let (resolution, args) = match &matched {
+            Some(matched) => {
+                let named = step.context.dispatch_args(&effect, &input, matched);
+                let call = lash_core_execution::sansio::PendingToolCall {
+                    call_id: execution.call().clone(),
+                    provider_call_id: None,
+                    tool_name: effect.to_string(),
+                    args: input.clone(),
+                    replay: None,
+                };
+                match named {
+                    Ok(Ok(args)) => (matched.resolved(), args),
+                    Ok(Err(refusal)) => {
+                        let output = failure_outcome(&process, refusal.failure()).output;
+                        return tool_step_refused(&process.id, &call, output).into();
+                    }
+                    Err(error) => {
+                        return dispatch_missing(&process, &call, &effect, &execution, &error);
+                    }
+                }
+            }
+            None => (step.effects.get(&effect), input),
+        };
+        if let Some(grant) = resolution.and_then(crate::ToolExecutionGrant::of_link) {
             let call = lash_core_execution::sansio::PendingToolCall {
                 call_id: execution.call().clone(),
                 provider_call_id: None,
                 tool_name: grant.manifest().tool(),
-                args: input,
+                args,
                 replay: None,
             };
             let result = step.tools.granted_body(&call, &execution, grant)(token).await;
@@ -130,64 +171,48 @@ impl DurableProcessWorker {
             call_id: execution.call().clone(),
             provider_call_id: None,
             tool_name: name,
-            args: input,
+            args,
             replay: None,
         };
         let result = step.tools.body(&call, &execution, None)(token).await;
         tool_step_output(&process.id, &call, result)
     }
 
-    /// The resolution `execution` of a `call_dynamic` call of `process`
-    /// with `input` (P6): the env's deferred provider resolves its call
-    /// path once, and the step's committed outcome is the match it
-    /// decided, which the commit that consumes it never resolves again. A
-    /// resolution that does not commit runs again: it is read-only.
-    async fn resolve_dynamic(
+    /// The resolution `execution` of `process`'s call of the granted tool
+    /// at `effect` with `input` (P6): the grant's transform names a call
+    /// path, its deferred provider resolves it once, and the step's
+    /// committed outcome is the match it decided, which the commit that
+    /// consumes it never resolves again. A resolution that does not commit
+    /// runs again: it is read-only. A transform that refuses `input`, or a
+    /// grant this node does not hold, settles typed before the provider is
+    /// asked.
+    async fn resolve_dispatch(
         &self,
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         execution: &AdmittedExecution,
+        effect: &lash_core::EffectName,
         input: serde_json::Value,
     ) -> MemberOutcome {
         let call = lash_core_execution::sansio::PendingToolCall {
             call_id: execution.call().clone(),
             provider_call_id: None,
-            tool_name: "call_dynamic".to_owned(),
-            args: input.clone(),
+            tool_name: effect.to_string(),
+            args: input,
             replay: None,
-        };
-        let failed = |code: &str, message: String, cause| {
-            let output = step_failure(process, code, message, Some(cause), None).output;
-            tool_step_refused(&process.id, &call, output).into()
-        };
-        let path = match serde_json::from_value::<lash_core::DynamicCall>(input) {
-            Ok(dynamic) => dynamic.path,
-            Err(error) => {
-                return failed(
-                    "dynamic_call_invalid",
-                    format!("a call_dynamic call takes a call path and its arguments: {error}"),
-                    crate::ToolFailureCause::DynamicCallInvalid {
-                        reason: error.to_string(),
-                    },
-                );
-            }
         };
         let Some(tools) = runtime.built_tools() else {
             return SettledOutput::Interrupted.into();
         };
-        let resolved = tools.context.resolve_dynamic(&path).await;
-        match resolved {
-            Ok(matched) => dynamic_resolution(&process.id, &call, &matched).into(),
+        match tools.context.resolve_dispatch(effect, &call.args).await {
+            Ok(Ok(matched)) => dispatch_resolution(&process.id, &call, &matched).into(),
+            Ok(Err(refusal)) => {
+                let output = failure_outcome(process, refusal.failure()).output;
+                tool_step_refused(&process.id, &call, output).into()
+            }
             // The deferred provider left this node since the step was
             // admitted: nothing was resolved, as a missing linked tool.
-            Err(error) => failed(
-                "linked_tool_missing",
-                format!("the call path `{path}` could not be resolved here: {error}"),
-                crate::ToolFailureCause::LinkedToolMissing {
-                    effect: lash_core::CALL_DYNAMIC_EFFECT.to_owned(),
-                    tool: execution.draft().tool().clone(),
-                },
-            ),
+            Err(error) => dispatch_missing(process, &call, effect, execution, &error),
         }
     }
 
@@ -197,6 +222,7 @@ impl DurableProcessWorker {
     /// a retried body reports again with the same site and call.
     fn observe_step_body_started(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         execution: &AdmittedExecution,
@@ -208,7 +234,7 @@ impl DurableProcessWorker {
         else {
             return;
         };
-        if step.resolves() {
+        if resolves(runtime, step) {
             return;
         }
         let tracing = crate::plugin::PluginExecutionTrace::new(
@@ -479,7 +505,7 @@ impl ProcessSteps for WorkerSteps {
                         reason: error.to_string(),
                     }
                 };
-                // The target of a `call_dynamic` call is admitted as the
+                // The target of a granted tool's call is admitted as the
                 // tool its recorded match names, on the match's provider,
                 // once this node reads the match's binding (S8).
                 let tools = self
@@ -534,6 +560,13 @@ impl ProcessSteps for WorkerSteps {
                         let mut admission =
                             StepAdmission::new(pin.tool, pin.policy, pin.limit, pin.park);
                         admission.binding = Some(*binding);
+                        // A granted tool's call is its resolution, under the
+                        // policy and bound its grant recorded.
+                        admission.resolves = matched.is_none()
+                            && tools
+                                .effects
+                                .get(effect)
+                                .is_some_and(lash_core::OperationLink::dispatches);
                         Ok(admission)
                     }
                     // The linked tool is missing here, or served under
@@ -604,7 +637,7 @@ impl ProcessSteps for WorkerSteps {
         let execution = execution.clone();
         Box::new(move |token| {
             Box::pin(async move {
-                worker.observe_step_body_started(&process, &step, &execution);
+                worker.observe_step_body_started(&runtime, &process, &step, &execution);
                 match step {
                     StepRequest::Tool { .. } => {
                         worker
@@ -764,7 +797,6 @@ impl DurableProcessWorker {
 }
 
 /// Retain the known pre-body failure as process-owned attempt material.
-#[expect(clippy::expect_used, reason = "a tool failure is serializable data")]
 fn step_failure(
     process: &ProcessRecord,
     code: &str,
@@ -772,12 +804,18 @@ fn step_failure(
     cause: Option<crate::ToolFailureCause>,
     source: Option<serde_json::Value>,
 ) -> MemberOutcome {
-    use lash_core_execution::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
     let mut failure = crate::ToolFailure::runtime(crate::ToolFailureClass::Internal, code, message);
     if let Some(cause) = cause {
         failure = failure.with_cause(cause);
     }
     failure.raw = source.map(crate::ToolValue::untrusted_json);
+    failure_outcome(process, failure)
+}
+
+/// `process`'s step settled with `failure`, which no body reported.
+#[expect(clippy::expect_used, reason = "a tool failure is serializable data")]
+fn failure_outcome(process: &ProcessRecord, failure: crate::ToolFailure) -> MemberOutcome {
+    use lash_core_execution::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
     let output = crate::ToolCallOutput::failure(failure);
     SettledOutput::Failed(
         Material::journal_local(
@@ -791,4 +829,28 @@ fn step_failure(
         .failure(KnownFailureReason::Reported, None),
     )
     .into()
+}
+
+/// A granted tool's `call` at `effect` this node cannot dispatch: its
+/// deferred provider left since the step was admitted, so nothing was
+/// resolved, as a missing linked tool.
+fn dispatch_missing(
+    process: &ProcessRecord,
+    call: &lash_core_execution::sansio::PendingToolCall,
+    effect: &lash_core::EffectName,
+    execution: &AdmittedExecution,
+    error: &lash_execution_contracts::plugin_error::PluginError,
+) -> MemberOutcome {
+    let output = step_failure(
+        process,
+        "linked_tool_missing",
+        format!("the call of `{effect}` could not be dispatched here: {error}"),
+        Some(crate::ToolFailureCause::LinkedToolMissing {
+            effect: effect.to_string(),
+            tool: execution.draft().tool().clone(),
+        }),
+        None,
+    )
+    .output;
+    tool_step_refused(&process.id, call, output).into()
 }

@@ -6,6 +6,12 @@
 //! each surface records its key. Resolution is read-only discovery: it is
 //! repeat-safe and effect-free until its [`crate::DeferredMatch`] commits,
 //! and a committed match is never resolved again.
+//!
+//! A process's call whose target is known only at run time is the call of a
+//! host-named tool its deferred provider's registration grants dispatch
+//! ([`DispatchGrant`]): the host's pure transform names the call path and
+//! its arguments, the provider resolves the path once, and the matched tool
+//! is called with the arguments (P6).
 
 use std::collections::BTreeMap;
 
@@ -14,21 +20,25 @@ use async_trait::async_trait;
 use crate::plugin::OwnerConfigView;
 use crate::{DeferredOutcome, ToolProvider};
 
-/// A deferred provider's typed host registration. Its resolution policy
-/// produces the dynamic link sealed into each new process environment;
-/// takeover serves that recorded link even when this registration changes.
+/// A deferred provider's typed host registration, with the dispatch grants
+/// it holds. Its resolution policy is sealed into each process environment
+/// with the grant link it produces; takeover serves that recorded link even
+/// when this registration changes.
 #[derive(Clone)]
 pub struct DeferredToolProviderRegistration {
     pub(crate) provider: std::sync::Arc<dyn DeferredToolProvider>,
     resolution_policy: crate::DeferredResolutionPolicy,
+    pub(crate) grants: BTreeMap<crate::ToolId, DispatchGrant>,
 }
 
 impl DeferredToolProviderRegistration {
-    /// Register with the documented 60-second, three-attempt default.
+    /// Register with the documented 60-second, three-attempt default and no
+    /// dispatch grant.
     pub fn new(provider: std::sync::Arc<dyn DeferredToolProvider>) -> Self {
         Self {
             provider,
             resolution_policy: crate::DeferredResolutionPolicy::default(),
+            grants: BTreeMap::new(),
         }
     }
 
@@ -39,11 +49,181 @@ impl DeferredToolProviderRegistration {
         self
     }
 
-    /// Link this registration's resolver under `provider`, with its policy
-    /// captured at environment creation. Pass this to `ProcessEnvBuilder::link`
-    /// at `CALL_DYNAMIC_EFFECT`; later registrations cannot change it.
-    pub fn dynamic_link(&self, provider: crate::ProviderKey) -> crate::OperationLink {
-        crate::OperationLink::dynamic(provider, self.resolution_policy)
+    /// Grant `grant`'s host-named tool dispatch through this provider: a
+    /// call of it runs the grant's transform, resolves the path it names
+    /// here, and calls the matched tool with the transform's arguments.
+    ///
+    /// # Errors
+    ///
+    /// [`DispatchGrantRefusal::Duplicate`] when this registration already
+    /// grants a tool with that id.
+    pub fn with_dispatch_grant(
+        mut self,
+        grant: DispatchGrant,
+    ) -> Result<Self, DispatchGrantRefusal> {
+        let tool = grant.definition.manifest.id.clone();
+        if self.grants.contains_key(&tool) {
+            return Err(DispatchGrantRefusal::Duplicate { tool });
+        }
+        self.grants.insert(tool, grant);
+        Ok(self)
+    }
+
+    /// The link of `tool`'s dispatch grant through this registration's
+    /// provider, registered under `provider`, with its resolution policy
+    /// captured now. Pass it to `ProcessEnvBuilder::link` at the effect
+    /// the granted tool's operation names; later registrations cannot
+    /// change it.
+    ///
+    /// # Errors
+    ///
+    /// [`DispatchGrantRefusal::NotGranted`] when this registration grants
+    /// no tool `tool`: only a granted tool dispatches.
+    pub fn dispatch_link(
+        &self,
+        provider: crate::ProviderKey,
+        tool: &crate::ToolId,
+    ) -> Result<crate::OperationLink, DispatchGrantRefusal> {
+        let grant = self
+            .grants
+            .get(tool)
+            .ok_or_else(|| DispatchGrantRefusal::NotGranted { tool: tool.clone() })?;
+        Ok(crate::OperationLink::dispatch(
+            provider,
+            grant.definition.clone(),
+            self.resolution_policy,
+        ))
+    }
+}
+
+/// The call a granted tool's transform names: the call path its deferred
+/// provider resolves, and the arguments the matched tool is called with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DispatchTarget {
+    pub path: String,
+    pub args: serde_json::Value,
+}
+
+/// A granted tool's transform refused the tool's input: nothing was
+/// resolved.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{reason}")]
+pub struct TransformRefusal {
+    pub reason: String,
+}
+
+/// A host's transform of a granted tool's input into the call it names.
+///
+/// It must be deterministic and pure: lash never journals its answer, and
+/// runs it again wherever the answer is needed, the call of the matched tool
+/// after a crash or a takeover included. A transform that answers one input
+/// with two call paths is a host bug, which lash detects as a divergence
+/// from the committed match and refuses typed (`dispatch_diverged`).
+pub type DispatchTransform = std::sync::Arc<
+    dyn Fn(&serde_json::Value) -> Result<DispatchTarget, TransformRefusal> + Send + Sync,
+>;
+
+/// A host-named tool granted dispatch: its definition, whose name, schema
+/// and description its callers see, and the transform of its input into the
+/// call it names.
+#[derive(Clone)]
+pub struct DispatchGrant {
+    pub(crate) definition: crate::ToolDefinition,
+    pub(crate) transform: DispatchTransform,
+}
+
+impl DispatchGrant {
+    /// Grant `definition` dispatch through `transform`, a deterministic,
+    /// pure function ([`DispatchTransform`]).
+    pub fn new(
+        definition: crate::ToolDefinition,
+        transform: impl Fn(&serde_json::Value) -> Result<DispatchTarget, TransformRefusal>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self {
+            definition,
+            transform: std::sync::Arc::new(transform),
+        }
+    }
+}
+
+/// A refused dispatch grant.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum DispatchGrantRefusal {
+    /// The registration grants no such tool: only a granted tool dispatches.
+    #[error("tool `{tool}` holds no dispatch grant")]
+    NotGranted { tool: crate::ToolId },
+    /// The registration already grants a tool with this id.
+    #[error("tool `{tool}` is granted dispatch twice")]
+    Duplicate { tool: crate::ToolId },
+}
+
+/// Why a granted tool's call dispatches nothing: a typed tool failure its
+/// caller may catch. Nothing was resolved, or the matched tool did not run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DispatchRefusal {
+    /// This node's deferred provider registration does not grant the
+    /// linked tool: only a granted tool dispatches.
+    NotGranted { effect: String, tool: crate::ToolId },
+    /// The grant's transform refused the tool's input.
+    InputRefused { tool: crate::ToolId, reason: String },
+    /// The grant's transform, run again for the call of the matched tool,
+    /// named another call path than the committed match resolved.
+    Diverged {
+        tool: crate::ToolId,
+        committed: String,
+        recomputed: String,
+    },
+}
+
+impl DispatchRefusal {
+    /// The typed tool failure the call settles with.
+    #[must_use]
+    pub fn failure(&self) -> crate::ToolFailure {
+        match self {
+            Self::NotGranted { effect, tool } => crate::ToolFailure::runtime(
+                crate::ToolFailureClass::PermissionDenied,
+                "dispatch_not_granted",
+                format!(
+                    "the effect `{effect}` is linked to tool `{tool}` as a dispatch grant this \
+                     node's deferred provider does not grant; nothing was resolved"
+                ),
+            )
+            .with_cause(crate::ToolFailureCause::DispatchNotGranted {
+                effect: effect.clone(),
+                tool: tool.clone(),
+            }),
+            Self::InputRefused { tool, reason } => crate::ToolFailure::runtime(
+                crate::ToolFailureClass::InvalidRequest,
+                "dispatch_input_refused",
+                format!("tool `{tool}` names no call for its input: {reason}"),
+            )
+            .with_cause(crate::ToolFailureCause::DispatchInputRefused {
+                tool: tool.clone(),
+                reason: reason.clone(),
+            }),
+            Self::Diverged {
+                tool,
+                committed,
+                recomputed,
+            } => crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "dispatch_diverged",
+                format!(
+                    "tool `{tool}`'s transform named `{recomputed}` for the input whose \
+                     committed match resolved `{committed}`: its transform is not \
+                     deterministic; the matched tool did not run"
+                ),
+            )
+            .with_cause(crate::ToolFailureCause::DispatchDiverged {
+                tool: tool.clone(),
+                committed: committed.clone(),
+                recomputed: recomputed.clone(),
+            }),
+        }
     }
 }
 

@@ -113,6 +113,9 @@ pub(crate) struct PluginContributions {
     pub(crate) tool_reads: Vec<RegisteredProvider<Arc<dyn crate::ToolReads>>>,
     /// The one deferred provider, registered among `tool_providers` too.
     pub(crate) deferred_provider: Option<RegisteredProvider<Arc<dyn crate::DeferredToolProvider>>>,
+    /// The transforms of the tools the deferred provider's registration
+    /// grants dispatch, by tool.
+    pub(crate) dispatch_grants: BTreeMap<crate::ToolId, crate::DispatchTransform>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -163,6 +166,7 @@ impl PluginContributions {
             tool_providers,
             tool_reads,
             deferred_provider,
+            dispatch_grants: _,
             tool_catalog_contributors,
             before_turn_hooks,
             tool_args_transforms,
@@ -339,6 +343,11 @@ impl ToolRegistrations<'_> {
             identity,
             hook: provider,
         });
+        self.reg.contributions.dispatch_grants = registration
+            .grants
+            .into_iter()
+            .map(|(tool, grant)| (tool, grant.transform))
+            .collect();
         Ok(())
     }
 }

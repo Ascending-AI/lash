@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::EffectName;
 use serde::{Deserialize, Serialize};
 
-use crate::LinkSource;
 use crate::OwnedOperations;
 use crate::PerformedEffects;
 use crate::ProcessEnv;
@@ -35,10 +34,9 @@ pub enum FitPolicy {
 /// contract id and intents and serves its signature (PKG-RUNNER). `served`
 /// is each link's tool as an env component serves it on this node,
 /// admitted under the link ([`crate::OperationLink::admitted`]); a link it
-/// lacks is not served. The `call_dynamic` endpoint is linked only at its
-/// own path, as a `Dynamic` link, and fits like any tool: the document is
-/// checked against its known signature, and its target is matched per
-/// call.
+/// lacks is not served. A dispatch grant fits like any tool: the document
+/// is checked against the granted tool's signature, and its target is
+/// matched per call.
 ///
 /// # Errors
 ///
@@ -74,18 +72,6 @@ pub fn check_links(
     }
     for (effect, expected) in performed {
         let link = &env.effects()[effect];
-        let at_endpoint = effect.as_str() == crate::CALL_DYNAMIC_EFFECT;
-        let dynamic = matches!(link.source, LinkSource::Dynamic { .. });
-        if dynamic != at_endpoint {
-            return Err(ProcessEnvRefusal::EffectUnfit {
-                effect: effect.to_string(),
-                tool: link.tool.to_string(),
-                reason: format!(
-                    "the call_dynamic endpoint is linked only at `{}`, as a dynamic link",
-                    crate::CALL_DYNAMIC_EFFECT
-                ),
-            });
-        }
         let Some(definition) = served.get(effect) else {
             return Err(ProcessEnvRefusal::ToolNotServed {
                 effect: effect.to_string(),

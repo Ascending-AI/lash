@@ -1,7 +1,7 @@
 //! How a process's steps are admitted (ADR 0132 §10): an engine's batch
 //! held against the process's `max_tool_calls`, each step pinned by its
 //! host's admission and recorded on the driver; and the handoff of a
-//! `call_dynamic` call (P6), whose committed resolution is consumed by the
+//! granted tool's call (P6), whose committed resolution is consumed by the
 //! commit that admits the call of its matched tool, without the engine.
 
 use std::collections::BTreeSet;
@@ -47,7 +47,7 @@ pub(super) struct Consumed<'a> {
     pub(super) now: DurableInstant,
 }
 
-/// A `call_dynamic` call's committed resolution, and the call of the tool
+/// A granted tool's call's committed resolution, and the call of the tool
 /// its match names, which lash admits in its place (P6).
 pub(super) struct Handoff {
     pub(super) resolution: InFlight,
@@ -109,7 +109,7 @@ impl ProcessActivation {
         Ok(Some(requires))
     }
 
-    /// Consume `handoff`'s resolution, a `call_dynamic` call's resolution
+    /// Consume `handoff`'s resolution, a granted tool's call's resolution
     /// step whose committed outcome resolved its path, by admitting its
     /// target, the call of the matched tool, in its place (P6): one commit removes the
     /// resolution from the driver, admits the target under the same step
@@ -314,12 +314,12 @@ impl ProcessActivation {
                 limit_max_slice_ms: u64::try_from(admitted.limit.max_slice.as_millis())
                     .unwrap_or(u64::MAX),
                 request,
+                resolves: admitted.resolves,
             };
             let trace = super::node_trace::step_trace_scope(
                 self.tracing.as_ref(),
                 record,
-                &step.request,
-                &step.call,
+                &step,
                 millis(now),
             );
             drafts.push(
@@ -472,8 +472,8 @@ impl ProcessActivation {
                 wake,
             } => {
                 // A recorded match is lash's to record, at the commit that
-                // consumes its resolution: an engine asks for the
-                // `call_dynamic` effect, never for a match.
+                // consumes its resolution: an engine asks for the granted
+                // tool's effect, never for a match.
                 if requests.iter().any(|request| request.matched().is_some()) {
                     return Ok(Some(refused(
                         "a step names a recorded match, which only lash records".to_owned(),

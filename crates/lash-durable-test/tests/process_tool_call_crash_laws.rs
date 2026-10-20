@@ -25,14 +25,18 @@
 //! step bound, parks on the sleep's deadline once its call settles, its
 //! actor released as `waiting`, and wakes there after node A is killed.
 //!
-//! A process's `call_dynamic` call is two committed steps (P6, R10): its
-//! resolution, whose committed outcome is the match, then the call of the
-//! matched tool, admitted by the commit that consumes the resolution. Cut
-//! at every write of the process's passes and step outcomes, a resumed
+//! A process's call of a host-named tool its deferred provider grants
+//! dispatch, `call_tool`, is two committed steps (P6, R10): its resolution
+//! of the path the grant's pure transform names, whose committed outcome is
+//! the match, then the call of the matched tool, admitted by the commit that
+//! consumes the resolution, with the arguments the transform names again.
+//! Cut at every write of the process's passes and step outcomes, a resumed
 //! call runs the target the committed match names under one call id, and
 //! the resolver never runs once a resolution committed: neither for a
 //! resolved path (law 10, DYNAMIC-TWO-STEP) nor for a refused or
-//! unavailable one, which the body catches typed.
+//! unavailable one, which the body catches typed. A tool without the grant
+//! dispatches nothing, and a transform that names another path when the
+//! matched tool's call runs is refused typed.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -769,10 +773,13 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     );
 }
 
-/// The component that serves a process's `call_dynamic` calls: its deferred
-/// provider resolves them and executes what it matched.
+/// The component that serves a process's calls of the granted `call_tool`:
+/// its deferred provider resolves them and executes what it matched.
 const DYNAMIC_COMPONENT: lash_core::ProcessConfigKey<()> =
     lash_core::ProcessConfigKey::new("process-dynamic", lash_core::FormatVersion::ONE);
+
+/// The effect the granted tool is performed as.
+const CALL_TOOL_EFFECT: &str = "tools.call_tool";
 
 /// The call path the resolver resolves, to `dyn_first` the first time it is
 /// asked and to `dyn_second` every time after: a path resolved again names
@@ -782,6 +789,8 @@ const RESOLVED_PATH: &str = "search.run";
 const REFUSED_PATH: &str = "search.refused";
 /// A call path no tool answers.
 const MISSING_PATH: &str = "search.missing";
+/// The call path a diverging transform names after its first answer.
+const DIVERGED_PATH: &str = "search.elsewhere";
 
 /// FIG-6590: exactly 1 KiB of host-authored UTF-8, retained byte-for-byte.
 fn dynamic_host_explanation() -> String {
@@ -794,10 +803,36 @@ struct Resolutions {
     /// Each resolver call: the path, and how many writes the trace held
     /// when it ran.
     resolved: Mutex<Vec<(String, usize)>>,
-    /// Each body entry of a matched target: its tool and call id.
-    entries: Mutex<Vec<(String, lash_core::ToolCallId)>>,
+    /// Each body entry of a matched target: its tool, call id and args.
+    entries: Mutex<Vec<(String, lash_core::ToolCallId, serde_json::Value)>>,
+    /// How many times the grant's transform ran.
+    transforms: std::sync::atomic::AtomicUsize,
     /// The nodes whose trace the resolver reads.
     nodes: Mutex<Option<std::sync::Weak<SimNodes>>>,
+}
+
+/// The host-named tool the deferred provider grants dispatch: callers see
+/// an ordinary tool taking a target's name and its arguments.
+fn call_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:call_tool",
+        CALL_TOOL_EFFECT,
+        "Calls the search tool `target` names, with `args`.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target"],
+            "properties": {
+                "target": { "type": "string" },
+                "args": {},
+            },
+        }),
+        serde_json::json!({}),
+    )
+    .expect("the granted tool's schemas")
+    .declared_contract(lash_kernel_doc::ContractId::new("tools.call_tool/1"))
+    // The grant's resolution policy replaces the bound when it is linked.
+    .with_execution(std::time::Duration::from_secs(30))
 }
 
 /// A target the resolver matches: `Repeatable`, so a call a kill interrupted
@@ -849,10 +884,11 @@ impl lash_core::ToolProvider for Resolver {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let tool = call.name().to_owned();
-        self.seen
-            .entries
-            .lock_recover()
-            .push((tool.clone(), call.context.call_id().clone()));
+        self.seen.entries.lock_recover().push((
+            tool.clone(),
+            call.context.call_id().clone(),
+            call.args.clone(),
+        ));
         ToolOutcome::ok(serde_json::json!({ "tool": tool })).into()
     }
 }
@@ -896,16 +932,16 @@ impl lash_core::DeferredToolProvider for Resolver {
     }
 }
 
-/// `dynamic()` calls the target `search.run` resolves to through
-/// `call_dynamic`, and answers what it answered.
+/// `dynamic()` calls the target `search.run` resolves to through the
+/// granted `call_tool`, and answers what it answered.
 const RESOLVING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json contract "lash.call_dynamic/1"
+effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
 entry dynamic() -> Any
 
 fn dynamic() {
-  let request = {path: "search.run", args: {q: "x"}}
-  let got = perform lash.call_dynamic(request) as Any
+  let request = {target: "run", args: {q: "x"}}
+  let got = perform tools.call_tool(request) as Any
   return got
 }
 
@@ -918,21 +954,21 @@ main {
 /// each failure, and answers both.
 const DECIDING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json contract "lash.call_dynamic/1"
+effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
 entry dynamic() -> Any
 
 fn dynamic() {
-  let refusing = {path: "search.refused", args: {}}
+  let refusing = {target: "refused", args: {}}
   let refused = null
   try {
-    set refused = perform lash.call_dynamic(refusing) as Any
+    set refused = perform tools.call_tool(refusing) as Any
   } catch e {
     set refused = {kind: e.kind, data: e.data}
   }
-  let looking = {path: "search.missing"}
+  let looking = {target: "missing"}
   let missing = null
   try {
-    set missing = perform lash.call_dynamic(looking) as Any
+    set missing = perform tools.call_tool(looking) as Any
   } catch e {
     set missing = {kind: e.kind, data: e.data}
   }
@@ -944,10 +980,47 @@ main {
 }
 "#;
 
+/// `dynamic()` calls `search.run` through `call_tool`, catches its failure,
+/// and answers it.
+const CATCHING: &str = r#"kernel 1
+numbers float
+effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
+entry dynamic() -> Any
+
+fn dynamic() {
+  let request = {target: "run", args: {q: "x"}}
+  let caught = null
+  try {
+    set caught = perform tools.call_tool(request) as Any
+  } catch e {
+    set caught = {kind: e.kind, data: e.data}
+  }
+  return caught
+}
+
+main {
+  finish null
+}
+"#;
+
+/// How the host's grant of `call_tool` stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Grant {
+    /// Granted, with a deterministic transform.
+    Pure,
+    /// Granted, with a transform that names `search.elsewhere` after its
+    /// first answer.
+    Diverging,
+    /// Not granted: the env holds a dispatch link built by hand, which the
+    /// registration does not grant.
+    Withheld,
+}
+
 /// A deployment whose host starts one kernel process running `document`'s
-/// `dynamic()` under an env that links only `call_dynamic`.
+/// `dynamic()` under an env that links only the granted `call_tool`.
 struct DynamicCalls {
     custom_policy: bool,
+    grant: Grant,
     dialect: Dialect,
     postgres_url: Option<String>,
     document: &'static str,
@@ -967,6 +1040,7 @@ impl DynamicCalls {
             postgres_url,
             document,
             custom_policy: false,
+            grant: Grant::Pure,
             seen: Arc::default(),
             backend: Mutex::default(),
             clock: Mutex::default(),
@@ -992,11 +1066,72 @@ impl DynamicCalls {
         }
     }
 
+    /// The grant's transform: `target` names the search tool, and `args`
+    /// are its arguments. A diverging one names another path after its
+    /// first answer.
+    fn transform(
+        &self,
+    ) -> impl Fn(
+        &serde_json::Value,
+    ) -> Result<lash::tools::DispatchTarget, lash::tools::TransformRefusal>
+    + Send
+    + Sync
+    + 'static {
+        let seen = Arc::clone(&self.seen);
+        let diverging = self.grant == Grant::Diverging;
+        move |input| {
+            let earlier = seen
+                .transforms
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let target = input["target"]
+                .as_str()
+                .ok_or_else(|| lash::tools::TransformRefusal {
+                    reason: "the input names no target".to_owned(),
+                })?;
+            let path = if diverging && earlier > 0 {
+                DIVERGED_PATH.to_owned()
+            } else {
+                format!("search.{target}")
+            };
+            Ok(lash::tools::DispatchTarget {
+                path,
+                args: input
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
+            })
+        }
+    }
+
     fn registration(&self) -> lash::tools::DeferredToolProviderRegistration {
-        lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
+        let registration = lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
             seen: Arc::clone(&self.seen),
         }))
-        .with_resolution_policy(self.policy())
+        .with_resolution_policy(self.policy());
+        if self.grant == Grant::Withheld {
+            return registration;
+        }
+        registration
+            .with_dispatch_grant(lash::tools::DispatchGrant::new(
+                call_tool(),
+                self.transform(),
+            ))
+            .expect("one grant of call_tool")
+    }
+
+    /// The link of `call_tool` the host's env records: its registration's
+    /// grant, or, when withheld, a dispatch link the host built itself.
+    fn link(&self) -> lash::tools::OperationLink {
+        let deferred = DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred"));
+        match self.grant {
+            Grant::Withheld => {
+                lash::tools::OperationLink::dispatch(deferred, call_tool(), self.policy())
+            }
+            Grant::Pure | Grant::Diverging => self
+                .registration()
+                .dispatch_link(deferred, call_tool().id())
+                .expect("the registration grants call_tool"),
+        }
     }
 
     fn backend(&self) -> lash::Backend {
@@ -1063,7 +1198,7 @@ impl DynamicCalls {
         .expect("the registry lists its processes")
     }
 
-    /// The host's start of `dynamic()` under the env linking `call_dynamic`
+    /// The host's start of `dynamic()` under the env linking `call_tool`
     /// to the component's deferred provider.
     async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
         let core = self.core();
@@ -1100,10 +1235,8 @@ impl DynamicCalls {
         let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
             .component(DYNAMIC_COMPONENT, &())
             .link(
-                lash::workflow::document::EffectName::new(lash_core::CALL_DYNAMIC_EFFECT).unwrap(),
-                self.registration().dynamic_link(
-                    DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
-                ),
+                lash::workflow::document::EffectName::new(CALL_TOOL_EFFECT).unwrap(),
+                self.link(),
             )
             .build()
             .map_err(|refusal| format!("the env builds: {refusal}"))?;
@@ -1171,6 +1304,171 @@ impl DynamicCalls {
         violations
     }
 
+    /// The recorded contracts of the resolution and its target: each under
+    /// its own bound and policy, the resolution's the grant's.
+    async fn admitted_policies(
+        &self,
+        nodes: &SimNodes,
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Vec<String> {
+        use lash_core_execution::runtime::actor::round::{self, PinnedWaits, PolicyView};
+        let mut violations = Vec::new();
+        let facts = nodes
+            .database()
+            .run_facts(&lash_durable::domain::OwnerKey::Process(process.id.clone()))
+            .await
+            .expect("the process's admitted contracts read");
+        let folded = round::fold(&facts, &PolicyView::default(), &PinnedWaits::default())
+            .expect("the recorded contracts fold after takeover");
+        let mut resolution_seen = false;
+        let mut target_seen = false;
+        for (id, _) in folded.recoveries() {
+            let execution = folded.admitted(id).expect("every recovery is admitted");
+            let draft = execution.draft();
+            let (bound, policy) = match draft.tool().as_str() {
+                "tool:call_tool" => {
+                    resolution_seen = true;
+                    (self.policy().execution, self.policy().execution_policy)
+                }
+                "tool:dyn_first" | "tool:dyn_second" => {
+                    target_seen = true;
+                    let target = dynamic_target("dyn_first");
+                    (
+                        target.manifest.bounds().execution,
+                        target.manifest.execution_policy,
+                    )
+                }
+                _ => continue,
+            };
+            if draft.limit().max_slice != bound || draft.policy() != policy {
+                violations.push(format!(
+                    "{} admitted {:?} / {:?}, expected {bound:?} / {policy:?}",
+                    draft.tool(),
+                    draft.limit(),
+                    draft.policy()
+                ));
+            }
+        }
+        if !resolution_seen || !target_seen {
+            violations.push("both the resolver and its distinct target must be admitted".into());
+        }
+        violations
+    }
+
+    /// What the body answered when it called a resolved path: the target
+    /// the committed match named ran under one call id with the transform's
+    /// arguments, and its answer is the body's.
+    fn resolved_laws(&self, answer: &serde_json::Value) -> Vec<String> {
+        let mut violations = Vec::new();
+        let entries = self.seen.entries.lock_recover().clone();
+        match entries.first() {
+            None => violations.push("the matched target never ran".to_owned()),
+            Some((tool, call, args)) => {
+                if entries
+                    .iter()
+                    .any(|entry| entry.0 != *tool || entry.1 != *call)
+                {
+                    violations.push(format!(
+                        "the target's body entries saw more than one target or call id: \
+                         {entries:?}"
+                    ));
+                }
+                if *args != serde_json::json!({ "q": "x" }) {
+                    violations.push(format!(
+                        "the target ran with {args}, not the arguments the transform named"
+                    ));
+                }
+                if *answer != serde_json::json!({ "tool": tool }) {
+                    violations.push(format!(
+                        "the process answered {answer}, not the target `{tool}` that ran"
+                    ));
+                }
+            }
+        }
+        violations
+    }
+
+    /// What the body caught when every call it made was decided against:
+    /// each decision is the typed failure it recorded, and no tool ran.
+    fn decided_laws(&self, answer: &serde_json::Value) -> Vec<String> {
+        let mut violations = Vec::new();
+        let entries = self.seen.entries.lock_recover().clone();
+        if !entries.is_empty() {
+            violations.push(format!("a refused or unavailable path ran: {entries:?}"));
+        }
+        for (index, cause, path) in [
+            (0, "dynamic_call_refused", REFUSED_PATH),
+            (1, "dynamic_call_unavailable", MISSING_PATH),
+        ] {
+            let caught = &answer[index];
+            if caught["kind"] != lash_vm_runtime::TOOL_FAILED
+                || caught["data"]["cause"]["kind"] != cause
+                || caught["data"]["cause"]["path"] != path
+            {
+                violations.push(format!(
+                    "the body did not catch `{path}` as a tool failure caused by {cause}: \
+                     {caught}"
+                ));
+            }
+        }
+        let explanation = dynamic_host_explanation();
+        if answer[0]["data"]["cause"]["reason"] != explanation
+            || answer[1]["data"]["cause"]["note"] != explanation
+        {
+            violations.push(format!(
+                "the committed host explanations did not survive verbatim: {answer}"
+            ));
+        }
+        violations
+    }
+
+    /// What the body caught when its grant was withheld or its transform
+    /// diverged: the typed refusal, before the provider was asked or before
+    /// the matched tool ran.
+    fn refused_laws(&self, answer: &serde_json::Value) -> Vec<String> {
+        let mut violations = Vec::new();
+        let entries = self.seen.entries.lock_recover().clone();
+        if !entries.is_empty() {
+            violations.push(format!("a refused call ran its target: {entries:?}"));
+        }
+        let resolved = self.seen.resolved.lock_recover().clone();
+        let cause = &answer["data"]["cause"];
+        let expected = match self.grant {
+            Grant::Withheld => {
+                if !resolved.is_empty() {
+                    violations.push(format!(
+                        "an ungranted call asked the provider: {resolved:?}"
+                    ));
+                }
+                serde_json::json!({
+                    "kind": "dispatch_not_granted",
+                    "effect": CALL_TOOL_EFFECT,
+                    "tool": "tool:call_tool",
+                })
+            }
+            Grant::Diverging => {
+                if resolved.len() != 1 {
+                    violations.push(format!(
+                        "a diverged call resolved other than once: {resolved:?}"
+                    ));
+                }
+                serde_json::json!({
+                    "kind": "dispatch_diverged",
+                    "tool": "tool:call_tool",
+                    "committed": RESOLVED_PATH,
+                    "recomputed": DIVERGED_PATH,
+                })
+            }
+            Grant::Pure => return vec!["a pure grant's call was refused".to_owned()],
+        };
+        if answer["kind"] != lash_vm_runtime::TOOL_FAILED || *cause != expected {
+            violations.push(format!(
+                "the body did not catch the call as a tool failure caused by {expected}: {answer}"
+            ));
+        }
+        violations
+    }
+
     /// The laws of one run, cut at `cut`.
     async fn laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = Vec::new();
@@ -1182,47 +1480,7 @@ impl DynamicCalls {
         let actor = ActorKey::process(process.id.as_str()).unwrap();
         violations.extend(self.resolved_once(&trace, &actor));
         if self.custom_policy {
-            use lash_core_execution::runtime::actor::round::{self, PinnedWaits, PolicyView};
-            let facts = nodes
-                .database()
-                .run_facts(&lash_durable::domain::OwnerKey::Process(process.id.clone()))
-                .await
-                .expect("the process's admitted contracts read");
-            let folded = round::fold(&facts, &PolicyView::default(), &PinnedWaits::default())
-                .expect("the recorded contracts fold after takeover");
-            let mut resolution_seen = false;
-            let mut target_seen = false;
-            for (id, _) in folded.recoveries() {
-                let execution = folded.admitted(id).expect("every recovery is admitted");
-                let draft = execution.draft();
-                let (bound, policy) = match draft.tool().as_str() {
-                    "lash:call_dynamic" => {
-                        resolution_seen = true;
-                        (self.policy().execution, self.policy().execution_policy)
-                    }
-                    "tool:dyn_first" | "tool:dyn_second" => {
-                        target_seen = true;
-                        let target = dynamic_target("dyn_first");
-                        (
-                            target.manifest.bounds().execution,
-                            target.manifest.execution_policy,
-                        )
-                    }
-                    _ => continue,
-                };
-                if draft.limit().max_slice != bound || draft.policy() != policy {
-                    violations.push(format!(
-                        "{} admitted {:?} / {:?}, expected {bound:?} / {policy:?}",
-                        draft.tool(),
-                        draft.limit(),
-                        draft.policy()
-                    ));
-                }
-            }
-            if !resolution_seen || !target_seen {
-                violations
-                    .push("both the resolver and its distinct target must be admitted".into());
-            }
+            violations.extend(self.admitted_policies(nodes, process).await);
         }
         let answer = match process.outcome() {
             Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output })
@@ -1235,59 +1493,11 @@ impl DynamicCalls {
                 serde_json::Value::Null
             }
         };
-        let entries = self.seen.entries.lock_recover().clone();
-        if self.document == RESOLVING {
-            // The target that ran is the one the committed match named,
-            // under one call id across every entry.
-            match entries.first() {
-                None => violations.push("the matched target never ran".to_owned()),
-                Some((tool, call)) => {
-                    if entries
-                        .iter()
-                        .any(|entry| entry.0 != *tool || entry.1 != *call)
-                    {
-                        violations.push(format!(
-                            "the target's body entries saw more than one target or call id: \
-                             {entries:?}"
-                        ));
-                    }
-                    if answer != serde_json::json!({ "tool": tool }) {
-                        violations.push(format!(
-                            "the process answered {answer}, not the target `{tool}` that ran"
-                        ));
-                    }
-                }
-            }
-        } else {
-            // Each decision is answered to the body as the typed failure it
-            // recorded; no tool ran.
-            if !entries.is_empty() {
-                violations.push(format!("a refused or unavailable path ran: {entries:?}"));
-            }
-            for (index, cause, path) in [
-                (0, "dynamic_call_refused", REFUSED_PATH),
-                (1, "dynamic_call_unavailable", MISSING_PATH),
-            ] {
-                let caught = &answer[index];
-                if caught["kind"] != lash_vm_runtime::TOOL_FAILED
-                    || caught["data"]["cause"]["kind"] != cause
-                    || caught["data"]["cause"]["path"] != path
-                {
-                    violations.push(format!(
-                        "the body did not catch `{path}` as a tool failure caused by {cause}: \
-                         {caught}"
-                    ));
-                }
-            }
-            let explanation = dynamic_host_explanation();
-            if answer[0]["data"]["cause"]["reason"] != explanation
-                || answer[1]["data"]["cause"]["note"] != explanation
-            {
-                violations.push(format!(
-                    "the committed host explanations did not survive verbatim: {answer}"
-                ));
-            }
-        }
+        violations.extend(match (self.grant, self.document) {
+            (Grant::Pure, RESOLVING) => self.resolved_laws(&answer),
+            (Grant::Pure, _) => self.decided_laws(&answer),
+            (Grant::Diverging | Grant::Withheld, _) => self.refused_laws(&answer),
+        });
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -1371,19 +1581,27 @@ impl Scenario for DynamicCalls {
     }
 }
 
-/// The matrix of `document`'s process on `tier`: every write of its passes
-/// and step outcomes cut under every fault, recovered on the other node.
-async fn dynamic_matrix(tier: Tier, document: &'static str, custom_policy: bool) {
-    let (dialect, postgres_url) = match tier {
-        Tier::SqliteMemory => (Dialect::SqliteMemory, None),
-        Tier::SqliteFile => (Dialect::SqliteFile, None),
+/// The deployment's tier as a dialect, or `None` to skip an unset
+/// PostgreSQL leg.
+fn tier_dialect(tier: Tier) -> Option<(Dialect, Option<String>)> {
+    match tier {
+        Tier::SqliteMemory => Some((Dialect::SqliteMemory, None)),
+        Tier::SqliteFile => Some((Dialect::SqliteFile, None)),
         Tier::Postgres => {
             let Some(url) = dialect::postgres_url() else {
                 eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-                return;
+                return None;
             };
-            (Dialect::Postgres, Some(url))
+            Some((Dialect::Postgres, Some(url)))
         }
+    }
+}
+
+/// The matrix of `document`'s process on `tier`: every write of its passes
+/// and step outcomes cut under every fault, recovered on the other node.
+async fn dynamic_matrix(tier: Tier, document: &'static str, custom_policy: bool) {
+    let Some((dialect, postgres_url)) = tier_dialect(tier) else {
+        return;
     };
     let labels = [CommitLabel::PROCESS_ADVANCE, CommitLabel::STEP_OUTCOME];
     let report = Matrix::new()
@@ -1413,13 +1631,31 @@ async fn dynamic_matrix(tier: Tier, document: &'static str, custom_policy: bool)
     }
 }
 
-/// DYNAMIC-TWO-STEP (law 10; P6, R10): a process's `call_dynamic` call is
-/// its resolution, whose committed outcome is the match, then the call of
-/// the matched tool, which the commit consuming the resolution admits. A
-/// crash anywhere between them resumes the same target under the same call
-/// id, and the resolver, which names another target every time it is asked
-/// again, never runs once the resolution committed.
-async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier: Tier) {
+/// One uncut run of `CATCHING`'s process on `tier` under `grant`.
+async fn refused_run(tier: Tier, grant: Grant) {
+    let Some((dialect, postgres_url)) = tier_dialect(tier) else {
+        return;
+    };
+    Matrix::new()
+        .faults(&[])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| {
+            let mut calls = DynamicCalls::new(dialect, postgres_url.clone(), CATCHING);
+            calls.grant = grant;
+            calls
+        })
+        .await
+        .assert_held();
+}
+
+/// DYNAMIC-TWO-STEP (law 10; P6, R10): a process's call of the granted
+/// `call_tool` is its resolution of the path the grant's transform names,
+/// whose committed outcome is the match, then the call of the matched tool
+/// with the transform's arguments, which the commit consuming the
+/// resolution admits. A crash anywhere between them resumes the same target
+/// under the same call id, and the resolver, which names another target
+/// every time it is asked again, never runs once the resolution committed.
+async fn a_granted_call_resumes_its_matched_target_and_never_resolves_again(tier: Tier) {
     dynamic_matrix(tier, RESOLVING, false).await;
 }
 
@@ -1427,21 +1663,55 @@ async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier
 /// (P6, S6): the body catches each as its typed failure, no tool runs, and
 /// a crash after a decision committed never resolves its path again.
 /// FIG-6590: its 1 KiB host explanation survives each commit and reopen verbatim.
-async fn a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed(tier: Tier) {
+async fn a_refused_or_unavailable_granted_call_is_decided_once_and_caught_typed(tier: Tier) {
     dynamic_matrix(tier, DECIDING, false).await;
 }
 
 /// RESOLVER-RECORDED-POLICY: a host's 120-second resolution contract
-/// survives environment admission and takeover, separately from its target.
-async fn a_dynamic_resolution_retains_its_host_policy_across_takeover(tier: Tier) {
+/// survives environment admission and takeover with the grant, separately
+/// from its target.
+async fn a_granted_resolution_retains_its_host_policy_across_takeover(tier: Tier) {
     dynamic_matrix(tier, RESOLVING, true).await;
+}
+
+/// DISPATCH-GRANTED: a dispatch link to a tool the deferred provider's
+/// registration does not grant dispatches nothing: the body catches
+/// `dispatch_not_granted`, and the provider is never asked.
+async fn an_ungranted_tool_dispatches_nothing_and_is_caught_typed(tier: Tier) {
+    refused_run(tier, Grant::Withheld).await;
+}
+
+/// DISPATCH-PURE: the transform is never journaled, so the call of the
+/// matched tool runs it again; a transform that then names another path
+/// than the committed match resolved is refused `dispatch_diverged`, and
+/// the matched tool does not run.
+async fn a_diverging_transform_is_refused_typed_when_the_call_replays_it(tier: Tier) {
+    refused_run(tier, Grant::Diverging).await;
+}
+
+/// DISPATCH-GRANTED at registration: only a tool the registration grants
+/// has a dispatch link.
+#[test]
+fn a_registration_links_only_the_tools_it_grants() {
+    let registration = lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
+        seen: Arc::default(),
+    }));
+    let deferred = DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred"));
+    assert_eq!(
+        registration.dispatch_link(deferred, call_tool().id()),
+        Err(lash::tools::DispatchGrantRefusal::NotGranted {
+            tool: call_tool().id().clone(),
+        })
+    );
 }
 
 tiered_laws!(
     current_thread:
     tool_call_limit_counts_what_a_process_holds_across_a_worker_kill,
     an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash,
-    a_dynamic_resolution_retains_its_host_policy_across_takeover,
-    a_dynamic_call_resumes_its_matched_target_and_never_resolves_again,
-    a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed,
+    a_granted_resolution_retains_its_host_policy_across_takeover,
+    a_granted_call_resumes_its_matched_target_and_never_resolves_again,
+    a_refused_or_unavailable_granted_call_is_decided_once_and_caught_typed,
+    an_ungranted_tool_dispatches_nothing_and_is_caught_typed,
+    a_diverging_transform_is_refused_typed_when_the_call_replays_it,
 );

@@ -908,8 +908,8 @@ impl PluginHost {
 }
 
 /// The tool registry `contributions`' providers route through. It takes the
-/// deferred provider and the readers, which only the registry serves; the
-/// providers stay for the execution composition.
+/// deferred provider, its dispatch grants and the readers, which only the
+/// registry serves; the providers stay for the execution composition.
 pub(crate) fn build_tool_registry(
     contributions: &mut PluginContributions,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
@@ -922,11 +922,12 @@ pub(crate) fn build_tool_registry(
         .deferred_provider
         .take()
         .map(|registered| (registered.identity, registered.hook));
+    let dispatch = std::mem::take(&mut contributions.dispatch_grants);
     let reads = std::mem::take(&mut contributions.tool_reads)
         .into_iter()
         .map(|registered| (registered.identity, registered.hook))
         .collect();
-    crate::ToolRegistry::from_tool_registrations(providers, deferred, reads)
+    crate::ToolRegistry::from_tool_registrations(providers, deferred, dispatch, reads)
         .map(Arc::new)
         .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))
 }

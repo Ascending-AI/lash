@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use lash::plugins::{FormatVersion, PluginError};
 use lash::process::{ProcessConfigKey, ProcessEnv, ProcessEnvRefusal};
-use lash::tools::{LinkSource, OperationLink};
 
 /// Serves `search_a` at `search.run`.
 const SEARCH_A: ProcessConfigKey<()> = ProcessConfigKey::new("link-search-a", FormatVersion::ONE);
@@ -491,44 +490,5 @@ async fn an_env_links_exactly_what_its_entry_performs() {
         Err(ProcessEnvRefusal::EffectNotPerformed {
             effect: "search.run".to_owned()
         })
-    );
-}
-
-/// R9/P6: Dynamic may only implement the fixed endpoint, even for an
-/// ordinary tool.
-#[test]
-fn dynamic_links_cannot_disguise_ordinary_effects() {
-    let tool = search_a();
-    let effect = lash_core::EffectName::new("search.run").unwrap();
-    let forged = ProcessEnv::builder(lash::MaxToolCalls::new(4))
-        .component(SEARCH_A, &())
-        .link(
-            effect.clone(),
-            OperationLink {
-                source: LinkSource::Dynamic {
-                    execution: std::time::Duration::from_secs(60),
-                },
-                ..OperationLink::advertised(
-                    SEARCH_A.tool_provider(lash::tool_provider_key!("tools")),
-                    &tool,
-                    None,
-                )
-            },
-        )
-        .build()
-        .expect("a policy-bearing dynamic link to an ordinary tool");
-    let performed = BTreeMap::from([(
-        effect,
-        lash::workflow::document::OperationRequirement::new(
-            lash_protocol_types::tool_signature(
-                &tool.contract.input_schema.canonical,
-                &tool.contract.output_schema.canonical,
-            ),
-            tool.contract_id(),
-        ),
-    )]);
-    assert!(
-        matches!(lash_execution_contracts::process::check_links(&forged, &performed, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new()),
-        Err(ProcessEnvRefusal::EffectUnfit { effect, .. }) if effect == "search.run")
     );
 }

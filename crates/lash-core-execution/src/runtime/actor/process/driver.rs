@@ -101,6 +101,11 @@ pub(super) struct InFlight {
     pub(super) call: ToolCallId,
     /// The request, so a `Repeatable` body can run again at its ordinal.
     pub(super) request: StepRequest,
+    /// Whether it is the resolution of a granted tool's call (P6): its
+    /// committed outcome is the match lash consumes, never the engine's
+    /// answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) resolves: bool,
     /// The policy its admission pinned.
     pub(super) policy: lash_protocol_types::ExecutionPolicy,
     /// Its limit's expiry, as admitted: never refreshed.

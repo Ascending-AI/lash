@@ -57,6 +57,9 @@ where
 pub struct ToolRegistry {
     providers: BTreeMap<ProviderKey, Arc<dyn ToolProvider>>,
     deferred: Option<(ProviderKey, Arc<dyn crate::DeferredToolProvider>)>,
+    /// The transforms of the tools the deferred provider's registration
+    /// grants dispatch, by tool.
+    dispatch: BTreeMap<ToolId, crate::DispatchTransform>,
     /// Each provider's reader, when it registered one.
     reads: BTreeMap<ProviderKey, Arc<dyn crate::ToolReads>>,
 }
@@ -76,21 +79,29 @@ impl ToolRegistry {
         identity: ProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(vec![(identity, provider)], None, Vec::new())
+        Self::from_tool_registrations(
+            vec![(identity, provider)],
+            None,
+            BTreeMap::new(),
+            Vec::new(),
+        )
     }
 
     /// A registry of every registered provider, keyed by the identity its
-    /// plugin or component declared it under, with each provider's reader.
-    /// A key registered twice, or a reader of no registered provider, is
+    /// plugin or component declared it under, with each provider's reader
+    /// and the dispatch grants of the deferred provider's registration. A
+    /// key registered twice, or a reader of no registered provider, is
     /// refused.
     pub(crate) fn from_tool_registrations(
         providers: Vec<(ProviderKey, Arc<dyn ToolProvider>)>,
         deferred: Option<(ProviderKey, Arc<dyn crate::DeferredToolProvider>)>,
+        dispatch: BTreeMap<ToolId, crate::DispatchTransform>,
         reads: Vec<(ProviderKey, Arc<dyn crate::ToolReads>)>,
     ) -> Result<Self, ReconfigureError> {
         let mut registry = Self {
             providers: BTreeMap::new(),
             deferred,
+            dispatch,
             reads: BTreeMap::new(),
         };
         for (key, provider) in providers {
@@ -138,6 +149,18 @@ impl ToolRegistry {
             .as_ref()
             .filter(|(registered, _)| registered == key)
             .map(|(_, provider)| provider)
+    }
+
+    /// The transform of `tool`, when the deferred provider registered under
+    /// `key` grants it dispatch: what a granted call's target is computed
+    /// by, wherever the call runs.
+    pub fn dispatch_transform(
+        &self,
+        key: &ProviderKey,
+        tool: &ToolId,
+    ) -> Option<&crate::DispatchTransform> {
+        self.deferred_provider(key)?;
+        self.dispatch.get(tool)
     }
 
     /// Whether a provider is registered under `key`.

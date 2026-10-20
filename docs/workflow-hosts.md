@@ -289,26 +289,39 @@ local task lowers to a guarded `processes.await`, so an entry that awaits a
 handle it was handed performs `processes.await` even when its source never
 names it, and its environment must link it.
 
-A call whose target is known only at run time goes through the runtime-owned
-`call_dynamic` endpoint: the code performs `lash.call_dynamic` with
-`{path, args}`, and the environment links it to the deferred provider one of
-its components declares. Register the provider with
-`DeferredToolProviderRegistration::new(provider)` and select its resolution
+A call whose target is known only at run time goes through a tool the host
+names itself, such as `call_tool(input)`, with its own name, schema and
+description: the code calls it like any other tool. Only a tool its deferred
+provider's registration grants dispatch may dispatch. Register the provider
+with `DeferredToolProviderRegistration::new(provider)`, select its resolution
 contract with `with_resolution_policy(DeferredResolutionPolicy { execution,
-execution_policy })`. The documented default is 60 seconds and three
-repeatable attempts, with exponential backoff from 100 to 1,000 ms. Use that
-registration's `dynamic_link(key)` in `ProcessEnvBuilder::link` at
-`CALL_DYNAMIC_EFFECT`. The link seals this policy into the environment;
-reopen, redrive and takeover use it rather than the receiving registration's
-policy. The resolution bound is clipped by the enclosing deadline as usual.
-Such a call is two committed steps (FIG-6120). The first resolves `path` through
-the deferred provider and commits its decision. The commit that consumes a
-resolved decision admits the call of the matched tool with `args`, under the
-tool's own policy, bound and call id. A crash between the two resumes the
-same target under the same call id, and the path is never resolved again. A
-refused path, or one no tool answers, reaches the code as a catchable
-`tool_failed` whose cause is `dynamic_call_refused` or
-`dynamic_call_unavailable`.
+execution_policy })`, and grant the tool with
+`with_dispatch_grant(DispatchGrant::new(definition, transform))`. The
+documented default is 60 seconds and three repeatable attempts, with
+exponential backoff from 100 to 1,000 ms. The transform is a deterministic,
+pure Rust function from the tool's input to a `DispatchTarget { path, args }`,
+or a `TransformRefusal`. Link the tool with the registration's
+`dispatch_link(key, &tool_id)` in `ProcessEnvBuilder::link` at the effect its
+operation names; a tool the registration does not grant is refused there with
+`DispatchGrantRefusal::NotGranted`. The link seals the grant, its definition
+and its policy into the environment; reopen, redrive and takeover use it
+rather than the receiving registration's policy. The resolution bound is
+clipped by the enclosing deadline as usual.
+
+Such a call is two committed steps (FIG-6120). The first runs the transform
+and resolves its `path` through the deferred provider, and commits the
+decision. The commit that consumes a resolved decision admits the call of the
+matched tool, under the tool's own policy, bound and call id; that call runs
+the transform again for its `args`. Lash never journals the transform's
+answer, so a transform that is not deterministic is a host bug: when the path
+it names again differs from the committed one, the call fails with
+`dispatch_diverged` and the matched tool does not run. A crash between the two
+steps resumes the same target under the same call id, and the path is never
+resolved again. A refused path, or one no tool answers, reaches the code as a
+catchable `tool_failed` whose cause is `dynamic_call_refused` or
+`dynamic_call_unavailable`. A transform that refuses the input fails the call
+with `dispatch_input_refused`, and a grant the node's registration does not
+hold with `dispatch_not_granted`, before the provider is asked.
 
 ## Editing
 

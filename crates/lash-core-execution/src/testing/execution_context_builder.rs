@@ -368,6 +368,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let registry = crate::ToolRegistry::from_tool_registrations(
             providers,
             self.deferred.clone(),
+            std::collections::BTreeMap::new(),
             Vec::new(),
         )
         .expect("the fixture's providers register");

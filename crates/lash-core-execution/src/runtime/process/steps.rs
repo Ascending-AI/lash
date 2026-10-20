@@ -2,11 +2,11 @@
 //!
 //! A [`StepRequest`] names a catalog tool or one of the engine's own bodies
 //! that its registration declares ([`EngineSteps`](super::EngineSteps)). A
-//! `call_dynamic` call is two steps (P6): its resolution, whose committed
-//! outcome is the match ([`dynamic_resolution`]), and the call of the
-//! matched tool, which the commit consuming the resolution admits
-//! ([`dynamic_target`]); a refused or unavailable decision answers the
-//! engine typed ([`dynamic_decision`]). The
+//! call of a tool its env links as a dispatch grant is two steps (P6): its
+//! resolution, whose committed outcome is the match ([`dispatch_resolution`]),
+//! and the call of the matched tool, which the commit consuming the
+//! resolution admits ([`matched_target`]); a refused or unavailable decision
+//! answers the engine typed ([`dispatch_decision`]). The
 //! process actor admits it as an admitted execution (S4) under the tool's
 //! declared [`ExecutionPolicy`] (an engine body's is the retry policy its
 //! kind declares) and an [`ExecutionLimit`] within the tool ceiling,
@@ -76,6 +76,10 @@ pub struct StepAdmission {
     /// changed since the env retained its surface. It commits with the
     /// admission; no `x_start` of it runs a body.
     pub settled: Option<SettledOutput>,
+    /// Whether the step is the resolution of a granted tool's call (P6):
+    /// its env links the effect as a dispatch grant, and the step is not
+    /// the call of a match.
+    pub resolves: bool,
 }
 
 impl StepAdmission {
@@ -95,6 +99,7 @@ impl StepAdmission {
             park,
             binding: None,
             settled: None,
+            resolves: false,
         }
     }
 }
@@ -183,7 +188,7 @@ pub trait ProcessStepContext: Send + Sync {
         effect: &lash_kernel_doc::EffectName,
         contract: &lash_kernel_doc::ContractId,
     ) -> Result<crate::plugin::StepLink, PluginError>;
-    /// Judge a recorded dynamic match and its execution binding.
+    /// Judge a recorded dispatch match and its execution binding.
     ///
     /// # Errors
     /// The prepared runtime cannot answer the binding.
@@ -198,11 +203,30 @@ pub trait ProcessStepContext: Send + Sync {
     fn requirements(
         &self,
     ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, PluginError>;
-    /// Resolve a new dynamic call through the prepared deferred provider.
+    /// Resolve the call the grant linked at `effect` names for `input`
+    /// through the prepared deferred provider: a refusal before the
+    /// provider is asked is the call's typed [`crate::DispatchRefusal`].
     ///
     /// # Errors
-    /// The path or provider cannot be resolved.
-    async fn resolve_dynamic(&self, path: &str) -> Result<crate::DeferredMatch, PluginError>;
+    /// The env grants no dispatch at `effect`, or its provider cannot be
+    /// asked here.
+    async fn resolve_dispatch(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+    ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError>;
+    /// The arguments the call of the tool `matched` resolved runs with: the
+    /// grant's transform at `effect`, run again on `input`. A divergence
+    /// from `matched` is the call's typed [`crate::DispatchRefusal`].
+    ///
+    /// # Errors
+    /// The env grants no dispatch at `effect`.
+    fn dispatch_args(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+        matched: &crate::DeferredMatch,
+    ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError>;
 }
 
 /// Why an activation's step tools are not there.
@@ -596,11 +620,11 @@ pub fn tool_step_refused(
     )
 }
 
-/// The committed outcome of the resolution `call` of a `call_dynamic` call
+/// The committed outcome of the resolution `call` of a granted tool's call
 /// (P6): its ToolCallRecord, whose value is the `matched` decision, which
 /// the step that consumes it never resolves again.
 #[must_use]
-pub fn dynamic_resolution(
+pub fn dispatch_resolution(
     process: &ProcessId,
     call: &crate::sansio::PendingToolCall,
     matched: &crate::DeferredMatch,
@@ -639,10 +663,11 @@ pub fn resolved_match(output: &SettledOutput) -> Option<crate::DeferredMatch> {
 
 /// The call of the tool `matched` resolved `resolution`'s path to: the
 /// step lash issues in the commit that consumes the resolution, under the
-/// same step name and site, with the call's `args` as its input. `None`
-/// when `matched` resolved nothing, or `resolution` is not a resolution.
+/// same step name, site and input, the granted tool's, whose arguments its
+/// grant's transform names again when the call runs. `None` when `matched`
+/// resolved nothing, or `resolution` is not a resolution.
 #[must_use]
-pub fn dynamic_target(
+pub fn matched_target(
     resolution: &StepRequest,
     matched: crate::DeferredMatch,
 ) -> Option<StepRequest> {
@@ -660,23 +685,22 @@ pub fn dynamic_target(
     // The target serves the definition its match retains: its call is
     // pinned to that definition's contract.
     let contract = matched.definition()?.contract_id();
-    let call = serde_json::from_value::<crate::DynamicCall>(input.clone()).ok()?;
     Some(StepRequest::Tool {
         step: step.clone(),
         effect: effect.clone(),
         contract,
-        input: call.args,
+        input: input.clone(),
         site: site.clone(),
         matched: Some(Box::new(matched)),
     })
 }
 
-/// What a body that performed `call_dynamic` is answered when its
+/// What a body that called a granted tool is answered when its
 /// resolution decided `matched` against it: a refused or unavailable path
 /// is a tool failure it may catch, typed, from the recorded decision alone.
 /// `None` for a resolved match, whose target answers instead.
 #[must_use]
-pub fn dynamic_decision(
+pub fn dispatch_decision(
     process: &ProcessId,
     matched: &crate::DeferredMatch,
 ) -> Option<SettledOutput> {

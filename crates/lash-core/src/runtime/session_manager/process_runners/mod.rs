@@ -145,7 +145,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     }
 
     /// How this node serves the engine process's call of the tool
-    /// `matched` resolved a `call_dynamic` path to (P6), and whether it
+    /// `matched` resolved a granted tool's call path to (P6), and whether it
     /// reads the match's execution binding (S8), judged now.
     fn matched_link(
         &self,
@@ -161,18 +161,39 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
         ))
     }
 
-    /// Resolve `path`, the call path of the engine process's `call_dynamic`
-    /// call, through the deferred provider its env links (P6).
-    async fn resolve_dynamic(
+    /// Resolve the call the engine process's granted tool at `effect` names
+    /// for `input`, through the deferred provider its grant links (P6).
+    async fn resolve_dispatch(
         &self,
-        path: &str,
-    ) -> Result<crate::DeferredMatch, lash_execution_contracts::plugin_error::PluginError> {
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+    ) -> Result<
+        Result<crate::DeferredMatch, lash_core_execution::DispatchRefusal>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (_, engine) = self.current.engine_process()?;
         let owner = self.current.execution_owner()?;
         engine
             .composition
-            .resolve_dynamic(&engine.env, &owner, path)
+            .resolve_dispatch(&engine.env, &owner, effect, input)
             .await
+    }
+
+    /// The arguments of the engine process's call of the tool `matched`
+    /// resolved, as the grant at `effect` names them again for `input`.
+    fn dispatch_args(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+        input: &serde_json::Value,
+        matched: &crate::DeferredMatch,
+    ) -> Result<
+        Result<serde_json::Value, lash_core_execution::DispatchRefusal>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        let (_, engine) = self.current.engine_process()?;
+        engine
+            .composition
+            .dispatch_args(&engine.env, effect, input, matched)
     }
 
     /// The claim requirements an engine process carries while it holds tool

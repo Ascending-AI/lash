@@ -23,8 +23,8 @@
 //! only parked waits and retry dues are left, it releases as `waiting`
 //! until its earliest due time, holding nothing. The activation adds only
 //! the engine-event adapter: a step whose call the fold settled is handed
-//! to `advance` as `StepSettled`. The one exception is a `call_dynamic`
-//! call's resolution (P6): lash consumes a resolved match itself, admitting
+//! to `advance` as `StepSettled`. The one exception is the resolution of a
+//! granted tool's call (P6): lash consumes a resolved match itself, admitting
 //! the call of the matched tool in the same commit
 //! ([`step_admission`](super::step_admission)), and the engine is answered
 //! once, by that call.
@@ -1151,7 +1151,7 @@ enum Next {
     Nothing {
         due: Option<DurableInstant>,
     },
-    /// A `call_dynamic` call's resolution committed its match: lash admits
+    /// A granted tool's call's resolution committed its match: lash admits
     /// the call of the matched tool in its place, without the engine.
     Matched(Box<Handoff>),
 }
@@ -1215,18 +1215,17 @@ impl ProcessActivation {
             }));
         }
         if let Some((step, outcome)) = settled_step(driver, fold) {
-            // A `call_dynamic` call's committed resolution is consumed by
+            // A granted tool's call's committed resolution is consumed by
             // lash (P6): a resolved match hands off to its target, and a
             // refused or unavailable one answers the engine, typed, from
             // the recorded decision.
             let matched = step
-                .request
-                .resolves()
+                .resolves
                 .then(|| crate::runtime::process::steps::resolved_match(&outcome))
                 .flatten();
             if let Some(matched) = matched {
                 if let Some(decision) =
-                    crate::runtime::process::steps::dynamic_decision(process, &matched)
+                    crate::runtime::process::steps::dispatch_decision(process, &matched)
                 {
                     record_effect(tx, process, driver, &step, &decision, self.fleet());
                     return Ok(Next::Event(EngineEvent::StepSettled {
@@ -1236,7 +1235,7 @@ impl ProcessActivation {
                     }));
                 }
                 if let Some(target) =
-                    crate::runtime::process::steps::dynamic_target(&step.request, matched)
+                    crate::runtime::process::steps::matched_target(&step.request, matched)
                 {
                     return Ok(Next::Matched(Box::new(Handoff {
                         resolution: step,
@@ -1244,8 +1243,8 @@ impl ProcessActivation {
                     })));
                 }
                 return Err(corrupt(
-                    "a call_dynamic resolution",
-                    "its input is not a call path with its arguments",
+                    "a granted tool's resolution",
+                    "its match retains no definition",
                 ));
             }
             let outcome = self.steps.engine_output(process, &step.request, outcome);

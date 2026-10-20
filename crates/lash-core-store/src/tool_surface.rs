@@ -217,17 +217,10 @@ impl RecordedSurface {
     }
 }
 
-/// The effect path a process performs the `call_dynamic` endpoint
-/// under (P6, R9).
-pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
-
-/// The contract id the `call_dynamic` endpoint declares: lash owns the
-/// operation, so its id is stated, never derived.
-pub const CALL_DYNAMIC_CONTRACT: &str = "lash.call_dynamic/1";
-
-/// The host's execution and retry contract for dynamic discovery, recorded
-/// in the process environment before its first resolution. Resolution and
-/// the matched tool have independent bounds. As with ordinary tool bounds,
+/// The host's execution and retry contract for a dispatch grant's
+/// discovery, recorded with the grant in the process environment before its
+/// first resolution. Resolution and the matched tool have independent
+/// bounds. As with ordinary tool bounds,
 /// there is no runtime-selected ceiling; enclosing deadlines still clip it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -251,50 +244,6 @@ impl Default for DeferredResolutionPolicy {
     }
 }
 
-/// The runtime-owned `call_dynamic` signature under `policy`: an endpoint that
-/// takes the call path to resolve and the target's arguments
-/// ([`DynamicCall`]) and answers whatever the target answers. No provider
-/// advertises it; an env links it to its deferred provider
-/// ([`LinkSource::Dynamic`]). A call of it is two committed steps: its
-/// resolution, whose committed outcome is the [`DeferredMatch`], then the
-/// call of the matched tool. Discovery is effect-free; its admitted policy
-/// controls retries and recovery.
-#[expect(
-    clippy::expect_used,
-    reason = "the endpoint's schemas are fixed literals the schema admission accepts"
-)]
-pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition {
-    ToolDefinition::raw(
-        "lash:call_dynamic",
-        CALL_DYNAMIC_EFFECT,
-        "Calls the tool the process env's deferred provider resolves `path` to, with `args`.",
-        serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["path"],
-            "properties": {
-                "path": { "type": "string" },
-                "args": {},
-            },
-        }),
-        serde_json::json!({}),
-    )
-    .expect("the call_dynamic endpoint's schemas admit")
-    .declared_contract(lash_kernel_doc::ContractId::new(CALL_DYNAMIC_CONTRACT))
-    .with_execution(policy.execution)
-    .with_execution_policy(policy.execution_policy)
-}
-
-/// The input of a `call_dynamic` call: the call path to resolve, and the
-/// arguments the matched tool is called with.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DynamicCall {
-    pub path: String,
-    #[serde(default)]
-    pub args: serde_json::Value,
-}
-
 /// Where a linked operation's tool comes from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -305,10 +254,12 @@ pub enum LinkSource {
     /// definition by the link's provider, which need not advertise it, and
     /// is never resolved again.
     Resolved { definition: Box<ToolDefinition> },
-    /// The `call_dynamic` endpoint, bounded by `execution`, under the link's
-    /// policy: a call it makes is resolved once, then runs on the recorded
+    /// A dispatch grant: the host-named tool `definition`, which no
+    /// provider serves. Its call is resolved once through the link's
+    /// provider, the grant's deferred provider, under the link's policy, at
+    /// the call path its host's transform names, then runs on the recorded
     /// match.
-    Dynamic { execution: std::time::Duration },
+    Dispatch { definition: Box<ToolDefinition> },
 }
 
 /// The one pinned record of how a run's operation is served: in session
@@ -370,18 +321,26 @@ impl OperationLink {
         }
     }
 
-    /// The link of the `call_dynamic` endpoint to the deferred provider an
-    /// env component declares as `deferred`, under `policy`.
-    pub fn dynamic(deferred: ProviderKey, policy: DeferredResolutionPolicy) -> Self {
-        let endpoint = call_dynamic_endpoint(policy);
+    /// The dispatch grant of `definition`, a host-named tool, through the
+    /// deferred provider an env component declares as `deferred`, under
+    /// `policy`: the tool's call is the resolution, bounded and retried as
+    /// `policy` says, whatever `definition` declares.
+    pub fn dispatch(
+        deferred: ProviderKey,
+        definition: ToolDefinition,
+        policy: DeferredResolutionPolicy,
+    ) -> Self {
+        let definition = definition
+            .with_execution(policy.execution)
+            .with_execution_policy(policy.execution_policy);
         Self {
-            tool: endpoint.manifest.id.clone(),
+            tool: definition.manifest.id.clone(),
             provider: deferred,
             policy: policy.execution_policy,
-            projection: endpoint.manifest.argument_projection,
+            projection: definition.manifest.argument_projection.clone(),
             payload: None,
-            source: LinkSource::Dynamic {
-                execution: policy.execution,
+            source: LinkSource::Dispatch {
+                definition: Box::new(definition),
             },
         }
     }
@@ -391,30 +350,25 @@ impl OperationLink {
     pub fn resolution(&self) -> Option<&ToolDefinition> {
         match &self.source {
             LinkSource::Resolved { definition } => Some(definition),
-            LinkSource::Advertised | LinkSource::Dynamic { .. } => None,
+            LinkSource::Advertised | LinkSource::Dispatch { .. } => None,
         }
     }
 
-    /// The resolution endpoint under the policy and bound this link
-    /// recorded, for a [`LinkSource::Dynamic`] link.
-    pub fn dynamic_endpoint(&self) -> Option<ToolDefinition> {
-        let LinkSource::Dynamic { execution } = self.source else {
-            return None;
-        };
-        Some(call_dynamic_endpoint(DeferredResolutionPolicy {
-            execution,
-            execution_policy: self.policy,
-        }))
+    /// Whether this link is a dispatch grant ([`LinkSource::Dispatch`]):
+    /// its call is a resolution, never a body of its own.
+    pub fn dispatches(&self) -> bool {
+        matches!(self.source, LinkSource::Dispatch { .. })
     }
 
     /// The definition a call through this link runs as: `served`, what the
-    /// runner serves now, or the retained or endpoint definition the link
+    /// runner serves now, or the retained or granted definition the link
     /// itself serves, admitted under the link's policy and argument
     /// projection rather than the served manifest's (C1).
     pub fn admitted(&self, served: Option<&ToolDefinition>) -> Option<ToolDefinition> {
         let mut definition = match &self.source {
-            LinkSource::Resolved { definition } => (**definition).clone(),
-            LinkSource::Dynamic { .. } => self.dynamic_endpoint()?,
+            LinkSource::Resolved { definition } | LinkSource::Dispatch { definition } => {
+                (**definition).clone()
+            }
             LinkSource::Advertised => served?.clone(),
         };
         definition.manifest.execution_policy = self.policy;
@@ -455,7 +409,7 @@ pub enum Judgement {
 
 /// The one dispatch check (OP-CONTRACT-PIN, OP-LINK-ONE): whether the call
 /// `link` serves, pinned to `pinned`, may run against `live`, what its
-/// provider serves the linked tool as now. A resolved or dynamic link
+/// provider serves the linked tool as now. A resolved or dispatch link
 /// serves its own definition, so `live` is read only for an advertised one.
 /// The live contract id must equal the pinned one; nothing else about the
 /// live tool is compared.

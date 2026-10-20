@@ -27,24 +27,22 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 
-/// The tool scope `call`, the call of `request` admitted at `now_ms`, is
-/// admitted with: under its occurrence's node when `record` retained
+/// The tool scope `step`'s call, admitted at `now_ms`, is admitted with: under its occurrence's node when `record` retained
 /// `trace_nodes`, else under the process. A step that is not a tool call
 /// has none, and neither has one of a process admitted unobserved or one
 /// this node does not observe.
 pub(super) fn step_trace_scope(
     tracing: Option<&TraceRuntime>,
     record: &ProcessRecord,
-    request: &StepRequest,
-    call: &ToolCallId,
+    step: &InFlight,
     now_ms: u64,
 ) -> Option<DurableTraceScope> {
-    let StepRequest::Tool { site, .. } = request else {
+    let StepRequest::Tool { site, .. } = &step.request else {
         return None;
     };
     tracing.filter(|tracing| tracing.is_observed())?;
     let process = record.trace.as_ref()?.as_parent()?;
-    let parent = match node_site(record, request, site.as_deref()) {
+    let parent = match node_site(record, step, site.as_deref()) {
         Some(at) => process.container(&SpanKey::Node { at }),
         None => process,
     };
@@ -53,20 +51,20 @@ pub(super) fn step_trace_scope(
             process_id: record.id.clone(),
         },
         Some(&parent),
-        call,
+        &step.call,
         now_ms,
     ))
 }
 
-/// The occurrence whose node `request`'s call is beneath. A `call_dynamic`
+/// The occurrence whose node `step`'s call is beneath. A granted tool's
 /// call's resolution is lash's lookup of the call, not the occurrence's
 /// tool: its target is, and its admission starts the node.
 fn node_site<'a>(
     record: &ProcessRecord,
-    request: &StepRequest,
+    step: &InFlight,
     site: Option<&'a lash_protocol_types::EffectId>,
 ) -> Option<&'a lash_protocol_types::EffectId> {
-    site.filter(|_| record.trace_nodes && !request.resolves())
+    site.filter(|_| record.trace_nodes && !step.resolves)
 }
 
 /// One node span a commit closes.
@@ -167,7 +165,7 @@ fn node_of(
     let StepRequest::Tool { site, .. } = &step.request else {
         return None;
     };
-    let at = node_site(record, &step.request, site.as_deref())?;
+    let at = node_site(record, step, site.as_deref())?;
     let member = fold
         .round(RunSeq(step.run))?
         .members()

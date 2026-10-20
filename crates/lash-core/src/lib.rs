@@ -440,7 +440,6 @@ pub use lash_core_execution::DeferredResolutionPolicy;
 pub use lash_core_execution::DeferredResolveContext;
 pub use lash_core_execution::DeferredToolProvider;
 pub use lash_core_execution::DeferredToolProviderRegistration;
-pub use lash_core_execution::DynamicCall;
 pub use lash_core_execution::EffectName;
 pub use lash_core_execution::ExecutionBinding;
 pub use lash_core_execution::ExecutionBindingUnreadable;
@@ -450,7 +449,10 @@ pub use lash_core_execution::LinkSource;
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::ObligationToken;
 pub use lash_core_execution::turn_stop_from_tool_control;
-pub use lash_core_execution::{CALL_DYNAMIC_CONTRACT, CALL_DYNAMIC_EFFECT};
+pub use lash_core_execution::{
+    DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
+    TransformRefusal,
+};
 
 pub use lash_core_execution::OperationLink;
 pub use lash_core_execution::ProviderKey;
@@ -463,7 +465,6 @@ pub use lash_core_execution::SurfaceRefusal;
 pub use lash_core_execution::SurfaceTools;
 pub use lash_core_execution::ToolSurfaceDrift;
 pub use lash_core_execution::ToolSurfaceDriftKind;
-pub use lash_core_execution::call_dynamic_endpoint;
 pub use lash_core_execution::judge;
 pub use lash_core_execution::operation_contract_changed;
 /// What pins an operation's meaning: the id a tool serves and code requires.
