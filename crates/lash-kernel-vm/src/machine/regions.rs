@@ -42,9 +42,10 @@ use super::loops::{Cursor, Guard, Header, counted};
 use super::ops::Flow;
 use super::{Control, Eval, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
-    Accumulator, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx,
-    Event, Executable, GuestCall, Headroom, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node, Ran,
-    RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE, scalar, store,
+    Accumulator, Append, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop,
+    CompiledStep, Cx, Event, Executable, GuestCall, Headroom, Hook, Kept, LoopPlan, Made, Meter,
+    NESTING, Node, Place, Ran, RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE,
+    scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -98,13 +99,25 @@ struct Called<'e> {
     levels: Vec<Level>,
 }
 
-/// An allocating plan's admission of each statement: the bound, the
-/// slice's end, and the next test's unit an iteration still charges.
+/// An allocating plan's admission of each statement (§2.5): the most the
+/// run may have charged after it, which is the bound less the next test's
+/// unit an iteration still charges (`None` where that unit alone passes
+/// the bound), and the slice's end.
 #[derive(Clone, Copy)]
 struct Admit {
-    bound: u64,
+    limit: Option<u64>,
     slice_end: u64,
-    loop_test: u64,
+}
+
+impl Admit {
+    /// Whether `units` more, charged after `charged`, leave the next
+    /// test's unit within the bound.
+    #[inline(always)]
+    fn admits(self, charged: u64, units: u64) -> bool {
+        self.limit
+            .and_then(|limit| limit.checked_sub(charged))
+            .is_some_and(|room| units <= room)
+    }
 }
 
 /// One region's run over its frame: what it charges, records and holds.
@@ -144,6 +157,8 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     blocks: u64,
     /// The typed runs that missed.
     misses: u32,
+    /// The list appends that committed.
+    appends: u64,
 }
 
 /// A typed run reads its frame's variables and writes back what it
@@ -385,9 +400,8 @@ impl KernelMachine {
             },
             tape,
             admit: Admit {
-                bound,
+                limit: bound.checked_sub(plan.loop_test),
                 slice_end,
-                loop_test: plan.loop_test,
             },
             due: false,
             chain: Vec::new(),
@@ -400,6 +414,7 @@ impl KernelMachine {
             pending: Vec::new(),
             blocks: 0,
             misses: 0,
+            appends: 0,
         };
         let batch = run.batch(plan, compiled, walk.as_mut(), bound, slice_end);
         // The region's charge is the machine's, however its batch ended.
@@ -415,6 +430,7 @@ impl KernelMachine {
             progressed,
             head_missed,
             blocks,
+            appends,
             ..
         } = run;
         let Cx { fault: refused, .. } = cx;
@@ -449,6 +465,7 @@ impl KernelMachine {
         if let Some(recorder) = recorder {
             recorder.iterated(started - u64::from(stopped));
             recorder.typed(blocks);
+            recorder.appended(appends);
         }
         // The exit publishes the session writes before any boundary, in
         // the order the region made them, as the reference's writes left
@@ -786,33 +803,40 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 step => step,
             };
             self.cx.meter.reset();
-            let tried = !(ALLOC && (self.due || !self.room(step)));
-            let ran = if !tried {
-                false
-            } else {
-                match step {
+            // An allocating plan runs no statement past a due boundary,
+            // and one whose bounded most does not fit is not tried:
+            // each arm admits its own commit before it evaluates.
+            let mut tried = !(ALLOC && self.due);
+            let ran = tried
+                && match step {
                     CompiledStep::Write {
                         value,
                         at,
                         commit,
                         accumulates: false,
                     } => {
-                        let value = value(self.frame.slot_states(), &mut self.cx);
-                        self.write(value, *at, commit)?
+                        self.room(commit, &mut tried) && {
+                            let value = value(self.frame.slot_states(), &mut self.cx);
+                            self.write(value, *at, commit)?
+                        }
                     }
                     CompiledStep::Write {
                         value,
                         at,
                         commit,
                         accumulates: true,
-                    } => self.accumulate(value, *at, commit)?,
+                    } => self.room(commit, &mut tried) && self.accumulate(value, *at, commit)?,
                     CompiledStep::Bind { value, at, commit } => {
-                        let value = value(self.frame.slot_states(), &mut self.cx);
-                        self.bind(value, *at, commit)?
+                        self.room(commit, &mut tried) && {
+                            let value = value(self.frame.slot_states(), &mut self.cx);
+                            self.bind(value, *at, commit)?
+                        }
                     }
                     CompiledStep::Session { value, at, commit } => {
-                        let value = value(self.frame.slot_states(), &mut self.cx);
-                        self.write_session(value, *at, commit)?
+                        self.room(commit, &mut tried) && {
+                            let value = value(self.frame.slot_states(), &mut self.cx);
+                            self.write_session(value, *at, commit)?
+                        }
                     }
                     CompiledStep::If {
                         condition,
@@ -820,10 +844,14 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                         then,
                         otherwise,
                     } => {
-                        let arm = match condition(self.frame.slot_states(), &mut self.cx) {
-                            Some(Value::Bool(true)) => Some(then),
-                            Some(Value::Bool(false)) => Some(otherwise),
-                            _ => None,
+                        let arm = if self.room(commit, &mut tried) {
+                            match condition(self.frame.slot_states(), &mut self.cx) {
+                                Some(Value::Bool(true)) => Some(then),
+                                Some(Value::Bool(false)) => Some(otherwise),
+                                _ => None,
+                            }
+                        } else {
+                            None
                         };
                         match arm {
                             Some(arm) if self.fits(commit) => {
@@ -842,7 +870,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                         }
                     }
                     CompiledStep::Continue(commit) => {
-                        if self.fits(commit) {
+                        if self.room(commit, &mut tried) && self.fits(commit) {
                             self.commit(commit)?;
                             self.ended();
                             for body in bodies[..=depth].iter().rev() {
@@ -856,31 +884,19 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                         operands,
                         place,
                         commit,
+                        append,
                     } => {
-                        let mut values = [Value::Absent; 3];
-                        let mut evaluated = true;
-                        for (role, node) in operands.iter() {
-                            match node(self.frame.slot_states(), &mut self.cx) {
-                                Some(value) => values[*role as usize] = value,
-                                None => {
-                                    evaluated = false;
-                                    break;
-                                }
-                            }
-                        }
-                        let [target, index, value] = values;
-                        evaluated
-                            && self.fits(commit)
-                            && store(&mut self.cx, place, target, index, value).is_some()
-                            && {
-                                self.commit(commit)?;
-                                true
+                        self.room(commit, &mut tried)
+                            && match append {
+                                Some(append) => self.append(append, operands, place, commit)?,
+                                None => self.store(operands, place, commit)?,
                             }
                     }
                     // A write its operator held is applied once the
                     // statement is admitted, as part of its commit.
                     CompiledStep::Discard { value, commit } => {
-                        value(self.frame.slot_states(), &mut self.cx).is_some()
+                        self.room(commit, &mut tried)
+                            && value(self.frame.slot_states(), &mut self.cx).is_some()
                             && self.fits(commit)
                             && self.cx.commit_write()
                             && {
@@ -888,9 +904,13 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                                 true
                             }
                     }
-                    CompiledStep::Typed(_) | CompiledStep::Leave => false,
-                }
-            };
+                    CompiledStep::Typed(_) | CompiledStep::Leave => {
+                        if let Some(commit) = commit_of(step) {
+                            self.room(commit, &mut tried);
+                        }
+                        false
+                    }
+                };
             if !ran {
                 return self.stopped(
                     (&bodies[..=depth], &nexts[..depth], index),
@@ -964,6 +984,59 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         }
         self.blocks += iterations;
         iterations
+    }
+
+    /// Runs store `operands` to `place`, evaluated in their order.
+    #[inline(always)]
+    fn store(
+        &mut self,
+        operands: &[(Role, Node)],
+        place: &Place,
+        commit: &Commit,
+    ) -> Result<bool, Halt> {
+        let mut values = [Value::Absent; 3];
+        for (role, node) in operands {
+            match node(self.frame.slot_states(), &mut self.cx) {
+                Some(value) => values[*role as usize] = value,
+                None => return Ok(false),
+            }
+        }
+        let [target, index, value] = values;
+        if !self.fits(commit) || store(&mut self.cx, place, target, index, value).is_none() {
+            return Ok(false);
+        }
+        self.commit(commit)?;
+        Ok(true)
+    }
+
+    /// Runs list append `append` of store `operands`: where its variable
+    /// holds a resident list, the list's length read once and only its
+    /// value's node evaluated; otherwise the store as it runs alone.
+    #[inline(always)]
+    fn append(
+        &mut self,
+        append: &Append,
+        operands: &[(Role, Node)],
+        place: &Place,
+        commit: &Commit,
+    ) -> Result<bool, Halt> {
+        let list = match self.frame.slot_states().get(append.list as usize) {
+            Some(SlotState::Value(Value::List(list))) => *list,
+            _ => return self.store(operands, place, commit),
+        };
+        let (Ok(length), Some((_, value))) = (self.cx.arena.len(list), operands.get(append.value))
+        else {
+            return self.store(operands, place, commit);
+        };
+        let Some(value) = append.value(value, self.frame.slot_states(), &mut self.cx) else {
+            return Ok(false);
+        };
+        if !self.fits(commit) || Append::write(&mut self.cx, list, length, value).is_none() {
+            return Ok(false);
+        }
+        self.commit(commit)?;
+        self.appends += 1;
+        Ok(true)
     }
 
     /// Assigns `value`, the statement's, to the slot at `at`, which the
@@ -1153,12 +1226,17 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         }
     }
 
-    /// Whether an allocating plan's statement `step` may run: one whose
-    /// formulas are bounded runs only where its most fits, so that what it
-    /// builds is not left for a charge it then cannot commit.
+    /// Whether an allocating plan's statement committing `commit` may
+    /// run: one whose formulas are bounded runs only where its most fits,
+    /// so that what it builds is not left for a charge it then cannot
+    /// commit. One that may not is not `tried`.
     #[inline(always)]
-    fn room(&self, step: &CompiledStep) -> bool {
-        commit_of(step).is_none_or(|commit| self.ahead(commit))
+    fn room(&self, commit: &Commit, tried: &mut bool) -> bool {
+        if !ALLOC || self.ahead(commit) {
+            return true;
+        }
+        *tried = false;
+        false
     }
 
     /// Whether a statement committing `commit` may run: always in a scalar
@@ -1168,17 +1246,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         if !self.ready(commit) {
             return false;
         }
-        if !ALLOC {
-            return true;
-        }
-        let admit = self.admit;
-        commit.max.is_none_or(|max| {
-            self.cx
-                .charged
-                .checked_add(max)
-                .and_then(|total| total.checked_add(admit.loop_test))
-                .is_some_and(|end| end <= admit.bound)
-        })
+        !ALLOC
+            || commit
+                .max
+                .is_none_or(|max| self.admit.admits(self.cx.charged, max))
     }
 
     /// Whether the statement that ran metered by the meter, committing
@@ -1188,16 +1259,11 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// commits, and the region stops after it, where the reference yields.
     #[inline(always)]
     fn fits(&self, commit: &Commit) -> bool {
-        if !ALLOC {
-            return true;
-        }
-        let admit = self.admit;
-        self.cx
-            .charged
-            .checked_add(commit.fixed)
-            .and_then(|total| total.checked_add(self.cx.meter.units))
-            .and_then(|total| total.checked_add(admit.loop_test))
-            .is_some_and(|end| end <= admit.bound)
+        !ALLOC
+            || commit
+                .fixed
+                .checked_add(self.cx.meter.units)
+                .is_some_and(|units| self.admit.admits(self.cx.charged, units))
     }
 
     /// Commits a region statement that ran metered by the meter: its fixed
@@ -1209,7 +1275,10 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             self.cx.held.is_none(),
             "only a `do` holds a write, and applies it as it commits"
         );
-        if INVOKES && let Some(counters) = self.cx.counters.as_deref_mut() {
+        if INVOKES
+            && !commit.calls.is_empty()
+            && let Some(counters) = self.cx.counters.as_deref_mut()
+        {
             for &site in &commit.calls {
                 counters.advance(site)?;
             }
@@ -1241,6 +1310,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     #[inline(always)]
     fn ready(&self, commit: &Commit) -> bool {
         !INVOKES
+            || commit.calls.is_empty()
             || self
                 .cx
                 .counters

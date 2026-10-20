@@ -60,8 +60,8 @@ mod verify;
 
 pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
 pub(crate) use nodes::{
-    Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter, Node,
-    Place, Role, SessionSlot, Taken, position, scalar, store,
+    Append, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter,
+    Node, Place, Role, SessionSlot, Taken, position, scalar, store,
 };
 pub(crate) use typed::{Headroom, Ran, Slots, Typed};
 
@@ -1852,6 +1852,7 @@ fn compile_body(
                         operands,
                         place: summary.place.clone()?,
                         commit: summary.into(),
+                        append: nodes::append(libs, summary),
                     }
                 }
                 Step::Discard(summary) => CompiledStep::Discard {

@@ -215,11 +215,13 @@ pub(crate) enum CompiledStep {
     },
     Continue(Commit),
     /// A heap write: its operands in the order the statement evaluates
-    /// them, and the place it writes.
+    /// them, and the place it writes; a list append's shape where it is
+    /// one.
     Store {
         operands: Box<[(Role, Node)]>,
         place: Place,
         commit: Commit,
+        append: Option<Append>,
     },
     /// `do`: a value the statement discards.
     Discard {
@@ -230,6 +232,99 @@ pub(crate) enum CompiledStep {
     /// statement as it runs alone where the run misses.
     Typed(Box<(super::Typed, CompiledStep)>),
     Leave,
+}
+
+/// A list append, `set t[list.len(t)] = v` of a frame variable `t`, in a
+/// statement that makes no guest call. Where `t` holds a resident list,
+/// its length is read once, for the index and for the write, and only the
+/// value's node runs, a statement-root invoke's among them: no value the
+/// statement computes can change the list before its write, as only a
+/// `do` holds a write.
+pub(crate) struct Append {
+    /// The slot of the variable that holds the list.
+    pub(crate) list: u32,
+    /// `list.len`'s units ([`Lib::length_read`]).
+    units: u64,
+    /// The value's place among the store's operands.
+    pub(crate) value: usize,
+    /// Whether the statement evaluates its value before its index.
+    value_first: bool,
+}
+
+/// The append shape of an allocating plan's store `summary`, where it has
+/// one.
+pub(super) fn append(libs: &Libs<'_>, summary: &super::Summary) -> Option<Append> {
+    if !libs.general || summary.guest.is_some() || !matches!(summary.place, Some(Place::Index)) {
+        return None;
+    }
+    let operand = |role| summary.roots.iter().position(|(held, _)| *held == role);
+    let slot = |expr: &Expr| match &expr.kind {
+        Kind::Local {
+            local,
+            scoped: false,
+            ..
+        } => Some(local.at),
+        _ => None,
+    };
+    let (target, index, value) = (
+        operand(Role::Target)?,
+        operand(Role::Index)?,
+        operand(Role::Value)?,
+    );
+    let list = slot(&summary.roots[target].1)?;
+    let Kind::Native { lib, args, .. } = &summary.roots[index].1.kind else {
+        return None;
+    };
+    let [read] = &args[..] else {
+        return None;
+    };
+    if slot(read)? != list {
+        return None;
+    }
+    Some(Append {
+        list,
+        units: libs.exe.lib(*lib).length_read()?,
+        value,
+        value_first: value < index,
+    })
+}
+
+impl Append {
+    /// The value the append of `value` writes, its index charged as
+    /// `list.len` charges it ([`Cx::length`]), in the statement's order;
+    /// `None` on a guard miss.
+    #[inline(always)]
+    pub(crate) fn value(
+        &self,
+        value: &Node,
+        slots: &[SlotState],
+        cx: &mut Cx<'_>,
+    ) -> Option<Value> {
+        if !self.value_first && cx.charging {
+            cx.meter.measured(self.units);
+        }
+        let value = value(slots, cx)?;
+        if self.value_first && cx.charging {
+            cx.meter.measured(self.units);
+        }
+        Some(value)
+    }
+
+    /// Writes `value` at `length`, the end of `list`, as [`store`] writes
+    /// it there; `None`, having written nothing, where the room does not
+    /// hold its slot or the arena must decode first.
+    #[inline(always)]
+    pub(crate) fn write(
+        cx: &mut Cx<'_>,
+        list: ArenaHandle,
+        length: u64,
+        value: Value,
+    ) -> Option<()> {
+        if !cx.fits(VALUE_BYTES) {
+            return None;
+        }
+        cx.arena.list_set(list, length, value).ok()
+    }
 }
 
 /// What a store's operand is.

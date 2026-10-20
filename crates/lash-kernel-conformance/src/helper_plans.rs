@@ -1253,6 +1253,22 @@ pub(crate) fn typed_block_programs() -> Vec<(runner::Case, Program)> {
     region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
 }
 
+/// FIG-6964: dialect programs whose loop regions allocate and append to
+/// lists, as `xs.append(v)`, `xs.push(v)` and comprehensions lower: in a
+/// `for` over a `range`, over a list, in an `if` arm, and to a list a
+/// helper's callback builds.
+pub(crate) fn append_programs() -> Vec<(runner::Case, Program)> {
+    let python = [(
+        "appends and comprehensions",
+        "def build(n):\n    xs = []\n    for i in range(n):\n        xs.append(i * 2)\n        if i % 3 == 0:\n            xs.append([i])\n    ys = [x for x in xs if x != 4]\n    return [xs, ys, [y * 2 for y in range(5)]]\nresult = build(8)\n",
+    )];
+    let typescript = [(
+        "pushes",
+        "function build(n) {\n  const xs = [];\n  for (let i = 0; i < n; i++) {\n    xs.push(i * 2);\n    if (i % 3 === 0) { xs.push([i]); }\n  }\n  const ys = [];\n  for (const x of xs) { ys.push(x); }\n  return [xs, ys];\n}\nconst result = build(8);\n",
+    )];
+    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+}
+
 /// Each dialect's `(name, source)` programs, lowered.
 fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     let mut programs = Vec::new();

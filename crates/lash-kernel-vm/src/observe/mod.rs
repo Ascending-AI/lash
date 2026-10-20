@@ -188,6 +188,9 @@ pub struct RegionWork {
     /// Typed runs a loop region ran whole (`docs/design/kernel-regions.md`
     /// §2.4).
     pub blocks: u64,
+    /// List appends a loop region committed reading their list's length
+    /// once (§2.5).
+    pub appends: u64,
 }
 
 impl ChargeTape {
@@ -226,6 +229,11 @@ impl ChargeTape {
     /// Counts `blocks` typed runs a loop region ran whole.
     pub(crate) fn typed(&self, blocks: u64) {
         self.lock().work.blocks += blocks;
+    }
+
+    /// Counts `appends` list appends a loop region committed.
+    pub(crate) fn appended(&self, appends: u64) {
+        self.lock().work.appends += appends;
     }
 
     /// Counts a pass a helper plan's loop region ran to its end, `merged`

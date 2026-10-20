@@ -1193,6 +1193,7 @@ impl Arena {
 
     /// Whether a release is due: enough objects wait on the zero-count
     /// list.
+    #[inline]
     pub fn release_due(&self) -> bool {
         self.zero.len() >= self.release_at
     }
@@ -1292,6 +1293,7 @@ impl Arena {
     /// trigger, and some count fell without reaching zero since the last
     /// collection. Without such a fall no garbage cycle can have formed,
     /// and the collection exits at once.
+    #[inline]
     pub fn cycles_due(&self) -> bool {
         self.resident >= self.collect_at && self.candidates > 0
     }

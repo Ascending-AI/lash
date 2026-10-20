@@ -2214,6 +2214,85 @@ fn typed_blocks_stop_where_the_reference_stops() {
     );
 }
 
+/// FIG-6964 (`docs/design/kernel-regions.md` §2.5): allocating loop
+/// regions that append to lists, in a body and an `if` arm, over a list's
+/// items, and to a variable that stops holding a list, whose store then
+/// runs alone and whose `list.len` raises.
+const APPENDS: &[(&str, &str)] = &[
+    (
+        "appends in a body and an arm",
+        "fn build(n) { let i = 0 let xs = [] let ys = [] while num.lt(i, n) { set xs[list.len(xs)] = num.mul(i, 2) if num.lt(num.rem_trunc(i, 3), 1) { set ys[list.len(ys)] = [i, list.len(xs)] } set i = num.add(i, 1) } return (xs, ys) }\n\
+         main { let r = call build(12) finish r }",
+    ),
+    (
+        "appends over a list's items",
+        "fn double(src) { let out = [] for x in src { set out[list.len(out)] = num.mul(x, 2) } return out }\n\
+         main { let r = call double([1, 2, 3, 4, 5, 6, 7, 8]) finish r }",
+    ),
+    (
+        "an append whose variable stops holding a list",
+        "fn swap(n) { let i = 0 let t = [] while num.lt(i, n) { set t[list.len(t)] = i if num.lt(4, i) { set t = map{} } set i = num.add(i, 1) } return t }\n\
+         main { try { let r = call swap(9) finish r } catch e { finish e.kind } }",
+    ),
+];
+
+/// FIG-6964: an allocating region's statements admit, run and commit one
+/// by one, and a list append reads its list's length once. Each program's
+/// natural run commits appends, and across the sweep, with charge Exact
+/// and Off, under every slice, with memory off and under a tight memory
+/// bound, a run with regions on stops where the reference stops: at its
+/// statement, with its charge, its charge program and its images.
+#[test]
+fn list_appends_stop_where_the_reference_stops() {
+    let registry = Arc::new(super::corpus_registry());
+    let mut programs = Vec::new();
+    for (name, text) in APPENDS {
+        let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
+        programs.push((program_case(name, text, 16), on, off));
+    }
+    for (lowered, program) in crate::helper_plans::append_programs() {
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        programs.push((case, on, off));
+    }
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (case, on, off) in &programs {
+        let work = check(on, off, case, &mut counts, &mut failures);
+        assert!(
+            work.appends > 0,
+            "{}: its natural run commits no list append: {work:?}",
+            case.name
+        );
+        let mut unaccounted = case.clone();
+        unaccounted.name = format!("{} (memory off)", case.name);
+        unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
+        check(on, off, &unaccounted, &mut counts, &mut failures);
+        let mut tight = case.clone();
+        tight.name = format!("{} (memory {TIGHT})", case.name);
+        tight.environment.bounds.memory = TIGHT;
+        check(on, off, &tight, &mut counts, &mut failures);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+    println!(
+        "list appends: programs={} paired runs={} bounds={} slices={}",
+        programs.len(),
+        counts.runs,
+        counts.bounds,
+        counts.slices
+    );
+}
+
 macro_rules! program_shards {
     (@parts $shard:literal, $parts:expr, $part:expr;) => {};
     (@parts $shard:literal, $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {

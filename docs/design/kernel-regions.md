@@ -289,6 +289,45 @@ Warm paired `instructions:u` against main 18d4942d66: branch1m TS 837.0 →
 291.0 M per body (QuickJS 374.5), sum1m TS 517.0 → 160.0, sum1m Python
 495.0 → 231.0, every other row within 1%, charges and digests equal.
 
+### 2.5 The statement step (FIG-6964)
+
+An allocating plan admits, runs and commits its statements one by one
+(`machine/regions.rs`, `Run::iterate`), so the step around each
+statement's nodes is paid per statement. It does only what the
+statement's own commit needs:
+
+- **One dispatch.** Each statement kind's arm admits its own commit
+  before it evaluates: a bounded statement's most against the bound, the
+  run past a due boundary not tried.
+- **Hoisted admission.** The bound less the next test's unit is taken
+  once per batch; a statement's admission is one subtraction from it and
+  one compare, with the same answer as the sum it replaces.
+- **Occurrences only where counted.** A commit that advances no
+  occurrence touches no counter.
+- **Boundary in line.** The arena's statement boundary, which ends read
+  streaks and drops large clean objects once residency doubles, tests
+  that it has neither to do in line and does either out of line.
+- **List appends.** `set t[list.len(t)] = v` of a frame variable, in a
+  statement with no guest call (`xs.append(v)`, `xs.push(v)` and the
+  comprehension collect lower to it), reads the list's length once for the
+  index and the write, and runs only the value's node. `list.len`'s units
+  are charged where its node would charge them, before or after the
+  value's as the statement orders its operands. A variable that holds no
+  resident list runs the store as it runs alone. No value a statement
+  computes changes the list before its write: only a `do` holds a write,
+  and a guest call excludes the shape.
+
+`tests::regions::list_appends_stop_where_the_reference_stops` runs kernel,
+Python and TypeScript append programs across the bounds sweep, the slices
+and their cross-resumes, with charge Exact and Off, memory off and under a
+tight memory bound, and requires each natural run to commit appends
+(`RegionWork::appends`).
+
+Warm paired `instructions:u` against main 7d6ab737dd: list_map_filter
+Python 2.606 → 2.020 M per body, TypeScript 6.550 → 6.229, whose rest is
+its helpers' plan walks; every other row within 1% or lower, charges and
+digests equal.
+
 ## 3. Contracts
 
 ### 3.1 Exact charge

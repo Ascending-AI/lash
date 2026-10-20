@@ -499,12 +499,26 @@ impl Arena {
     /// drops back to its pages, to be decoded chunk by chunk again when a
     /// read reaches it; the next drop waits until residency doubles. Call
     /// only where no borrow of a body is live.
+    ///
+    /// Most boundaries have neither to do, and cost the two tests.
+    #[inline]
     pub fn statement_boundary(&mut self) {
-        for handle in std::mem::take(&mut self.streaked) {
+        if !self.streaked.is_empty() || self.resident >= self.evict_at {
+            self.end_streaks_and_evict();
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn end_streaks_and_evict(&mut self) {
+        // The list keeps its buffer for the next statement's streaks.
+        let mut streaked = std::mem::take(&mut self.streaked);
+        for handle in streaked.drain(..) {
             if let Some(facts) = self.facts.get_mut(handle.index() as usize) {
                 facts.streak = 0;
             }
         }
+        self.streaked = streaked;
         if self.resident >= self.evict_at {
             self.evict_clean();
             self.evict_at = self.resident.saturating_mul(2).max(EVICT_AT);
